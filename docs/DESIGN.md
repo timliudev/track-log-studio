@@ -171,13 +171,26 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **分布圖**：XY 自選。
 - **每圈統計表**：圈時、距離、車速…可選欄位。
 
-### 6.5 避震設定（**決議：行程長度 + 基準點歸零**）
-每通道（前 / 後）：
-- 來源 AD：`SuspensionAD1` / `AD2`（可對調、可反向 invert，因安裝可能插反）。
-- **基準點 zero**：抓某 AD 值當 0mm（「以目前值歸零」或取最小值）。
-- **行程長度 travel(mm)** + 對應電壓範圍（預設 0–5000mv）。
-- 換算：`mm = (ad − zero_ad) / (full_ad − zero_ad) × travel_mm`，輸出至 Front / Rear Suspension。
-- 僅在偵測到該 AD 欄位（目前只有 RaceAMP 格式）時出現。
+### 6.5 避震校正（**更正：5 參數，對齊原廠 App**）
+
+每通道（前 / 後）參數，單位 mv / mm：
+- **最小電壓 min_mv、最大電壓 max_mv、零點電壓 zero_mv**（mv）
+- **最小行程 min_mm、最大行程 max_mm**（mm）
+- 來源 AD：`SuspensionAD1` / `AD2`（可對調，因安裝可能插反）。
+- 線性換算：`pos(ad) = min_mm + (ad − min_mv) / (max_mv − min_mv) × (max_mm − min_mm)`
+- 零點：輸出 = `pos(ad) − pos(zero_mv)`（行程相對零點；零點語意實作時再與使用者確認）。
+- 僅在偵測到 SuspensionAD 欄位（目前只有 RaceAMP 格式）時出現。
+
+**架構（共用於轉檔器與分析器，而非獨立工具）：**
+- 純函數 `domain/units/suspension.ts`：`adToTravel(ad, params)`，可單元測試。
+- **「衍生通道（derived channel）」機制**：解析後依設定算出 `Front/Rear Suspension(mm)`
+  通道，**附加到 LogSession 的可用通道清單**。如此：
+  - 轉檔器：衍生通道出現在槽位對應的可搜尋選單，可塞進 RC3 類比槽。
+  - 分析器：衍生通道可直接拿來繪圖 / FFT。
+- 共用設定 store（前 / 後各一組參數）持久化；校正面板為共用元件，轉檔器與分析器皆可開啟。
+- **不改寫回原始 `.loga`**（保資料完整、可重現）；「寫回」的需求改以衍生通道 + 匯出達成
+  （同樣的 mm 值能進 NMEA 也能進分析，效果一致而不破壞來源檔）。
+- 排程：移至獨立的後段階段（見 §11）。
 
 ---
 
@@ -218,9 +231,11 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 ## 11. 開發階段與 Commit 規劃 (#12)
 
-- **Phase 0 — 骨架**：Vite + Vue + TS + Pinia + PWA + i18n + 主題；`domain/` 三種 parser + 偵測器 + 單元測試（拿既有 `.nmea` 當黃金樣本）。
-- **Phase 1 — 轉檔器**：RC3 槽位對應面板（可搜尋下拉）+ preset + 批次轉檔 + 下載。
+- **Phase 0 — 骨架**（✅ 完成）：Vite + Vue + TS + Pinia + PWA + i18n + 主題；`domain/` 三種 parser + 偵測器 + 單元測試（拿既有 `.nmea` 當黃金樣本）。
+- **Phase 1 — 轉檔器**（✅ 完成）：RC3 槽位對應面板（可搜尋下拉）+ preset + 批次轉檔 + 下載；後續補上 GGA/RMC、logger2 合成時間戳、說明與頁尾。
 - **Phase 2 — 分析器**：軌跡 / 底圖 / 切圈 / 圖表 / G-G / FFT / 分布 / 每圈統計表。
+- **Phase 3 — 避震校正（衍生通道）**：`domain/units/suspension.ts` + 衍生通道機制 +
+  共用校正面板（轉檔器與分析器共用）。排在分析器核心之後（可隨需求挪到最末）。
 - 每階段內再細分小 commit。
 
 ---
@@ -250,7 +265,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **欄位選擇**：槽位導向 + 可搜尋下拉（桌面下拉內嵌搜尋 / 手機全螢幕挑選頁）。
 - **切圈**：線段（兩端點），觸控以可拖曳把手實現；圈時可選自算或 ECU 內建。
 - **底圖**：免費（上傳圖 + OSM）與衛星圖（自帶 key）兩者皆開放。
-- **避震**：行程長度 + 基準點歸零；AD1/AD2 可對調、可反向。
+- **避震**（更正）：5 參數（min/max/zero mv、min/max mm，對齊原廠 App）；AD1/AD2 可對調。
+  以「衍生通道」機制共用於轉檔器與分析器，不改寫回原始 .loga；排為獨立後段階段。
+- **IMU 軸向**：RaceChrono 不要求 xyz 對齊，故 X/Y/Z → x/y/z 直接 1:1，不加軸向設定；
+  `TC_*angle_dps` 已確認為 deg/s（與 RaceChrono gyro 同單位），`TC_*force` 為 milli-g（÷1000）。
 - **iOS 相容**：以 `<input>` 為底線，File System Access API 僅作加碼。
 - **效能**：Worker + Float32 column-store + 顯示降採樣；進度條。
 - **重要發現**：實測有三種檔頭，RaceAMP（logger2）尚未被既有 py 支援，且為唯一含避震資料者，新專案需補。
