@@ -233,11 +233,16 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 - **Phase 0 — 骨架**（✅ 完成）：Vite + Vue + TS + Pinia + PWA + i18n + 主題；`domain/` 三種 parser + 偵測器 + 單元測試（拿既有 `.nmea` 當黃金樣本）。
 - **Phase 1 — 轉檔器**（✅ 完成）：RC3 槽位對應面板（可搜尋下拉）+ preset + 批次轉檔 + 下載；後續補上 GGA/RMC、logger2 合成時間戳、說明與頁尾。
-- **Phase 2 — 避震校正（衍生通道）**：`domain/units/suspension.ts`（5 參數換算）+
+- **Phase 2 — 避震校正（衍生通道）**：`domain/units/suspension.ts`（5 參數換算 + 倒算）+
   衍生通道機制 + 共用校正面板與設定 store。先於分析器，讓轉檔器即可把避震 mm 塞進 RC3。
-- **Phase 3 — 分析器**：軌跡 / 底圖 / 切圈 / 圖表 / G-G / FFT / 分布 / 每圈統計表
+- **Phase 3 — 另存校正後 `.loga`**：loga 寫出器（保留原檔、只換避震欄位另存新檔）。
+- **Phase 4 — 分析器**：軌跡 / 底圖 / 切圈 / 圖表 / G-G / FFT / 分布 / 每圈統計表
   （避震衍生通道屆時可直接繪圖 / FFT）。
+- **Phase 5 — 上線準備**：關於我頁、`LICENSE` + 第三方套件授權清單、SEO（meta/OG、
+  robots.txt、sitemap、structured data）、Logo / favicon。
 - 每階段內再細分小 commit。
+- **設計原則**：功能能力以**實際欄位**（`session.has(...)`）判斷，不以檔頭/格式硬編；
+  檔頭僅決定如何解析結構。
 
 ---
 
