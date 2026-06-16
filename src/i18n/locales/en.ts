@@ -1,6 +1,10 @@
 export default {
   app: {
     title: 'aRacer Loga Analysis',
+    subtitle: 'aRacer ECU log analysis & RaceChrono export',
+  },
+  footer: {
+    developedBy: 'Developed by',
   },
   nav: {
     converter: 'Converter',
@@ -18,6 +22,12 @@ export default {
     auto: 'Auto',
   },
   converter: {
+    notes: {
+      racechrono: 'The converted .nmea is for importing into a RaceChrono DIY device.',
+      importGuide: 'Import guide',
+      raceModule:
+        'An aRacer Race Module is required for GPS positioning on the map; without GPS you can still convert sensor data (RC3), with the timestamp synthesized from the conversion time.',
+    },
     upload: {
       title: 'Load .loga files',
       hint: 'Click to choose or drop files here; multiple selection supported',

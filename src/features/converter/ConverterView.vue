@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useConverterStore } from '@/stores/converterStore'
 import { useLogImport } from '@/composables/useLogImport'
+import ConverterNotes from './ConverterNotes.vue'
 import FileDropZone from './FileDropZone.vue'
 import FileList from './FileList.vue'
 import PresetBar from './PresetBar.vue'
@@ -25,6 +26,7 @@ async function onFiles(files: File[]): Promise<void> {
 
 <template>
   <div class="converter">
+    <ConverterNotes />
     <FileDropZone @files="onFiles" />
     <div class="grid">
       <div class="col">
