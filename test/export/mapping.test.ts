@@ -43,6 +43,22 @@ describe('configurable RC3 slot mapping', () => {
     expect(fields[D2]).not.toBe('')
   })
 
+  it('synthesizes GGA+RMC for RaceAMP (position but no GPS time)', () => {
+    const session = parseLoga(loadFixture('raceAmp.loga'))
+    const now = new Date(Date.UTC(2026, 0, 2, 3, 4, 5, 0))
+    const lines = exporter
+      .export(session, DEFAULT_PRESET, now)
+      .split('\r\n')
+      .filter((l) => l.length > 0)
+
+    const gga = lines.filter((l) => l.startsWith('$GPGGA'))
+    const rmc = lines.filter((l) => l.startsWith('$GPRMC'))
+    expect(gga.length).toBeGreaterThan(0)
+    expect(gga.length).toBe(rmc.length)
+    // First fix is anchored at `now` (UTC 03:04:05.000).
+    expect(rmc[0]).toContain('030405.000')
+  })
+
   it('emits empty for a mapped-but-absent channel', () => {
     const session = parseLoga(loadFixture('super2.loga'))
     const mapping = makeMapping({

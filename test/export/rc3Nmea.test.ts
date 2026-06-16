@@ -99,7 +99,17 @@ describe('Rc3NmeaExporter vs Python golden', () => {
     it(`reproduces ${name}.expected.nmea`, () => {
       const session = parseLoga(loadFixture(`${name}.loga`))
       // Legacy mapping = the py field set; the regression anchor.
-      const output = exporter.export(session, LEGACY_PY_MAPPING)
+      const full = exporter.export(session, LEGACY_PY_MAPPING)
+
+      // GGA is an addition over the Python reference; assert it was emitted
+      // (one per fix) then compare only the GPRMC+RC3 lines to the golden.
+      const lines = full.split('\r\n').filter((l) => l.length > 0)
+      const ggaCount = lines.filter((l) => l.startsWith('$GPGGA')).length
+      const rmcCount = lines.filter((l) => l.startsWith('$GPRMC')).length
+      expect(ggaCount).toBeGreaterThan(0)
+      expect(ggaCount).toBe(rmcCount)
+
+      const output = lines.filter((l) => !l.startsWith('$GPGGA')).join('\r\n')
       const golden = loadFixture(`${name}.expected.nmea`)
 
       const { diffs, exactLines, total, maxDelta } = diffNmea(output, golden)
@@ -116,8 +126,8 @@ describe('Rc3NmeaExporter vs Python golden', () => {
 
       expect(diffs).toEqual([])
 
-      // every emitted sentence carries a self-consistent checksum
-      for (const line of output.split('\r\n').filter((l) => l.length > 0)) {
+      // every emitted sentence (incl. GGA) carries a self-consistent checksum
+      for (const line of lines) {
         const star = line.lastIndexOf('*')
         expect(nmeaChecksum(line.slice(1, star))).toBe(line.slice(star + 1))
       }
