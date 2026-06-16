@@ -25,6 +25,8 @@ export function descriptionOf(rawName: string): string | undefined {
 export const ALIASES: Readonly<Record<string, readonly string[]>> = {
   AFR: ['AFR', 'AFR_WBO2'],
   Volt_Batt: ['Volt_Batt', 'Volt_Batt_indx'],
+  // SuperX names it 'T_Air'; Super2 / RaceAMP use 'T_Air_indx'.
+  T_Air: ['T_Air', 'T_Air_indx'],
 }
 
 /** Candidate canonical names to try when resolving `name`, in priority order. */

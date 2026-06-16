@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
+import ConverterView from '@/features/converter/ConverterView.vue'
 
 const { t } = useI18n()
 const { themePref, localePref } = storeToRefs(useSettingsStore())
@@ -11,6 +13,9 @@ const { themePref, localePref } = storeToRefs(useSettingsStore())
 // Apply appearance + language side effects from persisted preferences.
 useTheme()
 useLocale()
+
+type Tab = 'converter' | 'analyzer'
+const tab = ref<Tab>('converter')
 </script>
 
 <template>
@@ -37,11 +42,22 @@ useLocale()
       </div>
     </header>
 
+    <nav class="tabs">
+      <button
+        type="button"
+        class="tab"
+        :class="{ active: tab === 'converter' }"
+        @click="tab = 'converter'"
+      >
+        {{ t('nav.converter') }}
+      </button>
+      <button type="button" class="tab" disabled>
+        {{ t('nav.analyzer') }} <small>{{ t('nav.analyzerSoon') }}</small>
+      </button>
+    </nav>
+
     <main class="content">
-      <section class="card">
-        <h2>{{ t('phase0.heading') }}</h2>
-        <p>{{ t('phase0.body') }}</p>
-      </section>
+      <ConverterView v-if="tab === 'converter'" />
     </main>
   </div>
 </template>
@@ -52,7 +68,6 @@ useLocale()
   display: flex;
   flex-direction: column;
 }
-
 .topbar {
   display: flex;
   flex-wrap: wrap;
@@ -63,19 +78,16 @@ useLocale()
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
 }
-
 .brand {
   margin: 0;
   font-size: 1.1rem;
   color: var(--color-accent);
 }
-
 .controls {
   display: flex;
   flex-wrap: wrap;
   gap: calc(var(--space) * 1.5);
 }
-
 .control {
   display: inline-flex;
   align-items: center;
@@ -83,7 +95,6 @@ useLocale()
   font-size: 0.85rem;
   color: var(--color-text-muted);
 }
-
 .control select {
   background: var(--color-bg);
   color: var(--color-text);
@@ -92,37 +103,35 @@ useLocale()
   padding: 4px 8px;
   font: inherit;
 }
-
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 calc(var(--space) * 2);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 14px;
+  font: inherit;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.tab.active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+.tab:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.tab small {
+  font-size: 0.7rem;
+}
 .content {
   flex: 1;
   padding: calc(var(--space) * 2);
-  display: flex;
-  justify-content: center;
-}
-
-.card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: calc(var(--radius) * 1.5);
-  padding: calc(var(--space) * 3);
-  max-width: 640px;
-  width: 100%;
-}
-
-.card h2 {
-  margin-top: 0;
-  color: var(--color-accent);
-}
-
-.card p {
-  color: var(--color-text-muted);
-  line-height: 1.6;
-}
-
-@media (max-width: 480px) {
-  .topbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 </style>
