@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { parseLoga } from '@/domain/parsing/LogaParser'
 import { Rc3NmeaExporter } from '@/domain/export/rc3Nmea/Rc3NmeaExporter'
+import { LEGACY_PY_MAPPING } from '@/domain/export/rc3Nmea/mapping'
 import { nmeaChecksum } from '@/domain/export/nmeaChecksum'
 import { loadFixture } from '../fixtures'
 
@@ -97,7 +98,8 @@ describe('Rc3NmeaExporter vs Python golden', () => {
   for (const name of ['super2', 'superX'] as const) {
     it(`reproduces ${name}.expected.nmea`, () => {
       const session = parseLoga(loadFixture(`${name}.loga`))
-      const output = exporter.export(session)
+      // Legacy mapping = the py field set; the regression anchor.
+      const output = exporter.export(session, LEGACY_PY_MAPPING)
       const golden = loadFixture(`${name}.expected.nmea`)
 
       const { diffs, exactLines, total, maxDelta } = diffNmea(output, golden)
