@@ -8,6 +8,11 @@ import {
   type Rc3Mapping,
   type SlotId,
 } from '@/domain/export/rc3Nmea/mapping'
+import {
+  applyDerivedChannels,
+  derivedSuspensionNames,
+} from '@/domain/units/suspension'
+import { useSuspensionStore } from '@/stores/suspensionStore'
 
 export interface SavedPreset {
   name: string
@@ -100,6 +105,8 @@ export const useConverterStore = defineStore('converter', () => {
     { deep: true },
   )
 
+  const suspension = useSuspensionStore()
+
   /** Channels available across all successfully parsed logs (for the picker). */
   const availableChannels = computed<{ name: string; description?: string }[]>(() => {
     const seen = new Map<string, string | undefined>()
@@ -108,6 +115,10 @@ export const useConverterStore = defineStore('converter', () => {
       if (f.status !== 'ready' || !session) continue
       for (const ch of session.channels) {
         if (!seen.has(ch.name)) seen.set(ch.name, ch.description)
+      }
+      // include derived suspension channels (by actual field presence)
+      for (const d of derivedSuspensionNames(session, suspension.config)) {
+        if (!seen.has(d.name)) seen.set(d.name, d.description)
       }
     }
     return [...seen.entries()]
@@ -217,9 +228,11 @@ export const useConverterStore = defineStore('converter', () => {
       for (const f of readyFiles.value) {
         const session = sessions.get(f.id)
         if (!session) continue
+        // augment with calibrated suspension channels before exporting
+        const augmented = applyDerivedChannels(session, suspension.config)
         out.push({
           name: outputName(f.name),
-          content: exporter.export(session, mapping.value),
+          content: exporter.export(augmented, mapping.value),
         })
       }
       results.value = out
