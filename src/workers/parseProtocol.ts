@@ -1,9 +1,9 @@
 import type { LogMeta } from '@/domain/model/types'
 
-/** Message posted to the parse worker. */
+/** Message posted to the parse worker. The File is read inside the worker. */
 export interface ParseRequest {
   id: number
-  text: string
+  file: File
 }
 
 /** A channel in transferable form (the buffer is transferred, not copied). */

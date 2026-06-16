@@ -7,9 +7,10 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope
 // Parses .loga text off the main thread and streams progress back. The parsed
 // channels are returned with their Float32Array buffers transferred (zero-copy)
 // so the main thread can rebuild a LogSession. UI wiring lands in Phase 1.
-ctx.onmessage = (event: MessageEvent<ParseRequest>) => {
-  const { id, text } = event.data
+ctx.onmessage = async (event: MessageEvent<ParseRequest>) => {
+  const { id, file } = event.data
   try {
+    const text = await file.text()
     const session = parseLoga(text, (fraction) => {
       ctx.postMessage({ id, kind: 'progress', fraction } satisfies ParseResponse)
     })
