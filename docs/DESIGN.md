@@ -254,3 +254,15 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **iOS 相容**：以 `<input>` 為底線，File System Access API 僅作加碼。
 - **效能**：Worker + Float32 column-store + 顯示降採樣；進度條。
 - **重要發現**：實測有三種檔頭，RaceAMP（logger2）尚未被既有 py 支援，且為唯一含避震資料者，新專案需補。
+
+### Phase 1 實作補充
+
+- **RC3 槽位對應可設定**：`d2, a1~a15` 由 preset 對應 loga 欄位；固定槽位
+  `xacc/yacc/zacc`(÷1000)、`gyrox/y/z`(由 `TC_*angle_dps`，無則留空)、`rpm/d1` 自動填。
+  尾端空欄修剪，使 `LEGACY_PY_MAPPING` 仍與 py 黃金樣本逐欄相符。
+- **兩種預設對應**：`DEFAULT_PRESET`（app 預設，使用者偏好欄位）與
+  `LEGACY_PY_MAPPING`（py 相容，測試錨點）。
+- **GPS-less 標準模式（新增）**：RaceAMP/logger2 無 `GPS_Valid`/`GPS_UTC`，
+  改輸出純 RC3（空 time、填入 0–65535 count 欄），符合 RaceChrono 對無 GPS
+  裝置的規格。Super2/SuperX 仍走 GPRMC+RC3 混合模式。
+- **批次下載**：單檔直接下載；多檔以 ZIP（fflate）為主，並提供個別下載鈕。

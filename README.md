@@ -27,7 +27,7 @@ Android.
 | 階段 | 內容 | 狀態 |
 |---|---|---|
 | Phase 0 | 專案骨架 + 三種 `.loga` parser + NMEA 輸出 + 測試 + PWA/i18n/主題殼 | ✅ |
-| Phase 1 | 轉檔器（`.loga` → `.nmea`） | ⬜ |
+| Phase 1 | 轉檔器（`.loga` → `.nmea`，可設定欄位對應 + preset + 批次） | ✅ |
 | Phase 2 | 分析器（軌跡 / 圖表 / 切圈 / FFT…） | ⬜ |
 
 ## 技術 Stack
