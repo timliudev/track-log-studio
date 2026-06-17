@@ -40,7 +40,7 @@ describe('converterStore', () => {
   it('convertAll produces .nmea for ready files', () => {
     const s = useConverterStore()
     const session = parseLoga(loadFixture('super2.loga'))
-    const id = s.beginImport('Super2.loga')
+    const id = s.beginImport(new File(['x'], 'Super2.loga'))
     s.completeImport(id, session)
 
     const results = s.convertAll()

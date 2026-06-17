@@ -68,6 +68,7 @@ export const raceAmpFormat: LogaFormat = {
 
     return {
       rawColumns: (lines[groupLine + 1] ?? '').split(','),
+      namesLineIndex: groupLine + 1,
       dataStartLine: groupLine + 2,
       createdDate,
       headerInfo,

@@ -4,6 +4,8 @@ import type { LogaFormatId } from '@/domain/model/types'
 export interface HeaderParseResult {
   /** Raw column names in column order (still `Canonical/說明` form). */
   readonly rawColumns: string[]
+  /** Index into the `lines` array of the column-name row. */
+  readonly namesLineIndex: number
   /** Index into the `lines` array where data rows begin. */
   readonly dataStartLine: number
   readonly createdDate: Date | null

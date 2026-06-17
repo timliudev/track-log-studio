@@ -43,6 +43,7 @@ export const superXFormat: LogaFormat = {
 
     return {
       rawColumns: (lines[nameLine] ?? '').split(','),
+      namesLineIndex: nameLine,
       dataStartLine,
       createdDate,
       headerInfo,

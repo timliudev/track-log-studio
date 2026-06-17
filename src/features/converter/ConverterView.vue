@@ -13,7 +13,7 @@ const { parseFile } = useLogImport()
 
 async function onFiles(files: File[]): Promise<void> {
   for (const file of files) {
-    const id = store.beginImport(file.name)
+    const id = store.beginImport(file)
     try {
       const session = await parseFile(file, (f) => store.setProgress(id, f))
       store.completeImport(id, session)

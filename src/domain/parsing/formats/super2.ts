@@ -38,6 +38,7 @@ export const super2Format: LogaFormat = {
 
     return {
       rawColumns: (lines[5] ?? '').split(','),
+      namesLineIndex: 5,
       dataStartLine: 6,
       createdDate,
       headerInfo,

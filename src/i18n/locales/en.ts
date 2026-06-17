@@ -34,6 +34,16 @@ export default {
     reverseHint: 'Needs a log containing both SuspensionAD and the ECU travel',
     reverseFail: 'Cannot recover (insufficient data, unset, or constant travel)',
     reverseOk: 'r²={r2} (5 params are not uniquely recoverable; shown under a 0–5000mv assumption)',
+    save: {
+      heading: 'Save calibrated .loga',
+      intro: 'Write the calibrated suspension travel into a new .loga (original untouched; columns are replaced if present, otherwise appended).',
+      none: 'No saveable files (enable calibration above and load a log with the matching SuspensionAD).',
+      one: 'Save',
+      all: 'Save all (ZIP)',
+      busy: 'Processing…',
+      replaced: 'replaced',
+      appended: 'added',
+    },
   },
   theme: {
     label: 'Theme',

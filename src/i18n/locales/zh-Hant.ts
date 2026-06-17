@@ -34,6 +34,16 @@ export default {
     reverseHint: '需載入同時含 SuspensionAD 與 ECU 行程的記錄',
     reverseFail: '無法倒算（資料不足、未設定或行程為定值）',
     reverseOk: 'r²={r2}（5 參數無法唯一還原，以 0–5000mv 標準假設呈現一組）',
+    save: {
+      heading: '另存校正後的 .loga',
+      intro: '把校正後的避震行程寫進一份新的 .loga（不複寫原檔；欄位有就替換、沒有就新增）。',
+      none: '沒有可另存的檔案（需在上方啟用校正，且記錄含對應的 SuspensionAD）。',
+      one: '另存',
+      all: '全部另存 (ZIP)',
+      busy: '處理中…',
+      replaced: '替換',
+      appended: '新增',
+    },
   },
   theme: {
     label: '主題',
