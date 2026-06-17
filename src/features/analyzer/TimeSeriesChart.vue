@@ -13,6 +13,7 @@ const props = defineProps<{
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
+  externalCursor?: number | null
 }>()
 const emit = defineEmits<{
   cursor: [number | null]
@@ -97,6 +98,7 @@ function removeChannel(name: string): void {
       :series="series"
       :axes="axes"
       :x-range="xRange"
+      :external-cursor="externalCursor"
       @cursor="(idx) => emit('cursor', idx)"
       @x-zoom="(r) => emit('xZoom', r)"
     />

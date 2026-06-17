@@ -67,6 +67,7 @@ function onSelect(e: Event): void {
           :session="session"
           :x-values="xValues"
           :x-range="xRange"
+          :external-cursor="cursorIdx"
           @cursor="(i) => (cursorIdx = i)"
           @x-zoom="(r) => analyzer.setXRange(r)"
         />
