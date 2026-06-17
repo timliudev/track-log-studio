@@ -5,7 +5,7 @@ import { useSuspensionStore } from '@/stores/suspensionStore'
 import { useConverterStore } from '@/stores/converterStore'
 import {
   PARTS,
-  DERIVED_NAME,
+  OUTPUT_NAME,
   ECU_NAME,
   adChannelName,
   adToTravelMm,
@@ -73,7 +73,7 @@ function preview(part: SuspensionPart): string {
           />
           <strong>{{ t(`suspension.${part}`) }}</strong>
         </label>
-        <span class="out">{{ t('suspension.outputs') }}: <code>{{ DERIVED_NAME[part] }}</code></span>
+        <span class="out">{{ t('suspension.outputs') }}: <code>{{ OUTPUT_NAME[part] }}</code></span>
       </header>
 
       <div class="grid">

@@ -59,6 +59,25 @@ describe('configurable RC3 slot mapping', () => {
     expect(rmc[0]).toContain('030405.000')
   })
 
+  it('emits empty accel when the IMU columns are absent', () => {
+    // RaceAMP log without any TC_*force columns (no Race Module IMU).
+    const text = [
+      '<aRacer ECU_Memory Log Data for RaceAMP>',
+      'Created Date:2025/4/20 下午 05:21:15',
+      'Product ID = 0xA6',
+      'Serial Number = X',
+      'Stage_1,Stage_1',
+      'Time,RPM/r',
+      '31.25,1000',
+      '62.5,2000',
+    ].join('\n')
+    const fields = firstRc3Fields(exporter.export(parseLoga(text)))
+    // xacc,yacc,zacc (indices 3,4,5) all empty, not "0.000"
+    expect(fields[3]).toBe('')
+    expect(fields[4]).toBe('')
+    expect(fields[5]).toBe('')
+  })
+
   it('emits empty for a mapped-but-absent channel', () => {
     const session = parseLoga(loadFixture('super2.loga'))
     const mapping = makeMapping({

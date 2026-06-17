@@ -233,16 +233,25 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 - **Phase 0 — 骨架**（✅ 完成）：Vite + Vue + TS + Pinia + PWA + i18n + 主題；`domain/` 三種 parser + 偵測器 + 單元測試（拿既有 `.nmea` 當黃金樣本）。
 - **Phase 1 — 轉檔器**（✅ 完成）：RC3 槽位對應面板（可搜尋下拉）+ preset + 批次轉檔 + 下載；後續補上 GGA/RMC、logger2 合成時間戳、說明與頁尾。
-- **Phase 2 — 避震校正（衍生通道）**：`domain/units/suspension.ts`（5 參數換算 + 倒算）+
-  衍生通道機制 + 共用校正面板與設定 store。先於分析器，讓轉檔器即可把避震 mm 塞進 RC3。
+- **Phase 2 — 避震校正（衍生通道）**（✅ 完成）：`domain/units/suspension.ts`（5 參數換算 +
+  倒算）+ 衍生通道機制 + 共用校正面板與設定 store。先於分析器，讓轉檔器即可把避震 mm 塞進
+  RC3。後續：衍生通道沿用 `Front/Rear Suspension` 欄名並覆蓋；accel/gyro 缺欄輸出留空；
+  設定分頁移到最右。
 - **Phase 3 — 另存校正後 `.loga`**：loga 寫出器（保留原檔、只換避震欄位另存新檔）。
 - **Phase 4 — 分析器**：軌跡 / 底圖 / 切圈 / 圖表 / G-G / FFT / 分布 / 每圈統計表
-  （避震衍生通道屆時可直接繪圖 / FFT）。
-- **Phase 5 — 上線準備**：關於我頁、`LICENSE` + 第三方套件授權清單、SEO（meta/OG、
-  robots.txt、sitemap、structured data）、Logo / favicon。
+  （避震衍生通道屆時可直接繪圖 / FFT）。建立 uPlot 圖表 / 游標同步 / 降採樣基礎。
+- **Phase 5 — 合併（RaceChrono GPS + loga）**：當 loga 無 GPS / GPS 異常時，匯入 RaceChrono
+  `.nmea`（`.rcz` 之後）取得好 GPS 軌跡，與 loga 引擎數據**手動時間對齊**（速度疊圖 +
+  互相關建議），重新取樣後**匯出合併 .nmea**。新增 NMEA **輸入**解析器（補齊模組化輸入），
+  對齊 UI 重用 Phase 4 圖表。難點：時鐘漂移（先單一位移）、取樣率內插。
+- **Phase 6 — 上線準備**：**改名**（產品名 / repo / 網域 / 資料夾一次全改；去除以 aRacer /
+  RaceChrono 商標當品牌，僅在副標描述相容性，例如品牌 LogaBridge 之類）、關於我頁、
+  `LICENSE` + 第三方套件授權清單、SEO（meta/OG、robots.txt、sitemap、structured data）、
+  Logo / favicon、使用說明連結指向外部文件（GitHub README / docs）。
 - 每階段內再細分小 commit。
 - **設計原則**：功能能力以**實際欄位**（`session.has(...)`）判斷，不以檔頭/格式硬編；
   檔頭僅決定如何解析結構。
+- **商標**：`aRacer`（ECU 廠商）與 `RaceChrono` 皆為註冊商標，不得當品牌名，僅作相容性描述。
 
 ---
 

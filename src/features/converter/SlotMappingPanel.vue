@@ -11,6 +11,9 @@ const store = useConverterStore()
 const { mapping, availableChannels } = storeToRefs(store)
 
 const hasFiles = computed(() => availableChannels.value.length > 0)
+const accelPresent = computed(() =>
+  availableChannels.value.some((c) => c.name === 'TC_Xforce'),
+)
 const gyroPresent = computed(() =>
   availableChannels.value.some((c) => c.name === 'TC_Xangle_dps'),
 )
@@ -27,7 +30,7 @@ function onSlotChange(slot: SlotId, channel: string | null): void {
     <div class="fixed">
       <h4>{{ t('converter.mapping.fixedHeading') }}</h4>
       <ul>
-        <li>{{ t('converter.mapping.accel') }}</li>
+        <li>{{ accelPresent ? t('converter.mapping.accel') : t('converter.mapping.accelAbsent') }}</li>
         <li>{{ gyroPresent ? t('converter.mapping.gyro') : t('converter.mapping.gyroAbsent') }}</li>
         <li>{{ t('converter.mapping.rpm') }}</li>
       </ul>

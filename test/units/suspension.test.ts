@@ -47,11 +47,11 @@ describe('adToTravelMm', () => {
 })
 
 describe('derived suspension channels', () => {
-  it('derives Front_Susp_mm from SuspensionAD1 (RaceAMP)', () => {
+  it('derives the Front Suspension channel from SuspensionAD1 (RaceAMP)', () => {
     const session = parseLoga(loadFixture('raceAmp.loga'))
     const channels = deriveSuspensionChannels(session, frontEnabled())
     expect(channels).toHaveLength(1)
-    expect(channels[0].name).toBe('Front_Susp_mm')
+    expect(channels[0].name).toBe('Front Suspension')
     expect(channels[0].data.length).toBe(session.rowCount)
     expect(Number.isFinite(channels[0].data[0])).toBe(true)
   })
@@ -61,11 +61,15 @@ describe('derived suspension channels', () => {
     expect(deriveSuspensionChannels(session, frontEnabled())).toHaveLength(0)
   })
 
-  it('augments the session so the derived channel is resolvable', () => {
+  it('overrides the ECU Front Suspension column (same name, no duplicate)', () => {
     const session = parseLoga(loadFixture('raceAmp.loga'))
+    const ecuValue = session.get('Front Suspension')?.data[0]
     const augmented = applyDerivedChannels(session, frontEnabled())
-    expect(augmented.has('Front_Susp_mm')).toBe(true)
-    expect(augmented.get('Front_Susp_mm')?.data.length).toBe(session.rowCount)
+    // same number of channels (overridden, not appended)
+    expect(augmented.channels.length).toBe(session.channels.length)
+    expect(augmented.get('Front Suspension')?.data.length).toBe(session.rowCount)
+    // calibrated value differs from the ECU's original
+    expect(augmented.get('Front Suspension')?.data[0]).not.toBe(ecuValue)
   })
 })
 

@@ -22,17 +22,19 @@ export interface SuspensionConfig {
 
 export const PARTS: readonly SuspensionPart[] = ['front', 'rear']
 
-/** Derived channel names — distinct from the ECU's own Front/Rear Suspension. */
-export const DERIVED_NAME: Record<SuspensionPart, string> = {
-  front: 'Front_Susp_mm',
-  rear: 'Rear_Susp_mm',
-}
-
-/** The ECU's own computed travel columns, used as the reverse-calc reference. */
-export const ECU_NAME: Record<SuspensionPart, string> = {
+/**
+ * Output channel names — deliberately the SAME as the loga's own Front/Rear
+ * Suspension columns. The calibrated channel overrides the ECU's column (see
+ * applyDerivedChannels), which keeps the field name stable for the future
+ * "save modified .loga" step (Phase 3) and for analysis.
+ */
+export const OUTPUT_NAME: Record<SuspensionPart, string> = {
   front: 'Front Suspension',
   rear: 'Rear Suspension',
 }
+
+/** The ECU's own computed travel columns, read as the reverse-calc reference. */
+export const ECU_NAME = OUTPUT_NAME
 
 const DERIVED_DESC: Record<SuspensionPart, string> = {
   front: '前避震行程 (校正)',
@@ -82,7 +84,7 @@ export function derivedSuspensionNames(
   for (const part of PARTS) {
     const cfg = config[part]
     if (cfg.enabled && session.has(adChannelName(cfg.source))) {
-      out.push({ name: DERIVED_NAME[part], description: DERIVED_DESC[part] })
+      out.push({ name: OUTPUT_NAME[part], description: DERIVED_DESC[part] })
     }
   }
   return out
@@ -102,8 +104,8 @@ export function deriveSuspensionChannels(
     const data = new Float32Array(ad.length)
     for (let i = 0; i < ad.length; i++) data[i] = adToTravelMm(ad[i], cfg)
     out.push({
-      name: DERIVED_NAME[part],
-      rawName: DERIVED_NAME[part],
+      name: OUTPUT_NAME[part],
+      rawName: OUTPUT_NAME[part],
       description: DERIVED_DESC[part],
       data,
     })
@@ -112,8 +114,10 @@ export function deriveSuspensionChannels(
 }
 
 /**
- * Return a LogSession augmented with the derived suspension channels, or the
- * original session unchanged if none apply. The source .loga is never modified.
+ * Return a LogSession with the calibrated suspension channels applied. A derived
+ * channel OVERRIDES the ECU's same-named column (Front/Rear Suspension) if it
+ * exists, otherwise it is appended. The in-memory session is replaced; the
+ * source .loga file is never modified.
  */
 export function applyDerivedChannels(
   session: LogSession,
@@ -121,7 +125,11 @@ export function applyDerivedChannels(
 ): LogSession {
   const derived = deriveSuspensionChannels(session, config)
   if (derived.length === 0) return session
-  return new LogSession([...session.channels, ...derived], session.meta)
+  const byName = new Map(derived.map((c) => [c.name, c]))
+  const existing = new Set(session.channels.map((c) => c.name))
+  const merged = session.channels.map((c) => byName.get(c.name) ?? c)
+  for (const d of derived) if (!existing.has(d.name)) merged.push(d)
+  return new LogSession(merged, session.meta)
 }
 
 // --- reverse-calc: recover the ECU's linear transfer from (AD, mm) pairs ---
