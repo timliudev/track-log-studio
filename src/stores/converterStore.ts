@@ -87,6 +87,8 @@ export const useConverterStore = defineStore('converter', () => {
   // ref-unwrapping would otherwise mangle the LogSession class type, and we do
   // not want the large Float32 column-store proxied.
   const sessions = new Map<number, LogSession>()
+  // Original File objects, kept so the loga writer can re-read the source text.
+  const originalFiles = new Map<number, File>()
 
   watch(
     [mapping, userPresets, activePresetId],
@@ -136,6 +138,24 @@ export const useConverterStore = defineStore('converter', () => {
       .filter((s): s is LogSession => s !== undefined),
   )
 
+  /** Ready files paired with their session + original File (for the loga writer). */
+  const savableEntries = computed<
+    { id: number; name: string; session: LogSession; file: File }[]
+  >(() =>
+    files.value
+      .filter((f) => f.status === 'ready')
+      .map((f) => ({
+        id: f.id,
+        name: f.name,
+        session: sessions.get(f.id),
+        file: originalFiles.get(f.id),
+      }))
+      .filter(
+        (e): e is { id: number; name: string; session: LogSession; file: File } =>
+          e.session !== undefined && e.file !== undefined,
+      ),
+  )
+
   // --- mapping / presets ---
 
   function setSlot(id: SlotId, channel: string | null, decimals?: number): void {
@@ -169,11 +189,12 @@ export const useConverterStore = defineStore('converter', () => {
 
   // --- file lifecycle (driven by the view's useLogImport) ---
 
-  function beginImport(name: string): number {
+  function beginImport(file: File): number {
     const id = nextFileId++
+    originalFiles.set(id, file)
     files.value.push({
       id,
-      name,
+      name: file.name,
       status: 'parsing',
       progress: 0,
       formatId: null,
@@ -213,11 +234,13 @@ export const useConverterStore = defineStore('converter', () => {
 
   function removeFile(id: number): void {
     sessions.delete(id)
+    originalFiles.delete(id)
     files.value = files.value.filter((f) => f.id !== id)
   }
 
   function clearFiles(): void {
     sessions.clear()
+    originalFiles.clear()
     files.value = []
     results.value = []
   }
@@ -260,6 +283,7 @@ export const useConverterStore = defineStore('converter', () => {
     availableChannels,
     readyFiles,
     readySessions,
+    savableEntries,
     slotIds: SLOT_IDS,
     setSlot,
     applyPreset,

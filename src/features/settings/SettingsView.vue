@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import SuspensionPanel from '@/features/suspension/SuspensionPanel.vue'
+import SaveCalibratedLoga from '@/features/suspension/SaveCalibratedLoga.vue'
 
 const { t } = useI18n()
 </script>
@@ -9,6 +10,9 @@ const { t } = useI18n()
   <div class="settings">
     <div class="card">
       <SuspensionPanel />
+    </div>
+    <div class="card">
+      <SaveCalibratedLoga />
     </div>
     <p class="future">{{ t('settings.futureNote') }}</p>
   </div>
