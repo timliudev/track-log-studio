@@ -12,8 +12,12 @@ const props = defineProps<{
   chart: ChartConfig
   session: LogSession
   xValues: Float64Array
+  xRange?: { min: number; max: number } | null
 }>()
-const emit = defineEmits<{ cursor: [number | null] }>()
+const emit = defineEmits<{
+  cursor: [number | null]
+  xZoom: [{ min: number; max: number }]
+}>()
 
 const { t } = useI18n()
 const analyzer = useAnalyzerStore()
@@ -92,7 +96,9 @@ function removeChannel(name: string): void {
       :data="data"
       :series="series"
       :axes="axes"
+      :x-range="xRange"
       @cursor="(idx) => emit('cursor', idx)"
+      @x-zoom="(r) => emit('xZoom', r)"
     />
   </section>
 </template>

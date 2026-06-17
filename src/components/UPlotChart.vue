@@ -8,15 +8,22 @@ const props = defineProps<{
   series: uPlot.Series[]
   /** Optional axes (with scale/side); colours are themed here. Defaults to x+y. */
   axes?: uPlot.Axis[]
+  /** Shared X zoom range (null = auto). Applied to this chart; user zoom emits xZoom. */
+  xRange?: { min: number; max: number } | null
   height?: number
 }>()
 
-const emit = defineEmits<{ cursor: [number | null] }>()
+const emit = defineEmits<{
+  cursor: [number | null]
+  xZoom: [{ min: number; max: number }]
+}>()
 
 const host = ref<HTMLDivElement | null>(null)
 let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
+// Guard so programmatic setScale (from a synced xRange) doesn't echo back out.
+let applyingRange = false
 
 function themeColor(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -48,8 +55,22 @@ function buildOptions(width: number): uPlot.Options {
       setCursor: [
         (u: uPlot) => emit('cursor', u.cursor.idx ?? null),
       ],
+      setScale: [
+        (u: uPlot, key: string) => {
+          if (key !== 'x' || applyingRange) return
+          const { min, max } = u.scales.x
+          if (min != null && max != null) emit('xZoom', { min, max })
+        },
+      ],
     },
   }
+}
+
+function applyXRange(): void {
+  if (!plot || !props.xRange) return
+  applyingRange = true
+  plot.setScale('x', { min: props.xRange.min, max: props.xRange.max })
+  applyingRange = false
 }
 
 function create(): void {
@@ -57,6 +78,7 @@ function create(): void {
   destroy()
   const width = host.value.clientWidth || 600
   plot = new uPlot(buildOptions(width), props.data, host.value)
+  applyXRange() // adopt the shared zoom on (re)create, e.g. a newly added chart
 }
 
 function destroy(): void {
@@ -108,9 +130,16 @@ watch(
       create()
     } else {
       plot.setData(props.data)
+      applyXRange()
     }
   },
   { deep: false },
+)
+
+// Sync this chart to the shared X zoom range.
+watch(
+  () => props.xRange,
+  () => applyXRange(),
 )
 </script>
 
