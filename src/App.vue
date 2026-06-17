@@ -6,6 +6,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import ConverterView from '@/features/converter/ConverterView.vue'
+import SettingsView from '@/features/settings/SettingsView.vue'
 
 const { t } = useI18n()
 const { themePref, localePref } = storeToRefs(useSettingsStore())
@@ -14,7 +15,7 @@ const { themePref, localePref } = storeToRefs(useSettingsStore())
 useTheme()
 useLocale()
 
-type Tab = 'converter' | 'analyzer'
+type Tab = 'converter' | 'analyzer' | 'settings'
 const tab = ref<Tab>('converter')
 </script>
 
@@ -54,6 +55,14 @@ const tab = ref<Tab>('converter')
       >
         {{ t('nav.converter') }}
       </button>
+      <button
+        type="button"
+        class="tab"
+        :class="{ active: tab === 'settings' }"
+        @click="tab = 'settings'"
+      >
+        {{ t('nav.settings') }}
+      </button>
       <button type="button" class="tab" disabled>
         {{ t('nav.analyzer') }} <small>{{ t('nav.analyzerSoon') }}</small>
       </button>
@@ -61,6 +70,7 @@ const tab = ref<Tab>('converter')
 
     <main class="content">
       <ConverterView v-if="tab === 'converter'" />
+      <SettingsView v-else-if="tab === 'settings'" />
     </main>
 
     <footer class="site-footer">

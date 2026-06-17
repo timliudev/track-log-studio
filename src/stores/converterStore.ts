@@ -128,6 +128,14 @@ export const useConverterStore = defineStore('converter', () => {
 
   const readyFiles = computed(() => files.value.filter((f) => f.status === 'ready'))
 
+  /** The parsed LogSession objects for ready files (e.g. for reverse-calc). */
+  const readySessions = computed<LogSession[]>(() =>
+    files.value
+      .filter((f) => f.status === 'ready')
+      .map((f) => sessions.get(f.id))
+      .filter((s): s is LogSession => s !== undefined),
+  )
+
   // --- mapping / presets ---
 
   function setSlot(id: SlotId, channel: string | null, decimals?: number): void {
@@ -251,6 +259,7 @@ export const useConverterStore = defineStore('converter', () => {
     isConverting,
     availableChannels,
     readyFiles,
+    readySessions,
     slotIds: SLOT_IDS,
     setSlot,
     applyPreset,
