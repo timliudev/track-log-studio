@@ -22,6 +22,8 @@ export default {
     time: 'Time',
     distance: 'Distance',
     pickChannel: 'Pick channels to plot from above',
+    addChart: 'Add chart',
+    removeChart: 'Remove',
   },
   suspension: {
     heading: 'Suspension calibration',

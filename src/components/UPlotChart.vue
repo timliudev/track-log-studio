@@ -6,6 +6,8 @@ import 'uplot/dist/uPlot.min.css'
 const props = defineProps<{
   data: uPlot.AlignedData
   series: uPlot.Series[]
+  /** Optional axes (with scale/side); colours are themed here. Defaults to x+y. */
+  axes?: uPlot.Axis[]
   height?: number
 }>()
 
@@ -25,16 +27,20 @@ function buildOptions(width: number): uPlot.Options {
   // Read theme colours so axis/grid text follows light/dark (incl. auto).
   const axisStroke = themeColor('--color-text-muted', '#888')
   const gridStroke = themeColor('--color-border', '#cccccc')
-  const axis = {
-    stroke: axisStroke,
+  // Apply theme to each axis; keep a per-axis stroke if the caller set one
+  // (used to colour each value axis to match its series).
+  const themed = (a: uPlot.Axis): uPlot.Axis => ({
     grid: { stroke: gridStroke, width: 1 },
     ticks: { stroke: gridStroke, width: 1 },
-  }
+    ...a,
+    stroke: a.stroke ?? axisStroke,
+  })
+  const axes = (props.axes ?? [{}, {}]).map(themed)
   return {
     width,
     height: props.height ?? 260,
     series: props.series,
-    axes: [axis, axis],
+    axes,
     legend: { show: true },
     scales: { x: { time: false } },
     cursor: { focus: { prox: 16 } },

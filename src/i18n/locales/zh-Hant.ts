@@ -22,6 +22,8 @@ export default {
     time: '時間',
     distance: '距離',
     pickChannel: '從上方選擇要繪製的通道',
+    addChart: '新增圖表',
+    removeChart: '移除',
   },
   suspension: {
     heading: '避震校正',
