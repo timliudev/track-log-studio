@@ -1,30 +1,31 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { useConverterStore } from '@/stores/converterStore'
+import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 
 const { t } = useI18n()
-const conv = useConverterStore()
+const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
-const { savableEntries } = storeToRefs(conv)
 const { charts, xAxis, xRange } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 
 const cursorIdx = ref<number | null>(null)
 
+const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
+
 // Switching the X unit (time↔distance) invalidates any shared zoom range.
 watch(xAxis, () => analyzer.setXRange(null))
 
 watch(
-  savableEntries,
-  (entries) => {
-    const exists = entries.some((e) => e.id === analyzer.activeFileId)
-    if (!exists) analyzer.activeFileId = entries.length ? entries[0].id : null
+  readyFiles,
+  (files) => {
+    const exists = files.some((f) => f.id === analyzer.activeFileId)
+    if (!exists) analyzer.activeFileId = files.length ? files[0].id : null
   },
   { immediate: true },
 )
@@ -36,14 +37,14 @@ function onSelect(e: Event): void {
 
 <template>
   <div class="analyzer">
-    <p v-if="savableEntries.length === 0" class="empty">{{ t('analyzer.noFiles') }}</p>
+    <p v-if="readyFiles.length === 0" class="empty">{{ t('analyzer.noFiles') }}</p>
 
     <template v-else>
       <div class="toolbar">
         <label class="record">
           <span>{{ t('analyzer.record') }}</span>
           <select :value="analyzer.activeFileId ?? ''" @change="onSelect">
-            <option v-for="e in savableEntries" :key="e.id" :value="e.id">{{ e.name }}</option>
+            <option v-for="f in readyFiles" :key="f.id" :value="f.id">{{ f.name }}</option>
           </select>
         </label>
         <div class="xaxis">

@@ -1,36 +1,15 @@
 <script setup lang="ts">
-import { useConverterStore } from '@/stores/converterStore'
-import { useLogImport } from '@/composables/useLogImport'
 import ConverterNotes from './ConverterNotes.vue'
-import FileDropZone from './FileDropZone.vue'
-import FileList from './FileList.vue'
 import PresetBar from './PresetBar.vue'
 import SlotMappingPanel from './SlotMappingPanel.vue'
 import ConvertResults from './ConvertResults.vue'
-
-const store = useConverterStore()
-const { parseFile } = useLogImport()
-
-async function onFiles(files: File[]): Promise<void> {
-  for (const file of files) {
-    const id = store.beginImport(file)
-    try {
-      const session = await parseFile(file, (f) => store.setProgress(id, f))
-      store.completeImport(id, session)
-    } catch (e) {
-      store.failImport(id, e instanceof Error ? e.message : String(e))
-    }
-  }
-}
 </script>
 
 <template>
   <div class="converter">
     <ConverterNotes />
-    <FileDropZone @files="onFiles" />
     <div class="grid">
       <div class="col">
-        <FileList />
         <ConvertResults />
       </div>
       <div class="col">

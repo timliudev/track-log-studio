@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseLoga } from '@/domain/parsing/LogaParser'
+import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
 import { extractGpsTrack, hasGps } from '@/domain/analysis/gpsTrack'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { lttb } from '@/domain/analysis/downsample'
@@ -9,6 +10,16 @@ import { loadFixture } from '../fixtures'
 describe('extractGpsTrack', () => {
   it('extracts a Taiwan-area track from a GPS log', () => {
     const track = extractGpsTrack(parseLoga(loadFixture('super2.loga')))
+    expect(hasGps(track)).toBe(true)
+    const i = track.valid.indexOf(1)
+    expect(track.lat[i]).toBeGreaterThan(20)
+    expect(track.lat[i]).toBeLessThan(26)
+    expect(track.lon[i]).toBeGreaterThan(118)
+    expect(track.lon[i]).toBeLessThan(123)
+  })
+
+  it('extracts decimal-degree fixes from an NMEA session (fallback path)', () => {
+    const track = extractGpsTrack(nmeaToSession(loadFixture('super2.expected.nmea')))
     expect(hasGps(track)).toBe(true)
     const i = track.valid.indexOf(1)
     expect(track.lat[i]).toBeGreaterThan(20)
