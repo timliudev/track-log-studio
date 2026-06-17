@@ -6,6 +6,7 @@
   "description": "Browser-based, fully client-side tool to parse aRacer ECU .loga logs: convert to RaceChrono .nmea and analyse laps & telemetry.",
   "scripts": {
     "dev": "vite",
+    "dev:host": "vite --host",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -16,6 +17,7 @@
     "fflate": "^0.8.3",
     "idb": "^8.0.3",
     "pinia": "^3.0.4",
+    "uplot": "^1.6.32",
     "vue": "^3.5.38",
     "vue-i18n": "^11.4.5"
   },

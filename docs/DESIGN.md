@@ -238,9 +238,21 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   RC3。後續：衍生通道沿用 `Front/Rear Suspension` 欄名並覆蓋；accel/gyro 缺欄輸出留空；
   設定分頁移到最右。
 - **Phase 3 — 另存校正後 `.loga`**：loga 寫出器（保留原檔、只換避震欄位另存新檔）。
-- **Phase 4 — 分析器**：軌跡 / 底圖 / 切圈 / 圖表 / G-G / FFT / 分布 / 每圈統計表
-  （避震衍生通道屆時可直接繪圖 / FFT）。建立 uPlot 圖表 / 游標同步 / 降採樣基礎。
-- **Phase 5 — 合併（RaceChrono GPS + loga）**：當 loga 無 GPS / GPS 異常時，匯入 RaceChrono
+- **Phase 4 — 分析器**（分子階段）：
+  - **4a（✅ 已實作，待 commit）**：軌跡圖(canvas) + 單一時間/距離序列圖(uPlot) + 游標連動；
+    `domain/analysis`(gpsTrack/distance/lttb/timeAxis)。
+  - **4b — 重構為共用檔案列 + 儀表板**：
+    - **共用 `fileStore`**：把「載入/已載入檔案」自轉檔器抽出為全 App 共用的**頂部檔案列**；
+      轉檔器與分析器讀同一份。**多格式輸入**:loga + **`.nmea` 讀取器** +（之後）`.rcz`。
+    - **分析器儀表板**:軌跡圖恆顯示 + 「＋新增圖表」可加多個圖表;序列圖**每通道獨立 Y 軸**
+      (#3)、可同類型多個、X 軸同步;`analyzerStore.charts: ChartConfig[]`。
+    - 修 #6（dpr/視窗 resize 重繪：RO 外加 window resize + matchMedia）。
+  - **4c — 圈次**：起終點線、切圈(線段穿越 / `IR_LapNumber`)、單圈/全部/多圈疊圖、每圈統計表。
+  - **4d — 其他圖表與互動**：G-G 點雲、分布圖、FFT（加 ECharts）；#7 框選縮放時軌跡聚焦
+    該段；**圖表觸控手勢**（雙指捏動縮放 / 拖曳平移 / 雙擊重置 —— uPlot 內建縮放只支援滑鼠，
+    觸控需另接;真機測後定）；**軌跡圖縮放/平移**（類 Google 地圖:滾輪 + 雙指 + 拖曳）。
+- **Phase 5 — 合併（RaceChrono GPS + loga）**：（NMEA 讀取器已於 4b 具備）當 loga 無 GPS /
+  GPS 異常時，匯入 RaceChrono
   `.nmea`（`.rcz` 之後）取得好 GPS 軌跡，與 loga 引擎數據**手動時間對齊**（速度疊圖 +
   互相關建議），重新取樣後**匯出合併 .nmea**。新增 NMEA **輸入**解析器（補齊模組化輸入），
   對齊 UI 重用 Phase 4 圖表。難點：時鐘漂移（先單一位移）、取樣率內插。
