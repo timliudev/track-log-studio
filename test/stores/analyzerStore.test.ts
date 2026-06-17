@@ -38,4 +38,13 @@ describe('analyzerStore', () => {
     s.removeChart(id)
     expect(s.charts.some((c) => c.id === id)).toBe(false)
   })
+
+  it('setXRange holds and clears the shared zoom range', () => {
+    const s = useAnalyzerStore()
+    expect(s.xRange).toBeNull()
+    s.setXRange({ min: 1, max: 5 })
+    expect(s.xRange).toEqual({ min: 1, max: 5 })
+    s.setXRange(null)
+    expect(s.xRange).toBeNull()
+  })
 })

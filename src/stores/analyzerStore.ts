@@ -14,7 +14,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const activeFileId = ref<number | null>(null)
   const xAxis = ref<XAxis>('time')
   const charts = ref<ChartConfig[]>([{ id: 1, channels: [] }])
+  // Shared X-axis zoom range across all charts (null = auto / full extent).
+  const xRange = ref<{ min: number; max: number } | null>(null)
   let nextId = 2
+
+  function setXRange(range: { min: number; max: number } | null): void {
+    xRange.value = range
+  }
 
   function addChart(): void {
     charts.value.push({ id: nextId++, channels: [] })
@@ -29,5 +35,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     if (chart) chart.channels = channels
   }
 
-  return { activeFileId, xAxis, charts, addChart, removeChart, setChartChannels }
+  return {
+    activeFileId,
+    xAxis,
+    charts,
+    xRange,
+    setXRange,
+    addChart,
+    removeChart,
+    setChartChannels,
+  }
 })

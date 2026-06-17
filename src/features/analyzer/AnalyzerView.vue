@@ -12,10 +12,13 @@ const { t } = useI18n()
 const conv = useConverterStore()
 const analyzer = useAnalyzerStore()
 const { savableEntries } = storeToRefs(conv)
-const { charts, xAxis } = storeToRefs(analyzer)
+const { charts, xAxis, xRange } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 
 const cursorIdx = ref<number | null>(null)
+
+// Switching the X unit (time↔distance) invalidates any shared zoom range.
+watch(xAxis, () => analyzer.setXRange(null))
 
 watch(
   savableEntries,
@@ -63,7 +66,9 @@ function onSelect(e: Event): void {
           :chart="c"
           :session="session"
           :x-values="xValues"
+          :x-range="xRange"
           @cursor="(i) => (cursorIdx = i)"
+          @x-zoom="(r) => analyzer.setXRange(r)"
         />
       </div>
 
