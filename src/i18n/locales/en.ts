@@ -16,6 +16,13 @@ export default {
     heading: 'Settings',
     futureNote: 'More settings (export / import, etc.) coming soon.',
   },
+  analyzer: {
+    noFiles: 'No logs loaded — load a .loga in the Converter first.',
+    record: 'Record',
+    time: 'Time',
+    distance: 'Distance',
+    pickChannel: 'Pick channels to plot from above',
+  },
   suspension: {
     heading: 'Suspension calibration',
     intro: 'Convert SuspensionAD voltage to travel (mm) as a derived channel for export and analysis.',

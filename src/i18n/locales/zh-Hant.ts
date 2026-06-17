@@ -16,6 +16,13 @@ export default {
     heading: '設定',
     futureNote: '更多設定（設定匯出 / 匯入等）將陸續加入。',
   },
+  analyzer: {
+    noFiles: '尚未載入記錄，請先到「轉檔器」載入 .loga。',
+    record: '記錄',
+    time: '時間',
+    distance: '距離',
+    pickChannel: '從上方選擇要繪製的通道',
+  },
   suspension: {
     heading: '避震校正',
     intro: '把 SuspensionAD 電壓換算成行程 (mm)，產生衍生通道供轉檔與分析使用。',
