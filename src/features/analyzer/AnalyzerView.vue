@@ -12,11 +12,11 @@ const { t } = useI18n()
 const conv = useConverterStore()
 const analyzer = useAnalyzerStore()
 const { savableEntries } = storeToRefs(conv)
+const { charts, xAxis } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 
 const cursorIdx = ref<number | null>(null)
 
-// Default the active record to the first ready file; recover if it's removed.
 watch(
   savableEntries,
   (entries) => {
@@ -43,21 +43,33 @@ function onSelect(e: Event): void {
             <option v-for="e in savableEntries" :key="e.id" :value="e.id">{{ e.name }}</option>
           </select>
         </label>
+        <div class="xaxis">
+          <button type="button" :class="{ active: xAxis === 'time' }" @click="analyzer.xAxis = 'time'">
+            {{ t('analyzer.time') }}
+          </button>
+          <button type="button" :class="{ active: xAxis === 'distance' }" @click="analyzer.xAxis = 'distance'">
+            {{ t('analyzer.distance') }}
+          </button>
+        </div>
       </div>
 
-      <div class="grid">
-        <div class="card">
-          <TrackMap :track="track" :cursor-idx="cursorIdx" @cursor="(i) => (cursorIdx = i)" />
-        </div>
-        <div class="card">
-          <TimeSeriesChart
-            v-if="session && xValues"
-            :session="session"
-            :x-values="xValues"
-            @cursor="(i) => (cursorIdx = i)"
-          />
-        </div>
+      <div class="card">
+        <TrackMap :track="track" :cursor-idx="cursorIdx" @cursor="(i) => (cursorIdx = i)" />
       </div>
+
+      <div v-for="c in charts" :key="c.id" class="card">
+        <TimeSeriesChart
+          v-if="session && xValues"
+          :chart="c"
+          :session="session"
+          :x-values="xValues"
+          @cursor="(i) => (cursorIdx = i)"
+        />
+      </div>
+
+      <button type="button" class="add" @click="analyzer.addChart()">
+        ＋ {{ t('analyzer.addChart') }}
+      </button>
     </template>
   </div>
 </template>
@@ -73,8 +85,10 @@ function onSelect(e: Event): void {
 }
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+  justify-content: space-between;
 }
 .record {
   display: inline-flex;
@@ -91,11 +105,23 @@ function onSelect(e: Event): void {
   padding: 5px 8px;
   font: inherit;
 }
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: calc(var(--space) * 2);
-  align-items: start;
+.xaxis {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.xaxis button {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: none;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.xaxis button.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
 }
 .card {
   background: var(--color-surface);
@@ -103,9 +129,18 @@ function onSelect(e: Event): void {
   border-radius: calc(var(--radius) * 1.5);
   padding: calc(var(--space) * 1.5);
 }
-@media (max-width: 960px) {
-  .grid {
-    grid-template-columns: 1fr;
-  }
+.add {
+  align-self: flex-start;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  font: inherit;
+  cursor: pointer;
+}
+.add:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 </style>

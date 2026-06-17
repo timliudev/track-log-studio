@@ -130,8 +130,13 @@ onMounted(() => {
   draw()
   ro = new ResizeObserver(() => draw())
   if (canvas.value) ro.observe(canvas.value)
+  // dpr / viewport changes (devtools device-mode toggle) may not trigger RO.
+  window.addEventListener('resize', draw)
 })
-onBeforeUnmount(() => ro?.disconnect())
+onBeforeUnmount(() => {
+  ro?.disconnect()
+  window.removeEventListener('resize', draw)
+})
 
 watch(() => props.track, () => draw())
 watch(() => props.cursorIdx, () => draw())
