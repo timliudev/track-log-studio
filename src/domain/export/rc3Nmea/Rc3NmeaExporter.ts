@@ -144,9 +144,11 @@ export class Rc3NmeaExporter implements Exporter {
 
     // Build one RC3 sentence for row i with the given time / count fields.
     const buildRc3 = (i: number, timeField: string, countField: string): string => {
-      const xacc = get(cXf, i) / 1000
-      const yacc = get(cYf, i) / 1000
-      const zacc = get(cZf, i) / 1000
+      // Accel/gyro come from the Race Module's IMU — emit empty (not a fake 0)
+      // when those columns are absent.
+      const xacc = cXf ? fmt(get(cXf, i) / 1000) : ''
+      const yacc = cYf ? fmt(get(cYf, i) / 1000) : ''
+      const zacc = cZf ? fmt(get(cZf, i) / 1000) : ''
       const gx = cGx ? fmt(get(cGx, i), 3) : ''
       const gy = cGy ? fmt(get(cGy, i), 3) : ''
       const gz = cGz ? fmt(get(cGz, i), 3) : ''
@@ -161,7 +163,7 @@ export class Rc3NmeaExporter implements Exporter {
 
       const body =
         `RC3,${timeField},${countField},` +
-        `${fmt(xacc)},${fmt(yacc)},${fmt(zacc)},` +
+        `${xacc},${yacc},${zacc},` +
         `${gx},${gy},${gz},` +
         `${fmt(rpm, 1)},` +
         slotStr

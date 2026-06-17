@@ -55,16 +55,16 @@ const tab = ref<Tab>('converter')
       >
         {{ t('nav.converter') }}
       </button>
+      <button type="button" class="tab" disabled>
+        {{ t('nav.analyzer') }} <small>{{ t('nav.analyzerSoon') }}</small>
+      </button>
       <button
         type="button"
-        class="tab"
+        class="tab tab--right"
         :class="{ active: tab === 'settings' }"
         @click="tab = 'settings'"
       >
         {{ t('nav.settings') }}
-      </button>
-      <button type="button" class="tab" disabled>
-        {{ t('nav.analyzer') }} <small>{{ t('nav.analyzerSoon') }}</small>
       </button>
     </nav>
 
@@ -161,6 +161,9 @@ const tab = ref<Tab>('converter')
 .tab.active {
   color: var(--color-text);
   border-bottom-color: var(--color-accent);
+}
+.tab--right {
+  margin-left: auto;
 }
 .tab:disabled {
   opacity: 0.6;
