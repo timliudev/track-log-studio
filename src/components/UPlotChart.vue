@@ -11,6 +11,7 @@ const props = defineProps<{
   /** Shared X zoom range (null = auto). Applied to this chart; user zoom emits xZoom. */
   xRange?: { min: number; max: number } | null
   height?: number
+  externalCursor?: number | null
 }>()
 
 const emit = defineEmits<{
@@ -24,6 +25,7 @@ let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
 // Guard so programmatic setScale (from a synced xRange) doesn't echo back out.
 let applyingRange = false
+let applyingCursor = false
 
 function themeColor(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -53,7 +55,9 @@ function buildOptions(width: number): uPlot.Options {
     cursor: { focus: { prox: 16 } },
     hooks: {
       setCursor: [
-        (u: uPlot) => emit('cursor', u.cursor.idx ?? null),
+        (u: uPlot) => {
+          if (!applyingCursor) emit('cursor', u.cursor.idx ?? null)
+        },
       ],
       setScale: [
         (u: uPlot, key: string) => {
@@ -140,6 +144,16 @@ watch(
 watch(
   () => props.xRange,
   () => applyXRange(),
+)
+
+watch(
+  () => props.externalCursor,
+  (idx) => {
+    if (!plot || idx == null) return
+    applyingCursor = true
+    plot.setCursor({ idx })
+    applyingCursor = false
+  },
 )
 </script>
 
