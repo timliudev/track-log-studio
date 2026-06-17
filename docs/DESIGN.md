@@ -243,11 +243,14 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
     `domain/analysis`(gpsTrack/distance/lttb/timeAxis)。NMEA 輸入讀取器(`domain/import/nmea`)亦已備妥。
   - **4b（✅ 完成）**：分析器「＋新增圖表」儀表板;序列圖**每通道獨立 Y 軸**(解決壓平)、
     多圖表、**X 軸縮放同步**(`analyzerStore.xRange`);#6 dpr/resize 重繪修復。
-  - **4c — 共用頂部檔案列 + 多格式輸入**：把「載入/已載入檔案」抽成全 App 共用 `fileStore`,
-    轉檔器與分析器讀同一份;分析器可吃 loga + `.nmea`(讀取器已備) +（之後）`.rcz`。
+  - **4c（✅ 完成）**：共用頂部 `FileBar`（.loga + .nmea）+ `fileStore` 抽離 `converterStore`;
+    分析器可直接吃 `.loga` / `.nmea`;`gpsTrack` 增加 decimal-degree fallback;
+    `LogaFormatId` 加入 `'nmea'`;`nmeaToSession` 函式;64 tests 通過。
+    跨圖表游標同步亦於本輪完成（UPlotChart `externalCursor` prop + `valToPos` 同步;
+    guard 防回響）。
   - **4d — 圈次**：起終點線、切圈(線段穿越 / `IR_LapNumber`)、單圈/全部/多圈疊圖、每圈統計表。
-  - **4e — 其他圖表與互動**：G-G 點雲、分布圖、FFT（加 ECharts）；**跨圖表游標同步**
-    (hover A → B 同位置顯示 value);**可拖動重排的圖表儀表板**(寬螢幕多欄,善用兩側);
+  - **4e — 其他圖表與互動**：G-G 點雲、分布圖、FFT（加 ECharts）；
+    **可拖動重排的圖表儀表板**(寬螢幕多欄,善用兩側);
     #7 框選縮放時軌跡聚焦該段；**圖表觸控手勢**(雙指/拖曳/雙擊;uPlot 縮放僅支援滑鼠);
     **軌跡圖縮放/平移**(類 Google 地圖:滾輪 + 雙指 + 拖曳;目前軌跡圖在觸控下無互動,屬待做)。
 - **Phase 5 — 合併（RaceChrono GPS + loga）**：（NMEA 讀取器已於 4b 具備）當 loga 無 GPS /
