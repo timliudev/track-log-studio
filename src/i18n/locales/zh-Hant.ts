@@ -16,8 +16,15 @@ export default {
     heading: '設定',
     futureNote: '更多設定（設定匯出 / 匯入等）將陸續加入。',
   },
+  fileBar: {
+    load: '載入記錄 (.loga / .nmea)',
+    rows: '{n} 列',
+    error: '解析失敗',
+    remove: '移除',
+    clearAll: '全部清除',
+  },
   analyzer: {
-    noFiles: '尚未載入記錄，請先到「轉檔器」載入 .loga。',
+    noFiles: '尚未載入記錄，請點選上方「載入記錄」選取 .loga 或 .nmea 檔案。',
     record: '記錄',
     time: '時間',
     distance: '距離',

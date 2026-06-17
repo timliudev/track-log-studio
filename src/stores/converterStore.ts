@@ -13,24 +13,16 @@ import {
   derivedSuspensionNames,
 } from '@/domain/units/suspension'
 import { useSuspensionStore } from '@/stores/suspensionStore'
+import { useFileStore } from '@/stores/fileStore'
 
 export interface SavedPreset {
   name: string
   mapping: Rc3Mapping
 }
 
-export interface ImportedFile {
-  id: number
-  name: string
-  status: 'parsing' | 'ready' | 'error'
-  progress: number
-  formatId: string | null
-  rowCount: number
-  error: string | null
-}
+export type { ImportedFile } from '@/stores/fileStore'
 
 export interface ConvertResult {
-  /** Output file name, e.g. "Session1.nmea". */
   name: string
   content: string
 }
@@ -47,8 +39,6 @@ interface Persisted {
 }
 
 function clone(mapping: Rc3Mapping): Rc3Mapping {
-  // JSON clone (not structuredClone) so it reads cleanly through Vue's reactive
-  // Proxy; the mapping is plain JSON-safe data.
   return JSON.parse(JSON.stringify(mapping)) as Rc3Mapping
 }
 
@@ -64,31 +54,19 @@ function loadPersisted(): Partial<Persisted> {
 const exporter = new Rc3NmeaExporter()
 
 /**
- * Converter state: the working RC3 slot mapping, user presets (persisted), the
- * list of imported logs and the conversion results. The parse worker lives in
- * the view via useLogImport — this store stays free of worker imports so it can
- * be unit-tested in Node.
+ * Converter state: the working RC3 slot mapping, user presets (persisted) and
+ * the conversion results. File management lives in fileStore; this store keeps
+ * thin delegation wrappers for backward compatibility.
  */
 export const useConverterStore = defineStore('converter', () => {
   const persisted = loadPersisted()
-
   const mapping = ref<Rc3Mapping>(persisted.mapping ?? clone(DEFAULT_PRESET))
   const userPresets = ref<(SavedPreset | null)[]>(
     persisted.userPresets ?? Array.from({ length: USER_PRESET_COUNT }, () => null),
   )
   const activePresetId = ref<PresetId>(persisted.activePresetId ?? 'default')
-
-  const files = ref<ImportedFile[]>([])
   const results = ref<ConvertResult[]>([])
   const isConverting = ref(false)
-  let nextFileId = 1
-
-  // Parsed sessions are held outside the reactive tree (plain Map): Vue's deep
-  // ref-unwrapping would otherwise mangle the LogSession class type, and we do
-  // not want the large Float32 column-store proxied.
-  const sessions = new Map<number, LogSession>()
-  // Original File objects, kept so the loga writer can re-read the source text.
-  const originalFiles = new Map<number, File>()
 
   watch(
     [mapping, userPresets, activePresetId],
@@ -108,17 +86,17 @@ export const useConverterStore = defineStore('converter', () => {
   )
 
   const suspension = useSuspensionStore()
+  const fileStore = useFileStore()
 
   /** Channels available across all successfully parsed logs (for the picker). */
   const availableChannels = computed<{ name: string; description?: string }[]>(() => {
     const seen = new Map<string, string | undefined>()
-    for (const f of files.value) {
-      const session = sessions.get(f.id)
+    for (const f of fileStore.files) {
+      const session = fileStore.getSession(f.id)
       if (f.status !== 'ready' || !session) continue
       for (const ch of session.channels) {
         if (!seen.has(ch.name)) seen.set(ch.name, ch.description)
       }
-      // include derived suspension channels (by actual field presence)
       for (const d of derivedSuspensionNames(session, suspension.config)) {
         if (!seen.has(d.name)) seen.set(d.name, d.description)
       }
@@ -128,36 +106,27 @@ export const useConverterStore = defineStore('converter', () => {
       .sort((a, b) => a.name.localeCompare(b.name))
   })
 
-  const readyFiles = computed(() => files.value.filter((f) => f.status === 'ready'))
+  const readyFiles = computed(() => fileStore.readyFiles)
+  const readySessions = computed(() => fileStore.readySessions)
+  const savableEntries = computed(() => fileStore.savableEntries)
 
-  /** The parsed LogSession objects for ready files (e.g. for reverse-calc). */
-  const readySessions = computed<LogSession[]>(() =>
-    files.value
-      .filter((f) => f.status === 'ready')
-      .map((f) => sessions.get(f.id))
-      .filter((s): s is LogSession => s !== undefined),
-  )
+  // --- Thin delegation wrappers (keeps backward compat with tests) ---
+  function beginImport(file: File): number { return fileStore.beginImport(file) }
+  function setProgress(id: number, fraction: number): void { fileStore.setProgress(id, fraction) }
+  function completeImport(id: number, session: LogSession): void {
+    fileStore.completeImport(id, session)
+  }
+  function failImport(id: number, message: string): void { fileStore.failImport(id, message) }
+  function removeFile(id: number): void { fileStore.removeFile(id) }
+  function clearFiles(): void {
+    fileStore.clearFiles()
+    results.value = []
+  }
 
-  /** Ready files paired with their session + original File (for the loga writer). */
-  const savableEntries = computed<
-    { id: number; name: string; session: LogSession; file: File }[]
-  >(() =>
-    files.value
-      .filter((f) => f.status === 'ready')
-      .map((f) => ({
-        id: f.id,
-        name: f.name,
-        session: sessions.get(f.id),
-        file: originalFiles.get(f.id),
-      }))
-      .filter(
-        (e): e is { id: number; name: string; session: LogSession; file: File } =>
-          e.session !== undefined && e.file !== undefined,
-      ),
-  )
+  // Also expose files ref for any remaining consumers
+  const files = computed(() => fileStore.files)
 
   // --- mapping / presets ---
-
   function setSlot(id: SlotId, channel: string | null, decimals?: number): void {
     mapping.value[id] = {
       channel,
@@ -187,79 +156,19 @@ export const useConverterStore = defineStore('converter', () => {
     applyPreset('default')
   }
 
-  // --- file lifecycle (driven by the view's useLogImport) ---
-
-  function beginImport(file: File): number {
-    const id = nextFileId++
-    originalFiles.set(id, file)
-    files.value.push({
-      id,
-      name: file.name,
-      status: 'parsing',
-      progress: 0,
-      formatId: null,
-      rowCount: 0,
-      error: null,
-    })
-    return id
-  }
-
-  function withFile(id: number, fn: (f: ImportedFile) => void): void {
-    const f = files.value.find((x) => x.id === id)
-    if (f) fn(f)
-  }
-
-  function setProgress(id: number, fraction: number): void {
-    withFile(id, (f) => {
-      f.progress = fraction
-    })
-  }
-
-  function completeImport(id: number, session: LogSession): void {
-    sessions.set(id, session)
-    withFile(id, (f) => {
-      f.status = 'ready'
-      f.progress = 1
-      f.formatId = session.meta.formatId
-      f.rowCount = session.rowCount
-    })
-  }
-
-  function failImport(id: number, message: string): void {
-    withFile(id, (f) => {
-      f.status = 'error'
-      f.error = message
-    })
-  }
-
-  function removeFile(id: number): void {
-    sessions.delete(id)
-    originalFiles.delete(id)
-    files.value = files.value.filter((f) => f.id !== id)
-  }
-
-  function clearFiles(): void {
-    sessions.clear()
-    originalFiles.clear()
-    files.value = []
-    results.value = []
-  }
-
   // --- conversion ---
-
   function outputName(logName: string): string {
     return logName.replace(/\.loga$/i, '') + '.nmea'
   }
 
-  /** Convert all ready files with the current mapping; stores results. */
+  /** Convert all ready loga files with the current mapping; stores results. */
   function convertAll(): ConvertResult[] {
     isConverting.value = true
     try {
       const out: ConvertResult[] = []
-      for (const f of readyFiles.value) {
-        const session = sessions.get(f.id)
+      for (const f of fileStore.readyFiles.filter((f) => f.fileType === 'loga')) {
+        const session = fileStore.getSession(f.id)
         if (!session) continue
-        // augment with calibrated suspension channels before exporting
         const augmented = applyDerivedChannels(session, suspension.config)
         out.push({
           name: outputName(f.name),

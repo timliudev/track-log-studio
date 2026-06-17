@@ -1,5 +1,5 @@
 /** Identifier for each recognised .loga header variant. */
-export type LogaFormatId = 'super2' | 'superX' | 'raceAmp'
+export type LogaFormatId = 'super2' | 'superX' | 'raceAmp' | 'nmea'
 
 /**
  * A single named data column, stored as a typed array for memory efficiency.

@@ -16,8 +16,15 @@ export default {
     heading: 'Settings',
     futureNote: 'More settings (export / import, etc.) coming soon.',
   },
+  fileBar: {
+    load: 'Load files (.loga / .nmea)',
+    rows: '{n} rows',
+    error: 'Parse failed',
+    remove: 'Remove',
+    clearAll: 'Clear all',
+  },
   analyzer: {
-    noFiles: 'No logs loaded — load a .loga in the Converter first.',
+    noFiles: 'No logs loaded — use the file bar above to load a .loga or .nmea file.',
     record: 'Record',
     time: 'Time',
     distance: 'Distance',

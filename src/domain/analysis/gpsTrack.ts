@@ -31,36 +31,51 @@ export function extractGpsTrack(session: LogSession): GpsTrack {
   const cLonEw = session.get('GPS_Lon_EW')?.data
   const cValid = session.get('GPS_Valid')?.data
 
-  if (!cLatDeg || !cLonDeg) return { lat, lon, valid } // no GPS position at all
+  if (cLatDeg && cLonDeg) {
+    const g = (a: Float32Array | undefined, i: number): number =>
+      a && !Number.isNaN(a[i]) ? a[i] : 0
+    const hasValidity = cValid !== undefined
 
-  const g = (a: Float32Array | undefined, i: number): number =>
-    a && !Number.isNaN(a[i]) ? a[i] : 0
-  const hasValidity = cValid !== undefined
+    for (let i = 0; i < n; i++) {
+      const latDeg = Math.trunc(g(cLatDeg, i))
+      const latMin = g(cLatMin, i) + g(cLatMmmm, i) / 10000
+      const lonDeg = Math.trunc(g(cLonDeg, i))
+      const lonMin = g(cLonMin, i) + g(cLonMmmm, i) / 10000
 
-  for (let i = 0; i < n; i++) {
-    const latDeg = Math.trunc(g(cLatDeg, i))
-    const latMin = g(cLatMin, i) + g(cLatMmmm, i) / 10000
-    const lonDeg = Math.trunc(g(cLonDeg, i))
-    const lonMin = g(cLonMin, i) + g(cLonMmmm, i) / 10000
+      let ok: boolean
+      if (hasValidity) {
+        const code = Math.trunc(g(cValid, i))
+        ok = code !== 0 && String.fromCharCode(code) === 'A'
+      } else {
+        ok = latDeg !== 0 || latMin !== 0 || lonDeg !== 0 || lonMin !== 0
+      }
+      if (!ok) continue
 
-    let ok: boolean
-    if (hasValidity) {
-      const code = Math.trunc(g(cValid, i))
-      ok = code !== 0 && String.fromCharCode(code) === 'A'
-    } else {
-      ok = latDeg !== 0 || latMin !== 0 || lonDeg !== 0 || lonMin !== 0
+      const ns = cLatNs ? String.fromCharCode(Math.trunc(g(cLatNs, i))) : 'N'
+      const ew = cLonEw ? String.fromCharCode(Math.trunc(g(cLonEw, i))) : 'E'
+      let la = latDeg + latMin / 60
+      if (ns === 'S') la = -la
+      let lo = lonDeg + lonMin / 60
+      if (ew === 'W') lo = -lo
+      lat[i] = la
+      lon[i] = lo
+      valid[i] = 1
     }
-    if (!ok) continue
-
-    const ns = cLatNs ? String.fromCharCode(Math.trunc(g(cLatNs, i))) : 'N'
-    const ew = cLonEw ? String.fromCharCode(Math.trunc(g(cLonEw, i))) : 'E'
-    let la = latDeg + latMin / 60
-    if (ns === 'S') la = -la
-    let lo = lonDeg + lonMin / 60
-    if (ew === 'W') lo = -lo
-    lat[i] = la
-    lon[i] = lo
-    valid[i] = 1
+  } else {
+    // Fallback: decimal-degree channels produced by nmeaToSession
+    const dLat = session.get('GPS_Lat')?.data
+    const dLon = session.get('GPS_Lon')?.data
+    if (dLat && dLon) {
+      for (let i = 0; i < n; i++) {
+        const la = dLat[i]
+        const lo = dLon[i]
+        if (Number.isFinite(la) && Number.isFinite(lo) && (la !== 0 || lo !== 0)) {
+          lat[i] = la
+          lon[i] = lo
+          valid[i] = 1
+        }
+      }
+    }
   }
   return { lat, lon, valid }
 }

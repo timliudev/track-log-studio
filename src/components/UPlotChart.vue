@@ -150,8 +150,12 @@ watch(
   () => props.externalCursor,
   (idx) => {
     if (!plot || idx == null) return
+    const xVal = (plot.data[0] as number[])[idx]
+    if (!Number.isFinite(xVal)) return
+    const left = plot.valToPos(xVal, 'x')
+    if (!Number.isFinite(left)) return
     applyingCursor = true
-    plot.setCursor({ idx })
+    plot.setCursor({ left, top: 0 })
     applyingCursor = false
   },
 )

@@ -8,6 +8,7 @@ import { useLocale } from '@/composables/useLocale'
 import ConverterView from '@/features/converter/ConverterView.vue'
 import AnalyzerView from '@/features/analyzer/AnalyzerView.vue'
 import SettingsView from '@/features/settings/SettingsView.vue'
+import FileBar from '@/components/FileBar.vue'
 
 const { t } = useI18n()
 const { themePref, localePref } = storeToRefs(useSettingsStore())
@@ -73,6 +74,8 @@ const tab = ref<Tab>('converter')
         {{ t('nav.settings') }}
       </button>
     </nav>
+
+    <FileBar v-if="tab !== 'settings'" />
 
     <main class="content">
       <ConverterView v-if="tab === 'converter'" />

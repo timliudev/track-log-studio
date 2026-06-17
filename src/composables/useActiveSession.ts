@@ -1,5 +1,5 @@
 import { computed, type ComputedRef } from 'vue'
-import { useConverterStore } from '@/stores/converterStore'
+import { useFileStore } from '@/stores/fileStore'
 import { useSuspensionStore } from '@/stores/suspensionStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { applyDerivedChannels } from '@/domain/units/suspension'
@@ -9,22 +9,24 @@ import { timeSeconds } from '@/domain/analysis/timeAxis'
 import type { LogSession } from '@/domain/model/LogSession'
 
 /**
- * The analyzer's active log (chosen in the analyzer, sourced from the converter's
- * loaded files) augmented with calibrated suspension channels, plus its GPS
- * track and time/distance axes. All computed/cached and recomputed on change.
+ * The analyzer's active log (chosen in the analyzer, sourced from the shared
+ * fileStore) augmented with calibrated suspension channels, plus its GPS track
+ * and time/distance axes. All computed/cached and recomputed on change.
  */
 export function useActiveSession(): {
   session: ComputedRef<LogSession | null>
   track: ComputedRef<GpsTrack | null>
   xValues: ComputedRef<Float64Array | null>
 } {
-  const conv = useConverterStore()
+  const fileStore = useFileStore()
   const susp = useSuspensionStore()
   const analyzer = useAnalyzerStore()
 
   const session = computed<LogSession | null>(() => {
-    const entry = conv.savableEntries.find((e) => e.id === analyzer.activeFileId)
-    return entry ? applyDerivedChannels(entry.session, susp.config) : null
+    const id = analyzer.activeFileId
+    if (id == null) return null
+    const s = fileStore.getSession(id)
+    return s ? applyDerivedChannels(s, susp.config) : null
   })
 
   const track = computed<GpsTrack | null>(() =>
