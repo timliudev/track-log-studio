@@ -12,7 +12,10 @@ import { VitePWA } from 'vite-plugin-pwa'
  * release tags, this commit hash IS the deployed version identifier.
  */
 function buildSha(): string {
-  const fromEnv = process.env.CF_PAGES_COMMIT_SHA ?? process.env.GITHUB_SHA
+  const fromEnv =
+    process.env.WORKERS_CI_COMMIT_SHA ?? // Cloudflare Workers Builds
+    process.env.CF_PAGES_COMMIT_SHA ?? // Cloudflare Pages
+    process.env.GITHUB_SHA // GitHub Actions
   if (fromEnv) return fromEnv.slice(0, 7)
   try {
     return execSync('git rev-parse --short=7 HEAD').toString().trim()
@@ -27,7 +30,11 @@ export default defineConfig({
   plugins: [
     vue(),
     VitePWA({
-      registerType: 'prompt',
+      // autoUpdate (was 'prompt' but the update-prompt UI was never wired, so
+      // returning visitors got stuck on the first cached build). During rapid
+      // continuous deploys we want new builds to apply automatically on next
+      // load instead of serving a stale service-worker cache.
+      registerType: 'autoUpdate',
       // App shell + assets are precached; large .loga files are user-provided at
       // runtime and never cached.
       workbox: {
