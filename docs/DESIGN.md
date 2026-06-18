@@ -248,17 +248,26 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
     `LogaFormatId` 加入 `'nmea'`;`nmeaToSession` 函式;64 tests 通過。
     跨圖表游標同步亦於本輪完成（UPlotChart `externalCursor` prop + `valToPos` 同步;
     guard 防回響）。
-  - **4d — 圈次**：
-    - **4d-1/2/3（✅ 完成）**：圈次偵測 domain 層
-      (`domain/analysis/laps.ts` — 線段穿越:平面投影 + straddle 測試 + 方向自動
-      判定 + minLapMs debounce;`detectLapsByChannel` 用 ECU `IR_LapNumber`);
-      軌跡圖可拖曳起終點線(geo 端點存於 `lapStore`,`projection.ts` 抽出共用
-      geo↔pixel,≥44px 觸控把手,拖曳時抑制 chart cursor);`useLaps` 自動播種
-      垂直初始航向的預設線;每圈統計表(`LapTable` — #/圈時/距離/最高速,
-      `lapStats.ts`)；圈時來源切換(線段自算 / ECU,僅 `IR_LapNumber` 存在時);
-      選圈 → `setXRange` 聚焦該段 + 軌跡高亮。
-    - **4d-4（延後）**：單圈/全部/**多圈疊圖**(同時改 TrackMap + TimeSeriesChart
-      的 color-by-lap 渲染),另起一輪。
+  - **4d — 圈次（核心完成，持續擴充）**：
+    - **4d-1/2/3（✅）**：圈次偵測 domain 層(`domain/analysis/laps.ts` — 線段穿越:
+      平面投影 + straddle 測試 + 方向自動判定 + minLapMs debounce;`detectLapsByChannel`
+      用 ECU `IR_LapNumber`);軌跡圖可拖曳起終點線(geo 端點存 `lapStore`,
+      `projection.ts` 抽出共用 geo↔pixel,≥44px 觸控把手,拖曳抑制 chart cursor);
+      `useLaps` 自動播種預設線;每圈統計表 `LapTable`;圈時來源切換(線段自算 / ECU);
+      選圈 → `setXRange` 聚焦 + 軌跡高亮。
+    - **修正包 A（✅）**：最高速改讀真實速度通道(`GPS_Speed`/`Vehicle_Speed`,非 GPS
+      位置差現算);起終點線提示 + 把手強化;**重設線改為重新播種**(修復線消失無法再加);
+      取消選圈鈕;**選圈↔縮放補同步**(拆掉互打 watcher,改命令式 handler:選入→放大、
+      明確選出→縮回、手動縮放→取消選取但保留視圖)。
+    - **批次 B 可設定欄位（✅）**：統計表欄位可增減,每欄 = 通道 + 聚合(max/min/avg)。
+    - **批次 C1 多選上色（✅）**：表格多選圈、軌跡**只顯示被選的圈並依圈上色**
+      (`lapColors.ts` 8 色 + `highlightLaps`)。
+    - **批次 R 架構整理（✅）**：`domain/analysis/lapMetrics.ts` 的 `LapMetric` 區別聯集
+      + `computeMetric` **統一所有「每圈數值」來源**——原始通道聚合與圈結構/跨圈指標收在
+      同一介面後,未來 delta/sector/optimal lap 只需加一個 union variant + case +
+      `LapContext` 欄位;cursor 由元件 local ref 移入 `analyzerStore`(共享)。
+    - **C2（待做）**：被選圈疊在 XY 折線圖比較、**切圈後 X 軸從 0 起算**(圈相對距離對齊)。
+    - **C3 跨 log（延後,與 Phase 5 合併規劃）**：跨不同已載入 log 選圈比較(需分析器持多 session)。
   - **4e — 其他圖表與互動**：G-G 點雲、分布圖、FFT（加 ECharts）；
     **可拖動重排的圖表儀表板**(寬螢幕多欄,善用兩側);
     #7 框選縮放時軌跡聚焦該段；**圖表觸控手勢**(雙指/拖曳/雙擊;uPlot 縮放僅支援滑鼠);
@@ -268,14 +277,60 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   `.nmea`（`.rcz` 之後）取得好 GPS 軌跡，與 loga 引擎數據**手動時間對齊**（速度疊圖 +
   互相關建議），重新取樣後**匯出合併 .nmea**。新增 NMEA **輸入**解析器（補齊模組化輸入），
   對齊 UI 重用 Phase 4 圖表。難點：時鐘漂移（先單一位移）、取樣率內插。
-- **Phase 6 — 上線準備**：**改名**（產品名 / repo / 網域 / 資料夾一次全改；去除以 aRacer /
-  RaceChrono 商標當品牌，僅在副標描述相容性，例如品牌 LogaBridge 之類）、關於我頁、
-  `LICENSE` + 第三方套件授權清單、SEO（meta/OG、robots.txt、sitemap、structured data）、
-  Logo / favicon、使用說明連結指向外部文件（GitHub README / docs）。
+- **Phase 6 — 上線準備（改為漸進上線，邊開發邊部署）**：
+  - **6a 對外品牌 + 上線前置（✅ 完成）**：產品改名 **Track Log Studio**（網頁標題 /
+    PWA manifest / i18n / package 名 / repo 名）；aRacer・RaceChrono 僅保留為相容性描述；
+    footer **build 戳記 = commit hash + 日期**（CI/CD 自動帶入,無 release tag 以 commit
+    hash 當版本）；`LICENSE`(MIT)；README 雙語商標免責；`THIRD-PARTY-NOTICES.md`；
+    `.nvmrc`=22。**已 push 並公開**：`github.com/timliudev/track-log-studio`。
+  - **6b 完整收尾（待做）**：內部資料夾 / 程式碼大改名、`docs/DESIGN.md` 標題改名、
+    關於我頁、SEO（meta/OG、robots.txt、sitemap、structured data）、Logo / favicon
+    （PWA icon 換點陣 PNG 192/512 + maskable）、使用說明外部文件連結。
 - 每階段內再細分小 commit。
 - **設計原則**：功能能力以**實際欄位**（`session.has(...)`）判斷，不以檔頭/格式硬編；
   檔頭僅決定如何解析結構。
 - **商標**：`aRacer`（ECU 廠商）與 `RaceChrono` 皆為註冊商標，不得當品牌名，僅作相容性描述。
+
+---
+
+## 11b. 目前狀態與待辦（接續用，2026-06-18）
+
+### 部署 / 流程現況
+- **已公開上線中**：`github.com/timliudev/track-log-studio`（public）。`main`=正式、
+  `develop`=Cloudflare preview。**gitflow 照舊**（feature→develop→`--no-ff`→main），
+  「先別 push」規矩**已解除**，之後正常推送。
+- **版本策略**：無 release tag，**以 commit hash 當版本**；footer build 戳記由
+  `vite.config.ts` 的 `__BUILD_SHA__` 注入（CF_PAGES_COMMIT_SHA→GITHUB_SHA→`git rev-parse`），
+  CI/CD 每次部署自動更新。里程碑才鬆散打 tag。
+- **Cloudflare Pages** 由使用者在後台接 Git（prod=main、build `npm run build`、output `dist`、
+  Node 由 `.nvmrc`=22）；無需 repo 密鑰。
+- **分析 / 廣告**（未來）：GA4 / Cloudflare Web Analytics / AdSense 用**公開 ID**(`VITE_*` env)，
+  非密鑰；lazy-load、離線不載、守隱私。
+
+### 架構原則（批次 R 後的鐵則）
+- 原始 `LogSession` **不可變**；每個顯示的每圈數值都是 `computeMetric` 的**純衍生**，不寫回來源。
+- 每份狀態**單一擁有者**(store ref)，其餘用 `computed` 衍生；**禁止用 watcher 去寫另一份狀態**
+  (那是 #9 desync 的根因)；選圈↔縮放等副作用放在**命令式 handler**。
+- 能力以 `session.has(...)` 實際欄位判斷,不以檔頭硬編。
+
+### 待辦佇列（來自 2026-06-18 實機回饋,依建議順序）
+1. **#3 起終點線樣式**：與軌跡/cursor 視覺區隔（那顆把手球易被誤認為軌跡位置）。**待視覺驗收**。
+2. **#1 Lap 管理（基礎優先）**：新增/排除「切西瓜」的爛圈，避免污染 opt time/delta。
+3. **C2 圖表疊圈**（#4,#7）：XY 折線疊被選圈、X 軸圈相對從 0 起算（距離對齊）。
+4. **軸顯示**（#5,#6）：X 軸原始值旁加換算（分/公里）；時間加當地時分秒 + 時區設定（log 多為 UTC）。
+5. **軌跡熱力上色**（#10,#11）：軌跡依通道值（RPM/G）漸層上色看進彎變化；可選 colormap。
+6. **#9 單圈 GNSS 偏移微調**：疊圈對位用的每圈時間/空間位移。
+7. **4e 版面**（#12,#13,#8）：laps 暫移到軌跡上方；桌面儀表板布局（左上軌跡、左下游標數值列、
+   中 XY、右上 G-G、右中避震/FFT、右下 laps）、手機分頁；非線性轉場動畫（最後做）。
+8. **D 本機持久化**：起終點線/sector/欄位設定存 localStorage/IndexedDB，以地理位置為 key 的賽道設定；
+   JSON 匯出入。**雲端同步延後**（牴觸純前端,Phase 6+ 選用）。
+9. **E 圈次分析**：手動 sector → 理論最佳圈(optimal) → delta time（皆為 `LapMetric` 新 variant）。
+10. **F 行動裝置驗收**：真機 + production build 查 Android 載入後偶發重整（疑記憶體壓力,桌面無法重現）。
+
+### 已知驗證限制
+- 無頭預覽（preview 工具）下 track `<canvas>` 寬度為 0、`preview_screenshot` 逾時 →
+  **canvas 視覺無法自動驗證**,只能驗 load/console/DOM 文字,像素由使用者目視。
+- 可灌小型合成 `.nmea` 進 file input 測載入路徑（50MB 真檔會觸發重整）。
 
 ---
 

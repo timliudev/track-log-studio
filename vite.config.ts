@@ -1,7 +1,25 @@
+import { execSync } from 'node:child_process'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
+
+/**
+ * Short commit hash for the footer build stamp. CI/CD provides it via env
+ * (Cloudflare Pages `CF_PAGES_COMMIT_SHA`, GitHub Actions `GITHUB_SHA`); local
+ * builds fall back to reading git directly, so the stamp is a real commit hash
+ * everywhere instead of a literal "dev". Since we ship continuously without
+ * release tags, this commit hash IS the deployed version identifier.
+ */
+function buildSha(): string {
+  const fromEnv = process.env.CF_PAGES_COMMIT_SHA ?? process.env.GITHUB_SHA
+  if (fromEnv) return fromEnv.slice(0, 7)
+  try {
+    return execSync('git rev-parse --short=7 HEAD').toString().trim()
+  } catch {
+    return 'unknown'
+  }
+}
 
 // Note: defineConfig from 'vitest/config' extends Vite's config with the `test`
 // field, so the unit-test setup lives alongside the build setup in one file.
@@ -47,9 +65,7 @@ export default defineConfig({
     format: 'es',
   },
   define: {
-    __BUILD_SHA__: JSON.stringify(
-      (process.env.CF_PAGES_COMMIT_SHA ?? process.env.GITHUB_SHA ?? 'dev').slice(0, 7),
-    ),
+    __BUILD_SHA__: JSON.stringify(buildSha()),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
   test: {
