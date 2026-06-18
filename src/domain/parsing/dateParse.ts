@@ -7,9 +7,17 @@
  *   - "2021/9/19 12:20:04"           (Super2 / RaceAMP, 24h)
  *   - "6/21/2025 5:15:07 PM"         (SuperX, 12h AM/PM)
  *   - "2025/4/20 下午 05:21:15"       (RaceAMP, Chinese AM/PM: 上午=AM 下午=PM)
+ *   - "2026-05-15 17:53:50"          (MX APP, ISO-like dashes, 24h)
  */
 export function parseCreatedDate(value: string): Date | null {
   const v = value.trim()
+
+  // 2026-05-15 17:53:50 (dashes, 24h)
+  const dash = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2}):(\d{2})$/)
+  if (dash) {
+    const [, y, mo, d, h, mi, s] = dash
+    return makeDate(+y, +mo, +d, +h, +mi, +s)
+  }
 
   // 2025/4/20 [上午|下午] 05:21:15
   const zh = v.match(

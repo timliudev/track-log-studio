@@ -26,6 +26,7 @@ describe('format detection', () => {
     { file: 'super2.loga', id: 'super2', interval: 62.5 },
     { file: 'superX.loga', id: 'superX', interval: 62.5 },
     { file: 'raceAmp.loga', id: 'raceAmp', interval: 31.25 },
+    { file: 'mxApp.loga', id: 'mxApp', interval: 100 },
   ] as const
 
   for (const c of cases) {
@@ -58,6 +59,25 @@ describe('channel resolution', () => {
   it('parses the created date', () => {
     const session = parseLoga(loadFixture('super2.loga'))
     expect(session.meta.createdDate?.getFullYear()).toBe(2021)
+  })
+})
+
+describe('MX APP format', () => {
+  it('parses the marker-based header and dashed created date', () => {
+    const session = parseLoga(loadFixture('mxApp.loga'))
+    expect(session.meta.formatId).toBe('mxApp')
+    expect(session.has('RPM')).toBe(true)
+    expect(session.has('Vehicle_Speed')).toBe(true)
+    // "Created Date:2026-05-15 17:53:50"
+    expect(session.meta.createdDate?.getFullYear()).toBe(2026)
+    expect(session.meta.createdDate?.getMonth()).toBe(4) // May (0-based)
+  })
+
+  it('exposes decimal phone GPS as GPS_Lat/GPS_Lon via aliases', () => {
+    const session = parseLoga(loadFixture('mxApp.loga'))
+    expect(session.has('GPS_Lat')).toBe(true)
+    expect(session.has('GPS_Lon')).toBe(true)
+    expect(session.get('GPS_Lat')?.rawName).toBe('Phone_GPS_Latitude')
   })
 })
 

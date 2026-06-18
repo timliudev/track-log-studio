@@ -28,6 +28,16 @@ describe('extractGpsTrack', () => {
     expect(track.lon[i]).toBeLessThan(123)
   })
 
+  it('extracts decimal phone-GPS fixes from an MX APP log', () => {
+    const track = extractGpsTrack(parseLoga(loadFixture('mxApp.loga')))
+    expect(hasGps(track)).toBe(true)
+    const i = track.valid.indexOf(1)
+    expect(track.lat[i]).toBeGreaterThan(20)
+    expect(track.lat[i]).toBeLessThan(26)
+    expect(track.lon[i]).toBeGreaterThan(118)
+    expect(track.lon[i]).toBeLessThan(123)
+  })
+
   it('returns no fixes for a log without GPS columns', () => {
     const text = [
       '<aRacer ECU_Memory Log Data for RaceAMP>',
