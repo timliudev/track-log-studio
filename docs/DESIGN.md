@@ -4,7 +4,7 @@
 > This document records requirements, technical decisions, and the discussion log
 > that shaped them. It is the source of truth for implementation.
 
-最後更新 / Last updated: 2026-06-16
+最後更新 / Last updated: 2026-06-18
 
 ---
 
@@ -248,7 +248,17 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
     `LogaFormatId` 加入 `'nmea'`;`nmeaToSession` 函式;64 tests 通過。
     跨圖表游標同步亦於本輪完成（UPlotChart `externalCursor` prop + `valToPos` 同步;
     guard 防回響）。
-  - **4d — 圈次**：起終點線、切圈(線段穿越 / `IR_LapNumber`)、單圈/全部/多圈疊圖、每圈統計表。
+  - **4d — 圈次**：
+    - **4d-1/2/3（✅ 完成）**：圈次偵測 domain 層
+      (`domain/analysis/laps.ts` — 線段穿越:平面投影 + straddle 測試 + 方向自動
+      判定 + minLapMs debounce;`detectLapsByChannel` 用 ECU `IR_LapNumber`);
+      軌跡圖可拖曳起終點線(geo 端點存於 `lapStore`,`projection.ts` 抽出共用
+      geo↔pixel,≥44px 觸控把手,拖曳時抑制 chart cursor);`useLaps` 自動播種
+      垂直初始航向的預設線;每圈統計表(`LapTable` — #/圈時/距離/最高速,
+      `lapStats.ts`)；圈時來源切換(線段自算 / ECU,僅 `IR_LapNumber` 存在時);
+      選圈 → `setXRange` 聚焦該段 + 軌跡高亮。
+    - **4d-4（延後）**：單圈/全部/**多圈疊圖**(同時改 TrackMap + TimeSeriesChart
+      的 color-by-lap 渲染),另起一輪。
   - **4e — 其他圖表與互動**：G-G 點雲、分布圖、FFT（加 ECharts）；
     **可拖動重排的圖表儀表板**(寬螢幕多欄,善用兩側);
     #7 框選縮放時軌跡聚焦該段；**圖表觸控手勢**(雙指/拖曳/雙擊;uPlot 縮放僅支援滑鼠);

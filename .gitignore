@@ -25,6 +25,9 @@ Thumbs.db
 .vite/
 coverage/
 
+# Claude Code agent worktrees (transient, not part of the project)
+.claude/worktrees/
+
 # Env
 .env
 .env.*

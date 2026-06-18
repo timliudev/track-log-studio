@@ -5,21 +5,56 @@ import { storeToRefs } from 'pinia'
 import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
+import { useLaps } from '@/composables/useLaps'
+import { useLapStore } from '@/stores/lapStore'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
+import LapTable from './LapTable.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
+const lapStore = useLapStore()
 const { charts, xAxis, xRange } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
+const { laps, timeMs, resetLine } = useLaps()
 
 const cursorIdx = ref<number | null>(null)
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
-// Switching the X unit (time↔distance) invalidates any shared zoom range.
-watch(xAxis, () => analyzer.setXRange(null))
+const hasEcuLaps = computed(() => session.value?.has('IR_LapNumber') ?? false)
+
+// The currently selected lap (from the table), or null.
+const selectedLap = computed(() =>
+  lapStore.selectedIndex == null
+    ? null
+    : (laps.value.find((l) => l.index === lapStore.selectedIndex) ?? null),
+)
+
+const highlightRange = computed(() =>
+  selectedLap.value
+    ? { startIdx: selectedLap.value.startIdx, endIdx: selectedLap.value.endIdx }
+    : null,
+)
+
+// Selecting a lap zooms all charts to its span (in the current xValues units);
+// deselecting clears the zoom.
+watch(selectedLap, (lap) => {
+  const xs = xValues.value
+  if (lap && xs) {
+    analyzer.setXRange({ min: xs[lap.startIdx], max: xs[lap.endIdx] })
+  } else {
+    analyzer.setXRange(null)
+  }
+})
+
+// Switching the X unit (time↔distance) invalidates any shared zoom range; the
+// selected lap's span is in the old units, so clear the selection too.
+watch(xAxis, () => {
+  lapStore.selectLap(null)
+  analyzer.setXRange(null)
+})
 
 watch(
   readyFiles,
@@ -58,7 +93,26 @@ function onSelect(e: Event): void {
       </div>
 
       <div class="card">
-        <TrackMap :track="track" :cursor-idx="cursorIdx" @cursor="(i) => (cursorIdx = i)" />
+        <TrackMap
+          :track="track"
+          :cursor-idx="cursorIdx"
+          :line="lapStore.line"
+          :highlight-range="highlightRange"
+          @cursor="(i) => (cursorIdx = i)"
+          @update:line="lapStore.setLine($event)"
+        />
+        <div class="laps">
+          <span class="lap-count">{{ t('analyzer.lapCount', { n: laps.length }) }}</span>
+          <button type="button" class="reset" @click="resetLine">
+            {{ t('analyzer.resetLine') }}
+          </button>
+        </div>
+        <LapTable
+          :laps="laps"
+          :track="track"
+          :time-ms="timeMs"
+          :has-ecu-laps="hasEcuLaps"
+        />
       </div>
 
       <div v-for="c in charts" :key="c.id" class="card">
@@ -135,6 +189,28 @@ function onSelect(e: Event): void {
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   padding: calc(var(--space) * 1.5);
+}
+.laps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: calc(var(--space) * 1.5);
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+.reset {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.reset:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .add {
   align-self: flex-start;
