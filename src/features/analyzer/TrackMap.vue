@@ -26,7 +26,7 @@ let dragging: 'a' | 'b' | null = null
 
 const PAD = 16
 // Visible endpoint radius and a larger touch-friendly hit radius (~44px target).
-const HANDLE_R = 7
+const HANDLE_R = 8
 const HANDLE_HIT = 22
 
 function cssVar(name: string): string {
@@ -125,11 +125,18 @@ function draw(): void {
     ctx.moveTo(a.x, a.y)
     ctx.lineTo(b.x, b.y)
     ctx.stroke()
-    ctx.fillStyle = cssVar('--color-accent')
+    // Grab handles: an accent fill ringed by the surface colour so they read as
+    // draggable and stay distinct from the (smaller, ring-less) cursor dot.
+    const accent = cssVar('--color-accent')
+    const ring = cssVar('--color-surface')
     for (const p of [a, b]) {
       ctx.beginPath()
       ctx.arc(p.x, p.y, HANDLE_R, 0, Math.PI * 2)
+      ctx.fillStyle = accent
       ctx.fill()
+      ctx.lineWidth = 2.5
+      ctx.strokeStyle = ring
+      ctx.stroke()
     }
   }
 

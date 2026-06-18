@@ -33,6 +33,8 @@ export default {
     removeChart: '移除',
     lapCount: '圈數：{n}',
     resetLine: '重設起終點線',
+    lineHint: '拖曳軌跡圖上的兩個端點可設定起終點線',
+    clearLapSelection: '取消選圈',
     lap: '#',
     lapTime: '圈時',
     lapDistance: '距離',
