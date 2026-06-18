@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useFileStore } from '@/stores/fileStore'
@@ -16,11 +16,9 @@ const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
-const { charts, xAxis, xRange } = storeToRefs(analyzer)
+const { charts, xAxis, xRange, cursorIdx } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
-
-const cursorIdx = ref<number | null>(null)
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
@@ -127,7 +125,7 @@ function onSelect(e: Event): void {
           :cursor-idx="cursorIdx"
           :line="lapStore.line"
           :highlight-laps="highlightLaps"
-          @cursor="(i) => (cursorIdx = i)"
+          @cursor="analyzer.setCursor"
           @update:line="lapStore.setLine($event)"
         />
         <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
@@ -155,7 +153,7 @@ function onSelect(e: Event): void {
           :x-values="xValues"
           :x-range="xRange"
           :external-cursor="cursorIdx"
-          @cursor="(i) => (cursorIdx = i)"
+          @cursor="analyzer.setCursor"
           @x-zoom="onXZoom"
         />
       </div>

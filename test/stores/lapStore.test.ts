@@ -70,7 +70,7 @@ describe('lapStore', () => {
     const s = useLapStore()
     s.setLine({ a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } })
     s.setSource('ecu')
-    s.addColumn('RPM', 'max')
+    s.addColumn({ kind: 'channel', channel: 'RPM', agg: 'max' })
     s.toggleLap(1)
     s.toggleLap(2)
     s.clearSelection()
@@ -84,46 +84,63 @@ describe('lapStore', () => {
     expect(s.columns).toEqual([])
   })
 
-  it('addColumn appends columns with unique incremental ids', () => {
+  it('addColumn appends channel-metric columns with unique incremental ids', () => {
     const s = useLapStore()
-    s.addColumn('GPS_Speed', 'max')
-    s.addColumn('Vehicle_Speed', 'avg')
+    s.addColumn({ kind: 'channel', channel: 'GPS_Speed', agg: 'max' })
+    s.addColumn({ kind: 'channel', channel: 'Vehicle_Speed', agg: 'avg' })
     expect(s.columns).toHaveLength(2)
-    expect(s.columns[0]).toMatchObject({ channel: 'GPS_Speed', agg: 'max' })
-    expect(s.columns[1]).toMatchObject({ channel: 'Vehicle_Speed', agg: 'avg' })
+    expect(s.columns[0].metric).toEqual({ kind: 'channel', channel: 'GPS_Speed', agg: 'max' })
+    expect(s.columns[1].metric).toEqual({ kind: 'channel', channel: 'Vehicle_Speed', agg: 'avg' })
     const ids = s.columns.map((c) => c.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('addColumn accepts non-channel metrics (e.g. distance)', () => {
+    const s = useLapStore()
+    s.addColumn({ kind: 'distance' })
+    expect(s.columns).toHaveLength(1)
+    expect(s.columns[0].metric).toEqual({ kind: 'distance' })
+  })
+
   it('removeColumn drops only the matching column and keeps ids unique afterwards', () => {
     const s = useLapStore()
-    s.addColumn('A', 'max')
-    s.addColumn('B', 'min')
+    s.addColumn({ kind: 'channel', channel: 'A', agg: 'max' })
+    s.addColumn({ kind: 'channel', channel: 'B', agg: 'min' })
     const removeId = s.columns[0].id
     s.removeColumn(removeId)
     expect(s.columns).toHaveLength(1)
-    expect(s.columns[0].channel).toBe('B')
+    expect(s.columns[0].metric).toMatchObject({ kind: 'channel', channel: 'B' })
     // A new column must not reuse the removed id.
-    s.addColumn('C', 'avg')
+    s.addColumn({ kind: 'channel', channel: 'C', agg: 'avg' })
     const ids = s.columns.map((c) => c.id)
     expect(ids).not.toContain(removeId)
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('setColumnChannel and setColumnAgg update the targeted column', () => {
+  it('setColumnChannel and setColumnAgg mutate a channel-metric column', () => {
     const s = useLapStore()
-    s.addColumn('', 'max')
+    s.addColumn({ kind: 'channel', channel: '', agg: 'max' })
     const id = s.columns[0].id
     s.setColumnChannel(id, 'RPM')
     s.setColumnAgg(id, 'avg')
-    expect(s.columns[0]).toMatchObject({ channel: 'RPM', agg: 'avg' })
+    expect(s.columns[0].metric).toEqual({ kind: 'channel', channel: 'RPM', agg: 'avg' })
   })
 
   it('setColumnChannel/setColumnAgg ignore unknown ids', () => {
     const s = useLapStore()
-    s.addColumn('A', 'max')
+    s.addColumn({ kind: 'channel', channel: 'A', agg: 'max' })
     s.setColumnChannel(999, 'X')
     s.setColumnAgg(999, 'min')
-    expect(s.columns[0]).toMatchObject({ channel: 'A', agg: 'max' })
+    expect(s.columns[0].metric).toEqual({ kind: 'channel', channel: 'A', agg: 'max' })
+  })
+
+  it('setColumnChannel/setColumnAgg are no-ops on a non-channel metric column', () => {
+    const s = useLapStore()
+    s.addColumn({ kind: 'distance' })
+    const id = s.columns[0].id
+    s.setColumnChannel(id, 'RPM')
+    s.setColumnAgg(id, 'avg')
+    // The distance metric is untouched (it has no channel/agg to set).
+    expect(s.columns[0].metric).toEqual({ kind: 'distance' })
   })
 })

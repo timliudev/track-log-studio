@@ -16,10 +16,18 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const charts = ref<ChartConfig[]>([{ id: 1, channels: [] }])
   // Shared X-axis zoom range across all charts (null = auto / full extent).
   const xRange = ref<{ min: number; max: number } | null>(null)
+  // Shared hovered sample index across charts + track map (null = no hover).
+  // Owned here (not locally in AnalyzerView) so future cursor-following readouts
+  // can subscribe to it; presentational charts still receive it as a prop.
+  const cursorIdx = ref<number | null>(null)
   let nextId = 2
 
   function setXRange(range: { min: number; max: number } | null): void {
     xRange.value = range
+  }
+
+  function setCursor(i: number | null): void {
+    cursorIdx.value = i
   }
 
   function addChart(): void {
@@ -40,7 +48,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     xAxis,
     charts,
     xRange,
+    cursorIdx,
     setXRange,
+    setCursor,
     addChart,
     removeChart,
     setChartChannels,

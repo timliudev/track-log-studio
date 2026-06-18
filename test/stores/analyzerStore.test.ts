@@ -47,4 +47,13 @@ describe('analyzerStore', () => {
     s.setXRange(null)
     expect(s.xRange).toBeNull()
   })
+
+  it('setCursor holds and clears the shared hovered sample index', () => {
+    const s = useAnalyzerStore()
+    expect(s.cursorIdx).toBeNull()
+    s.setCursor(42)
+    expect(s.cursorIdx).toBe(42)
+    s.setCursor(null)
+    expect(s.cursorIdx).toBeNull()
+  })
 })
