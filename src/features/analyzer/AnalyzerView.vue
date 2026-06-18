@@ -38,16 +38,26 @@ const highlightRange = computed(() =>
     : null,
 )
 
-// Selecting a lap zooms all charts to its span (in the current xValues units);
-// deselecting clears the zoom.
+// Selecting a lap zooms all charts to its span (in the current xValues units).
+// We only DRIVE the zoom when a lap becomes selected — clearing the zoom on
+// deselect is left to the explicit deselect path (onLapSelect(null)), so a
+// user-initiated zoom that deselects (onXZoom) keeps the user's own range
+// instead of this watcher snapping it back. (No else branch = no fight.)
 watch(selectedLap, (lap) => {
   const xs = xValues.value
   if (lap && xs) {
     analyzer.setXRange({ min: xs[lap.startIdx], max: xs[lap.endIdx] })
-  } else {
-    analyzer.setXRange(null)
   }
 })
+
+// Lap selection from the table is routed here so this component (which owns the
+// select↔zoom coupling) stays the single place that decides zoom side-effects.
+// Explicit deselect (toggling the row off / clear button) also zooms back out;
+// selecting a lap lets the watcher above zoom in.
+function onLapSelect(index: number | null): void {
+  lapStore.selectLap(index)
+  if (index == null) analyzer.setXRange(null)
+}
 
 // Switching the X unit (time↔distance) invalidates any shared zoom range; the
 // selected lap's span is in the old units, so clear the selection too.
@@ -64,6 +74,15 @@ watch(
   },
   { immediate: true },
 )
+
+// Fired ONLY on user drag-zoom or double-click-reset (the programmatic
+// select→zoom path sets a guard in UPlotChart so it never echoes here). A
+// user-initiated zoom means they're no longer viewing the selected lap, so
+// deselect it; the lap highlight then clears in sync with the new range.
+function onXZoom(r: { min: number; max: number } | null): void {
+  analyzer.setXRange(r)
+  lapStore.selectLap(null)
+}
 
 function onSelect(e: Event): void {
   analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
@@ -101,6 +120,7 @@ function onSelect(e: Event): void {
           @cursor="(i) => (cursorIdx = i)"
           @update:line="lapStore.setLine($event)"
         />
+        <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
         <div class="laps">
           <span class="lap-count">{{ t('analyzer.lapCount', { n: laps.length }) }}</span>
           <button type="button" class="reset" @click="resetLine">
@@ -111,7 +131,9 @@ function onSelect(e: Event): void {
           :laps="laps"
           :track="track"
           :time-ms="timeMs"
+          :session="session"
           :has-ecu-laps="hasEcuLaps"
+          @select="onLapSelect"
         />
       </div>
 
@@ -124,7 +146,7 @@ function onSelect(e: Event): void {
           :x-range="xRange"
           :external-cursor="cursorIdx"
           @cursor="(i) => (cursorIdx = i)"
-          @x-zoom="(r) => analyzer.setXRange(r)"
+          @x-zoom="onXZoom"
         />
       </div>
 
@@ -190,12 +212,17 @@ function onSelect(e: Event): void {
   border-radius: calc(var(--radius) * 1.5);
   padding: calc(var(--space) * 1.5);
 }
+.line-hint {
+  margin: calc(var(--space) * 1.5) 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
 .laps {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: calc(var(--space) * 1.5);
+  margin-top: var(--space);
   font-size: 0.9rem;
   color: var(--color-text-muted);
 }

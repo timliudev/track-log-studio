@@ -13,48 +13,55 @@ function makeTrack(lat: number[], lon: number[], valid?: number[]): GpsTrack {
 }
 
 describe('lapStats', () => {
-  it('computes distance and top speed for a straight constant-speed track', () => {
-    // A straight eastbound run along the equator. Each step is one constant
-    // longitude increment per second, so distance is the sum of steps and the
-    // peak speed equals the constant per-step speed.
+  it('computes distance and takes top speed as the max of the speed channel', () => {
     const n = 6
     const lat = new Array(n).fill(0)
     const lon = Array.from({ length: n }, (_, i) => i * 0.001) // ~111 m steps
     const track = makeTrack(lat, lon)
     const timeMs = new Float64Array(Array.from({ length: n }, (_, i) => i * 1000))
     const cum = cumulativeDistanceM(track.lat, track.lon, track.valid)
+    // Real speed channel in km/h; top speed must be the max over the span.
+    const speed = new Float32Array([40, 55, 80, 120, 95, 60])
     const lap: Lap = { index: 0, startIdx: 0, endIdx: n - 1, lapTimeMs: (n - 1) * 1000 }
 
-    const stats = lapStats(track, timeMs, cum, lap)
+    const stats = lapStats(track, timeMs, cum, speed, lap)
 
-    const expectedDistance = cum[n - 1] - cum[0]
-    expect(stats.distanceM).toBeCloseTo(expectedDistance, 6)
-    // Each ~111 m step over 1 s → ~111 m/s → ~400 km/h; uniform, so top == step.
-    const stepM = expectedDistance / (n - 1)
-    const expectedKmh = stepM * 3.6
-    expect(stats.topSpeedKmh).toBeCloseTo(expectedKmh, 3)
+    expect(stats.distanceM).toBeCloseTo(cum[n - 1] - cum[0], 6)
+    expect(stats.topSpeedKmh).toBe(120)
   })
 
-  it('returns zeros for a zero-length lap', () => {
+  it('restricts top speed to the lap span and ignores NaN samples', () => {
+    const track = makeTrack([0, 0, 0, 0, 0], [0, 0.001, 0.002, 0.003, 0.004])
+    const timeMs = new Float64Array([0, 1000, 2000, 3000, 4000])
+    const cum = cumulativeDistanceM(track.lat, track.lon, track.valid)
+    // The 150 outside [1,3] must be excluded; the NaN inside the span is skipped.
+    const speed = new Float32Array([150, 60, NaN, 90, 150])
+    const lap: Lap = { index: 0, startIdx: 1, endIdx: 3, lapTimeMs: 2000 }
+
+    const stats = lapStats(track, timeMs, cum, speed, lap)
+    expect(stats.topSpeedKmh).toBe(90)
+  })
+
+  it('returns NaN top speed when no speed channel is available', () => {
     const track = makeTrack([0, 0], [0, 0.001])
     const timeMs = new Float64Array([0, 1000])
     const cum = cumulativeDistanceM(track.lat, track.lon, track.valid)
-    const lap: Lap = { index: 0, startIdx: 1, endIdx: 1, lapTimeMs: 0 }
+    const lap: Lap = { index: 0, startIdx: 0, endIdx: 1, lapTimeMs: 1000 }
 
-    const stats = lapStats(track, timeMs, cum, lap)
-    expect(stats.distanceM).toBe(0)
-    expect(stats.topSpeedKmh).toBe(0)
+    const stats = lapStats(track, timeMs, cum, null, lap)
+    expect(Number.isNaN(stats.topSpeedKmh)).toBe(true)
   })
 
-  it('ignores invalid fixes and guards non-positive time steps', () => {
-    // Middle sample invalid; the speed step bridges valid fixes 0 and 2.
-    const track = makeTrack([0, 0, 0], [0, 0.5, 0.001], [1, 0, 1])
-    const timeMs = new Float64Array([0, 500, 2000])
+  it('still reports cumulative distance for a single-sample lap', () => {
+    const track = makeTrack([0, 0], [0, 0.001])
+    const timeMs = new Float64Array([0, 1000])
     const cum = cumulativeDistanceM(track.lat, track.lon, track.valid)
-    const lap: Lap = { index: 0, startIdx: 0, endIdx: 2, lapTimeMs: 2000 }
+    const speed = new Float32Array([10, 20])
+    const lap: Lap = { index: 0, startIdx: 1, endIdx: 1, lapTimeMs: 0 }
 
-    const stats = lapStats(track, timeMs, cum, lap)
-    expect(stats.topSpeedKmh).toBeGreaterThan(0)
-    expect(Number.isFinite(stats.topSpeedKmh)).toBe(true)
+    const stats = lapStats(track, timeMs, cum, speed, lap)
+    expect(stats.distanceM).toBe(0)
+    // Single index span [1,1] -> just sample 1's speed.
+    expect(stats.topSpeedKmh).toBe(20)
   })
 })

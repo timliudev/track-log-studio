@@ -33,6 +33,8 @@ export default {
     removeChart: 'Remove',
     lapCount: 'Laps: {n}',
     resetLine: 'Reset line',
+    lineHint: 'Drag the two endpoints on the track to set the start/finish line.',
+    clearLapSelection: 'Clear selection',
     lap: '#',
     lapTime: 'Lap time',
     lapDistance: 'Distance',
