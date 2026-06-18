@@ -134,3 +134,29 @@ describe('Rc3NmeaExporter vs Python golden', () => {
     })
   }
 })
+
+describe('Rc3NmeaExporter decimal-degree GPS (MX APP)', () => {
+  it('emits GGA + RMC from decimal phone coordinates', () => {
+    const session = parseLoga(loadFixture('mxApp.loga'))
+    const out = new Rc3NmeaExporter().export(session, LEGACY_PY_MAPPING)
+    const lines = out.split('\r\n').filter((l) => l.length > 0)
+
+    const gga = lines.filter((l) => l.startsWith('$GPGGA'))
+    const rmc = lines.filter((l) => l.startsWith('$GPRMC'))
+    expect(gga.length).toBeGreaterThan(0)
+    expect(gga.length).toBe(rmc.length)
+
+    // RMC latitude (ddmm.mmmm) decoded back to ~25° N, Taiwan area.
+    const fields = rmc[0].slice(1, rmc[0].lastIndexOf('*')).split(',')
+    const lat = Number(fields[3].slice(0, 2)) + Number(fields[3].slice(2)) / 60
+    expect(lat).toBeGreaterThan(24)
+    expect(lat).toBeLessThan(26)
+    expect(fields[4]).toBe('N')
+
+    // self-consistent checksums on every sentence
+    for (const line of lines) {
+      const star = line.lastIndexOf('*')
+      expect(nmeaChecksum(line.slice(1, star))).toBe(line.slice(star + 1))
+    }
+  })
+})

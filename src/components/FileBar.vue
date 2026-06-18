@@ -3,26 +3,55 @@ import { useI18n } from 'vue-i18n'
 import { useFileStore } from '@/stores/fileStore'
 import { useLogImport } from '@/composables/useLogImport'
 import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
+import { extractLogFiles } from '@/domain/import/zip'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const { parseFile } = useLogImport()
 
+/** Import one log file (.loga → parse worker, .nmea → NMEA reader). */
+async function importOne(file: File): Promise<void> {
+  const id = fileStore.beginImport(file)
+  try {
+    if (file.name.toLowerCase().endsWith('.nmea')) {
+      const session = nmeaToSession(await file.text())
+      fileStore.completeImport(id, session)
+    } else {
+      const session = await parseFile(file, (f) => fileStore.setProgress(id, f))
+      fileStore.completeImport(id, session)
+    }
+  } catch (e) {
+    fileStore.failImport(id, e instanceof Error ? e.message : String(e))
+  }
+}
+
+/** Expand a .zip into its .loga / .nmea entries as Files ready to import. */
+async function importZip(zip: File): Promise<void> {
+  // Surface a bad/empty zip as a failed pill rather than a silent no-op.
+  const id = fileStore.beginImport(zip)
+  let inner: File[]
+  try {
+    const logs = extractLogFiles(new Uint8Array(await zip.arrayBuffer()))
+    if (logs.length === 0) {
+      throw new Error(`${zip.name}: no .loga or .nmea file inside the zip`)
+    }
+    // A Uint8Array is a valid BlobPart at runtime; the lib type is over-narrow.
+    inner = logs.map((l) => new File([l.data as BlobPart], l.name))
+  } catch (e) {
+    fileStore.failImport(id, e instanceof Error ? e.message : String(e))
+    return
+  }
+  fileStore.removeFile(id)
+  for (const f of inner) await importOne(f)
+}
+
 async function onFiles(list: FileList | null): Promise<void> {
   if (!list || list.length === 0) return
   for (const file of Array.from(list)) {
-    const id = fileStore.beginImport(file)
-    try {
-      if (file.name.toLowerCase().endsWith('.nmea')) {
-        const text = await file.text()
-        const session = nmeaToSession(text)
-        fileStore.completeImport(id, session)
-      } else {
-        const session = await parseFile(file, (f) => fileStore.setProgress(id, f))
-        fileStore.completeImport(id, session)
-      }
-    } catch (e) {
-      fileStore.failImport(id, e instanceof Error ? e.message : String(e))
+    if (file.name.toLowerCase().endsWith('.zip')) {
+      await importZip(file)
+    } else {
+      await importOne(file)
     }
   }
 }
@@ -40,7 +69,7 @@ function onChange(e: Event): void {
       <input
         type="file"
         multiple
-        accept=".loga,.nmea"
+        accept=".loga,.nmea,.zip"
         class="hidden"
         @change="onChange"
       />
