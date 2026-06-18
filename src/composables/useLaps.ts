@@ -122,7 +122,13 @@ export function useLaps(): {
   watch(
     track,
     (next, prev) => {
-      if (prev && next !== prev) lapStore.clearLine()
+      if (prev && next !== prev) {
+        lapStore.clearLine()
+        // Lap selection and garbage exclusions are keyed by lap index, which is
+        // meaningless across a different recording — clear them on file change.
+        lapStore.clearSelection()
+        lapStore.clearExcluded()
+      }
       if (next && lapStore.line == null) {
         const seeded = defaultLine(next)
         if (seeded) lapStore.setLine(seeded)

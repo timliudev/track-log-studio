@@ -130,7 +130,11 @@ function onSelect(e: Event): void {
         />
         <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
         <div class="laps">
-          <span class="lap-count">{{ t('analyzer.lapCount', { n: laps.length }) }}</span>
+          <span class="lap-count">{{
+            lapStore.excluded.length > 0
+              ? t('analyzer.lapCountExcluded', { n: laps.length, x: lapStore.excluded.length })
+              : t('analyzer.lapCount', { n: laps.length })
+          }}</span>
           <button type="button" class="reset" @click="resetLine">
             {{ t('analyzer.resetLine') }}
           </button>

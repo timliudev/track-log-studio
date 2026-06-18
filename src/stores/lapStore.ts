@@ -28,6 +28,10 @@ export const useLapStore = defineStore('lap', () => {
   // lap's color (assigned by order) stays stable as laps are added/removed.
   // Drives chart zoom and the colored segments on the track map.
   const selected = ref<number[]>([])
+  // Indices of laps the user has marked as garbage (e.g. an off-track "cut" lap)
+  // so they don't pollute best-lap / future optimal-time & delta computations.
+  // Order is irrelevant (membership only), unlike `selected`.
+  const excluded = ref<number[]>([])
   // User-configured statistics columns for the lap table.
   const columns = ref<LapMetricColumn[]>([])
   // Monotonic id source so column ids stay unique across add/remove.
@@ -62,6 +66,23 @@ export const useLapStore = defineStore('lap', () => {
     return selected.value.includes(i)
   }
 
+  /** Mark lap `i` as garbage, or un-mark it when already excluded. */
+  function toggleExcluded(i: number): void {
+    excluded.value = excluded.value.includes(i)
+      ? excluded.value.filter((x) => x !== i)
+      : [...excluded.value, i]
+  }
+
+  /** Whether lap `i` is currently excluded as garbage. */
+  function isExcluded(i: number): boolean {
+    return excluded.value.includes(i)
+  }
+
+  /** Clear all garbage-lap exclusions. */
+  function clearExcluded(): void {
+    excluded.value = []
+  }
+
   /** Append a column for any metric kind (channel, lapTime, distance, …). */
   function addColumn(metric: LapMetric): void {
     columns.value.push({ id: nextColumnId++, metric })
@@ -91,6 +112,7 @@ export const useLapStore = defineStore('lap', () => {
     line,
     source,
     selected,
+    excluded,
     columns,
     setLine,
     clearLine,
@@ -98,6 +120,9 @@ export const useLapStore = defineStore('lap', () => {
     toggleLap,
     clearSelection,
     isSelected,
+    toggleExcluded,
+    isExcluded,
+    clearExcluded,
     addColumn,
     removeColumn,
     setColumnChannel,
