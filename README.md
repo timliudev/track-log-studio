@@ -1,14 +1,14 @@
-# aRacerLogaAnalysis
+# Track Log Studio
 
 純前端工具，用於解析 aRacer ECU 的 `.loga` 記錄檔。兩大功能：
 
 1. **轉檔器** — 把 `.loga` 轉成 [RaceChrono](https://racechrono.com/) DIY `.nmea`（NMEA 0183 `$GPRMC` + `$RC3`）供下載。
 2. **分析器** — 在賽道底圖上顯示軌跡、切圈，繪製遙測圖表做賽道分析。
 
-A browser-based, **fully client-side** tool to parse aRacer ECU `.loga` logs:
-convert them to RaceChrono `.nmea`, and analyse laps & telemetry. No backend —
-all processing happens locally in your browser. Installable as a PWA on iOS /
-Android.
+**Track Log Studio** is a browser-based, **fully client-side** tool to parse
+aRacer ECU `.loga` logs: convert them to RaceChrono `.nmea`, and analyse laps &
+telemetry. No backend — all processing happens locally in your browser.
+Installable as a PWA on iOS / Android.
 
 ## 特色 Highlights
 
@@ -59,6 +59,24 @@ npm test         # 執行單元測試
 - `loga2nmea.py` — 原始 Python 轉檔參考實作（本專案 `domain/export` 即移植自此）
 - `LogaExample/` — 三種檔頭的 `.loga` 範例（Super2 / SuperX / RaceAMP）
 
+## 商標聲明 Trademark notice
+
+> **商標聲明：** Track Log Studio 為獨立的非官方工具，與 aRacer、RaceChrono 無任何隸屬或背書關係；文中提及僅用於描述相容性。aRacer 與 RaceChrono 為其各自所有者的商標。
+>
+> **Trademark notice:** Track Log Studio is an independent, unofficial tool and is not affiliated with or endorsed by aRacer or RaceChrono; those names are used only to describe compatibility. aRacer and RaceChrono are trademarks of their respective owners.
+
 ## 授權 License
 
-TBD
+MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 timliudev.
+
+## 第三方相依 Third-party
+
+執行時相依套件及其授權（皆為 MIT，詳見 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)）：
+
+- [vue](https://github.com/vuejs/core) — MIT
+- [vue-i18n](https://github.com/intlify/vue-i18n) — MIT
+- [pinia](https://github.com/vuejs/pinia) — MIT
+- [uplot](https://github.com/leeoniya/uPlot) — MIT
+- [fflate](https://github.com/101arrowz/fflate) — MIT
+- [idb](https://github.com/jakearchibald/idb) — ISC
+- [vite-plugin-pwa](https://github.com/vite-pwa/vite-plugin-pwa) — MIT

@@ -16,10 +16,10 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
       },
       manifest: {
-        name: 'aRacer Loga Analysis',
-        short_name: 'LogaAnalysis',
+        name: 'Track Log Studio',
+        short_name: 'TrackLogStudio',
         description:
-          'Parse aRacer ECU .loga logs: convert to RaceChrono .nmea and analyse laps & telemetry.',
+          'Track Log Studio — convert aRacer ECU .loga logs to RaceChrono .nmea and analyse laps & telemetry.',
         lang: 'zh-Hant',
         start_url: '/',
         display: 'standalone',
@@ -45,6 +45,12 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+  },
+  define: {
+    __BUILD_SHA__: JSON.stringify(
+      (process.env.CF_PAGES_COMMIT_SHA ?? process.env.GITHUB_SHA ?? 'dev').slice(0, 7),
+    ),
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
   test: {
     environment: 'node',
