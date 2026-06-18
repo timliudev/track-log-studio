@@ -10,6 +10,9 @@ export const useLapStore = defineStore('lap', () => {
   // Stored in GEO coords (lat/lon) so it survives canvas resize / refit.
   const line = ref<LapLine | null>(null)
   const source = ref<LapSource>('line')
+  // Index of the lap selected in the table (null = none); drives chart zoom and
+  // the highlighted segment on the track map.
+  const selectedIndex = ref<number | null>(null)
 
   function setLine(l: LapLine): void {
     line.value = l
@@ -23,5 +26,23 @@ export const useLapStore = defineStore('lap', () => {
     source.value = s
   }
 
-  return { line, source, setLine, clearLine, setSource }
+  function selectLap(i: number | null): void {
+    selectedIndex.value = i
+  }
+
+  /** Select lap `i`, or deselect when it is already the selected one. */
+  function toggleLap(i: number): void {
+    selectedIndex.value = selectedIndex.value === i ? null : i
+  }
+
+  return {
+    line,
+    source,
+    selectedIndex,
+    setLine,
+    clearLine,
+    setSource,
+    selectLap,
+    toggleLap,
+  }
 })

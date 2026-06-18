@@ -33,6 +33,13 @@ export default {
     removeChart: 'Remove',
     lapCount: 'Laps: {n}',
     resetLine: 'Reset line',
+    lap: '#',
+    lapTime: 'Lap time',
+    lapDistance: 'Distance',
+    topSpeed: 'Top speed',
+    noLaps: 'No laps detected yet (drag the start/finish line or switch source).',
+    sourceLine: 'By line',
+    sourceEcu: 'ECU',
   },
   suspension: {
     heading: 'Suspension calibration',

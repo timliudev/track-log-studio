@@ -8,6 +8,7 @@ const props = defineProps<{
   track: GpsTrack | null
   cursorIdx: number | null
   line: LapLine | null
+  highlightRange?: { startIdx: number; endIdx: number } | null
 }>()
 const emit = defineEmits<{ cursor: [number | null]; 'update:line': [LapLine] }>()
 
@@ -88,6 +89,30 @@ function draw(): void {
     }
   }
   ctx.stroke()
+
+  // highlighted lap segment: redraw [startIdx, endIdx] in accent, thicker.
+  const hr = props.highlightRange
+  if (hr) {
+    const lo = Math.max(0, Math.min(hr.startIdx, hr.endIdx))
+    const hi = Math.min(n - 1, Math.max(hr.startIdx, hr.endIdx))
+    ctx.strokeStyle = cssVar('--color-accent')
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    let on = false
+    for (let i = lo; i <= hi; i++) {
+      if (Number.isNaN(px[i])) {
+        on = false
+        continue
+      }
+      if (!on) {
+        ctx.moveTo(px[i], py[i])
+        on = true
+      } else {
+        ctx.lineTo(px[i], py[i])
+      }
+    }
+    ctx.stroke()
+  }
 
   // start/finish line + draggable endpoints
   const line = props.line
@@ -203,6 +228,7 @@ onBeforeUnmount(() => {
 watch(() => props.track, () => draw())
 watch(() => props.cursorIdx, () => draw())
 watch(() => props.line, () => draw())
+watch(() => props.highlightRange, () => draw())
 </script>
 
 <template>

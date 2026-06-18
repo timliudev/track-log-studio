@@ -33,6 +33,13 @@ export default {
     removeChart: '移除',
     lapCount: '圈數：{n}',
     resetLine: '重設起終點線',
+    lap: '#',
+    lapTime: '圈時',
+    lapDistance: '距離',
+    topSpeed: '最高速',
+    noLaps: '尚未偵測到圈次（拖曳起終點線或切換來源）',
+    sourceLine: '線段自算',
+    sourceEcu: 'ECU',
   },
   suspension: {
     heading: '避震校正',

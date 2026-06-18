@@ -29,4 +29,28 @@ describe('lapStore', () => {
     s.setSource('line')
     expect(s.source).toBe('line')
   })
+
+  it('starts with no lap selected', () => {
+    const s = useLapStore()
+    expect(s.selectedIndex).toBeNull()
+  })
+
+  it('selectLap sets and clears the selected index', () => {
+    const s = useLapStore()
+    s.selectLap(2)
+    expect(s.selectedIndex).toBe(2)
+    s.selectLap(null)
+    expect(s.selectedIndex).toBeNull()
+  })
+
+  it('toggleLap selects, then deselects the same lap on a second toggle', () => {
+    const s = useLapStore()
+    s.toggleLap(1)
+    expect(s.selectedIndex).toBe(1)
+    s.toggleLap(1)
+    expect(s.selectedIndex).toBeNull()
+    s.toggleLap(1)
+    s.toggleLap(3)
+    expect(s.selectedIndex).toBe(3)
+  })
 })
