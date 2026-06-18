@@ -31,6 +31,8 @@ export default {
     pickChannel: '從上方選擇要繪製的通道',
     addChart: '新增圖表',
     removeChart: '移除',
+    lapCount: '圈數：{n}',
+    resetLine: '重設起終點線',
   },
   suspension: {
     heading: '避震校正',

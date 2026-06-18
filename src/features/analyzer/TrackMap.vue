@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
+import type { LapLine } from '@/domain/analysis/laps'
+import { fitProjection, type MapProjection } from './projection'
 
 const props = defineProps<{
   track: GpsTrack | null
   cursorIdx: number | null
+  line: LapLine | null
 }>()
-const emit = defineEmits<{ cursor: [number | null] }>()
+const emit = defineEmits<{ cursor: [number | null]; 'update:line': [LapLine] }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let ro: ResizeObserver | null = null
@@ -14,8 +17,16 @@ let ro: ResizeObserver | null = null
 // Projected pixel coords per sample (NaN where no fix); recomputed on draw.
 let px: Float64Array | null = null
 let py: Float64Array | null = null
+// The projection used by the last draw(); shared with line hit-testing/dragging.
+let projection: MapProjection | null = null
+
+// Which start/finish handle is being dragged ('a' | 'b'), or null when idle.
+let dragging: 'a' | 'b' | null = null
 
 const PAD = 16
+// Visible endpoint radius and a larger touch-friendly hit radius (~44px target).
+const HANDLE_R = 7
+const HANDLE_HIT = 22
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'
@@ -36,30 +47,14 @@ function draw(): void {
   ctx.clearRect(0, 0, w, h)
 
   const track = props.track
-  if (!track) return
-
-  // bounds over valid fixes
-  let minLat = Infinity
-  let maxLat = -Infinity
-  let minLon = Infinity
-  let maxLon = -Infinity
-  let count = 0
-  for (let i = 0; i < track.valid.length; i++) {
-    if (!track.valid[i]) continue
-    count++
-    if (track.lat[i] < minLat) minLat = track.lat[i]
-    if (track.lat[i] > maxLat) maxLat = track.lat[i]
-    if (track.lon[i] < minLon) minLon = track.lon[i]
-    if (track.lon[i] > maxLon) maxLon = track.lon[i]
+  if (!track) {
+    projection = null
+    return
   }
-  if (count < 2) return
 
-  const latMean = ((minLat + maxLat) / 2) * (Math.PI / 180)
-  const spanX = Math.max((maxLon - minLon) * Math.cos(latMean), 1e-9)
-  const spanY = Math.max(maxLat - minLat, 1e-9)
-  const scale = Math.min((w - 2 * PAD) / spanX, (h - 2 * PAD) / spanY)
-  const offX = (w - spanX * scale) / 2
-  const offY = (h - spanY * scale) / 2
+  projection = fitProjection(track, w, h, PAD)
+  if (!projection) return
+  const proj = projection
 
   const n = track.valid.length
   px = new Float64Array(n)
@@ -70,8 +65,9 @@ function draw(): void {
       py[i] = NaN
       continue
     }
-    px[i] = offX + (track.lon[i] - minLon) * Math.cos(latMean) * scale
-    py[i] = h - (offY + (track.lat[i] - minLat) * scale) // flip Y
+    const p = proj.toPixel(track.lat[i], track.lon[i])
+    px[i] = p.x
+    py[i] = p.y
   }
 
   // polyline
@@ -93,6 +89,25 @@ function draw(): void {
   }
   ctx.stroke()
 
+  // start/finish line + draggable endpoints
+  const line = props.line
+  if (line) {
+    const a = proj.toPixel(line.a.lat, line.a.lon)
+    const b = proj.toPixel(line.b.lat, line.b.lon)
+    ctx.strokeStyle = cssVar('--color-accent')
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+    ctx.fillStyle = cssVar('--color-accent')
+    for (const p of [a, b]) {
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, HANDLE_R, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
   // cursor marker
   const ci = props.cursorIdx
   if (ci != null && ci >= 0 && ci < n && !Number.isNaN(px[ci])) {
@@ -103,17 +118,57 @@ function draw(): void {
   }
 }
 
-function onPointerMove(e: PointerEvent): void {
-  if (!px || !py || !canvas.value) return
+/** Pointer position relative to the canvas, in CSS px. */
+function pointerPos(e: PointerEvent): { x: number; y: number } | null {
+  if (!canvas.value) return null
   const rect = canvas.value.getBoundingClientRect()
-  const mx = e.clientX - rect.left
-  const my = e.clientY - rect.top
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+/** Which start/finish handle (if any) is under the pointer, within the hit radius. */
+function handleAt(mx: number, my: number): 'a' | 'b' | null {
+  if (!props.line || !projection) return null
+  const a = projection.toPixel(props.line.a.lat, props.line.a.lon)
+  const b = projection.toPixel(props.line.b.lat, props.line.b.lon)
+  const da = (a.x - mx) ** 2 + (a.y - my) ** 2
+  const db = (b.x - mx) ** 2 + (b.y - my) ** 2
+  const hit = HANDLE_HIT * HANDLE_HIT
+  if (da <= hit && da <= db) return 'a'
+  if (db <= hit) return 'b'
+  return null
+}
+
+function onPointerDown(e: PointerEvent): void {
+  const pos = pointerPos(e)
+  if (!pos) return
+  const h = handleAt(pos.x, pos.y)
+  if (!h) return
+  dragging = h
+  canvas.value?.setPointerCapture(e.pointerId)
+  e.preventDefault()
+}
+
+function onPointerMove(e: PointerEvent): void {
+  // While dragging a handle, move the line and suppress the chart cursor.
+  if (dragging && projection && props.line) {
+    const pos = pointerPos(e)
+    if (!pos) return
+    const geo = projection.toGeo(pos.x, pos.y)
+    const next: LapLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+    next[dragging] = { lat: geo.lat, lon: geo.lon }
+    emit('update:line', next)
+    return
+  }
+
+  if (!px || !py) return
+  const pos = pointerPos(e)
+  if (!pos) return
   let best = -1
   let bestD = Infinity
   for (let i = 0; i < px.length; i++) {
     if (Number.isNaN(px[i])) continue
-    const dx = px[i] - mx
-    const dy = py[i] - my
+    const dx = px[i] - pos.x
+    const dy = py[i] - pos.y
     const d = dx * dx + dy * dy
     if (d < bestD) {
       bestD = d
@@ -124,6 +179,13 @@ function onPointerMove(e: PointerEvent): void {
   // whitespace around it doesn't snap to the outermost point.
   const HIT = 24
   emit('cursor', best >= 0 && bestD <= HIT * HIT ? best : null)
+}
+
+function onPointerUp(e: PointerEvent): void {
+  if (dragging) {
+    canvas.value?.releasePointerCapture(e.pointerId)
+    dragging = null
+  }
 }
 
 onMounted(() => {
@@ -140,13 +202,16 @@ onBeforeUnmount(() => {
 
 watch(() => props.track, () => draw())
 watch(() => props.cursorIdx, () => draw())
+watch(() => props.line, () => draw())
 </script>
 
 <template>
   <canvas
     ref="canvas"
     class="track"
+    @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
     @pointerleave="emit('cursor', null)"
   />
 </template>

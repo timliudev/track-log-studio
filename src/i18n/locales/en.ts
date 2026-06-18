@@ -31,6 +31,8 @@ export default {
     pickChannel: 'Pick channels to plot from above',
     addChart: 'Add chart',
     removeChart: 'Remove',
+    lapCount: 'Laps: {n}',
+    resetLine: 'Reset line',
   },
   suspension: {
     heading: 'Suspension calibration',
