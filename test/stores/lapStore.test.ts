@@ -30,28 +30,53 @@ describe('lapStore', () => {
     expect(s.source).toBe('line')
   })
 
-  it('starts with no lap selected', () => {
+  it('starts with no laps selected', () => {
     const s = useLapStore()
-    expect(s.selectedIndex).toBeNull()
+    expect(s.selected).toEqual([])
   })
 
-  it('selectLap sets and clears the selected index', () => {
-    const s = useLapStore()
-    s.selectLap(2)
-    expect(s.selectedIndex).toBe(2)
-    s.selectLap(null)
-    expect(s.selectedIndex).toBeNull()
-  })
-
-  it('toggleLap selects, then deselects the same lap on a second toggle', () => {
+  it('toggleLap adds laps in selection order and removes on a second toggle', () => {
     const s = useLapStore()
     s.toggleLap(1)
-    expect(s.selectedIndex).toBe(1)
-    s.toggleLap(1)
-    expect(s.selectedIndex).toBeNull()
-    s.toggleLap(1)
+    expect(s.selected).toEqual([1])
     s.toggleLap(3)
-    expect(s.selectedIndex).toBe(3)
+    s.toggleLap(0)
+    // Kept in selection order (not sorted) so colors stay stable.
+    expect(s.selected).toEqual([1, 3, 0])
+    // Removing the middle one preserves the order of the rest.
+    s.toggleLap(3)
+    expect(s.selected).toEqual([1, 0])
+    s.toggleLap(1)
+    s.toggleLap(0)
+    expect(s.selected).toEqual([])
+  })
+
+  it('isSelected reflects membership', () => {
+    const s = useLapStore()
+    s.toggleLap(2)
+    expect(s.isSelected(2)).toBe(true)
+    expect(s.isSelected(5)).toBe(false)
+  })
+
+  it('clearSelection empties the selection', () => {
+    const s = useLapStore()
+    s.toggleLap(1)
+    s.toggleLap(4)
+    s.clearSelection()
+    expect(s.selected).toEqual([])
+  })
+
+  it('selection changes leave columns/line/source untouched', () => {
+    const s = useLapStore()
+    s.setLine({ a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } })
+    s.setSource('ecu')
+    s.addColumn('RPM', 'max')
+    s.toggleLap(1)
+    s.toggleLap(2)
+    s.clearSelection()
+    expect(s.line).not.toBeNull()
+    expect(s.source).toBe('ecu')
+    expect(s.columns).toHaveLength(1)
   })
 
   it('starts with no configured columns', () => {

@@ -8,7 +8,8 @@ const props = defineProps<{
   track: GpsTrack | null
   cursorIdx: number | null
   line: LapLine | null
-  highlightRange?: { startIdx: number; endIdx: number } | null
+  /** Selected laps to draw, each as a colored [startIdx, endIdx] segment. */
+  highlightLaps?: { startIdx: number; endIdx: number; color: string }[]
 }>()
 const emit = defineEmits<{ cursor: [number | null]; 'update:line': [LapLine] }>()
 
@@ -71,47 +72,42 @@ function draw(): void {
     py[i] = p.y
   }
 
-  // polyline
-  ctx.strokeStyle = cssVar('--color-text-muted')
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  let started = false
-  for (let i = 0; i < n; i++) {
-    if (Number.isNaN(px[i])) {
-      started = false
-      continue
-    }
-    if (!started) {
-      ctx.moveTo(px[i], py[i])
-      started = true
-    } else {
-      ctx.lineTo(px[i], py[i])
-    }
-  }
-  ctx.stroke()
-
-  // highlighted lap segment: redraw [startIdx, endIdx] in accent, thicker.
-  const hr = props.highlightRange
-  if (hr) {
-    const lo = Math.max(0, Math.min(hr.startIdx, hr.endIdx))
-    const hi = Math.min(n - 1, Math.max(hr.startIdx, hr.endIdx))
-    ctx.strokeStyle = cssVar('--color-accent')
-    ctx.lineWidth = 3
+  // Helper: stroke the polyline over sample range [lo, hi] (inclusive), breaking
+  // the path across gaps (NaN) so missing fixes don't draw bogus connectors.
+  const strokeRange = (lo: number, hi: number): void => {
     ctx.beginPath()
     let on = false
     for (let i = lo; i <= hi; i++) {
-      if (Number.isNaN(px[i])) {
+      if (Number.isNaN(px![i])) {
         on = false
         continue
       }
       if (!on) {
-        ctx.moveTo(px[i], py[i])
+        ctx.moveTo(px![i], py![i])
         on = true
       } else {
-        ctx.lineTo(px[i], py[i])
+        ctx.lineTo(px![i], py![i])
       }
     }
     ctx.stroke()
+  }
+
+  const highlightLaps = props.highlightLaps ?? []
+
+  // Full-track polyline. With no selection it's the normal muted track; with a
+  // selection we draw it faint (border color) for context and let the selected
+  // laps stand out, per "only show selected laps".
+  ctx.strokeStyle = cssVar(highlightLaps.length ? '--color-border' : '--color-text-muted')
+  ctx.lineWidth = 2
+  strokeRange(0, n - 1)
+
+  // Selected laps: each [startIdx, endIdx] segment in its own color, thicker.
+  for (const lap of highlightLaps) {
+    const lo = Math.max(0, Math.min(lap.startIdx, lap.endIdx))
+    const hi = Math.min(n - 1, Math.max(lap.startIdx, lap.endIdx))
+    ctx.strokeStyle = lap.color
+    ctx.lineWidth = 3
+    strokeRange(lo, hi)
   }
 
   // start/finish line + draggable endpoints
@@ -235,7 +231,7 @@ onBeforeUnmount(() => {
 watch(() => props.track, () => draw())
 watch(() => props.cursorIdx, () => draw())
 watch(() => props.line, () => draw())
-watch(() => props.highlightRange, () => draw())
+watch(() => props.highlightLaps, () => draw())
 </script>
 
 <template>

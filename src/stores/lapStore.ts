@@ -22,9 +22,10 @@ export const useLapStore = defineStore('lap', () => {
   // Stored in GEO coords (lat/lon) so it survives canvas resize / refit.
   const line = ref<LapLine | null>(null)
   const source = ref<LapSource>('line')
-  // Index of the lap selected in the table (null = none); drives chart zoom and
-  // the highlighted segment on the track map.
-  const selectedIndex = ref<number | null>(null)
+  // Indices of the laps selected in the table, kept in SELECTION ORDER so each
+  // lap's color (assigned by order) stays stable as laps are added/removed.
+  // Drives chart zoom and the colored segments on the track map.
+  const selected = ref<number[]>([])
   // User-configured statistics columns for the lap table.
   const columns = ref<LapColumn[]>([])
   // Monotonic id source so column ids stay unique across add/remove.
@@ -42,13 +43,21 @@ export const useLapStore = defineStore('lap', () => {
     source.value = s
   }
 
-  function selectLap(i: number | null): void {
-    selectedIndex.value = i
+  /** Add lap `i` to the selection (appended), or remove it when already present. */
+  function toggleLap(i: number): void {
+    selected.value = selected.value.includes(i)
+      ? selected.value.filter((x) => x !== i)
+      : [...selected.value, i]
   }
 
-  /** Select lap `i`, or deselect when it is already the selected one. */
-  function toggleLap(i: number): void {
-    selectedIndex.value = selectedIndex.value === i ? null : i
+  /** Clear the whole lap selection. */
+  function clearSelection(): void {
+    selected.value = []
+  }
+
+  /** Whether lap `i` is currently selected. */
+  function isSelected(i: number): boolean {
+    return selected.value.includes(i)
   }
 
   function addColumn(channel: string, agg: Aggregation): void {
@@ -72,13 +81,14 @@ export const useLapStore = defineStore('lap', () => {
   return {
     line,
     source,
-    selectedIndex,
+    selected,
     columns,
     setLine,
     clearLine,
     setSource,
-    selectLap,
     toggleLap,
+    clearSelection,
+    isSelected,
     addColumn,
     removeColumn,
     setColumnChannel,

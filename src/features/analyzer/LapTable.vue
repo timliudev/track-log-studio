@@ -5,6 +5,7 @@ import { useLapStore } from '@/stores/lapStore'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { aggregateChannel, type Aggregation } from '@/domain/analysis/lapAggregate'
 import { formatLapTime } from '@/domain/analysis/format'
+import { lapColor } from './lapColors'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
@@ -47,6 +48,12 @@ const channelOptions = computed(() =>
         .sort((a, b) => a.name.localeCompare(b.name))
     : [],
 )
+
+/** Track color for a selected lap, matching its segment on the map (or '' if unselected). */
+function swatchColor(index: number): string {
+  const order = lapStore.selected.indexOf(index)
+  return order === -1 ? '' : lapColor(order)
+}
 
 /** Format an aggregated value: '—' for NaN, finer precision for small magnitudes. */
 function formatValue(v: number): string {
@@ -145,7 +152,7 @@ const rows = computed<Row[]>(() => {
     </div>
 
     <button
-      v-if="lapStore.selectedIndex != null"
+      v-if="lapStore.selected.length > 0"
       type="button"
       class="clear-selection"
       @click="emit('select', null)"
@@ -170,10 +177,17 @@ const rows = computed<Row[]>(() => {
         <tr
           v-for="r in rows"
           :key="r.index"
-          :class="{ selected: lapStore.selectedIndex === r.index }"
-          @click="emit('select', lapStore.selectedIndex === r.index ? null : r.index)"
+          :class="{ selected: lapStore.isSelected(r.index) }"
+          @click="emit('select', r.index)"
         >
-          <td>{{ r.index + 1 }}</td>
+          <td>
+            <span
+              v-if="lapStore.isSelected(r.index)"
+              class="swatch"
+              :style="{ background: swatchColor(r.index) }"
+            />
+            {{ r.index + 1 }}
+          </td>
           <td>{{ r.lapTime }}</td>
           <td>{{ r.distanceKm === '—' ? '—' : `${r.distanceKm} km` }}</td>
           <td v-for="(cell, i) in r.cells" :key="lapStore.columns[i].id">{{ cell }}</td>
@@ -320,5 +334,15 @@ tbody tr:hover {
 tbody tr.selected {
   background: var(--color-accent);
   color: var(--color-accent-text);
+}
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: baseline;
+  /* ring so the swatch reads on top of the selected row's accent background */
+  box-shadow: 0 0 0 1px var(--color-surface);
 }
 </style>
