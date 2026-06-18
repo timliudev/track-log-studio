@@ -1,0 +1,74 @@
+/*
+ * Theme tokens as CSS custom properties. Light is the default; dark is applied
+ * either by the OS (prefers-color-scheme) or by an explicit [data-theme]
+ * attribute that useTheme() sets on <html> for manual override.
+ */
+
+:root {
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-text: #1a1c20;
+  --color-text-muted: #5b616e;
+  --color-border: #d8dce3;
+  --color-accent: #e23b3b;
+  --color-accent-text: #ffffff;
+
+  --radius: 8px;
+  --space: 8px;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-bg: #0f1115;
+    --color-surface: #181b21;
+    --color-text: #e8eaed;
+    --color-text-muted: #9aa1ad;
+    --color-border: #2a2f38;
+    --color-accent: #e23b3b;
+    --color-accent-text: #ffffff;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --color-bg: #0f1115;
+  --color-surface: #181b21;
+  --color-text: #e8eaed;
+  --color-text-muted: #9aa1ad;
+  --color-border: #2a2f38;
+  --color-accent: #e23b3b;
+  --color-accent-text: #ffffff;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    'Noto Sans TC',
+    sans-serif;
+  /* Avoid double-tap zoom / improve touch responsiveness on the analysis canvas. */
+  touch-action: manipulation;
+}
+
+#app {
+  min-height: 100%;
+}

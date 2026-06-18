@@ -25,6 +25,9 @@ Thumbs.db
 .vite/
 coverage/
 
+# Claude Code agent worktrees (transient, not part of the project)
+.claude/worktrees/
+
 # Env
 .env
 .env.*
@@ -33,3 +36,7 @@ coverage/
 # Large sample logs（LogaExample/ 共 ~92MB）— 不納入 git 歷史以免撐大 repo。
 # 範例檔保留在本機作測試素材；Phase 0 會擷取小型 header fixture 進版控。
 LogaExample/
+
+# Stray converted output downloaded to the repo root (test fixtures under
+# test/fixtures/ stay tracked).
+/*.nmea

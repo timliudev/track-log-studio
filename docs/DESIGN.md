@@ -4,7 +4,7 @@
 > This document records requirements, technical decisions, and the discussion log
 > that shaped them. It is the source of truth for implementation.
 
-最後更新 / Last updated: 2026-06-16
+最後更新 / Last updated: 2026-06-18
 
 ---
 
@@ -171,13 +171,26 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **分布圖**：XY 自選。
 - **每圈統計表**：圈時、距離、車速…可選欄位。
 
-### 6.5 避震設定（**決議：行程長度 + 基準點歸零**）
-每通道（前 / 後）：
-- 來源 AD：`SuspensionAD1` / `AD2`（可對調、可反向 invert，因安裝可能插反）。
-- **基準點 zero**：抓某 AD 值當 0mm（「以目前值歸零」或取最小值）。
-- **行程長度 travel(mm)** + 對應電壓範圍（預設 0–5000mv）。
-- 換算：`mm = (ad − zero_ad) / (full_ad − zero_ad) × travel_mm`，輸出至 Front / Rear Suspension。
-- 僅在偵測到該 AD 欄位（目前只有 RaceAMP 格式）時出現。
+### 6.5 避震校正（**更正：5 參數，對齊原廠 App**）
+
+每通道（前 / 後）參數，單位 mv / mm：
+- **最小電壓 min_mv、最大電壓 max_mv、零點電壓 zero_mv**（mv）
+- **最小行程 min_mm、最大行程 max_mm**（mm）
+- 來源 AD：`SuspensionAD1` / `AD2`（可對調，因安裝可能插反）。
+- 線性換算：`pos(ad) = min_mm + (ad − min_mv) / (max_mv − min_mv) × (max_mm − min_mm)`
+- 零點：輸出 = `pos(ad) − pos(zero_mv)`（行程相對零點；零點語意實作時再與使用者確認）。
+- 僅在偵測到 SuspensionAD 欄位（目前只有 RaceAMP 格式）時出現。
+
+**架構（共用於轉檔器與分析器，而非獨立工具）：**
+- 純函數 `domain/units/suspension.ts`：`adToTravel(ad, params)`，可單元測試。
+- **「衍生通道（derived channel）」機制**：解析後依設定算出 `Front/Rear Suspension(mm)`
+  通道，**附加到 LogSession 的可用通道清單**。如此：
+  - 轉檔器：衍生通道出現在槽位對應的可搜尋選單，可塞進 RC3 類比槽。
+  - 分析器：衍生通道可直接拿來繪圖 / FFT。
+- 共用設定 store（前 / 後各一組參數）持久化；校正面板為共用元件，轉檔器與分析器皆可開啟。
+- **不改寫回原始 `.loga`**（保資料完整、可重現）；「寫回」的需求改以衍生通道 + 匯出達成
+  （同樣的 mm 值能進 NMEA 也能進分析，效果一致而不破壞來源檔）。
+- 排程：**Phase 2（分析器之前）**，見 §11。
 
 ---
 
@@ -218,10 +231,51 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 ## 11. 開發階段與 Commit 規劃 (#12)
 
-- **Phase 0 — 骨架**：Vite + Vue + TS + Pinia + PWA + i18n + 主題；`domain/` 三種 parser + 偵測器 + 單元測試（拿既有 `.nmea` 當黃金樣本）。
-- **Phase 1 — 轉檔器**：RC3 槽位對應面板（可搜尋下拉）+ preset + 批次轉檔 + 下載。
-- **Phase 2 — 分析器**：軌跡 / 底圖 / 切圈 / 圖表 / G-G / FFT / 分布 / 每圈統計表。
+- **Phase 0 — 骨架**（✅ 完成）：Vite + Vue + TS + Pinia + PWA + i18n + 主題；`domain/` 三種 parser + 偵測器 + 單元測試（拿既有 `.nmea` 當黃金樣本）。
+- **Phase 1 — 轉檔器**（✅ 完成）：RC3 槽位對應面板（可搜尋下拉）+ preset + 批次轉檔 + 下載；後續補上 GGA/RMC、logger2 合成時間戳、說明與頁尾。
+- **Phase 2 — 避震校正（衍生通道）**（✅ 完成）：`domain/units/suspension.ts`（5 參數換算 +
+  倒算）+ 衍生通道機制 + 共用校正面板與設定 store。先於分析器，讓轉檔器即可把避震 mm 塞進
+  RC3。後續：衍生通道沿用 `Front/Rear Suspension` 欄名並覆蓋；accel/gyro 缺欄輸出留空；
+  設定分頁移到最右。
+- **Phase 3 — 另存校正後 `.loga`**：loga 寫出器（保留原檔、只換避震欄位另存新檔）。
+- **Phase 4 — 分析器**（分子階段）：
+  - **4a（✅ 完成）**：軌跡圖(canvas) + 時間/距離序列圖(uPlot) + 游標連動；
+    `domain/analysis`(gpsTrack/distance/lttb/timeAxis)。NMEA 輸入讀取器(`domain/import/nmea`)亦已備妥。
+  - **4b（✅ 完成）**：分析器「＋新增圖表」儀表板;序列圖**每通道獨立 Y 軸**(解決壓平)、
+    多圖表、**X 軸縮放同步**(`analyzerStore.xRange`);#6 dpr/resize 重繪修復。
+  - **4c（✅ 完成）**：共用頂部 `FileBar`（.loga + .nmea）+ `fileStore` 抽離 `converterStore`;
+    分析器可直接吃 `.loga` / `.nmea`;`gpsTrack` 增加 decimal-degree fallback;
+    `LogaFormatId` 加入 `'nmea'`;`nmeaToSession` 函式;64 tests 通過。
+    跨圖表游標同步亦於本輪完成（UPlotChart `externalCursor` prop + `valToPos` 同步;
+    guard 防回響）。
+  - **4d — 圈次**：
+    - **4d-1/2/3（✅ 完成）**：圈次偵測 domain 層
+      (`domain/analysis/laps.ts` — 線段穿越:平面投影 + straddle 測試 + 方向自動
+      判定 + minLapMs debounce;`detectLapsByChannel` 用 ECU `IR_LapNumber`);
+      軌跡圖可拖曳起終點線(geo 端點存於 `lapStore`,`projection.ts` 抽出共用
+      geo↔pixel,≥44px 觸控把手,拖曳時抑制 chart cursor);`useLaps` 自動播種
+      垂直初始航向的預設線;每圈統計表(`LapTable` — #/圈時/距離/最高速,
+      `lapStats.ts`)；圈時來源切換(線段自算 / ECU,僅 `IR_LapNumber` 存在時);
+      選圈 → `setXRange` 聚焦該段 + 軌跡高亮。
+    - **4d-4（延後）**：單圈/全部/**多圈疊圖**(同時改 TrackMap + TimeSeriesChart
+      的 color-by-lap 渲染),另起一輪。
+  - **4e — 其他圖表與互動**：G-G 點雲、分布圖、FFT（加 ECharts）；
+    **可拖動重排的圖表儀表板**(寬螢幕多欄,善用兩側);
+    #7 框選縮放時軌跡聚焦該段；**圖表觸控手勢**(雙指/拖曳/雙擊;uPlot 縮放僅支援滑鼠);
+    **軌跡圖縮放/平移**(類 Google 地圖:滾輪 + 雙指 + 拖曳;目前軌跡圖在觸控下無互動,屬待做)。
+- **Phase 5 — 合併（RaceChrono GPS + loga）**：（NMEA 讀取器已於 4b 具備）當 loga 無 GPS /
+  GPS 異常時，匯入 RaceChrono
+  `.nmea`（`.rcz` 之後）取得好 GPS 軌跡，與 loga 引擎數據**手動時間對齊**（速度疊圖 +
+  互相關建議），重新取樣後**匯出合併 .nmea**。新增 NMEA **輸入**解析器（補齊模組化輸入），
+  對齊 UI 重用 Phase 4 圖表。難點：時鐘漂移（先單一位移）、取樣率內插。
+- **Phase 6 — 上線準備**：**改名**（產品名 / repo / 網域 / 資料夾一次全改；去除以 aRacer /
+  RaceChrono 商標當品牌，僅在副標描述相容性，例如品牌 LogaBridge 之類）、關於我頁、
+  `LICENSE` + 第三方套件授權清單、SEO（meta/OG、robots.txt、sitemap、structured data）、
+  Logo / favicon、使用說明連結指向外部文件（GitHub README / docs）。
 - 每階段內再細分小 commit。
+- **設計原則**：功能能力以**實際欄位**（`session.has(...)`）判斷，不以檔頭/格式硬編；
+  檔頭僅決定如何解析結構。
+- **商標**：`aRacer`（ECU 廠商）與 `RaceChrono` 皆為註冊商標，不得當品牌名，僅作相容性描述。
 
 ---
 
@@ -250,7 +304,22 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **欄位選擇**：槽位導向 + 可搜尋下拉（桌面下拉內嵌搜尋 / 手機全螢幕挑選頁）。
 - **切圈**：線段（兩端點），觸控以可拖曳把手實現；圈時可選自算或 ECU 內建。
 - **底圖**：免費（上傳圖 + OSM）與衛星圖（自帶 key）兩者皆開放。
-- **避震**：行程長度 + 基準點歸零；AD1/AD2 可對調、可反向。
+- **避震**（更正）：5 參數（min/max/zero mv、min/max mm，對齊原廠 App）；AD1/AD2 可對調。
+  以「衍生通道」機制共用於轉檔器與分析器，不改寫回原始 .loga；排為 Phase 2（分析器之前）。
+- **IMU 軸向**：RaceChrono 不要求 xyz 對齊，故 X/Y/Z → x/y/z 直接 1:1，不加軸向設定；
+  `TC_*angle_dps` 已確認為 deg/s（與 RaceChrono gyro 同單位），`TC_*force` 為 milli-g（÷1000）。
 - **iOS 相容**：以 `<input>` 為底線，File System Access API 僅作加碼。
 - **效能**：Worker + Float32 column-store + 顯示降採樣；進度條。
 - **重要發現**：實測有三種檔頭，RaceAMP（logger2）尚未被既有 py 支援，且為唯一含避震資料者，新專案需補。
+
+### Phase 1 實作補充
+
+- **RC3 槽位對應可設定**：`d2, a1~a15` 由 preset 對應 loga 欄位；固定槽位
+  `xacc/yacc/zacc`(÷1000)、`gyrox/y/z`(由 `TC_*angle_dps`，無則留空)、`rpm/d1` 自動填。
+  尾端空欄修剪，使 `LEGACY_PY_MAPPING` 仍與 py 黃金樣本逐欄相符。
+- **兩種預設對應**：`DEFAULT_PRESET`（app 預設，使用者偏好欄位）與
+  `LEGACY_PY_MAPPING`（py 相容，測試錨點）。
+- **GPS-less 標準模式（新增）**：RaceAMP/logger2 無 `GPS_Valid`/`GPS_UTC`，
+  改輸出純 RC3（空 time、填入 0–65535 count 欄），符合 RaceChrono 對無 GPS
+  裝置的規格。Super2/SuperX 仍走 GPRMC+RC3 混合模式。
+- **批次下載**：單檔直接下載；多檔以 ZIP（fflate）為主，並提供個別下載鈕。

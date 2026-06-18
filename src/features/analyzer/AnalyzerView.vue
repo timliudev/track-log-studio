@@ -1,0 +1,264 @@
+<script setup lang="ts">
+import { computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { storeToRefs } from 'pinia'
+import { useFileStore } from '@/stores/fileStore'
+import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useActiveSession } from '@/composables/useActiveSession'
+import { useLaps } from '@/composables/useLaps'
+import { useLapStore } from '@/stores/lapStore'
+import { lapColor } from './lapColors'
+import TrackMap from './TrackMap.vue'
+import TimeSeriesChart from './TimeSeriesChart.vue'
+import LapTable from './LapTable.vue'
+
+const { t } = useI18n()
+const fileStore = useFileStore()
+const analyzer = useAnalyzerStore()
+const lapStore = useLapStore()
+const { charts, xAxis, xRange, cursorIdx } = storeToRefs(analyzer)
+const { session, track, xValues } = useActiveSession()
+const { laps, timeMs, resetLine } = useLaps()
+
+const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
+
+const hasEcuLaps = computed(() => session.value?.has('IR_LapNumber') ?? false)
+
+// The selected laps (from the table) resolved to Lap objects, in selection
+// order (so each gets a stable color); missing indices are filtered out.
+const selectedLaps = computed(() =>
+  lapStore.selected
+    .map((i) => laps.value.find((l) => l.index === i))
+    .filter((l): l is NonNullable<typeof l> => l != null),
+)
+
+// One colored segment per selected lap; color is assigned by selection order.
+const highlightLaps = computed(() =>
+  selectedLaps.value.map((lap, order) => ({
+    startIdx: lap.startIdx,
+    endIdx: lap.endIdx,
+    color: lapColor(order),
+  })),
+)
+
+// Lap selection from the table is routed here so this component (which owns the
+// select↔zoom coupling) stays the single place that decides zoom side-effects.
+// The zoom rule is applied imperatively right after toggling — no state-writing
+// watcher — to keep selection and zoom from fighting each other.
+function onLapSelect(index: number | null): void {
+  // Explicit clear (clear button) → empty selection + full view.
+  if (index == null) {
+    lapStore.clearSelection()
+    analyzer.setXRange(null)
+    return
+  }
+  lapStore.toggleLap(index)
+  const sel = lapStore.selected
+  const xs = xValues.value
+  if (sel.length === 1 && xs) {
+    // Exactly one lap selected → zoom the charts to its span.
+    const lap = laps.value.find((l) => l.index === sel[0])
+    if (lap) analyzer.setXRange({ min: xs[lap.startIdx], max: xs[lap.endIdx] })
+  } else {
+    // 0 selected (toggled the last one off) or ≥2 (comparison) → full view so
+    // every selected lap is visible at once.
+    analyzer.setXRange(null)
+  }
+}
+
+// Switching the X unit (time↔distance) invalidates any shared zoom range; the
+// selected laps' spans are in the old units, so clear the selection too.
+watch(xAxis, () => {
+  lapStore.clearSelection()
+  analyzer.setXRange(null)
+})
+
+watch(
+  readyFiles,
+  (files) => {
+    const exists = files.some((f) => f.id === analyzer.activeFileId)
+    if (!exists) analyzer.activeFileId = files.length ? files[0].id : null
+  },
+  { immediate: true },
+)
+
+// Fired ONLY on user drag-zoom or double-click-reset (the programmatic
+// select→zoom path sets a guard in UPlotChart so it never echoes here).
+function onXZoom(r: { min: number; max: number } | null): void {
+  analyzer.setXRange(r)
+  // A single-lap selection is zoom-coupled (selecting it drove this zoom), so a
+  // manual zoom means the user moved off it → deselect. A multi-lap selection is
+  // a track comparison that's independent of chart zoom, so leave it intact.
+  if (lapStore.selected.length <= 1) lapStore.clearSelection()
+}
+
+function onSelect(e: Event): void {
+  analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
+}
+</script>
+
+<template>
+  <div class="analyzer">
+    <p v-if="readyFiles.length === 0" class="empty">{{ t('analyzer.noFiles') }}</p>
+
+    <template v-else>
+      <div class="toolbar">
+        <label class="record">
+          <span>{{ t('analyzer.record') }}</span>
+          <select :value="analyzer.activeFileId ?? ''" @change="onSelect">
+            <option v-for="f in readyFiles" :key="f.id" :value="f.id">{{ f.name }}</option>
+          </select>
+        </label>
+        <div class="xaxis">
+          <button type="button" :class="{ active: xAxis === 'time' }" @click="analyzer.xAxis = 'time'">
+            {{ t('analyzer.time') }}
+          </button>
+          <button type="button" :class="{ active: xAxis === 'distance' }" @click="analyzer.xAxis = 'distance'">
+            {{ t('analyzer.distance') }}
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <TrackMap
+          :track="track"
+          :cursor-idx="cursorIdx"
+          :line="lapStore.line"
+          :highlight-laps="highlightLaps"
+          @cursor="analyzer.setCursor"
+          @update:line="lapStore.setLine($event)"
+        />
+        <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
+        <div class="laps">
+          <span class="lap-count">{{ t('analyzer.lapCount', { n: laps.length }) }}</span>
+          <button type="button" class="reset" @click="resetLine">
+            {{ t('analyzer.resetLine') }}
+          </button>
+        </div>
+        <LapTable
+          :laps="laps"
+          :track="track"
+          :time-ms="timeMs"
+          :session="session"
+          :has-ecu-laps="hasEcuLaps"
+          @select="onLapSelect"
+        />
+      </div>
+
+      <div v-for="c in charts" :key="c.id" class="card">
+        <TimeSeriesChart
+          v-if="session && xValues"
+          :chart="c"
+          :session="session"
+          :x-values="xValues"
+          :x-range="xRange"
+          :external-cursor="cursorIdx"
+          @cursor="analyzer.setCursor"
+          @x-zoom="onXZoom"
+        />
+      </div>
+
+      <button type="button" class="add" @click="analyzer.addChart()">
+        ＋ {{ t('analyzer.addChart') }}
+      </button>
+    </template>
+  </div>
+</template>
+
+<style scoped>
+.analyzer {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 2);
+}
+.empty {
+  color: var(--color-text-muted);
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.record {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+.record select {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: inherit;
+}
+.xaxis {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.xaxis button {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: none;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.xaxis button.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius) * 1.5);
+  padding: calc(var(--space) * 1.5);
+}
+.line-hint {
+  margin: calc(var(--space) * 1.5) 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.laps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: var(--space);
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+.reset {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.reset:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.add {
+  align-self: flex-start;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  font: inherit;
+  cursor: pointer;
+}
+.add:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+</style>
