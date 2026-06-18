@@ -27,6 +27,10 @@ export const ALIASES: Readonly<Record<string, readonly string[]>> = {
   Volt_Batt: ['Volt_Batt', 'Volt_Batt_indx'],
   // SuperX names it 'T_Air'; Super2 / RaceAMP use 'T_Air_indx'.
   T_Air: ['T_Air', 'T_Air_indx'],
+  // MX APP logs GPS only as decimal-degree phone coordinates; treat them as the
+  // session's GPS_Lat/GPS_Lon (the decimal encoding the track + exporter use).
+  GPS_Lat: ['GPS_Lat', 'Phone_GPS_Latitude'],
+  GPS_Lon: ['GPS_Lon', 'Phone_GPS_Longitude'],
 }
 
 /** Candidate canonical names to try when resolving `name`, in priority order. */

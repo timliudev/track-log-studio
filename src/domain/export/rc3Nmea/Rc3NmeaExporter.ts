@@ -3,6 +3,7 @@ import type { LogSession } from '@/domain/model/LogSession'
 import { makeSentence } from '../nmeaChecksum'
 import { computeSmoothedCourses } from './heading'
 import { SLOT_IDS, LEGACY_PY_MAPPING, type Rc3Mapping } from './mapping'
+import { makeFixResolver, type GpsFix } from '@/domain/gps/gpsFix'
 
 /** Format a number with fixed decimals (matches Python f"{v:.Nf}"). */
 function fmt(v: number, decimals = 3): string {
@@ -21,18 +22,6 @@ function fmtMin(v: number): string {
 
 function ddmmyy(d: number, m: number, y: number): string {
   return `${padInt(d, 2)}${padInt(m + 1, 2)}${padInt(y % 100, 2)}`
-}
-
-/** A resolved GPS fix for one row. */
-interface Fix {
-  latDeg: number
-  latMin: number
-  latNs: string
-  lonDeg: number
-  lonMin: number
-  lonEw: string
-  latDd: number
-  lonDd: number
 }
 
 /**
@@ -71,16 +60,9 @@ export class Rc3NmeaExporter implements Exporter {
     const n = session.rowCount
     const arr = (name: string): Float32Array | undefined => session.get(name)?.data
 
-    // GPS channels
-    const cGpsValid = arr('GPS_Valid')
-    const cLatDeg = arr('GPS_Lat_deg')
-    const cLatMin = arr('GPS_Lat_min')
-    const cLatMmmm = arr('GPS_Lat_mmmm')
-    const cLatNs = arr('GPS_Lat_NS')
-    const cLonDeg = arr('GPS_Lon_deg')
-    const cLonMin = arr('GPS_Lon_min')
-    const cLonMmmm = arr('GPS_Lon_mmmm')
-    const cLonEw = arr('GPS_Lon_EW')
+    // GPS position: resolved through the shared fix source (handles both the
+    // integer deg/min ECU encoding and decimal-degree GPS_Lat/GPS_Lon).
+    const fixResolver = makeFixResolver(session)
     const cUtcHh = arr('GPS_UTC_hh')
     const cUtcMm = arr('GPS_UTC_mm')
     const cUtcSs = arr('GPS_UTC_ss')
@@ -111,36 +93,9 @@ export class Rc3NmeaExporter implements Exporter {
       return Number.isNaN(v) ? 0 : v
     }
 
-    const hasValidity = cGpsValid !== undefined
     const hasUtc = cUtcHh !== undefined
-    const hasPosition = cLatDeg !== undefined && cLonDeg !== undefined
-
-    // Resolve a fix for row i, or null if the row has no valid fix.
-    const fixAt = (i: number): Fix | null => {
-      if (!hasPosition) return null
-      const latDeg = Math.trunc(get(cLatDeg, i))
-      const latMin = get(cLatMin, i) + get(cLatMmmm, i) / 10000
-      const lonDeg = Math.trunc(get(cLonDeg, i))
-      const lonMin = get(cLonMin, i) + get(cLonMmmm, i) / 10000
-
-      let valid: boolean
-      if (hasValidity) {
-        const code = Math.trunc(get(cGpsValid, i))
-        valid = code !== 0 && String.fromCharCode(code) === 'A'
-      } else {
-        // No validity flag: a non-zero coordinate means we have a fix.
-        valid = latDeg !== 0 || latMin !== 0 || lonDeg !== 0 || lonMin !== 0
-      }
-      if (!valid) return null
-
-      const latNs = cLatNs ? String.fromCharCode(Math.trunc(get(cLatNs, i))) : 'N'
-      const lonEw = cLonEw ? String.fromCharCode(Math.trunc(get(cLonEw, i))) : 'E'
-      let latDd = latDeg + latMin / 60
-      if (latNs === 'S') latDd = -latDd
-      let lonDd = lonDeg + lonMin / 60
-      if (lonEw === 'W') lonDd = -lonDd
-      return { latDeg, latMin, latNs, lonDeg, lonMin, lonEw, latDd, lonDd }
-    }
+    const hasPosition = fixResolver.hasPosition
+    const fixAt = (i: number): GpsFix | null => fixResolver.fixAt(i)
 
     // Build one RC3 sentence for row i with the given time / count fields.
     const buildRc3 = (i: number, timeField: string, countField: string): string => {
@@ -180,7 +135,7 @@ export class Rc3NmeaExporter implements Exporter {
 
     // GPS mode. Pass 1: collect fixes for heading smoothing.
     const fixIdx = new Int32Array(n).fill(-1)
-    const fixes: (Fix | null)[] = new Array(n)
+    const fixes: (GpsFix | null)[] = new Array(n)
     const fixLat: number[] = []
     const fixLon: number[] = []
     let firstFixRow = -1

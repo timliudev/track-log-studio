@@ -1,0 +1,23 @@
+# Keep dependencies current and patch known vulnerabilities automatically.
+# Dependabot opens PRs against `develop` (the integration branch); CI then
+# type-checks, tests, audits and builds them before they reach `main`.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: develop
+    open-pull-requests-limit: 10
+    groups:
+      # Batch low-risk patch/minor bumps into a single PR to cut noise.
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    target-branch: develop

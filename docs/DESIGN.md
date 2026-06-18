@@ -101,22 +101,27 @@ src/
 
 ---
 
-## 4. `.loga` 格式分析（實測三個範例）
+## 4. `.loga` 格式分析（實測四種檔頭）
 
-三種檔頭並存，**parser 必須是「格式偵測器註冊表」**：
+四種檔頭並存，**parser 必須是「格式偵測器註冊表」**：
 
-| 檔案 | 第一行標記 | 檔頭結構 | 取樣率 | 避震資料 |
-|---|---|---|---|---|
-| Super2.loga | `<Cycling Memory Log Data of Super ECU>` | 固定行：第5行群組、第6行欄名、第7行起資料 | 62.5ms (16Hz) | ❌ |
-| SuperX.loga | `<aRacerX Memory Log File>` | 標記式：`<VAR NAME>` 下一行欄名、`<DATA START>` 下一行起資料 | 62.5ms (16Hz) | ❌ |
-| logger2.loga | `<aRacer ECU_Memory Log Data for RaceAMP>` | `Product ID = ...; Table ID...` 單行 + 群組行 + 欄名行 + 資料 | 31.25ms (32Hz) | ✅ |
+| 檔案 | 第一行標記 | 檔頭結構 | 取樣率 | 避震資料 | GPS 編碼 |
+|---|---|---|---|---|---|
+| Super2.loga | `<Cycling Memory Log Data of Super ECU>` | 固定行：第5行群組、第6行欄名、第7行起資料 | 62.5ms (16Hz) | ❌ | 整數度/分 |
+| SuperX.loga | `<aRacerX Memory Log File>` | 標記式：`<VAR NAME>` 下一行欄名、`<DATA START>` 下一行起資料 | 62.5ms (16Hz) | ❌ | 整數度/分 |
+| logger2.loga | `<aRacer ECU_Memory Log Data for RaceAMP>` | `Product ID = ...; Table ID...` 單行 + 群組行 + 欄名行 + 資料 | 31.25ms (32Hz) | ✅ | 整數度/分 |
+| (MX APP) | `<aRacer MX APP Log File>` | 與 SuperX 同標記式 layout（多 `<VAR ID>` / `<VAR GROUP>` 兩段，掃描略過） | 100ms (10Hz) | ❌ | 十進位（手機 `Phone_GPS_*`） |
 
 共通慣例：
-- 欄名格式為 `Canonical/中文說明`，以 `/` 切開取前段作正規名。
+- 欄名格式為 `Canonical/中文說明`，以 `/` 切開取前段作正規名（MX APP 欄名無 `/說明` 後綴）。
 - 資料區為純 CSV。
-- 既有別名：`AFR`↔`AFR_WBO2`、`Volt_Batt`↔`Volt_Batt_indx`（見 `loga2nmea.py` 的 `ALIASES`）。
+- 既有別名：`AFR`↔`AFR_WBO2`、`Volt_Batt`↔`Volt_Batt_indx`；新增 `GPS_Lat`↔`Phone_GPS_Latitude`、`GPS_Lon`↔`Phone_GPS_Longitude`（把 MX APP 的手機十進位座標當成 session 的 `GPS_Lat/GPS_Lon`）。
 
-> **重點**：原 `loga2nmea.py` 只處理 Super2 / SuperX 兩種，**RaceAMP（logger2）尚未支援**，而它正是唯一含避震 `SuspensionAD1/AD2`、`Front/Rear Suspension`、`EXIN_AD1~3` 的格式。新專案需補上第三種 parser。
+> **重點**：原 `loga2nmea.py` 只處理 Super2 / SuperX 兩種；**RaceAMP（logger2）** 為唯一含避震 `SuspensionAD1/AD2`、`Front/Rear Suspension`、`EXIN_AD1~3` 的格式，新專案已補。**MX APP** 由 aRacer x Tune Android App 分享輸出（常以 `.zip` 包一個 `.loga`），layout 與 SuperX 共用同一 marker 掃描，差別在標題、`2026-05-15 17:53:50` 破折號日期、與「GPS 只有手機十進位座標」。
+>
+> **GPS fix 單一來源**：因 MX APP 走十進位、ECU 格式走整數度/分，把兩種編碼的「逐列 fix 解析」收斂到 `domain/gps/gpsFix.ts` 的 `makeFixResolver`，由分析器軌跡（`extractGpsTrack`）與 `.nmea` 匯出器**共用**，整數路徑數學不變（golden 逐位元相符）。
+>
+> **`.zip` 上傳資安**：`.zip` 為不可信輸入，`domain/import/zip.ts` 以副檔名白名單（只解 `.loga/.nmea`）、解壓前 `originalSize` 累計上限（擋解壓炸彈）、entry 路徑只取 base name（擋 zip-slip）三道防線處理。
 
 ---
 
@@ -286,6 +291,14 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **6b 完整收尾（待做）**：內部資料夾 / 程式碼大改名、`docs/DESIGN.md` 標題改名、
     關於我頁、SEO（meta/OG、robots.txt、sitemap、structured data）、Logo / favicon
     （PWA icon 換點陣 PNG 192/512 + maskable）、使用說明外部文件連結。
+- **Phase 7 — 直線加速測試（idea，不急，先記錄）**：在整段軌跡中**掃描出符合條件的最速區段**並列出，
+  常見於速可達/機車玩家。設計為一個**可調項目**（搜尋整條 log）：
+  - **距離型**：例如「0~400m 最速」——找出跑完 400m 花時間最短的區段。但若要求「從靜止 0 起跑」會限制太死，
+    故傾向**複合條件**：從車速 `v0`（可為 0）起、再跑 `d` 公尺的最短秒數。
+  - **車速型**：例如「0~100 km/h」最短秒數 / 距離（標準加速指標）。
+  - **歸屬**：本質上和分析器的「圈/區段」是同一類東西——一段被選出的軌跡片段配一個衍生數值，
+    因此**併入 lap/segment 架構**：視為 `LapMetric` 的新 variant + `computeMetric` 的新 case（見 §11 Phase 4 E、
+    架構鐵則），不另起爐灶。掃描演算法（滑動視窗找最佳區段）為唯一新增的計算。
 - 每階段內再細分小 commit。
 - **設計原則**：功能能力以**實際欄位**（`session.has(...)`）判斷，不以檔頭/格式硬編；
   檔頭僅決定如何解析結構。
@@ -306,6 +319,18 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   Node 由 `.nvmrc`=22）；無需 repo 密鑰。
 - **分析 / 廣告**（未來）：GA4 / Cloudflare Web Analytics / AdSense 用**公開 ID**(`VITE_*` env)，
   非密鑰；lazy-load、離線不載、守隱私。
+
+### 近期增量
+- **MX APP 格式 + `.zip` 上傳（feature/mx-app-loga-format）**：新增 `mxApp` 解析器（與
+  SuperX 共用抽出的 `formats/markerHeader.ts`）、破折號日期、`Phone_GPS_*`→`GPS_Lat/Lon`
+  別名；GPS fix 邏輯收斂到 `domain/gps/gpsFix.ts`（軌跡 + 匯出器共用）；`domain/import/zip.ts`
+  安全解壓（白名單 / 防炸彈 / 防 zip-slip）；FileBar 接受 `.loga/.nmea/.zip`。詳見 §4。
+
+### 依賴 / 資安 / CI（鐵則）
+- **每次改動都要評估資安**（尤其處理不可信輸入：檔案、zip、未來的網路請求）。
+- **依賴常保最新**：以 `npm outdated` / `npm audit`（聯網查 registry）確認；目前 0 漏洞。
+- **CI 已加 `npm audit --audit-level=high`**（high/critical 直接擋）；**Dependabot**（`.github/
+  dependabot.yml`）每週對 develop 開 npm + github-actions 更新 PR，過 CI 才進 main。
 
 ### 架構原則（批次 R 後的鐵則）
 - 原始 `LogSession` **不可變**；每個顯示的每圈數值都是 `computeMetric` 的**純衍生**，不寫回來源。

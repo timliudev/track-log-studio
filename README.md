@@ -17,8 +17,20 @@ Installable as a PWA on iOS / Android.
 - 🖥️ **響應式**：手機 / 平板 / 桌面自動適應，亦可手動調整
 - 🌗 **日夜模式**：跟隨系統或手動
 - 🌐 **多語系**：繁體中文 / English（自動偵測 + 手動）
-- 🧩 自動相容多種 `.loga` 檔頭（Super2 / SuperX / RaceAMP）
+- 🧩 自動相容多種 `.loga` 檔頭（Super2 / SuperX / RaceAMP / aRacer X tune App）
+- 📥 可直接上傳 `.loga`、`.nmea`，或 aRacer x Tune App 分享出的 `.zip`（自動解壓）
 - 💾 設定本地永久化，可匯出 JSON 轉移
+
+## 支援來源 Supported sources
+
+**經測試 Tested：**
+
+1. RC super2 — 透過 SpeedTuning 2 回讀
+2. RC superX — 透過 SpeedTuningX 回讀
+3. aRacer X tune App — 透過分享功能輸出 log（`.zip` 可直接上傳）
+4. aRacer Logger 2.5 Module — 透過 Logger2 Reader 讀出
+
+**理論上支援但尚未測試 Expected to work, untested：** RC super、RC superXX、RC mini X、RC mini XX、aRacer Race Module 3
 
 ## 開發狀態 Status
 
