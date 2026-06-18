@@ -5,6 +5,7 @@ import { useLapStore, type LapMetricColumn } from '@/stores/lapStore'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { type Aggregation } from '@/domain/analysis/lapAggregate'
 import { computeMetric, type LapContext } from '@/domain/analysis/lapMetrics'
+import { fastestLapIndex, slowestLapIndex } from '@/domain/analysis/bestLap'
 import { formatLapTime } from '@/domain/analysis/format'
 import { lapColor } from './lapColors'
 import SearchableSelect from '@/components/SearchableSelect.vue'
@@ -62,6 +63,20 @@ function swatchColor(index: number): string {
   const order = lapStore.selected.indexOf(index)
   return order === -1 ? '' : lapColor(order)
 }
+
+// The fastest lap among the non-excluded laps; gets a marker in the table so
+// excluding a "cut" lap visibly promotes the next-best one. null when none.
+const bestLapIndex = computed<number | null>(() =>
+  fastestLapIndex(props.laps, lapStore.excluded),
+)
+
+// The slowest non-excluded lap, marked only when it's a DIFFERENT lap than the
+// fastest — with 0 or 1 included laps the two coincide and a second marker on
+// the same row is just noise.
+const worstLapIndex = computed<number | null>(() => {
+  const i = slowestLapIndex(props.laps, lapStore.excluded)
+  return i != null && i !== bestLapIndex.value ? i : null
+})
 
 /**
  * Localized header for a configurable column's metric. Channel kind →
@@ -202,10 +217,21 @@ const rows = computed<Row[]>(() => {
         <tr
           v-for="r in rows"
           :key="r.index"
-          :class="{ selected: lapStore.isSelected(r.index) }"
+          :class="{ selected: lapStore.isSelected(r.index), excluded: lapStore.isExcluded(r.index) }"
           @click="emit('select', r.index)"
         >
-          <td>
+          <td class="lap-cell">
+            <button
+              type="button"
+              class="exclude"
+              :class="{ on: lapStore.isExcluded(r.index) }"
+              :title="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+              :aria-label="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+              :aria-pressed="lapStore.isExcluded(r.index)"
+              @click.stop="lapStore.toggleExcluded(r.index)"
+            >
+              ⦸
+            </button>
             <span
               v-if="lapStore.isSelected(r.index)"
               class="swatch"
@@ -213,7 +239,11 @@ const rows = computed<Row[]>(() => {
             />
             {{ r.index + 1 }}
           </td>
-          <td>{{ r.lapTime }}</td>
+          <td>
+            <span v-if="r.index === bestLapIndex" class="mark" :title="t('analyzer.bestLap')">⚡</span>
+            <span v-else-if="r.index === worstLapIndex" class="mark" :title="t('analyzer.slowestLap')">🐢</span>
+            {{ r.lapTime }}
+          </td>
           <td>{{ r.distanceKm === '—' ? '—' : `${r.distanceKm} km` }}</td>
           <td v-for="(cell, i) in r.cells" :key="lapStore.columns[i].id">{{ cell }}</td>
         </tr>
@@ -359,6 +389,46 @@ tbody tr:hover {
 tbody tr.selected {
   background: var(--color-accent);
   color: var(--color-accent-text);
+}
+/* Excluded (garbage) laps are dimmed and struck through; selection styling still
+   wins when both apply so a selected-for-inspection bad lap stays readable. */
+tbody tr.excluded td {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+tbody tr.excluded.selected td {
+  text-decoration: none;
+}
+.lap-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.exclude {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.exclude:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.exclude.on {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background: var(--color-bg);
+}
+.mark {
+  /* not decorative-only: the title attr conveys fastest/slowest to AT */
+  margin-right: 2px;
 }
 .swatch {
   display: inline-block;

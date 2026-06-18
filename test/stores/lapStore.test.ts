@@ -79,6 +79,44 @@ describe('lapStore', () => {
     expect(s.columns).toHaveLength(1)
   })
 
+  it('starts with no laps excluded', () => {
+    const s = useLapStore()
+    expect(s.excluded).toEqual([])
+  })
+
+  it('toggleExcluded marks and un-marks garbage laps', () => {
+    const s = useLapStore()
+    s.toggleExcluded(2)
+    expect(s.excluded).toEqual([2])
+    expect(s.isExcluded(2)).toBe(true)
+    expect(s.isExcluded(5)).toBe(false)
+    s.toggleExcluded(4)
+    expect(s.excluded).toContain(2)
+    expect(s.excluded).toContain(4)
+    s.toggleExcluded(2)
+    expect(s.excluded).toEqual([4])
+  })
+
+  it('clearExcluded empties the exclusions', () => {
+    const s = useLapStore()
+    s.toggleExcluded(1)
+    s.toggleExcluded(3)
+    s.clearExcluded()
+    expect(s.excluded).toEqual([])
+  })
+
+  it('exclusion and selection are independent', () => {
+    const s = useLapStore()
+    s.toggleLap(2)
+    s.toggleExcluded(2)
+    // A lap can be both selected (for inspection) and excluded (from best-lap).
+    expect(s.isSelected(2)).toBe(true)
+    expect(s.isExcluded(2)).toBe(true)
+    s.clearExcluded()
+    expect(s.isSelected(2)).toBe(true)
+    expect(s.isExcluded(2)).toBe(false)
+  })
+
   it('starts with no configured columns', () => {
     const s = useLapStore()
     expect(s.columns).toEqual([])

@@ -45,6 +45,7 @@ export default {
     addChart: 'Add chart',
     removeChart: 'Remove',
     lapCount: 'Laps: {n}',
+    lapCountExcluded: 'Laps: {n} ({x} excluded)',
     resetLine: 'Reset line',
     lineHint: 'Drag the two endpoints on the track to set the start/finish line.',
     clearLapSelection: 'Clear selection',
@@ -60,6 +61,10 @@ export default {
     aggAvg: 'Avg',
     selectChannel: 'Select channel',
     removeColumn: 'Remove column',
+    excludeLap: 'Exclude this lap (garbage, omit from best lap)',
+    includeLap: 'Re-include lap',
+    bestLap: 'Fastest lap',
+    slowestLap: 'Slowest lap',
   },
   suspension: {
     heading: 'Suspension calibration',

@@ -45,6 +45,7 @@ export default {
     addChart: '新增圖表',
     removeChart: '移除',
     lapCount: '圈數：{n}',
+    lapCountExcluded: '圈數：{n}（已排除 {x}）',
     resetLine: '重設起終點線',
     lineHint: '拖曳軌跡圖上的兩個端點可設定起終點線',
     clearLapSelection: '取消選圈',
@@ -60,6 +61,10 @@ export default {
     aggAvg: '平均',
     selectChannel: '選擇通道',
     removeColumn: '移除欄位',
+    excludeLap: '排除此圈（爛圈，不列入最快圈）',
+    includeLap: '取消排除',
+    bestLap: '最快圈',
+    slowestLap: '最慢圈',
   },
   suspension: {
     heading: '避震校正',
