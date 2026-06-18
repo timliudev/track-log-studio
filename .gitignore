@@ -41,3 +41,8 @@ LogaExample/
 # Stray converted output downloaded to the repo root (test fixtures under
 # test/fixtures/ stay tracked).
 /*.nmea
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
