@@ -65,7 +65,7 @@ function onChange(e: Event): void {
 
 <template>
   <div class="filebar">
-    <label class="load-btn">
+    <label class="load-btn" :title="t('fileBar.loadTitle')">
       <input
         type="file"
         multiple

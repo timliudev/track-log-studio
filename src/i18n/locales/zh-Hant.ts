@@ -17,14 +17,15 @@ export default {
     futureNote: '更多設定（設定匯出 / 匯入等）將陸續加入。',
   },
   fileBar: {
-    load: '載入記錄 (.loga / .nmea)',
+    load: '載入記錄 (.loga / .nmea / .zip)',
+    loadTitle: '.zip = aRacer x Tune App 透過分享功能輸出的 log（會自動解壓）',
     rows: '{n} 列',
     error: '解析失敗',
     remove: '移除',
     clearAll: '全部清除',
   },
   analyzer: {
-    noFiles: '尚未載入記錄，請點選上方「載入記錄」選取 .loga 或 .nmea 檔案。',
+    noFiles: '尚未載入記錄，請點選上方「載入記錄」選取 .loga、.nmea 或 .zip 檔案。',
     record: '記錄',
     time: '時間',
     distance: '距離',
@@ -93,6 +94,18 @@ export default {
       importGuide: '匯入說明',
       raceModule:
         '需安裝 aRacer Race Module 才有 GPS 數據可於底圖對位；若無 GPS，仍可轉出感測器數據（RC3），此時時間戳以轉檔當下時間合成。',
+      sources: {
+        title: '支援的 log 來源',
+        tested: '經測試支援',
+        untested: '理論上支援但尚未測試',
+        testedItems: [
+          'RC super2 — 透過 SpeedTuning 2 回讀',
+          'RC superX — 透過 SpeedTuningX 回讀',
+          'aRacer X tune App — 透過分享功能將 log 輸出（.zip）',
+          'aRacer Logger 2.5 Module — 透過 Logger2 Reader 讀出',
+        ],
+        untestedItems: ['RC super', 'RC superXX', 'RC mini X', 'RC mini XX', 'aRacer Race Module 3'],
+      },
     },
     upload: {
       title: '載入 .loga 檔',

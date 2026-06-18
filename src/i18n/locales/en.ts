@@ -17,14 +17,15 @@ export default {
     futureNote: 'More settings (export / import, etc.) coming soon.',
   },
   fileBar: {
-    load: 'Load files (.loga / .nmea)',
+    load: 'Load files (.loga / .nmea / .zip)',
+    loadTitle: '.zip = a log exported via the aRacer x Tune app’s share feature (auto-extracted)',
     rows: '{n} rows',
     error: 'Parse failed',
     remove: 'Remove',
     clearAll: 'Clear all',
   },
   analyzer: {
-    noFiles: 'No logs loaded — use the file bar above to load a .loga or .nmea file.',
+    noFiles: 'No logs loaded — use the file bar above to load a .loga, .nmea or .zip file.',
     record: 'Record',
     time: 'Time',
     distance: 'Distance',
@@ -93,6 +94,18 @@ export default {
       importGuide: 'Import guide',
       raceModule:
         'An aRacer Race Module is required for GPS positioning on the map; without GPS you can still convert sensor data (RC3), with the timestamp synthesized from the conversion time.',
+      sources: {
+        title: 'Supported log sources',
+        tested: 'Tested',
+        untested: 'Expected to work, untested',
+        testedItems: [
+          'RC super2 — read back via SpeedTuning 2',
+          'RC superX — read back via SpeedTuningX',
+          'aRacer X tune App — exported via the share feature (.zip)',
+          'aRacer Logger 2.5 Module — read out via Logger2 Reader',
+        ],
+        untestedItems: ['RC super', 'RC superXX', 'RC mini X', 'RC mini XX', 'aRacer Race Module 3'],
+      },
     },
     upload: {
       title: 'Load .loga files',
