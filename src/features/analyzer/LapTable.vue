@@ -3,8 +3,9 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLapStore } from '@/stores/lapStore'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
-import { lapStats } from '@/domain/analysis/lapStats'
+import { aggregateChannel, type Aggregation } from '@/domain/analysis/lapAggregate'
 import { formatLapTime } from '@/domain/analysis/format'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -13,7 +14,7 @@ const props = defineProps<{
   laps: Lap[]
   track: GpsTrack | null
   timeMs: Float64Array | null
-  /** Active session, used to resolve the real speed channel for top speed. */
+  /** Active session, used to resolve configurable per-lap statistic columns. */
   session: LogSession | null
   /** Whether the ECU lap channel (IR_LapNumber) is available in this session. */
   hasEcuLaps: boolean
@@ -27,6 +28,10 @@ const lapStore = useLapStore()
 // store directly here.
 const emit = defineEmits<{ select: [number | null] }>()
 
+const AGGS: Aggregation[] = ['max', 'min', 'avg']
+const aggLabel = (agg: Aggregation): string =>
+  agg === 'max' ? t('analyzer.aggMax') : agg === 'min' ? t('analyzer.aggMin') : t('analyzer.aggAvg')
+
 // Cumulative distance computed once for the active track and reused per lap row.
 const cumDistM = computed<Float64Array | null>(() =>
   props.track
@@ -34,40 +39,52 @@ const cumDistM = computed<Float64Array | null>(() =>
     : null,
 )
 
-// Real speed channel for top speed: GPS_Speed (already km/h in both .loga and
-// NMEA-sourced sessions) preferred over Vehicle_Speed. null when neither exists,
-// in which case top speed is unknown and rendered as '—'.
-const speedKmh = computed<Float32Array | null>(
-  () => props.session?.get('GPS_Speed')?.data ?? props.session?.get('Vehicle_Speed')?.data ?? null,
+// Sorted channel options for each column's picker (same idiom as TimeSeriesChart).
+const channelOptions = computed(() =>
+  props.session
+    ? props.session.channels
+        .map((c) => ({ name: c.name, description: c.description }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    : [],
 )
+
+/** Format an aggregated value: '—' for NaN, finer precision for small magnitudes. */
+function formatValue(v: number): string {
+  if (Number.isNaN(v)) return '—'
+  return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1)
+}
 
 interface Row {
   index: number
   lapTime: string
   distanceKm: string
-  topSpeed: string
+  /** Aggregated value per configured column, aligned to lapStore.columns. */
+  cells: string[]
 }
 
 const rows = computed<Row[]>(() => {
-  const track = props.track
-  const timeMs = props.timeMs
   const cum = cumDistM.value
-  if (!track || !timeMs || !cum) {
-    return props.laps.map((l) => ({
-      index: l.index,
-      lapTime: formatLapTime(l.lapTimeMs),
-      distanceKm: '—',
-      topSpeed: '—',
-    }))
-  }
-  const speed = speedKmh.value
+  const session = props.session
+  const cols = lapStore.columns
+
   return props.laps.map((l) => {
-    const s = lapStats(track, timeMs, cum, speed, l)
+    const distanceM =
+      cum && l.endIdx > l.startIdx && l.endIdx < cum.length
+        ? cum[l.endIdx] - cum[l.startIdx]
+        : NaN
+
+    const cells = cols.map((col) => {
+      if (!col.channel || !session) return '—'
+      const ch = session.get(col.channel)
+      if (!ch) return '—'
+      return formatValue(aggregateChannel(ch.data, l.startIdx, l.endIdx, col.agg))
+    })
+
     return {
       index: l.index,
       lapTime: formatLapTime(l.lapTimeMs),
-      distanceKm: (s.distanceM / 1000).toFixed(3),
-      topSpeed: Number.isNaN(s.topSpeedKmh) ? '—' : s.topSpeedKmh.toFixed(1),
+      distanceKm: Number.isNaN(distanceM) ? '—' : (distanceM / 1000).toFixed(3),
+      cells,
     }
   })
 })
@@ -92,6 +109,41 @@ const rows = computed<Row[]>(() => {
       </button>
     </div>
 
+    <!-- Column editor: one row per configured statistics column. -->
+    <div class="columns-editor">
+      <div v-for="col in lapStore.columns" :key="col.id" class="column-row">
+        <SearchableSelect
+          class="channel-select"
+          :model-value="col.channel || null"
+          :options="channelOptions"
+          @update:model-value="lapStore.setColumnChannel(col.id, $event ?? '')"
+        />
+        <div class="agg">
+          <button
+            v-for="a in AGGS"
+            :key="a"
+            type="button"
+            :class="{ active: col.agg === a }"
+            @click="lapStore.setColumnAgg(col.id, a)"
+          >
+            {{ aggLabel(a) }}
+          </button>
+        </div>
+        <button
+          type="button"
+          class="remove"
+          :title="t('analyzer.removeColumn')"
+          :aria-label="t('analyzer.removeColumn')"
+          @click="lapStore.removeColumn(col.id)"
+        >
+          ×
+        </button>
+      </div>
+      <button type="button" class="add-column" @click="lapStore.addColumn('', 'max')">
+        {{ t('analyzer.addColumn') }}
+      </button>
+    </div>
+
     <button
       v-if="lapStore.selectedIndex != null"
       type="button"
@@ -109,7 +161,9 @@ const rows = computed<Row[]>(() => {
           <th>{{ t('analyzer.lap') }}</th>
           <th>{{ t('analyzer.lapTime') }}</th>
           <th>{{ t('analyzer.lapDistance') }}</th>
-          <th>{{ t('analyzer.topSpeed') }}</th>
+          <th v-for="col in lapStore.columns" :key="col.id">
+            {{ col.channel || t('analyzer.selectChannel') }} · {{ aggLabel(col.agg) }}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -121,8 +175,8 @@ const rows = computed<Row[]>(() => {
         >
           <td>{{ r.index + 1 }}</td>
           <td>{{ r.lapTime }}</td>
-          <td>{{ r.distanceKm }} km</td>
-          <td>{{ r.topSpeed === '—' ? '—' : `${r.topSpeed} km/h` }}</td>
+          <td>{{ r.distanceKm === '—' ? '—' : `${r.distanceKm} km` }}</td>
+          <td v-for="(cell, i) in r.cells" :key="lapStore.columns[i].id">{{ cell }}</td>
         </tr>
       </tbody>
     </table>
@@ -154,6 +208,71 @@ const rows = computed<Row[]>(() => {
   background: var(--color-accent);
   color: var(--color-accent-text);
 }
+
+.columns-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space);
+  align-items: flex-start;
+}
+.column-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  flex-wrap: wrap;
+}
+.channel-select {
+  flex: 1 1 200px;
+  max-width: 280px;
+}
+.agg {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.agg button {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: none;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.agg button.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.remove {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  width: 30px;
+  height: 30px;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+.remove:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.add-column {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.add-column:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
 .empty {
   color: var(--color-text-muted);
   font-size: 0.9rem;
