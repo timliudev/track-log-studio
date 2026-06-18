@@ -7,6 +7,7 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useLapStore } from '@/stores/lapStore'
+import { lapColor } from './lapColors'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
@@ -25,44 +26,52 @@ const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 're
 
 const hasEcuLaps = computed(() => session.value?.has('IR_LapNumber') ?? false)
 
-// The currently selected lap (from the table), or null.
-const selectedLap = computed(() =>
-  lapStore.selectedIndex == null
-    ? null
-    : (laps.value.find((l) => l.index === lapStore.selectedIndex) ?? null),
+// The selected laps (from the table) resolved to Lap objects, in selection
+// order (so each gets a stable color); missing indices are filtered out.
+const selectedLaps = computed(() =>
+  lapStore.selected
+    .map((i) => laps.value.find((l) => l.index === i))
+    .filter((l): l is NonNullable<typeof l> => l != null),
 )
 
-const highlightRange = computed(() =>
-  selectedLap.value
-    ? { startIdx: selectedLap.value.startIdx, endIdx: selectedLap.value.endIdx }
-    : null,
+// One colored segment per selected lap; color is assigned by selection order.
+const highlightLaps = computed(() =>
+  selectedLaps.value.map((lap, order) => ({
+    startIdx: lap.startIdx,
+    endIdx: lap.endIdx,
+    color: lapColor(order),
+  })),
 )
-
-// Selecting a lap zooms all charts to its span (in the current xValues units).
-// We only DRIVE the zoom when a lap becomes selected — clearing the zoom on
-// deselect is left to the explicit deselect path (onLapSelect(null)), so a
-// user-initiated zoom that deselects (onXZoom) keeps the user's own range
-// instead of this watcher snapping it back. (No else branch = no fight.)
-watch(selectedLap, (lap) => {
-  const xs = xValues.value
-  if (lap && xs) {
-    analyzer.setXRange({ min: xs[lap.startIdx], max: xs[lap.endIdx] })
-  }
-})
 
 // Lap selection from the table is routed here so this component (which owns the
 // select↔zoom coupling) stays the single place that decides zoom side-effects.
-// Explicit deselect (toggling the row off / clear button) also zooms back out;
-// selecting a lap lets the watcher above zoom in.
+// The zoom rule is applied imperatively right after toggling — no state-writing
+// watcher — to keep selection and zoom from fighting each other.
 function onLapSelect(index: number | null): void {
-  lapStore.selectLap(index)
-  if (index == null) analyzer.setXRange(null)
+  // Explicit clear (clear button) → empty selection + full view.
+  if (index == null) {
+    lapStore.clearSelection()
+    analyzer.setXRange(null)
+    return
+  }
+  lapStore.toggleLap(index)
+  const sel = lapStore.selected
+  const xs = xValues.value
+  if (sel.length === 1 && xs) {
+    // Exactly one lap selected → zoom the charts to its span.
+    const lap = laps.value.find((l) => l.index === sel[0])
+    if (lap) analyzer.setXRange({ min: xs[lap.startIdx], max: xs[lap.endIdx] })
+  } else {
+    // 0 selected (toggled the last one off) or ≥2 (comparison) → full view so
+    // every selected lap is visible at once.
+    analyzer.setXRange(null)
+  }
 }
 
 // Switching the X unit (time↔distance) invalidates any shared zoom range; the
-// selected lap's span is in the old units, so clear the selection too.
+// selected laps' spans are in the old units, so clear the selection too.
 watch(xAxis, () => {
-  lapStore.selectLap(null)
+  lapStore.clearSelection()
   analyzer.setXRange(null)
 })
 
@@ -76,12 +85,13 @@ watch(
 )
 
 // Fired ONLY on user drag-zoom or double-click-reset (the programmatic
-// select→zoom path sets a guard in UPlotChart so it never echoes here). A
-// user-initiated zoom means they're no longer viewing the selected lap, so
-// deselect it; the lap highlight then clears in sync with the new range.
+// select→zoom path sets a guard in UPlotChart so it never echoes here).
 function onXZoom(r: { min: number; max: number } | null): void {
   analyzer.setXRange(r)
-  lapStore.selectLap(null)
+  // A single-lap selection is zoom-coupled (selecting it drove this zoom), so a
+  // manual zoom means the user moved off it → deselect. A multi-lap selection is
+  // a track comparison that's independent of chart zoom, so leave it intact.
+  if (lapStore.selected.length <= 1) lapStore.clearSelection()
 }
 
 function onSelect(e: Event): void {
@@ -116,7 +126,7 @@ function onSelect(e: Event): void {
           :track="track"
           :cursor-idx="cursorIdx"
           :line="lapStore.line"
-          :highlight-range="highlightRange"
+          :highlight-laps="highlightLaps"
           @cursor="(i) => (cursorIdx = i)"
           @update:line="lapStore.setLine($event)"
         />
