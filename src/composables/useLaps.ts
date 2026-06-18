@@ -105,9 +105,16 @@ export function useLaps(): {
       : []
   })
 
-  /** Clear the stored line; the watcher below reseeds a fresh default. */
+  /**
+   * Re-seed the start/finish line to a fresh default from the current track.
+   * (Clearing alone would leave the line null until the next file change, since
+   * the seeding watcher only fires on track identity change — so "reset" must
+   * itself re-seed, otherwise the line vanishes with no way to get it back.)
+   */
   function resetLine(): void {
-    lapStore.clearLine()
+    const seeded = track.value ? defaultLine(track.value) : null
+    if (seeded) lapStore.setLine(seeded)
+    else lapStore.clearLine()
   }
 
   // Seed a default line when a track appears, and reseed when the active file
