@@ -2,19 +2,21 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { LapLine } from '@/domain/analysis/laps'
 import type { Aggregation } from '@/domain/analysis/lapAggregate'
+import type { LapMetric } from '@/domain/analysis/lapMetrics'
 
 /** How laps are detected: a user-placed start/finish line, or the ECU channel. */
 export type LapSource = 'line' | 'ecu'
 
 /**
- * One configurable statistics column in the lap table: a channel aggregated
- * (max/min/avg) over each lap's sample span. `channel` may be '' until the user
- * picks one (rendered as '—' meanwhile). `id` is a stable, unique handle.
+ * One configurable column in the lap table, backed by a {@link LapMetric}. The
+ * metric is the single source of how the column's per-lap value is computed —
+ * today a channel aggregation, tomorrow delta-time / sector metrics — so the
+ * column model no longer hard-codes "channel + aggregation". `id` is a stable,
+ * unique handle. (For a channel metric, an empty `channel` renders as '—'.)
  */
-export interface LapColumn {
+export interface LapMetricColumn {
   id: number
-  channel: string
-  agg: Aggregation
+  metric: LapMetric
 }
 
 /** Transient lap-detection UI state: the start/finish line and detection mode. */
@@ -27,7 +29,7 @@ export const useLapStore = defineStore('lap', () => {
   // Drives chart zoom and the colored segments on the track map.
   const selected = ref<number[]>([])
   // User-configured statistics columns for the lap table.
-  const columns = ref<LapColumn[]>([])
+  const columns = ref<LapMetricColumn[]>([])
   // Monotonic id source so column ids stay unique across add/remove.
   let nextColumnId = 1
 
@@ -60,22 +62,29 @@ export const useLapStore = defineStore('lap', () => {
     return selected.value.includes(i)
   }
 
-  function addColumn(channel: string, agg: Aggregation): void {
-    columns.value.push({ id: nextColumnId++, channel, agg })
+  /** Append a column for any metric kind (channel, lapTime, distance, …). */
+  function addColumn(metric: LapMetric): void {
+    columns.value.push({ id: nextColumnId++, metric })
   }
 
   function removeColumn(id: number): void {
     columns.value = columns.value.filter((c) => c.id !== id)
   }
 
+  /**
+   * Ergonomic editor for channel-kind columns: set the channel name. No-op if
+   * the id is unknown OR the column's metric is not a channel kind (future
+   * delta/sector columns aren't edited this way).
+   */
   function setColumnChannel(id: number, channel: string): void {
     const col = columns.value.find((c) => c.id === id)
-    if (col) col.channel = channel
+    if (col && col.metric.kind === 'channel') col.metric.channel = channel
   }
 
+  /** Ergonomic editor for channel-kind columns: set the aggregation. Same no-op rules. */
   function setColumnAgg(id: number, agg: Aggregation): void {
     const col = columns.value.find((c) => c.id === id)
-    if (col) col.agg = agg
+    if (col && col.metric.kind === 'channel') col.metric.agg = agg
   }
 
   return {

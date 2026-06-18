@@ -144,7 +144,7 @@ export function useLaps(): {
         : s.has('Vehicle_Speed')
           ? 'Vehicle_Speed'
           : null
-      if (speed) lapStore.addColumn(speed, 'max')
+      if (speed) lapStore.addColumn({ kind: 'channel', channel: speed, agg: 'max' })
     },
     { immediate: true },
   )

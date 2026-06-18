@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useLapStore } from '@/stores/lapStore'
+import { useLapStore, type LapMetricColumn } from '@/stores/lapStore'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
-import { aggregateChannel, type Aggregation } from '@/domain/analysis/lapAggregate'
+import { type Aggregation } from '@/domain/analysis/lapAggregate'
+import { computeMetric, type LapContext } from '@/domain/analysis/lapMetrics'
 import { formatLapTime } from '@/domain/analysis/format'
 import { lapColor } from './lapColors'
 import SearchableSelect from '@/components/SearchableSelect.vue'
@@ -40,6 +41,13 @@ const cumDistM = computed<Float64Array | null>(() =>
     : null,
 )
 
+// One context for every per-lap value: built-in #/time/distance columns and the
+// configurable channel columns all source their numbers through computeMetric(ctx).
+const ctx = computed<LapContext>(() => ({
+  session: props.session,
+  cumDistM: cumDistM.value,
+}))
+
 // Sorted channel options for each column's picker (same idiom as TimeSeriesChart).
 const channelOptions = computed(() =>
   props.session
@@ -55,6 +63,22 @@ function swatchColor(index: number): string {
   return order === -1 ? '' : lapColor(order)
 }
 
+/**
+ * Localized header for a configurable column's metric. Channel kind →
+ * `${channel} · ${aggLabel}` (placeholder label until a channel is picked);
+ * built-in kinds map to their own header label.
+ */
+function columnHeader(metric: LapMetricColumn['metric']): string {
+  switch (metric.kind) {
+    case 'channel':
+      return `${metric.channel || t('analyzer.selectChannel')} · ${aggLabel(metric.agg)}`
+    case 'lapTime':
+      return t('analyzer.lapTime')
+    case 'distance':
+      return t('analyzer.lapDistance')
+  }
+}
+
 /** Format an aggregated value: '—' for NaN, finer precision for small magnitudes. */
 function formatValue(v: number): string {
   if (Number.isNaN(v)) return '—'
@@ -65,31 +89,24 @@ interface Row {
   index: number
   lapTime: string
   distanceKm: string
-  /** Aggregated value per configured column, aligned to lapStore.columns. */
+  /** Per-metric value per configured column, aligned to lapStore.columns. */
   cells: string[]
 }
 
 const rows = computed<Row[]>(() => {
-  const cum = cumDistM.value
-  const session = props.session
+  const c = ctx.value
   const cols = lapStore.columns
 
   return props.laps.map((l) => {
-    const distanceM =
-      cum && l.endIdx > l.startIdx && l.endIdx < cum.length
-        ? cum[l.endIdx] - cum[l.startIdx]
-        : NaN
-
-    const cells = cols.map((col) => {
-      if (!col.channel || !session) return '—'
-      const ch = session.get(col.channel)
-      if (!ch) return '—'
-      return formatValue(aggregateChannel(ch.data, l.startIdx, l.endIdx, col.agg))
-    })
+    // Built-in #/time/distance go through the SAME computeMetric path as the
+    // configurable columns, so every displayed number has one source of truth.
+    const lapTimeMs = computeMetric({ kind: 'lapTime' }, l, c)
+    const distanceM = computeMetric({ kind: 'distance' }, l, c)
+    const cells = cols.map((col) => formatValue(computeMetric(col.metric, l, c)))
 
     return {
       index: l.index,
-      lapTime: formatLapTime(l.lapTimeMs),
+      lapTime: formatLapTime(lapTimeMs),
       distanceKm: Number.isNaN(distanceM) ? '—' : (distanceM / 1000).toFixed(3),
       cells,
     }
@@ -116,26 +133,30 @@ const rows = computed<Row[]>(() => {
       </button>
     </div>
 
-    <!-- Column editor: one row per configured statistics column. -->
+    <!-- Column editor: one row per configured column. The editor is channel-
+         focused, so only channel-kind metrics expose the picker + agg toggle;
+         other metric kinds (future delta/sector) would render their own editor. -->
     <div class="columns-editor">
       <div v-for="col in lapStore.columns" :key="col.id" class="column-row">
-        <SearchableSelect
-          class="channel-select"
-          :model-value="col.channel || null"
-          :options="channelOptions"
-          @update:model-value="lapStore.setColumnChannel(col.id, $event ?? '')"
-        />
-        <div class="agg">
-          <button
-            v-for="a in AGGS"
-            :key="a"
-            type="button"
-            :class="{ active: col.agg === a }"
-            @click="lapStore.setColumnAgg(col.id, a)"
-          >
-            {{ aggLabel(a) }}
-          </button>
-        </div>
+        <template v-if="col.metric.kind === 'channel'">
+          <SearchableSelect
+            class="channel-select"
+            :model-value="col.metric.channel || null"
+            :options="channelOptions"
+            @update:model-value="lapStore.setColumnChannel(col.id, $event ?? '')"
+          />
+          <div class="agg">
+            <button
+              v-for="a in AGGS"
+              :key="a"
+              type="button"
+              :class="{ active: col.metric.agg === a }"
+              @click="lapStore.setColumnAgg(col.id, a)"
+            >
+              {{ aggLabel(a) }}
+            </button>
+          </div>
+        </template>
         <button
           type="button"
           class="remove"
@@ -146,7 +167,11 @@ const rows = computed<Row[]>(() => {
           ×
         </button>
       </div>
-      <button type="button" class="add-column" @click="lapStore.addColumn('', 'max')">
+      <button
+        type="button"
+        class="add-column"
+        @click="lapStore.addColumn({ kind: 'channel', channel: '', agg: 'max' })"
+      >
         {{ t('analyzer.addColumn') }}
       </button>
     </div>
@@ -169,7 +194,7 @@ const rows = computed<Row[]>(() => {
           <th>{{ t('analyzer.lapTime') }}</th>
           <th>{{ t('analyzer.lapDistance') }}</th>
           <th v-for="col in lapStore.columns" :key="col.id">
-            {{ col.channel || t('analyzer.selectChannel') }} · {{ aggLabel(col.agg) }}
+            {{ columnHeader(col.metric) }}
           </th>
         </tr>
       </thead>
