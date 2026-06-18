@@ -25,8 +25,9 @@ Thumbs.db
 .vite/
 coverage/
 
-# Claude Code agent worktrees (transient, not part of the project)
-.claude/worktrees/
+# Claude Code local tooling (dev launch config, agent worktrees) — machine-local,
+# not part of the project; keep out of the public repo.
+.claude/
 
 # Env
 .env
