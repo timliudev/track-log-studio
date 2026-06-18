@@ -124,5 +124,23 @@ export function useLaps(): {
     { immediate: true },
   )
 
+  // Seed ONE default statistics column (reproducing the old "top speed" column)
+  // the first time a session with a speed channel appears and no columns exist.
+  // Guarded on `columns.length === 0` so it seeds once and never duplicates on
+  // recompute; a fresh file with an empty column list reseeds, which is fine.
+  watch(
+    session,
+    (s) => {
+      if (!s || lapStore.columns.length > 0) return
+      const speed = s.has('GPS_Speed')
+        ? 'GPS_Speed'
+        : s.has('Vehicle_Speed')
+          ? 'Vehicle_Speed'
+          : null
+      if (speed) lapStore.addColumn(speed, 'max')
+    },
+    { immediate: true },
+  )
+
   return { timeMs, laps, resetLine }
 }

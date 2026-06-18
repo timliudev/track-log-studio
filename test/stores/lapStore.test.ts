@@ -53,4 +53,52 @@ describe('lapStore', () => {
     s.toggleLap(3)
     expect(s.selectedIndex).toBe(3)
   })
+
+  it('starts with no configured columns', () => {
+    const s = useLapStore()
+    expect(s.columns).toEqual([])
+  })
+
+  it('addColumn appends columns with unique incremental ids', () => {
+    const s = useLapStore()
+    s.addColumn('GPS_Speed', 'max')
+    s.addColumn('Vehicle_Speed', 'avg')
+    expect(s.columns).toHaveLength(2)
+    expect(s.columns[0]).toMatchObject({ channel: 'GPS_Speed', agg: 'max' })
+    expect(s.columns[1]).toMatchObject({ channel: 'Vehicle_Speed', agg: 'avg' })
+    const ids = s.columns.map((c) => c.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('removeColumn drops only the matching column and keeps ids unique afterwards', () => {
+    const s = useLapStore()
+    s.addColumn('A', 'max')
+    s.addColumn('B', 'min')
+    const removeId = s.columns[0].id
+    s.removeColumn(removeId)
+    expect(s.columns).toHaveLength(1)
+    expect(s.columns[0].channel).toBe('B')
+    // A new column must not reuse the removed id.
+    s.addColumn('C', 'avg')
+    const ids = s.columns.map((c) => c.id)
+    expect(ids).not.toContain(removeId)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('setColumnChannel and setColumnAgg update the targeted column', () => {
+    const s = useLapStore()
+    s.addColumn('', 'max')
+    const id = s.columns[0].id
+    s.setColumnChannel(id, 'RPM')
+    s.setColumnAgg(id, 'avg')
+    expect(s.columns[0]).toMatchObject({ channel: 'RPM', agg: 'avg' })
+  })
+
+  it('setColumnChannel/setColumnAgg ignore unknown ids', () => {
+    const s = useLapStore()
+    s.addColumn('A', 'max')
+    s.setColumnChannel(999, 'X')
+    s.setColumnAgg(999, 'min')
+    expect(s.columns[0]).toMatchObject({ channel: 'A', agg: 'max' })
+  })
 })
