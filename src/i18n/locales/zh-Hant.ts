@@ -1,7 +1,7 @@
 export default {
   app: {
-    title: 'aRacer Loga Analysis',
-    subtitle: 'aRacer ECU 記錄分析與 RaceChrono 轉檔',
+    title: 'Track Log Studio',
+    subtitle: '相容 aRacer ECU .loga 的賽道圈次與遙測分析・RaceChrono 轉檔',
   },
   footer: {
     developedBy: 'Developed by',

@@ -19,6 +19,10 @@ useLocale()
 
 type Tab = 'converter' | 'analyzer' | 'settings'
 const tab = ref<Tab>('converter')
+
+// Build identity injected at compile time (see vite.config.ts `define`).
+const buildSha = __BUILD_SHA__
+const buildDate = __BUILD_DATE__
 </script>
 
 <template>
@@ -86,7 +90,7 @@ const tab = ref<Tab>('converter')
     <footer class="site-footer">
       <a
         class="repo-link"
-        href="https://github.com/timliudev/aRacerLogaAnalysis"
+        href="https://github.com/timliudev/track-log-studio"
         target="_blank"
         rel="noopener noreferrer"
       >
@@ -98,6 +102,7 @@ const tab = ref<Tab>('converter')
         </svg>
         <span>{{ t('footer.developedBy') }} timliudev</span>
       </a>
+      <span class="build-stamp">build {{ buildSha }} · {{ buildDate }}</span>
     </footer>
   </div>
 </template>
@@ -188,9 +193,16 @@ const tab = ref<Tab>('converter')
 }
 .site-footer {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   padding: calc(var(--space) * 2);
   border-top: 1px solid var(--color-border);
+}
+.build-stamp {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  opacity: 0.7;
 }
 .repo-link {
   display: inline-flex;
