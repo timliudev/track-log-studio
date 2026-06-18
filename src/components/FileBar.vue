@@ -5,7 +5,7 @@ import { useLogImport } from '@/composables/useLogImport'
 import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
 import { extractLogFiles } from '@/domain/import/zip'
 
-const { t } = useI18n()
+const { t, tm, rt } = useI18n()
 const fileStore = useFileStore()
 const { parseFile } = useLogImport()
 
@@ -76,6 +76,21 @@ function onChange(e: Event): void {
       <span>＋ {{ t('fileBar.load') }}</span>
     </label>
 
+    <details class="sources">
+      <summary class="info-btn" :title="t('fileBar.sources.title')" :aria-label="t('fileBar.sources.title')">ⓘ</summary>
+      <div class="sources-panel">
+        <p class="src-title">{{ t('fileBar.sources.title') }}</p>
+        <p class="src-label">{{ t('fileBar.sources.tested') }}</p>
+        <ol class="src-list">
+          <li v-for="(item, i) in tm('fileBar.sources.testedItems')" :key="`t${i}`">{{ rt(item) }}</li>
+        </ol>
+        <p class="src-label muted">{{ t('fileBar.sources.untested') }}</p>
+        <ol class="src-list muted">
+          <li v-for="(item, i) in tm('fileBar.sources.untestedItems')" :key="`u${i}`">{{ rt(item) }}</li>
+        </ol>
+      </div>
+    </details>
+
     <div v-if="fileStore.files.length" class="pills">
       <span
         v-for="f in fileStore.files"
@@ -130,6 +145,59 @@ function onChange(e: Event): void {
 }
 .hidden {
   display: none;
+}
+.sources {
+  position: relative;
+}
+.info-btn {
+  cursor: pointer;
+  list-style: none;
+  font-size: 1rem;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+.info-btn::-webkit-details-marker {
+  display: none;
+}
+.info-btn:hover {
+  color: var(--color-accent);
+}
+.sources[open] .info-btn {
+  color: var(--color-accent);
+}
+.sources-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(340px, 86vw);
+  padding: 10px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  font-size: 0.82rem;
+}
+.src-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+.src-label {
+  margin: 8px 0 2px;
+  font-weight: 500;
+}
+.src-label.muted {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+.src-list {
+  margin: 0;
+  padding-left: 1.4em;
+  line-height: 1.55;
+}
+.src-list.muted {
+  color: var(--color-text-muted);
 }
 .pills {
   display: flex;
