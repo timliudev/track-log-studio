@@ -157,6 +157,7 @@ function onSelect(e: Event): void {
           :x-values="xValues"
           :x-range="xRange"
           :external-cursor="cursorIdx"
+          :selected-laps="selectedLaps"
           @cursor="analyzer.setCursor"
           @x-zoom="onXZoom"
         />
