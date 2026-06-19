@@ -65,6 +65,9 @@ export default {
     includeLap: 'Re-include lap',
     bestLap: 'Fastest lap',
     slowestLap: 'Slowest lap',
+    modeTimeline: 'Timeline',
+    modeOverlay: 'Overlay',
+    overlayHint: 'Select laps in the table below to overlay (colour = lap, line style = channel, X aligned from 0)',
   },
   suspension: {
     heading: 'Suspension calibration',
