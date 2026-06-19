@@ -159,13 +159,19 @@ const axes = computed<uPlot.Axis[]>(() => {
   ]
 })
 
-// Overlay's X is a lap-relative index space, unrelated to the session-wide
-// cursor/zoom — so only timeline charts participate in the shared cursor/range.
+// Overlay's X is a lap-relative grid index space, unrelated to the session-wide
+// cursor/zoom. Overlay charts share a SEPARATE cursor (overlayCursorIdx) — all
+// overlay charts build the same grid so the index aligns across them — while
+// timeline charts (and the track map) stay on the session-index cursor/zoom.
 const canRender = computed(() =>
   mode.value === 'overlay' ? present.value.length > 0 && laps.value.length > 0 : present.value.length > 0,
 )
+const effectiveCursor = computed<number | null>(() =>
+  mode.value === 'overlay' ? analyzer.overlayCursorIdx : (props.externalCursor ?? null),
+)
 function onCursor(idx: number | null): void {
-  if (mode.value === 'timeline') emit('cursor', idx)
+  if (mode.value === 'overlay') analyzer.setOverlayCursor(idx)
+  else emit('cursor', idx)
 }
 function onXZoom(r: { min: number; max: number }): void {
   if (mode.value === 'timeline') emit('xZoom', r)
@@ -226,7 +232,7 @@ function removeChannel(name: string): void {
       :series="series"
       :axes="axes"
       :x-range="mode === 'timeline' ? xRange : null"
-      :external-cursor="mode === 'timeline' ? externalCursor : null"
+      :external-cursor="effectiveCursor"
       @cursor="onCursor"
       @x-zoom="onXZoom"
     />
