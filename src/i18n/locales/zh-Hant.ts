@@ -65,6 +65,9 @@ export default {
     includeLap: '取消排除',
     bestLap: '最快圈',
     slowestLap: '最慢圈',
+    modeTimeline: '時間軸',
+    modeOverlay: '疊圈',
+    overlayHint: '在下方圈次表選取要疊比的圈（色＝圈、線型＝通道，X 從 0 對齊）',
   },
   suspension: {
     heading: '避震校正',
