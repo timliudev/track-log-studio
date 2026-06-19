@@ -29,6 +29,12 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // Owned here (not locally in AnalyzerView) so future cursor-following readouts
   // can subscribe to it; presentational charts still receive it as a prop.
   const cursorIdx = ref<number | null>(null)
+  // Separate shared cursor for OVERLAY charts: an index into the shared
+  // lap-relative grid (not a session sample index). Overlay charts all build the
+  // same grid (same xValues + selected laps + gridPoints), so this index aligns
+  // across them — but it's meaningless to timeline charts / the track map, which
+  // live in session-index space, hence a distinct ref instead of reusing cursorIdx.
+  const overlayCursorIdx = ref<number | null>(null)
   let nextId = 2
 
   function setXRange(range: { min: number; max: number } | null): void {
@@ -37,6 +43,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setCursor(i: number | null): void {
     cursorIdx.value = i
+  }
+
+  function setOverlayCursor(i: number | null): void {
+    overlayCursorIdx.value = i
   }
 
   function addChart(): void {
@@ -63,8 +73,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     charts,
     xRange,
     cursorIdx,
+    overlayCursorIdx,
     setXRange,
     setCursor,
+    setOverlayCursor,
     addChart,
     removeChart,
     setChartChannels,
