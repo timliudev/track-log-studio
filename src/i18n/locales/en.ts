@@ -15,6 +15,8 @@ export default {
   settings: {
     heading: 'Settings',
     futureNote: 'More settings (export / import, etc.) coming soon.',
+    timezone: 'Time zone',
+    timezoneAuto: 'Auto (browser)',
   },
   fileBar: {
     load: 'Load files (.loga / .nmea / .zip)',
