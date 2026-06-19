@@ -325,6 +325,17 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   SuperX 共用抽出的 `formats/markerHeader.ts`）、破折號日期、`Phone_GPS_*`→`GPS_Lat/Lon`
   別名；GPS fix 邏輯收斂到 `domain/gps/gpsFix.ts`（軌跡 + 匯出器共用）；`domain/import/zip.ts`
   安全解壓（白名單 / 防炸彈 / 防 zip-slip）；FileBar 接受 `.loga/.nmea/.zip`。詳見 §4。
+- **軸顯示 #5/#6（feature/axis-display）**：圖表 X 軸刻度改為可讀格式——時間 `m:ss`／
+  `h:mm:ss`、距離自動 m↔km（純函式 `domain/analysis/axisFormat.ts`：`formatElapsed`/
+  `formatDistance`/`formatClock`）。時間 + timeline 模式且能取得絕對起點時，**疊加第二條
+  X 軸**(uPlot side 2，自動堆疊)顯示當地時鐘 `HH:mm:ss`，軸標籤標 `UTC±N`。起點時刻由
+  純函式 `domain/analysis/startTime.ts` `sessionStartAnchor` 決定：**GPS_UTC 優先**（首個
+  有效 UTC fix，日期取 header createdDate，再扣掉該 sample 的 elapsed 對齊 elapsed=0，
+  source=`gpsUtc`），退回 `meta.createdDate`（把本地時分秒「重新解讀成 UTC」，offset 0 即
+  還原 header 印的時刻，source=`created`），皆無→`null`。時區：`settingsStore.tzOverride`
+  (`'auto' | 分鐘`，持久化)；auto 時 `gpsUtc` 用瀏覽器偏移、`created` 用 0；Settings 下拉可
+  手動覆寫 UTC-12..+14。瀏覽器偏移只在顯示用 computed 讀取、不存成狀態（守批次 R 鐵則）。
+  `.wrangler/` 加入 `.gitignore`。
 
 ### 依賴 / 資安 / CI（鐵則）
 - **每次改動都要評估資安**（尤其處理不可信輸入：檔案、zip、未來的網路請求）。
@@ -345,7 +356,8 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
    純衍生於「included laps」集合——最速已有 `domain/analysis/bestLap.ts` 的 `fastestLapIndex`
    做為原始基元，最慢比照新增 `slowestLapIndex`（同一 exclusion-aware 慣例）。
 3. **C2 圖表疊圈**（#4,#7）：XY 折線疊被選圈、X 軸圈相對從 0 起算（距離對齊）。
-4. **軸顯示**（#5,#6）：X 軸原始值旁加換算（分/公里）；時間加當地時分秒 + 時區設定（log 多為 UTC）。
+4. ~~**軸顯示**（#5,#6）：X 軸原始值旁加換算（分/公里）；時間加當地時分秒 + 時區設定（log 多為 UTC）。~~
+   **DONE**（feature/axis-display，見上方近期增量）。**待視覺驗收**：時鐘第二軸的對位與時區切換。
 5. **軌跡熱力上色**（#10,#11）：軌跡依通道值（RPM/G）漸層上色看進彎變化；可選 colormap。
 6. **#9 單圈 GNSS 偏移微調**：疊圈對位用的每圈時間/空間位移。
 7. **4e 版面**（#12,#13,#8）：laps 暫移到軌跡上方；桌面儀表板布局（左上軌跡、左下游標數值列、
