@@ -15,6 +15,8 @@ export default {
   settings: {
     heading: '設定',
     futureNote: '更多設定（設定匯出 / 匯入等）將陸續加入。',
+    timezone: '時區',
+    timezoneAuto: '自動（瀏覽器）',
   },
   fileBar: {
     load: '載入記錄 (.loga / .nmea / .zip)',
