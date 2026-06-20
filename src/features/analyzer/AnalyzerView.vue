@@ -8,15 +8,18 @@ import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useLapStore } from '@/stores/lapStore'
 import { lapColor } from './lapColors'
+import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
+import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
+import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
-const { charts, xAxis, xRange, cursorIdx } = storeToRefs(analyzer)
+const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
 
@@ -40,6 +43,39 @@ const highlightLaps = computed(() =>
     color: lapColor(order),
   })),
 )
+
+// --- Track heatmap (#10/#11): colour the track by a channel's value. ---
+// Channels offered for colouring (all of them, sorted), for the picker.
+const channelOptions = computed(() =>
+  (session.value?.channels ?? [])
+    .map((c) => ({ name: c.name, description: c.description }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
+
+// Normalise the chosen channel over the track (null when none chosen / absent).
+const heatNorm = computed(() => {
+  const name = trackColorChannel.value
+  const tk = track.value
+  if (!name || !tk) return null
+  const ch = session.value?.get(name)
+  if (!ch) return null
+  return normalizeChannel(ch.data, tk.valid)
+})
+const colorValues = computed(() => heatNorm.value?.norm ?? null)
+
+// Legend: a CSS gradient of the active colormap + the channel's min/max.
+const legendGradient = computed(
+  () => `linear-gradient(to right, ${colormapSwatches(trackColormap.value, 16).join(',')})`,
+)
+function colormapPreview(id: ColormapId): string {
+  return `linear-gradient(to right, ${colormapSwatches(id, 8).join(',')})`
+}
+// Compact value label for the legend ends — fewer decimals as magnitude grows.
+function fmtVal(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  const a = Math.abs(v)
+  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
+}
 
 // Lap selection from the table is routed here so this component (which owns the
 // select↔zoom coupling) stays the single place that decides zoom side-effects.
@@ -125,9 +161,39 @@ function onSelect(e: Event): void {
           :cursor-idx="cursorIdx"
           :line="lapStore.line"
           :highlight-laps="highlightLaps"
+          :color-values="colorValues"
+          :colormap="trackColormap"
           @cursor="analyzer.setCursor"
           @update:line="lapStore.setLine($event)"
         />
+        <div class="track-color">
+          <label class="tc-channel">
+            <span>{{ t('analyzer.trackColor') }}</span>
+            <SearchableSelect
+              :model-value="trackColorChannel"
+              :options="channelOptions"
+              @update:model-value="analyzer.setTrackColorChannel($event)"
+            />
+          </label>
+          <div v-if="heatNorm" class="tc-maps" role="group" :aria-label="t('analyzer.colormap')">
+            <button
+              v-for="id in COLORMAP_IDS"
+              :key="id"
+              type="button"
+              class="tc-swatch"
+              :class="{ active: trackColormap === id }"
+              :style="{ background: colormapPreview(id) }"
+              :title="id"
+              @click="analyzer.setTrackColormap(id)"
+            />
+          </div>
+        </div>
+        <div v-if="heatNorm" class="tc-legend">
+          <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
+          <span class="tc-bar" :style="{ background: legendGradient }" />
+          <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
+          <span class="tc-name">{{ trackColorChannel }}</span>
+        </div>
         <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
         <div class="laps">
           <span class="lap-count">{{
@@ -224,6 +290,58 @@ function onSelect(e: Event): void {
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   padding: calc(var(--space) * 1.5);
+}
+.track-color {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: var(--space);
+}
+.tc-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  flex: 1 1 220px;
+  min-width: 200px;
+}
+.tc-channel :deep(.ss) {
+  flex: 1;
+}
+.tc-maps {
+  display: inline-flex;
+  gap: 6px;
+}
+.tc-swatch {
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.tc-swatch.active {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.tc-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--space);
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.tc-bar {
+  flex: 0 1 200px;
+  height: 10px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+}
+.tc-name {
+  color: var(--color-text);
 }
 .line-hint {
   margin: calc(var(--space) * 1.5) 0 0;

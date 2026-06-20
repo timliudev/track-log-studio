@@ -4,12 +4,15 @@ import type { LocaleCode } from '@/i18n'
 
 export type ThemePref = 'auto' | 'light' | 'dark'
 export type LocalePref = 'auto' | LocaleCode
+/** Timezone for clock-time axis labels: 'auto' (browser) or offset minutes east of UTC. */
+export type TzOverride = 'auto' | number
 
 const STORAGE_KEY = 'aracer-loga.settings.v1'
 
 interface PersistedSettings {
   themePref: ThemePref
   localePref: LocalePref
+  tzOverride: TzOverride
 }
 
 function loadPersisted(): Partial<PersistedSettings> {
@@ -30,11 +33,13 @@ export const useSettingsStore = defineStore('settings', () => {
   const persisted = loadPersisted()
   const themePref = ref<ThemePref>(persisted.themePref ?? 'auto')
   const localePref = ref<LocalePref>(persisted.localePref ?? 'auto')
+  const tzOverride = ref<TzOverride>(persisted.tzOverride ?? 'auto')
 
-  watch([themePref, localePref], () => {
+  watch([themePref, localePref, tzOverride], () => {
     const data: PersistedSettings = {
       themePref: themePref.value,
       localePref: localePref.value,
+      tzOverride: tzOverride.value,
     }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -47,6 +52,7 @@ export const useSettingsStore = defineStore('settings', () => {
     const data: PersistedSettings = {
       themePref: themePref.value,
       localePref: localePref.value,
+      tzOverride: tzOverride.value,
     }
     return JSON.stringify(data, null, 2)
   }
@@ -55,7 +61,8 @@ export const useSettingsStore = defineStore('settings', () => {
     const data = JSON.parse(json) as Partial<PersistedSettings>
     if (data.themePref) themePref.value = data.themePref
     if (data.localePref) localePref.value = data.localePref
+    if (data.tzOverride !== undefined) tzOverride.value = data.tzOverride
   }
 
-  return { themePref, localePref, exportJson, importJson }
+  return { themePref, localePref, tzOverride, exportJson, importJson }
 })
