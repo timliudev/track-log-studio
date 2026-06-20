@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LapLine } from '@/domain/analysis/laps'
+import { colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import { fitProjection, type MapProjection } from './projection'
 
 const props = defineProps<{
@@ -10,7 +11,17 @@ const props = defineProps<{
   line: LapLine | null
   /** Selected laps to draw, each as a colored [startIdx, endIdx] segment. */
   highlightLaps?: { startIdx: number; endIdx: number; color: string }[]
+  /**
+   * Per-sample normalised value in [0, 1] (NaN where uncoloured) for the track
+   * heatmap, or null to draw the plain track. Colours come from {@link colormap}.
+   */
+  colorValues?: Float64Array | null
+  colormap?: ColormapId
 }>()
+
+// Number of discrete colour buckets: caps strokes per frame regardless of
+// sample count, so the heatmap stays as cheap as the plain single-stroke track.
+const HEAT_BUCKETS = 32
 const emit = defineEmits<{ cursor: [number | null]; 'update:line': [LapLine] }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -92,22 +103,63 @@ function draw(): void {
     ctx.stroke()
   }
 
+  // Heatmap: stroke [lo, hi] gradient-coloured by props.colorValues. Segments are
+  // bucketed by their (quantised) value so we issue at most HEAT_BUCKETS strokes
+  // instead of one per segment. A segment is skipped if either endpoint is a gap
+  // (NaN px) or has no colour (NaN value).
+  const colorVals = props.colorValues
+  const swatches = colorVals ? colormapSwatches(props.colormap ?? 'turbo', HEAT_BUCKETS) : []
+  const strokeHeatmap = (lo: number, hi: number, width: number): void => {
+    if (!colorVals) return
+    const buckets: number[][] = Array.from({ length: HEAT_BUCKETS }, () => [])
+    for (let i = lo; i < hi; i++) {
+      if (Number.isNaN(px![i]) || Number.isNaN(px![i + 1])) continue
+      const va = colorVals[i]
+      const vb = colorVals[i + 1]
+      if (Number.isNaN(va) || Number.isNaN(vb)) continue
+      const b = Math.min(HEAT_BUCKETS - 1, Math.max(0, Math.round(((va + vb) / 2) * (HEAT_BUCKETS - 1))))
+      buckets[b].push(i)
+    }
+    ctx.lineWidth = width
+    for (let b = 0; b < HEAT_BUCKETS; b++) {
+      const seg = buckets[b]
+      if (seg.length === 0) continue
+      ctx.strokeStyle = swatches[b]
+      ctx.beginPath()
+      for (const i of seg) {
+        ctx.moveTo(px![i], py![i])
+        ctx.lineTo(px![i + 1], py![i + 1])
+      }
+      ctx.stroke()
+    }
+  }
+
   const highlightLaps = props.highlightLaps ?? []
+  const heat = !!colorVals
 
-  // Full-track polyline. With no selection it's the normal muted track; with a
-  // selection we draw it faint (border color) for context and let the selected
-  // laps stand out, per "only show selected laps".
-  ctx.strokeStyle = cssVar(highlightLaps.length ? '--color-border' : '--color-text-muted')
-  ctx.lineWidth = 2
-  strokeRange(0, n - 1)
+  // Full-track polyline. With no selection it's the normal muted track (or the
+  // heatmap if active); with a selection we draw it faint (border color) for
+  // context and let the selected laps stand out, per "only show selected laps".
+  if (heat && !highlightLaps.length) {
+    strokeHeatmap(0, n - 1, 2.5)
+  } else {
+    ctx.strokeStyle = cssVar(highlightLaps.length ? '--color-border' : '--color-text-muted')
+    ctx.lineWidth = 2
+    strokeRange(0, n - 1)
+  }
 
-  // Selected laps: each [startIdx, endIdx] segment in its own color, thicker.
+  // Selected laps: each [startIdx, endIdx] segment, thicker. Heatmap-coloured by
+  // value when a heatmap channel is chosen, else its per-lap identity color.
   for (const lap of highlightLaps) {
     const lo = Math.max(0, Math.min(lap.startIdx, lap.endIdx))
     const hi = Math.min(n - 1, Math.max(lap.startIdx, lap.endIdx))
-    ctx.strokeStyle = lap.color
-    ctx.lineWidth = 3
-    strokeRange(lo, hi)
+    if (heat) {
+      strokeHeatmap(lo, hi, 3)
+    } else {
+      ctx.strokeStyle = lap.color
+      ctx.lineWidth = 3
+      strokeRange(lo, hi)
+    }
   }
 
   // start/finish line + draggable endpoints
@@ -232,6 +284,8 @@ watch(() => props.track, () => draw())
 watch(() => props.cursorIdx, () => draw())
 watch(() => props.line, () => draw())
 watch(() => props.highlightLaps, () => draw())
+watch(() => props.colorValues, () => draw())
+watch(() => props.colormap, () => draw())
 </script>
 
 <template>

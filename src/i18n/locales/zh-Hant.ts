@@ -15,6 +15,8 @@ export default {
   settings: {
     heading: '設定',
     futureNote: '更多設定（設定匯出 / 匯入等）將陸續加入。',
+    timezone: '時區',
+    timezoneAuto: '自動（瀏覽器）',
   },
   fileBar: {
     load: '載入記錄 (.loga / .nmea / .zip)',
@@ -68,6 +70,8 @@ export default {
     modeTimeline: '時間軸',
     modeOverlay: '疊圈',
     overlayHint: '在下方圈次表選取要疊比的圈（色＝圈、線型＝通道，X 從 0 對齊）',
+    trackColor: '軌跡上色',
+    colormap: '色階',
   },
   suspension: {
     heading: '避震校正',

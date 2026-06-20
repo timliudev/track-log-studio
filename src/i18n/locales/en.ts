@@ -15,6 +15,8 @@ export default {
   settings: {
     heading: 'Settings',
     futureNote: 'More settings (export / import, etc.) coming soon.',
+    timezone: 'Time zone',
+    timezoneAuto: 'Auto (browser)',
   },
   fileBar: {
     load: 'Load files (.loga / .nmea / .zip)',
@@ -68,6 +70,8 @@ export default {
     modeTimeline: 'Timeline',
     modeOverlay: 'Overlay',
     overlayHint: 'Select laps in the table below to overlay (colour = lap, line style = channel, X aligned from 0)',
+    trackColor: 'Track colour',
+    colormap: 'Colormap',
   },
   suspension: {
     heading: 'Suspension calibration',

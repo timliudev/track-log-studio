@@ -4,9 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
 import { useAnalyzerStore, type ChartConfig, type ChartMode } from '@/stores/analyzerStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
+import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
+import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { lapColor } from './lapColors'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
@@ -28,6 +31,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const analyzer = useAnalyzerStore()
 const { xAxis } = storeToRefs(analyzer)
+const settings = useSettingsStore()
+const { tzOverride } = storeToRefs(settings)
 
 const PALETTE = ['#e23b3b', '#3b82e2', '#2ea043', '#e2a33b', '#9b3be2', '#3bd6e2']
 const color = (i: number): string => PALETTE[i % PALETTE.length]
@@ -93,24 +98,80 @@ const series = computed<uPlot.Series[]>(() =>
   mode.value === 'overlay' ? overlaySeries.value : timelineSeries.value,
 )
 
+// Absolute start instant (elapsed=0) of this session, for the clock-time axis.
+const anchor = computed(() => sessionStartAnchor(props.session))
+
+// Effective timezone offset (minutes east of UTC) for clock labels. 'auto' uses
+// the browser zone for GPS-derived anchors, but 0 for created-date anchors (whose
+// wall-clock components were reinterpreted as UTC). Reading the browser offset here
+// is display-only — it never becomes stored state.
+const effectiveOffset = computed<number>(() => {
+  if (tzOverride.value !== 'auto') return tzOverride.value
+  if (anchor.value?.source === 'gpsUtc') return -new Date().getTimezoneOffset()
+  return 0
+})
+
+// Label for the clock axis, e.g. 'UTC+8', 'UTC-3:30', 'UTC'.
+const clockAxisLabel = computed<string>(() => {
+  const off = effectiveOffset.value
+  if (off === 0) return 'UTC'
+  const sign = off > 0 ? '+' : '-'
+  const abs = Math.abs(off)
+  const hours = Math.floor(abs / 60)
+  const mins = abs % 60
+  return `UTC${sign}${hours}${mins ? ':' + mins.toString().padStart(2, '0') : ''}`
+})
+
 // x axis + up to two value axes; in timeline mode they're coloured per series,
 // in overlay mode colour means "lap" so the channel axes stay theme-neutral.
-const axes = computed<uPlot.Axis[]>(() => [
-  { scale: 'x' },
-  ...present.value.slice(0, 2).map((n, i) => ({
-    scale: n,
-    side: i === 0 ? 3 : 1,
-    ...(mode.value === 'overlay' ? { label: n } : { stroke: color(i) }),
-  })),
-])
+// In timeline + time mode an extra bottom x-axis shows absolute clock time.
+const axes = computed<uPlot.Axis[]>(() => {
+  const xValuesFmt = (_u: uPlot, splits: number[]): string[] =>
+    splits.map((v) => (xAxis.value === 'distance' ? formatDistance(v) : formatElapsed(v)))
+  const showClock = mode.value === 'timeline' && xAxis.value === 'time' && anchor.value != null
+  // Clock labels (HH:mm:ss) are ~2.5× wider than the elapsed labels. Widen the
+  // tick spacing on BOTH x-axes so they pick the same coarser splits — the two
+  // time rows then line up and the clock labels stop colliding.
+  const xSpace = showClock ? 80 : undefined
+  const xAxes: uPlot.Axis[] = [{ scale: 'x', space: xSpace, values: xValuesFmt }]
+  if (showClock) {
+    const startMs = anchor.value!.startUtcMs
+    const offset = effectiveOffset.value
+    xAxes.push({
+      scale: 'x',
+      side: 2,
+      space: xSpace,
+      // The primary x-axis already draws the gridlines; suppress this one's so the
+      // chart isn't double-gridded.
+      grid: { show: false },
+      label: clockAxisLabel.value,
+      values: (_u: uPlot, splits: number[]): string[] =>
+        splits.map((v) => formatClock(startMs + v * 1000, offset)),
+    })
+  }
+  return [
+    ...xAxes,
+    ...present.value.slice(0, 2).map((n, i) => ({
+      scale: n,
+      side: i === 0 ? 3 : 1,
+      ...(mode.value === 'overlay' ? { label: n } : { stroke: color(i) }),
+    })),
+  ]
+})
 
-// Overlay's X is a lap-relative index space, unrelated to the session-wide
-// cursor/zoom — so only timeline charts participate in the shared cursor/range.
+// Overlay's X is a lap-relative grid index space, unrelated to the session-wide
+// cursor/zoom. Overlay charts share a SEPARATE cursor (overlayCursorIdx) — all
+// overlay charts build the same grid so the index aligns across them — while
+// timeline charts (and the track map) stay on the session-index cursor/zoom.
 const canRender = computed(() =>
   mode.value === 'overlay' ? present.value.length > 0 && laps.value.length > 0 : present.value.length > 0,
 )
+const effectiveCursor = computed<number | null>(() =>
+  mode.value === 'overlay' ? analyzer.overlayCursorIdx : (props.externalCursor ?? null),
+)
 function onCursor(idx: number | null): void {
-  if (mode.value === 'timeline') emit('cursor', idx)
+  if (mode.value === 'overlay') analyzer.setOverlayCursor(idx)
+  else emit('cursor', idx)
 }
 function onXZoom(r: { min: number; max: number }): void {
   if (mode.value === 'timeline') emit('xZoom', r)
@@ -171,7 +232,7 @@ function removeChannel(name: string): void {
       :series="series"
       :axes="axes"
       :x-range="mode === 'timeline' ? xRange : null"
-      :external-cursor="mode === 'timeline' ? externalCursor : null"
+      :external-cursor="effectiveCursor"
       @cursor="onCursor"
       @x-zoom="onXZoom"
     />
