@@ -70,6 +70,8 @@ export default {
     modeTimeline: 'Timeline',
     modeOverlay: 'Overlay',
     overlayHint: 'Select laps in the table below to overlay (colour = lap, line style = channel, X aligned from 0)',
+    trackColor: 'Track colour',
+    colormap: 'Colormap',
   },
   suspension: {
     heading: 'Suspension calibration',
