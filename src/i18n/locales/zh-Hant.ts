@@ -70,6 +70,8 @@ export default {
     modeTimeline: '時間軸',
     modeOverlay: '疊圈',
     overlayHint: '在下方圈次表選取要疊比的圈（色＝圈、線型＝通道，X 從 0 對齊）',
+    trackColor: '軌跡上色',
+    colormap: '色階',
   },
   suspension: {
     heading: '避震校正',

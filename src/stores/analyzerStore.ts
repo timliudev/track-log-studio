@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { COLORMAP_IDS, type ColormapId } from '@/domain/analysis/colormap'
 
 export type XAxis = 'time' | 'distance'
 
@@ -35,6 +36,11 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // across them — but it's meaningless to timeline charts / the track map, which
   // live in session-index space, hence a distinct ref instead of reusing cursorIdx.
   const overlayCursorIdx = ref<number | null>(null)
+  // Track heatmap (#10/#11): colour the track polyline by this channel's value
+  // (null = plain track) using the chosen colormap. Transient analyzer state
+  // like charts/cursor — not persisted (persistence is queue item D).
+  const trackColorChannel = ref<string | null>(null)
+  const trackColormap = ref<ColormapId>(COLORMAP_IDS[0])
   let nextId = 2
 
   function setXRange(range: { min: number; max: number } | null): void {
@@ -47,6 +53,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setOverlayCursor(i: number | null): void {
     overlayCursorIdx.value = i
+  }
+
+  function setTrackColorChannel(name: string | null): void {
+    trackColorChannel.value = name
+  }
+
+  function setTrackColormap(id: ColormapId): void {
+    trackColormap.value = id
   }
 
   function addChart(): void {
@@ -74,9 +88,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     xRange,
     cursorIdx,
     overlayCursorIdx,
+    trackColorChannel,
+    trackColormap,
     setXRange,
     setCursor,
     setOverlayCursor,
+    setTrackColorChannel,
+    setTrackColormap,
     addChart,
     removeChart,
     setChartChannels,
