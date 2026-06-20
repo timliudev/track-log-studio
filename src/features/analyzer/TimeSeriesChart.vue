@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
 import { useAnalyzerStore, type ChartConfig, type ChartMode } from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
@@ -31,6 +32,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const analyzer = useAnalyzerStore()
 const { xAxis } = storeToRefs(analyzer)
+const lapStore = useLapStore()
 const settings = useSettingsStore()
 const { tzOverride } = storeToRefs(settings)
 
@@ -75,6 +77,8 @@ const overlay = computed(() =>
     xValues: props.xValues,
     channels: present.value.map((n) => ({ name: n, data: props.session.get(n)!.data })),
     laps: laps.value,
+    // Per-lap alignment nudges, resolved to the current axis' units (#9).
+    offsets: laps.value.map((l) => lapStore.offsetOf(l.index, xAxis.value)),
   }),
 )
 const overlayData = computed<uPlot.AlignedData>(

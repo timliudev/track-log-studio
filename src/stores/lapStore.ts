@@ -3,9 +3,22 @@ import { ref } from 'vue'
 import type { LapLine } from '@/domain/analysis/laps'
 import type { Aggregation } from '@/domain/analysis/lapAggregate'
 import type { LapMetric } from '@/domain/analysis/lapMetrics'
+import type { XAxis } from '@/stores/analyzerStore'
 
 /** How laps are detected: a user-placed start/finish line, or the ECU channel. */
 export type LapSource = 'line' | 'ecu'
+
+/**
+ * A lap's manual overlay-alignment shift (#9 GNSS-offset fine-tune), kept
+ * SEPARATELY per X axis because the units differ: `time` is in seconds and
+ * `dist` is in metres — the same units as the overlay's lap-relative X in each
+ * mode. Switching axes therefore preserves both nudges instead of misapplying
+ * one unit's value to the other.
+ */
+export interface LapOffset {
+  time: number
+  dist: number
+}
 
 /**
  * One configurable column in the lap table, backed by a {@link LapMetric}. The
@@ -36,6 +49,9 @@ export const useLapStore = defineStore('lap', () => {
   const columns = ref<LapMetricColumn[]>([])
   // Monotonic id source so column ids stay unique across add/remove.
   let nextColumnId = 1
+  // Per-lap overlay-alignment shifts, keyed by lap index. Absent = {time:0,dist:0}.
+  // The single owner of the #9 alignment nudges; the overlay derives from these.
+  const offsets = ref<Record<number, LapOffset>>({})
 
   function setLine(l: LapLine): void {
     line.value = l
@@ -83,6 +99,30 @@ export const useLapStore = defineStore('lap', () => {
     excluded.value = []
   }
 
+  /** This lap's alignment shift for `axis` (0 when none set). */
+  function offsetOf(index: number, axis: XAxis): number {
+    const o = offsets.value[index]
+    if (!o) return 0
+    return axis === 'distance' ? o.dist : o.time
+  }
+
+  /** Nudge lap `index` along `axis` by `delta` (seconds for time, metres for distance). */
+  function nudgeOffset(index: number, axis: XAxis, delta: number): void {
+    const cur = offsets.value[index] ?? { time: 0, dist: 0 }
+    offsets.value[index] =
+      axis === 'distance' ? { ...cur, dist: cur.dist + delta } : { ...cur, time: cur.time + delta }
+  }
+
+  /** Reset lap `index`'s shift on BOTH axes back to zero. */
+  function resetOffset(index: number): void {
+    delete offsets.value[index]
+  }
+
+  /** Clear every lap's alignment shift. */
+  function clearOffsets(): void {
+    offsets.value = {}
+  }
+
   /** Append a column for any metric kind (channel, lapTime, distance, …). */
   function addColumn(metric: LapMetric): void {
     columns.value.push({ id: nextColumnId++, metric })
@@ -114,6 +154,7 @@ export const useLapStore = defineStore('lap', () => {
     selected,
     excluded,
     columns,
+    offsets,
     setLine,
     clearLine,
     setSource,
@@ -123,6 +164,10 @@ export const useLapStore = defineStore('lap', () => {
     toggleExcluded,
     isExcluded,
     clearExcluded,
+    offsetOf,
+    nudgeOffset,
+    resetOffset,
+    clearOffsets,
     addColumn,
     removeColumn,
     setColumnChannel,
