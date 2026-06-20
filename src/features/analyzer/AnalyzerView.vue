@@ -13,6 +13,7 @@ import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analys
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
+import LapAlignPanel from './LapAlignPanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
@@ -33,6 +34,12 @@ const selectedLaps = computed(() =>
   lapStore.selected
     .map((i) => laps.value.find((l) => l.index === i))
     .filter((l): l is NonNullable<typeof l> => l != null),
+)
+
+// The alignment panel only makes sense when laps are being overlaid: at least
+// one chart in overlay mode and ≥2 laps selected to compare/align.
+const showAlign = computed(
+  () => selectedLaps.value.length >= 2 && charts.value.some((c) => c.mode === 'overlay'),
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
@@ -213,6 +220,10 @@ function onSelect(e: Event): void {
           :has-ecu-laps="hasEcuLaps"
           @select="onLapSelect"
         />
+      </div>
+
+      <div v-if="showAlign" class="card">
+        <LapAlignPanel :selected-laps="selectedLaps" />
       </div>
 
       <div v-for="c in charts" :key="c.id" class="card">

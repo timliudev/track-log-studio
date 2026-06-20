@@ -117,6 +117,45 @@ describe('lapStore', () => {
     expect(s.isExcluded(2)).toBe(false)
   })
 
+  it('offsetOf returns 0 for laps with no nudge, per axis', () => {
+    const s = useLapStore()
+    expect(s.offsetOf(0, 'time')).toBe(0)
+    expect(s.offsetOf(0, 'distance')).toBe(0)
+  })
+
+  it('nudgeOffset accumulates per lap and per axis independently', () => {
+    const s = useLapStore()
+    s.nudgeOffset(2, 'time', 0.05)
+    s.nudgeOffset(2, 'time', 0.05)
+    s.nudgeOffset(2, 'distance', -3)
+    expect(s.offsetOf(2, 'time')).toBeCloseTo(0.1)
+    expect(s.offsetOf(2, 'distance')).toBe(-3)
+    // Other laps are unaffected.
+    expect(s.offsetOf(5, 'time')).toBe(0)
+  })
+
+  it('resetOffset clears one lap on both axes; clearOffsets clears all', () => {
+    const s = useLapStore()
+    s.nudgeOffset(1, 'time', 0.2)
+    s.nudgeOffset(1, 'distance', 5)
+    s.nudgeOffset(4, 'time', -0.1)
+    s.resetOffset(1)
+    expect(s.offsetOf(1, 'time')).toBe(0)
+    expect(s.offsetOf(1, 'distance')).toBe(0)
+    expect(s.offsetOf(4, 'time')).toBeCloseTo(-0.1)
+    s.clearOffsets()
+    expect(s.offsetOf(4, 'time')).toBe(0)
+  })
+
+  it('offsets are independent of selection and exclusion', () => {
+    const s = useLapStore()
+    s.toggleLap(2)
+    s.nudgeOffset(2, 'time', 0.05)
+    s.clearSelection()
+    // Deselecting a lap keeps its alignment offset (re-selecting restores it).
+    expect(s.offsetOf(2, 'time')).toBeCloseTo(0.05)
+  })
+
   it('starts with no configured columns', () => {
     const s = useLapStore()
     expect(s.columns).toEqual([])
