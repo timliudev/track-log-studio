@@ -162,29 +162,75 @@ function draw(): void {
     }
   }
 
-  // start/finish line + draggable endpoints
+  // start/finish line + draggable endpoints. Drawn as a checkered-flag band
+  // (the universal start/finish marker) in the text/surface two-tone so it has
+  // contrast in both themes and reads completely differently from the round red
+  // (--color-accent) cursor dot and the colourful track/heatmap — the #3 fix.
   const line = props.line
   if (line) {
     const a = proj.toPixel(line.a.lat, line.a.lon)
     const b = proj.toPixel(line.b.lat, line.b.lon)
-    ctx.strokeStyle = cssVar('--color-accent')
-    ctx.lineWidth = 3
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-    // Grab handles: an accent fill ringed by the surface colour so they read as
-    // draggable and stay distinct from the (smaller, ring-less) cursor dot.
-    const accent = cssVar('--color-accent')
-    const ring = cssVar('--color-surface')
-    for (const p of [a, b]) {
+    const dark = cssVar('--color-text')
+    const light = cssVar('--color-surface')
+
+    // Checkered band: two rows of alternating squares laid along the line.
+    const dx = b.x - a.x
+    const dy = b.y - a.y
+    const len = Math.hypot(dx, dy)
+    if (len > 1) {
+      const ux = dx / len
+      const uy = dy / len
+      const nx = -uy // unit perpendicular to the line
+      const ny = ux
+      const SQ = 6 // target checker square size (px)
+      const cols = Math.max(2, Math.round(len / SQ))
+      const sq = len / cols // exact size so squares tile the line end-to-end
+      const corner = (along: number, perp: number): [number, number] => [
+        a.x + ux * along + nx * perp,
+        a.y + uy * along + ny * perp,
+      ]
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < 2; r++) {
+          // r = 0 sits above the centre line (perp −sq..0), r = 1 below (0..sq)
+          const a0 = c * sq
+          const a1 = (c + 1) * sq
+          const p0 = (r - 1) * sq
+          const p1 = r * sq
+          ctx.fillStyle = (c + r) % 2 === 0 ? dark : light
+          ctx.beginPath()
+          ctx.moveTo(...corner(a0, p0))
+          ctx.lineTo(...corner(a1, p0))
+          ctx.lineTo(...corner(a1, p1))
+          ctx.lineTo(...corner(a0, p1))
+          ctx.closePath()
+          ctx.fill()
+        }
+      }
+      // Outline so the band stays delineated against either theme background.
+      ctx.strokeStyle = dark
+      ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.arc(p.x, p.y, HANDLE_R, 0, Math.PI * 2)
-      ctx.fillStyle = accent
-      ctx.fill()
-      ctx.lineWidth = 2.5
-      ctx.strokeStyle = ring
+      ctx.moveTo(...corner(0, -sq))
+      ctx.lineTo(...corner(len, -sq))
+      ctx.lineTo(...corner(len, sq))
+      ctx.lineTo(...corner(0, sq))
+      ctx.closePath()
       ctx.stroke()
+    }
+
+    // Grab handles: a 2×2-checker square (surface + text) at each endpoint. The
+    // square shape + checker tie them to the start/finish line and keep them
+    // distinct from the round red cursor/track dots.
+    for (const p of [a, b]) {
+      const s = HANDLE_R // half-side
+      ctx.fillStyle = light
+      ctx.fillRect(p.x - s, p.y - s, s * 2, s * 2)
+      ctx.fillStyle = dark
+      ctx.fillRect(p.x - s, p.y - s, s, s) // top-left
+      ctx.fillRect(p.x, p.y, s, s) // bottom-right
+      ctx.lineWidth = 2
+      ctx.strokeStyle = dark
+      ctx.strokeRect(p.x - s, p.y - s, s * 2, s * 2)
     }
   }
 
