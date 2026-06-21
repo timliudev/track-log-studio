@@ -156,7 +156,7 @@ function onSelect(e: Event): void {
       <div class="toolbar">
         <label class="record">
           <span>{{ t('analyzer.record') }}</span>
-          <select :value="analyzer.activeFileId ?? ''" @change="onSelect">
+          <select name="record" :value="analyzer.activeFileId ?? ''" @change="onSelect">
             <option v-for="f in readyFiles" :key="f.id" :value="f.id">{{ f.name }}</option>
           </select>
         </label>

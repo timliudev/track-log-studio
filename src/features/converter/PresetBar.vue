@@ -29,7 +29,7 @@ function onSave(): void {
     <div class="controls">
       <label class="field">
         <span>{{ t('converter.preset.current') }}</span>
-        <select :value="activePresetId" @change="onSelect">
+        <select name="preset" :value="activePresetId" @change="onSelect">
           <option value="default">{{ t('converter.preset.default') }}</option>
           <option v-if="activePresetId === 'custom'" value="custom">
             {{ t('converter.preset.custom') }}
@@ -51,12 +51,14 @@ function onSave(): void {
 
     <div class="save-row">
       <span>{{ t('converter.preset.saveTo') }}</span>
-      <select v-model.number="saveIndex">
+      <select v-model.number="saveIndex" name="save-slot">
         <option v-for="i in 5" :key="i" :value="i - 1">{{ i }}</option>
       </select>
       <input
         v-model="saveName"
         type="text"
+        name="preset-name"
+        autocomplete="off"
         :placeholder="t('converter.preset.name')"
         class="name-input"
       />

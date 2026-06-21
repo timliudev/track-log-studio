@@ -35,7 +35,7 @@ const buildDate = __BUILD_DATE__
       <div class="controls">
         <label class="control">
           <span>{{ t('theme.label') }}</span>
-          <select v-model="themePref">
+          <select v-model="themePref" name="theme">
             <option value="auto">{{ t('theme.auto') }}</option>
             <option value="light">{{ t('theme.light') }}</option>
             <option value="dark">{{ t('theme.dark') }}</option>
@@ -43,7 +43,7 @@ const buildDate = __BUILD_DATE__
         </label>
         <label class="control">
           <span>{{ t('language.label') }}</span>
-          <select v-model="localePref">
+          <select v-model="localePref" name="locale">
             <option value="auto">{{ t('language.auto') }}</option>
             <option value="zh-Hant">繁體中文</option>
             <option value="en">English</option>
