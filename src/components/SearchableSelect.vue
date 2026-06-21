@@ -73,6 +73,8 @@ function onEnter(): void {
           v-model="query"
           class="ss-search"
           type="search"
+          name="ss-search"
+          autocomplete="off"
           :placeholder="t('converter.mapping.search')"
           @keydown.enter.prevent="onEnter"
           @keydown.esc="close"
