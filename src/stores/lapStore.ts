@@ -9,16 +9,22 @@ import type { XAxis } from '@/stores/analyzerStore'
 export type LapSource = 'line' | 'ecu'
 
 /**
- * A lap's manual overlay-alignment shift (#9 GNSS-offset fine-tune), kept
- * SEPARATELY per X axis because the units differ: `time` is in seconds and
- * `dist` is in metres — the same units as the overlay's lap-relative X in each
- * mode. Switching axes therefore preserves both nudges instead of misapplying
- * one unit's value to the other.
+ * A lap's manual alignment shift (#9 GNSS-offset fine-tune). Two independent
+ * facets:
+ *  - CHART X-axis nudge, kept SEPARATELY per axis because the units differ:
+ *    `time` (seconds) and `dist` (metres) — the same units as the overlay's
+ *    lap-relative X in each mode, so switching axes preserves both nudges.
+ *  - MAP 2-D position nudge `mapX`/`mapY` in METRES (east+/north+), to align
+ *    racing lines that GNSS drift has offset between laps on the track map.
  */
 export interface LapOffset {
   time: number
   dist: number
+  mapX: number
+  mapY: number
 }
+
+const ZERO_OFFSET: LapOffset = { time: 0, dist: 0, mapX: 0, mapY: 0 }
 
 /**
  * One configurable column in the lap table, backed by a {@link LapMetric}. The
@@ -99,26 +105,45 @@ export const useLapStore = defineStore('lap', () => {
     excluded.value = []
   }
 
-  /** This lap's alignment shift for `axis` (0 when none set). */
+  /** This lap's CHART shift for `axis` (0 when none set). */
   function offsetOf(index: number, axis: XAxis): number {
     const o = offsets.value[index]
     if (!o) return 0
     return axis === 'distance' ? o.dist : o.time
   }
 
-  /** Nudge lap `index` along `axis` by `delta` (seconds for time, metres for distance). */
+  /** This lap's MAP position shift in metres (east+/north+); zero when none set. */
+  function mapOffsetOf(index: number): { x: number; y: number } {
+    const o = offsets.value[index]
+    return o ? { x: o.mapX, y: o.mapY } : { x: 0, y: 0 }
+  }
+
+  /** Nudge lap `index`'s CHART shift along `axis` (seconds for time, metres for distance). */
   function nudgeOffset(index: number, axis: XAxis, delta: number): void {
-    const cur = offsets.value[index] ?? { time: 0, dist: 0 }
+    const cur = offsets.value[index] ?? { ...ZERO_OFFSET }
     offsets.value[index] =
       axis === 'distance' ? { ...cur, dist: cur.dist + delta } : { ...cur, time: cur.time + delta }
   }
 
-  /** Reset lap `index`'s shift on BOTH axes back to zero. */
-  function resetOffset(index: number): void {
-    delete offsets.value[index]
+  /** Nudge lap `index`'s MAP position by (`dx` east, `dy` north) metres. */
+  function nudgeMapOffset(index: number, dx: number, dy: number): void {
+    const cur = offsets.value[index] ?? { ...ZERO_OFFSET }
+    offsets.value[index] = { ...cur, mapX: cur.mapX + dx, mapY: cur.mapY + dy }
   }
 
-  /** Clear every lap's alignment shift. */
+  /** Reset lap `index`'s CHART shift (both axes) to zero; keeps the map shift. */
+  function resetOffset(index: number): void {
+    const cur = offsets.value[index]
+    if (cur) offsets.value[index] = { ...cur, time: 0, dist: 0 }
+  }
+
+  /** Reset lap `index`'s MAP shift to zero; keeps the chart shift. */
+  function resetMapOffset(index: number): void {
+    const cur = offsets.value[index]
+    if (cur) offsets.value[index] = { ...cur, mapX: 0, mapY: 0 }
+  }
+
+  /** Clear every lap's alignment shift (both facets). */
   function clearOffsets(): void {
     offsets.value = {}
   }
@@ -165,8 +190,11 @@ export const useLapStore = defineStore('lap', () => {
     isExcluded,
     clearExcluded,
     offsetOf,
+    mapOffsetOf,
     nudgeOffset,
+    nudgeMapOffset,
     resetOffset,
+    resetMapOffset,
     clearOffsets,
     addColumn,
     removeColumn,
