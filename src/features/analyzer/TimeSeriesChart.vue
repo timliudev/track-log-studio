@@ -81,8 +81,18 @@ const overlay = computed(() =>
     offsets: laps.value.map((l) => lapStore.offsetOf(l.index, xAxis.value)),
   }),
 )
+// uPlot seeds a scale's range from a series' first in-range sample and treats
+// only `null` (not NaN) as a gap. Once a lap is nudged off grid-0 its trace
+// starts with a NaN, which would poison the shared channel scale to
+// [null, null] and hide EVERY line (the data is still there — the cursor
+// readout works — but nothing draws). Convert gaps to null so uPlot skips them
+// in both range and path. (Only the y series carry gaps; the x grid is finite.)
 const overlayData = computed<uPlot.AlignedData>(
-  () => [overlay.value.x, ...overlay.value.series.map((s) => s.y)] as unknown as uPlot.AlignedData,
+  () =>
+    [
+      overlay.value.x,
+      ...overlay.value.series.map((s) => Array.from(s.y, (v) => (Number.isFinite(v) ? v : null))),
+    ] as unknown as uPlot.AlignedData,
 )
 const overlaySeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
