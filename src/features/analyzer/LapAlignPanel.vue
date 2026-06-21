@@ -37,13 +37,19 @@ const anyOffset = computed(() =>
 function nudge(index: number, dir: -1 | 1): void {
   lapStore.nudgeOffset(index, xAxis.value, dir * step.value)
 }
+
+// Reset the CHART offset of the shown (selected) laps only; map offsets are left
+// untouched (those have their own panel/reset).
+function resetAll(): void {
+  props.selectedLaps.forEach((l) => lapStore.resetOffset(l.index))
+}
 </script>
 
 <template>
   <section class="align" :aria-label="t('analyzer.alignTitle')">
     <div class="head">
       <span class="title">{{ t('analyzer.alignTitle') }}</span>
-      <button v-if="anyOffset" type="button" class="reset-all" @click="lapStore.clearOffsets()">
+      <button v-if="anyOffset" type="button" class="reset-all" @click="resetAll">
         {{ t('analyzer.alignResetAll') }}
       </button>
     </div>

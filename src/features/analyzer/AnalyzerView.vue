@@ -14,6 +14,7 @@ import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
+import MapAlignPanel from './MapAlignPanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
@@ -43,13 +44,20 @@ const showAlign = computed(
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
+// `offset` is the per-lap MAP position nudge (metres east/north) so GNSS-drifted
+// racing lines can be aligned on the track map (#9 spatial half).
 const highlightLaps = computed(() =>
   selectedLaps.value.map((lap, order) => ({
     startIdx: lap.startIdx,
     endIdx: lap.endIdx,
     color: lapColor(order),
+    offset: lapStore.mapOffsetOf(lap.index),
   })),
 )
+
+// The map-alignment panel applies to whatever laps are drawn on the map, so it
+// shows whenever ≥2 laps are selected (independent of any overlay chart).
+const showMapAlign = computed(() => selectedLaps.value.length >= 2)
 
 // --- Track heatmap (#10/#11): colour the track by a channel's value. ---
 // Channels offered for colouring (all of them, sorted), for the picker.
@@ -220,6 +228,10 @@ function onSelect(e: Event): void {
           :has-ecu-laps="hasEcuLaps"
           @select="onLapSelect"
         />
+      </div>
+
+      <div v-if="showMapAlign" class="card">
+        <MapAlignPanel :selected-laps="selectedLaps" />
       </div>
 
       <div v-if="showAlign" class="card">
