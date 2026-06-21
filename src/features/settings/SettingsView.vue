@@ -32,7 +32,7 @@ const tzModel = computed<string>({
     <div class="card">
       <label class="control">
         <span>{{ t('settings.timezone') }}</span>
-        <select v-model="tzModel">
+        <select v-model="tzModel" name="timezone">
           <option value="auto">{{ t('settings.timezoneAuto') }}</option>
           <option v-for="h in tzHours" :key="h" :value="String(h * 60)">{{ tzLabel(h) }}</option>
         </select>

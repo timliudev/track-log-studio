@@ -124,10 +124,12 @@ export function useLaps(): {
     (next, prev) => {
       if (prev && next !== prev) {
         lapStore.clearLine()
-        // Lap selection and garbage exclusions are keyed by lap index, which is
-        // meaningless across a different recording — clear them on file change.
+        // Lap selection, garbage exclusions and alignment offsets are keyed by
+        // lap index, which is meaningless across a different recording — clear
+        // them all on file change.
         lapStore.clearSelection()
         lapStore.clearExcluded()
+        lapStore.clearOffsets()
       }
       if (next && lapStore.line == null) {
         const seeded = defaultLine(next)

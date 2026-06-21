@@ -13,6 +13,8 @@ import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analys
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
+import LapAlignPanel from './LapAlignPanel.vue'
+import MapAlignPanel from './MapAlignPanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
@@ -35,14 +37,27 @@ const selectedLaps = computed(() =>
     .filter((l): l is NonNullable<typeof l> => l != null),
 )
 
+// The alignment panel only makes sense when laps are being overlaid: at least
+// one chart in overlay mode and ≥2 laps selected to compare/align.
+const showAlign = computed(
+  () => selectedLaps.value.length >= 2 && charts.value.some((c) => c.mode === 'overlay'),
+)
+
 // One colored segment per selected lap; color is assigned by selection order.
+// `offset` is the per-lap MAP position nudge (metres east/north) so GNSS-drifted
+// racing lines can be aligned on the track map (#9 spatial half).
 const highlightLaps = computed(() =>
   selectedLaps.value.map((lap, order) => ({
     startIdx: lap.startIdx,
     endIdx: lap.endIdx,
     color: lapColor(order),
+    offset: lapStore.mapOffsetOf(lap.index),
   })),
 )
+
+// The map-alignment panel applies to whatever laps are drawn on the map, so it
+// shows whenever ≥2 laps are selected (independent of any overlay chart).
+const showMapAlign = computed(() => selectedLaps.value.length >= 2)
 
 // --- Track heatmap (#10/#11): colour the track by a channel's value. ---
 // Channels offered for colouring (all of them, sorted), for the picker.
@@ -141,7 +156,7 @@ function onSelect(e: Event): void {
       <div class="toolbar">
         <label class="record">
           <span>{{ t('analyzer.record') }}</span>
-          <select :value="analyzer.activeFileId ?? ''" @change="onSelect">
+          <select name="record" :value="analyzer.activeFileId ?? ''" @change="onSelect">
             <option v-for="f in readyFiles" :key="f.id" :value="f.id">{{ f.name }}</option>
           </select>
         </label>
@@ -213,6 +228,14 @@ function onSelect(e: Event): void {
           :has-ecu-laps="hasEcuLaps"
           @select="onLapSelect"
         />
+      </div>
+
+      <div v-if="showMapAlign" class="card">
+        <MapAlignPanel :selected-laps="selectedLaps" />
+      </div>
+
+      <div v-if="showAlign" class="card">
+        <LapAlignPanel :selected-laps="selectedLaps" />
       </div>
 
       <div v-for="c in charts" :key="c.id" class="card">

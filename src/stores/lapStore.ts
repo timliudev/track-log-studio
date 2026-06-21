@@ -3,9 +3,28 @@ import { ref } from 'vue'
 import type { LapLine } from '@/domain/analysis/laps'
 import type { Aggregation } from '@/domain/analysis/lapAggregate'
 import type { LapMetric } from '@/domain/analysis/lapMetrics'
+import type { XAxis } from '@/stores/analyzerStore'
 
 /** How laps are detected: a user-placed start/finish line, or the ECU channel. */
 export type LapSource = 'line' | 'ecu'
+
+/**
+ * A lap's manual alignment shift (#9 GNSS-offset fine-tune). Two independent
+ * facets:
+ *  - CHART X-axis nudge, kept SEPARATELY per axis because the units differ:
+ *    `time` (seconds) and `dist` (metres) — the same units as the overlay's
+ *    lap-relative X in each mode, so switching axes preserves both nudges.
+ *  - MAP 2-D position nudge `mapX`/`mapY` in METRES (east+/north+), to align
+ *    racing lines that GNSS drift has offset between laps on the track map.
+ */
+export interface LapOffset {
+  time: number
+  dist: number
+  mapX: number
+  mapY: number
+}
+
+const ZERO_OFFSET: LapOffset = { time: 0, dist: 0, mapX: 0, mapY: 0 }
 
 /**
  * One configurable column in the lap table, backed by a {@link LapMetric}. The
@@ -36,6 +55,9 @@ export const useLapStore = defineStore('lap', () => {
   const columns = ref<LapMetricColumn[]>([])
   // Monotonic id source so column ids stay unique across add/remove.
   let nextColumnId = 1
+  // Per-lap overlay-alignment shifts, keyed by lap index. Absent = {time:0,dist:0}.
+  // The single owner of the #9 alignment nudges; the overlay derives from these.
+  const offsets = ref<Record<number, LapOffset>>({})
 
   function setLine(l: LapLine): void {
     line.value = l
@@ -83,6 +105,49 @@ export const useLapStore = defineStore('lap', () => {
     excluded.value = []
   }
 
+  /** This lap's CHART shift for `axis` (0 when none set). */
+  function offsetOf(index: number, axis: XAxis): number {
+    const o = offsets.value[index]
+    if (!o) return 0
+    return axis === 'distance' ? o.dist : o.time
+  }
+
+  /** This lap's MAP position shift in metres (east+/north+); zero when none set. */
+  function mapOffsetOf(index: number): { x: number; y: number } {
+    const o = offsets.value[index]
+    return o ? { x: o.mapX, y: o.mapY } : { x: 0, y: 0 }
+  }
+
+  /** Nudge lap `index`'s CHART shift along `axis` (seconds for time, metres for distance). */
+  function nudgeOffset(index: number, axis: XAxis, delta: number): void {
+    const cur = offsets.value[index] ?? { ...ZERO_OFFSET }
+    offsets.value[index] =
+      axis === 'distance' ? { ...cur, dist: cur.dist + delta } : { ...cur, time: cur.time + delta }
+  }
+
+  /** Nudge lap `index`'s MAP position by (`dx` east, `dy` north) metres. */
+  function nudgeMapOffset(index: number, dx: number, dy: number): void {
+    const cur = offsets.value[index] ?? { ...ZERO_OFFSET }
+    offsets.value[index] = { ...cur, mapX: cur.mapX + dx, mapY: cur.mapY + dy }
+  }
+
+  /** Reset lap `index`'s CHART shift (both axes) to zero; keeps the map shift. */
+  function resetOffset(index: number): void {
+    const cur = offsets.value[index]
+    if (cur) offsets.value[index] = { ...cur, time: 0, dist: 0 }
+  }
+
+  /** Reset lap `index`'s MAP shift to zero; keeps the chart shift. */
+  function resetMapOffset(index: number): void {
+    const cur = offsets.value[index]
+    if (cur) offsets.value[index] = { ...cur, mapX: 0, mapY: 0 }
+  }
+
+  /** Clear every lap's alignment shift (both facets). */
+  function clearOffsets(): void {
+    offsets.value = {}
+  }
+
   /** Append a column for any metric kind (channel, lapTime, distance, …). */
   function addColumn(metric: LapMetric): void {
     columns.value.push({ id: nextColumnId++, metric })
@@ -114,6 +179,7 @@ export const useLapStore = defineStore('lap', () => {
     selected,
     excluded,
     columns,
+    offsets,
     setLine,
     clearLine,
     setSource,
@@ -123,6 +189,13 @@ export const useLapStore = defineStore('lap', () => {
     toggleExcluded,
     isExcluded,
     clearExcluded,
+    offsetOf,
+    mapOffsetOf,
+    nudgeOffset,
+    nudgeMapOffset,
+    resetOffset,
+    resetMapOffset,
+    clearOffsets,
     addColumn,
     removeColumn,
     setColumnChannel,

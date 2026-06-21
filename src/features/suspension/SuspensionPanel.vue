@@ -68,6 +68,7 @@ function preview(part: SuspensionPart): string {
         <label class="enable">
           <input
             type="checkbox"
+            :name="`${part}-enabled`"
             :checked="susp.config[part].enabled"
             @change="susp.setChannel(part, { enabled: checked($event) })"
           />
@@ -80,6 +81,7 @@ function preview(part: SuspensionPart): string {
         <label class="field">
           <span>{{ t('suspension.source') }}</span>
           <select
+            :name="`${part}-source`"
             :value="susp.config[part].source"
             @change="susp.setChannel(part, { source: ($event.target as HTMLSelectElement).value as AdSource })"
           >
@@ -89,23 +91,23 @@ function preview(part: SuspensionPart): string {
         </label>
         <label class="field">
           <span>{{ t('suspension.minMv') }}</span>
-          <input type="number" :value="susp.config[part].minMv" @input="susp.setChannel(part, { minMv: num($event) })" />
+          <input type="number" :name="`${part}-minMv`" :value="susp.config[part].minMv" @input="susp.setChannel(part, { minMv: num($event) })" />
         </label>
         <label class="field">
           <span>{{ t('suspension.maxMv') }}</span>
-          <input type="number" :value="susp.config[part].maxMv" @input="susp.setChannel(part, { maxMv: num($event) })" />
+          <input type="number" :name="`${part}-maxMv`" :value="susp.config[part].maxMv" @input="susp.setChannel(part, { maxMv: num($event) })" />
         </label>
         <label class="field">
           <span>{{ t('suspension.zeroMv') }}</span>
-          <input type="number" :value="susp.config[part].zeroMv" @input="susp.setChannel(part, { zeroMv: num($event) })" />
+          <input type="number" :name="`${part}-zeroMv`" :value="susp.config[part].zeroMv" @input="susp.setChannel(part, { zeroMv: num($event) })" />
         </label>
         <label class="field">
           <span>{{ t('suspension.minMm') }}</span>
-          <input type="number" :value="susp.config[part].minMm" @input="susp.setChannel(part, { minMm: num($event) })" />
+          <input type="number" :name="`${part}-minMm`" :value="susp.config[part].minMm" @input="susp.setChannel(part, { minMm: num($event) })" />
         </label>
         <label class="field">
           <span>{{ t('suspension.maxMm') }}</span>
-          <input type="number" :value="susp.config[part].maxMm" @input="susp.setChannel(part, { maxMm: num($event) })" />
+          <input type="number" :name="`${part}-maxMm`" :value="susp.config[part].maxMm" @input="susp.setChannel(part, { maxMm: num($event) })" />
         </label>
       </div>
 
