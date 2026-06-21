@@ -133,8 +133,14 @@ export function buildLapOverlay(input: LapOverlayInput): LapOverlayResult {
     if (o + ext > gridMax) gridMax = o + ext
   })
 
+  // Guard the degenerate case (every lap's extent non-finite/zero, so span ≤ 0):
+  // force a minimal positive span so the grid is always STRICTLY increasing.
+  // uPlot needs an ascending x array — feeding it all-equal values blanks the
+  // whole chart, so never let that happen regardless of the input data.
+  const span = gridMax - gridMin
+  const safeSpan = span > 0 ? span : 1
   const grid = new Float64Array(gridPoints)
-  const step = gridPoints > 1 ? (gridMax - gridMin) / (gridPoints - 1) : 0
+  const step = gridPoints > 1 ? safeSpan / (gridPoints - 1) : 0
   for (let g = 0; g < gridPoints; g++) grid[g] = gridMin + g * step
 
   const series: LapOverlaySeries[] = []
