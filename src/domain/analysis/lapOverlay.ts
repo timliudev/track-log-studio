@@ -17,6 +17,13 @@ export interface LapOverlayInput {
   channels: OverlayChannel[]
   /** Laps to overlay, in the order their colours should be assigned. */
   laps: Lap[]
+  /**
+   * Optional per-lap X shift (parallel to `laps`, same units as `xValues`),
+   * added to each lap's lap-relative X so the user can nudge laps left/right to
+   * align corresponding features (the #9 GNSS-offset fine-tune). Missing/omitted
+   * entries are treated as 0; all-zero offsets reproduce the un-shifted overlay.
+   */
+  offsets?: number[]
   /** Number of points on the shared lap-relative grid (default 600). */
   gridPoints?: number
 }
@@ -46,43 +53,45 @@ function lapRelExtent(xValues: ArrayLike<number>, lap: Lap): number {
 
 /**
  * Linear-interpolate a channel onto `grid`, where the source samples are the
- * lap's relative-X (`xValues[i] - x0`) against the channel value. Both `grid`
- * and the source relative-X are ascending, so a single forward-moving pointer
- * walks the source once. Grid points beyond the lap's own extent → NaN (the
- * line simply ends); non-finite source samples are skipped.
+ * lap's relative-X (`xValues[i] - x0 + offset`) against the channel value. The
+ * `offset` slides this lap along the shared grid (the #9 alignment nudge). Both
+ * `grid` and the source relative-X are ascending, so a single forward-moving
+ * pointer walks the source once. Grid points outside this lap's own (shifted)
+ * span → NaN (the line simply ends); non-finite source samples are skipped.
  */
 function resampleLap(
   grid: Float64Array,
   xValues: ArrayLike<number>,
   data: ArrayLike<number>,
   lap: Lap,
+  offset: number,
 ): Float64Array {
   const y = new Float64Array(grid.length).fill(NaN)
   const x0 = xValues[lap.startIdx]
-  const extent = xValues[lap.endIdx] - x0
 
   // Collect this lap's valid (relX, value) samples in order. relX is ascending
-  // because xValues is non-decreasing; equal-X duplicates are harmless (the
-  // interpolation just picks the first segment that brackets a grid point).
+  // because xValues is non-decreasing (offset is a constant shift); equal-X
+  // duplicates are harmless (the interpolation just picks the first segment that
+  // brackets a grid point).
   const relX: number[] = []
   const val: number[] = []
   for (let i = lap.startIdx; i <= lap.endIdx; i++) {
     const v = data[i]
     if (!Number.isFinite(v)) continue
-    relX.push(xValues[i] - x0)
+    relX.push(xValues[i] - x0 + offset)
     val.push(v)
   }
   if (relX.length === 0) return y
 
+  const lo = relX[0]
+  const hi = relX[relX.length - 1]
   let p = 0 // index of the source segment start being considered
   for (let g = 0; g < grid.length; g++) {
     const gx = grid[g]
-    if (gx > extent) break // past this lap → leave the rest NaN
+    if (gx < lo || gx > hi) continue // outside this lap's shifted span → NaN
     // Advance until relX[p+1] >= gx, so [p, p+1] brackets gx.
     while (p < relX.length - 1 && relX[p + 1] < gx) p++
-    if (gx <= relX[0]) {
-      y[g] = val[0]
-    } else if (p >= relX.length - 1) {
+    if (p >= relX.length - 1) {
       y[g] = val[relX.length - 1]
     } else {
       const xa = relX[p]
@@ -103,22 +112,36 @@ function resampleLap(
  * Pure; returns an empty result when there are no laps or channels.
  */
 export function buildLapOverlay(input: LapOverlayInput): LapOverlayResult {
-  const { xValues, channels, laps } = input
+  const { xValues, channels, laps, offsets } = input
   const gridPoints = input.gridPoints ?? 600
+  const offsetAt = (i: number): number => offsets?.[i] ?? 0
 
   if (laps.length === 0 || channels.length === 0) {
     return { x: new Float64Array(0), series: [] }
   }
 
-  let maxRel = 0
-  for (const lap of laps) {
+  // The grid spans every lap's shifted extent. 0 is kept in range as the nominal
+  // alignment point, so with all-zero offsets this is exactly [0, maxRel]; a
+  // lap nudged left/right extends the grid so its trace stays fully visible.
+  let gridMin = 0
+  let gridMax = 0
+  laps.forEach((lap, i) => {
     const ext = lapRelExtent(xValues, lap)
-    if (Number.isFinite(ext) && ext > maxRel) maxRel = ext
-  }
+    if (!Number.isFinite(ext)) return
+    const o = offsetAt(i)
+    if (o < gridMin) gridMin = o
+    if (o + ext > gridMax) gridMax = o + ext
+  })
 
+  // Guard the degenerate case (every lap's extent non-finite/zero, so span ≤ 0):
+  // force a minimal positive span so the grid is always STRICTLY increasing.
+  // uPlot needs an ascending x array — feeding it all-equal values blanks the
+  // whole chart, so never let that happen regardless of the input data.
+  const span = gridMax - gridMin
+  const safeSpan = span > 0 ? span : 1
   const grid = new Float64Array(gridPoints)
-  const step = gridPoints > 1 ? maxRel / (gridPoints - 1) : 0
-  for (let g = 0; g < gridPoints; g++) grid[g] = g * step
+  const step = gridPoints > 1 ? safeSpan / (gridPoints - 1) : 0
+  for (let g = 0; g < gridPoints; g++) grid[g] = gridMin + g * step
 
   const series: LapOverlaySeries[] = []
   // Lap-outer / channel-inner so a lap's traces stay grouped (matching the
@@ -129,7 +152,7 @@ export function buildLapOverlay(input: LapOverlayInput): LapOverlayResult {
         channelIndex,
         lapOrder,
         lap,
-        y: resampleLap(grid, xValues, ch.data, lap),
+        y: resampleLap(grid, xValues, ch.data, lap, offsetAt(lapOrder)),
       })
     })
   })

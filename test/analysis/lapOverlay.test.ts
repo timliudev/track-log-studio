@@ -91,6 +91,60 @@ describe('buildLapOverlay', () => {
     ])
   })
 
+  it('shifts a lap right by its offset, extending the grid past maxRel', () => {
+    const r = buildLapOverlay({
+      xValues: X,
+      channels: [{ name: 'v', data: CH }],
+      laps: [lapA, lapB],
+      offsets: [0, 10], // nudge lapB +10
+      gridPoints: 5,
+    })
+    // grid spans [0, lapB extent 30 + offset 10] = [0,40] → 0,10,20,30,40
+    expect(Array.from(r.x)).toEqual([0, 10, 20, 30, 40])
+    const [, b] = r.series
+    // lapB (vals 3,4,5,6 over rel 0..30) shifted +10 → occupies rel 10..40:
+    // grid 0 is before its span → NaN, then 3,4,5,6
+    expect(Number.isNaN(b.y[0])).toBe(true)
+    expect(Array.from(b.y.slice(1))).toEqual([3, 4, 5, 6])
+  })
+
+  it('shifts a lap left by a negative offset, extending the grid below 0', () => {
+    const r = buildLapOverlay({
+      xValues: X,
+      channels: [{ name: 'v', data: CH }],
+      laps: [lapA],
+      offsets: [-10], // nudge lapA -10
+      gridPoints: 3,
+    })
+    // lapA extent 20, offset -10 → span [-10,10]; grid keeps 0 → [-10,0,10]
+    expect(Array.from(r.x)).toEqual([-10, 0, 10])
+    const y = r.series[0].y
+    // lapA vals 0,1,2 at rel -10,0,10 → grid maps exactly onto them
+    expect(y[0]).toBeCloseTo(0)
+    expect(y[1]).toBeCloseTo(1)
+    expect(y[2]).toBeCloseTo(2)
+  })
+
+  it('treats missing/omitted offset entries as 0 (unshifted)', () => {
+    const withZeros = buildLapOverlay({
+      xValues: X,
+      channels: [{ name: 'v', data: CH }],
+      laps: [lapA, lapB],
+      offsets: [0, 0],
+      gridPoints: 4,
+    })
+    const without = buildLapOverlay({
+      xValues: X,
+      channels: [{ name: 'v', data: CH }],
+      laps: [lapA, lapB],
+      gridPoints: 4,
+    })
+    expect(Array.from(withZeros.x)).toEqual(Array.from(without.x))
+    expect(withZeros.series.map((s) => Array.from(s.y))).toEqual(
+      without.series.map((s) => Array.from(s.y)),
+    )
+  })
+
   it('returns an empty result for no laps or no channels', () => {
     expect(buildLapOverlay({ xValues: X, channels: [{ name: 'v', data: CH }], laps: [] })).toEqual({
       x: new Float64Array(0),
