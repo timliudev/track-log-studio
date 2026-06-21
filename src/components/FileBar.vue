@@ -68,6 +68,7 @@ function onChange(e: Event): void {
     <label class="load-btn" :title="t('fileBar.loadTitle')">
       <input
         type="file"
+        name="logfile"
         multiple
         accept=".loga,.nmea,.zip"
         class="hidden"

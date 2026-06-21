@@ -9,8 +9,12 @@ const props = defineProps<{
   track: GpsTrack | null
   cursorIdx: number | null
   line: LapLine | null
-  /** Selected laps to draw, each as a colored [startIdx, endIdx] segment. */
-  highlightLaps?: { startIdx: number; endIdx: number; color: string }[]
+  /**
+   * Selected laps to draw, each as a colored [startIdx, endIdx] segment. An
+   * optional `offset` (metres east/north) shifts just that lap's polyline so
+   * GNSS-drifted racing lines can be aligned on the map (#9 spatial half).
+   */
+  highlightLaps?: { startIdx: number; endIdx: number; color: string; offset?: { x: number; y: number } }[]
   /**
    * Per-sample normalised value in [0, 1] (NaN where uncoloured) for the track
    * heatmap, or null to draw the plain track. Colours come from {@link colormap}.
@@ -85,7 +89,8 @@ function draw(): void {
 
   // Helper: stroke the polyline over sample range [lo, hi] (inclusive), breaking
   // the path across gaps (NaN) so missing fixes don't draw bogus connectors.
-  const strokeRange = (lo: number, hi: number): void => {
+  // (dx, dy) is a constant pixel shift applied to this stroke (for #9 lap offset).
+  const strokeRange = (lo: number, hi: number, dx = 0, dy = 0): void => {
     ctx.beginPath()
     let on = false
     for (let i = lo; i <= hi; i++) {
@@ -94,13 +99,38 @@ function draw(): void {
         continue
       }
       if (!on) {
-        ctx.moveTo(px![i], py![i])
+        ctx.moveTo(px![i] + dx, py![i] + dy)
         on = true
       } else {
-        ctx.lineTo(px![i], py![i])
+        ctx.lineTo(px![i] + dx, py![i] + dy)
       }
     }
     ctx.stroke()
+  }
+
+  // Reference geo point + cos(lat) for converting a metres offset to a CONSTANT
+  // pixel shift. The projection is affine, so a fixed geo delta maps to a fixed
+  // pixel delta regardless of where it's measured; project a ref point and the
+  // ref point + delta, and take the pixel difference.
+  let refLat = 0
+  let refLon = 0
+  let cosRefLat = 1
+  for (let i = 0; i < n; i++) {
+    if (track.valid[i]) {
+      refLat = track.lat[i]
+      refLon = track.lon[i]
+      cosRefLat = Math.cos((refLat * Math.PI) / 180) || 1
+      break
+    }
+  }
+  const M_PER_DEG = 111320
+  const pixelShift = (off?: { x: number; y: number }): [number, number] => {
+    if (!off || (off.x === 0 && off.y === 0)) return [0, 0]
+    const dLat = off.y / M_PER_DEG
+    const dLon = off.x / (M_PER_DEG * cosRefLat)
+    const p0 = proj.toPixel(refLat, refLon)
+    const p1 = proj.toPixel(refLat + dLat, refLon + dLon)
+    return [p1.x - p0.x, p1.y - p0.y]
   }
 
   // Heatmap: stroke [lo, hi] gradient-coloured by props.colorValues. Segments are
@@ -109,7 +139,7 @@ function draw(): void {
   // (NaN px) or has no colour (NaN value).
   const colorVals = props.colorValues
   const swatches = colorVals ? colormapSwatches(props.colormap ?? 'turbo', HEAT_BUCKETS) : []
-  const strokeHeatmap = (lo: number, hi: number, width: number): void => {
+  const strokeHeatmap = (lo: number, hi: number, width: number, dx = 0, dy = 0): void => {
     if (!colorVals) return
     const buckets: number[][] = Array.from({ length: HEAT_BUCKETS }, () => [])
     for (let i = lo; i < hi; i++) {
@@ -127,8 +157,8 @@ function draw(): void {
       ctx.strokeStyle = swatches[b]
       ctx.beginPath()
       for (const i of seg) {
-        ctx.moveTo(px![i], py![i])
-        ctx.lineTo(px![i + 1], py![i + 1])
+        ctx.moveTo(px![i] + dx, py![i] + dy)
+        ctx.lineTo(px![i + 1] + dx, py![i + 1] + dy)
       }
       ctx.stroke()
     }
@@ -153,12 +183,13 @@ function draw(): void {
   for (const lap of highlightLaps) {
     const lo = Math.max(0, Math.min(lap.startIdx, lap.endIdx))
     const hi = Math.min(n - 1, Math.max(lap.startIdx, lap.endIdx))
+    const [dx, dy] = pixelShift(lap.offset)
     if (heat) {
-      strokeHeatmap(lo, hi, 3)
+      strokeHeatmap(lo, hi, 3, dx, dy)
     } else {
       ctx.strokeStyle = lap.color
       ctx.lineWidth = 3
-      strokeRange(lo, hi)
+      strokeRange(lo, hi, dx, dy)
     }
   }
 

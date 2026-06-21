@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
 import { useAnalyzerStore, type ChartConfig, type ChartMode } from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
@@ -31,6 +32,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const analyzer = useAnalyzerStore()
 const { xAxis } = storeToRefs(analyzer)
+const lapStore = useLapStore()
 const settings = useSettingsStore()
 const { tzOverride } = storeToRefs(settings)
 
@@ -75,10 +77,22 @@ const overlay = computed(() =>
     xValues: props.xValues,
     channels: present.value.map((n) => ({ name: n, data: props.session.get(n)!.data })),
     laps: laps.value,
+    // Per-lap alignment nudges, resolved to the current axis' units (#9).
+    offsets: laps.value.map((l) => lapStore.offsetOf(l.index, xAxis.value)),
   }),
 )
+// uPlot seeds a scale's range from a series' first in-range sample and treats
+// only `null` (not NaN) as a gap. Once a lap is nudged off grid-0 its trace
+// starts with a NaN, which would poison the shared channel scale to
+// [null, null] and hide EVERY line (the data is still there — the cursor
+// readout works — but nothing draws). Convert gaps to null so uPlot skips them
+// in both range and path. (Only the y series carry gaps; the x grid is finite.)
 const overlayData = computed<uPlot.AlignedData>(
-  () => [overlay.value.x, ...overlay.value.series.map((s) => s.y)] as unknown as uPlot.AlignedData,
+  () =>
+    [
+      overlay.value.x,
+      ...overlay.value.series.map((s) => Array.from(s.y, (v) => (Number.isFinite(v) ? v : null))),
+    ] as unknown as uPlot.AlignedData,
 )
 const overlaySeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
