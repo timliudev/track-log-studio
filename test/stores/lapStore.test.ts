@@ -117,6 +117,77 @@ describe('lapStore', () => {
     expect(s.isExcluded(2)).toBe(false)
   })
 
+  it('offsetOf returns 0 for laps with no nudge, per axis', () => {
+    const s = useLapStore()
+    expect(s.offsetOf(0, 'time')).toBe(0)
+    expect(s.offsetOf(0, 'distance')).toBe(0)
+  })
+
+  it('nudgeOffset accumulates per lap and per axis independently', () => {
+    const s = useLapStore()
+    s.nudgeOffset(2, 'time', 0.05)
+    s.nudgeOffset(2, 'time', 0.05)
+    s.nudgeOffset(2, 'distance', -3)
+    expect(s.offsetOf(2, 'time')).toBeCloseTo(0.1)
+    expect(s.offsetOf(2, 'distance')).toBe(-3)
+    // Other laps are unaffected.
+    expect(s.offsetOf(5, 'time')).toBe(0)
+  })
+
+  it('resetOffset clears one lap on both axes; clearOffsets clears all', () => {
+    const s = useLapStore()
+    s.nudgeOffset(1, 'time', 0.2)
+    s.nudgeOffset(1, 'distance', 5)
+    s.nudgeOffset(4, 'time', -0.1)
+    s.resetOffset(1)
+    expect(s.offsetOf(1, 'time')).toBe(0)
+    expect(s.offsetOf(1, 'distance')).toBe(0)
+    expect(s.offsetOf(4, 'time')).toBeCloseTo(-0.1)
+    s.clearOffsets()
+    expect(s.offsetOf(4, 'time')).toBe(0)
+  })
+
+  it('mapOffsetOf/nudgeMapOffset accumulate a per-lap 2-D metre shift', () => {
+    const s = useLapStore()
+    expect(s.mapOffsetOf(3)).toEqual({ x: 0, y: 0 })
+    s.nudgeMapOffset(3, 0.5, 0)
+    s.nudgeMapOffset(3, 0.5, -1)
+    expect(s.mapOffsetOf(3)).toEqual({ x: 1, y: -1 })
+    expect(s.mapOffsetOf(9)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('chart and map offsets are independent facets of the same lap', () => {
+    const s = useLapStore()
+    s.nudgeOffset(2, 'time', 0.1)
+    s.nudgeMapOffset(2, 2, 3)
+    // Resetting the chart facet keeps the map facet, and vice versa.
+    s.resetOffset(2)
+    expect(s.offsetOf(2, 'time')).toBe(0)
+    expect(s.mapOffsetOf(2)).toEqual({ x: 2, y: 3 })
+    s.nudgeOffset(2, 'time', 0.2)
+    s.resetMapOffset(2)
+    expect(s.mapOffsetOf(2)).toEqual({ x: 0, y: 0 })
+    expect(s.offsetOf(2, 'time')).toBeCloseTo(0.2)
+  })
+
+  it('clearOffsets clears both facets for all laps', () => {
+    const s = useLapStore()
+    s.nudgeOffset(1, 'time', 0.1)
+    s.nudgeMapOffset(1, 5, 5)
+    s.clearOffsets()
+    expect(s.offsetOf(1, 'time')).toBe(0)
+    expect(s.mapOffsetOf(1)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('offsets are independent of selection and exclusion', () => {
+    const s = useLapStore()
+    s.toggleLap(2)
+    s.nudgeOffset(2, 'time', 0.05)
+    s.clearSelection()
+    // Deselecting a lap keeps its alignment offset (re-selecting restores it).
+    expect(s.offsetOf(2, 'time')).toBeCloseTo(0.05)
+  })
+
   it('starts with no configured columns', () => {
     const s = useLapStore()
     expect(s.columns).toEqual([])
