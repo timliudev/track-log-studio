@@ -202,7 +202,8 @@ const rows = computed<Row[]>(() => {
 
     <p v-if="laps.length === 0" class="empty">{{ t('analyzer.noLaps') }}</p>
 
-    <table v-else>
+    <div v-else class="table-scroll">
+    <table>
       <thead>
         <tr>
           <th>{{ t('analyzer.lap') }}</th>
@@ -249,6 +250,7 @@ const rows = computed<Row[]>(() => {
         </tr>
       </tbody>
     </table>
+    </div>
   </div>
 </template>
 
@@ -361,6 +363,12 @@ const rows = computed<Row[]>(() => {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+/* Horizontal scroll so extra channel columns scroll instead of squeezing the
+   cells into multi-line wraps (which misaligned rows on narrow phones). */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -371,6 +379,13 @@ td {
   text-align: right;
   padding: 6px 10px;
   border-bottom: 1px solid var(--color-border);
+  /* middle-align every cell so a wrapped header/value can't stagger its row */
+  vertical-align: middle;
+}
+/* Keep data values on one line; the scroll container handles overflow. Headers
+   may still wrap to keep column widths reasonable. */
+tbody td {
+  white-space: nowrap;
 }
 th:first-child,
 td:first-child {
