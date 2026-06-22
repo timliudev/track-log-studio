@@ -383,6 +383,11 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
    JSON 匯出入。**雲端同步延後**（牴觸純前端,Phase 6+ 選用）。
 9. **E 圈次分析**：手動 sector → 理論最佳圈(optimal) → delta time（皆為 `LapMetric` 新 variant）。
 10. **F 行動裝置驗收**：真機 + production build 查 Android 載入後偶發重整（疑記憶體壓力,桌面無法重現）。
+    **診斷工具已備（`src/debug/diagnostics.ts`，feature/mobile-diagnostics）**：手機無 DevTools、
+    重整又清 console，故 `?debug=1` 開啟一個純 DOM 自我診斷面板，把 `document.wasDiscarded`
+    （true=系統記憶體壓力丟棄分頁自動重載，非 JS 崩潰）、navigation type、window error/rejection
+    （含 stack）、pagehide/freeze/visibility 生命週期、JS heap 記憶體（現值/峰值）寫進 localStorage、
+    **重整後顯示在畫面角落**。用法：手機開 `?debug=1` → 載檔重現 → 看面板最後幾筆判斷死因。
 
 ### 已知驗證限制
 - 無頭預覽（preview 工具）下 track `<canvas>` 寬度為 0、`preview_screenshot` 逾時 →
