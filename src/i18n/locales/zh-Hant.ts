@@ -85,6 +85,8 @@ export default {
     mapWest: '往西（左）',
     trackColor: '軌跡上色',
     colormap: '色階',
+    resetView: '重設視角',
+    zoomHint: '滾輪縮放、拖曳平移、雙指縮放、雙擊重設',
   },
   suspension: {
     heading: '避震校正',
