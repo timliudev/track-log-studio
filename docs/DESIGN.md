@@ -299,6 +299,23 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **歸屬**：本質上和分析器的「圈/區段」是同一類東西——一段被選出的軌跡片段配一個衍生數值，
     因此**併入 lap/segment 架構**：視為 `LapMetric` 的新 variant + `computeMetric` 的新 case（見 §11 Phase 4 E、
     架構鐵則），不另起爐灶。掃描演算法（滑動視窗找最佳區段）為唯一新增的計算。
+- **`.vbo` 輸出格式（Phase 1 轉檔器延伸；idea，已記錄，與分析器佇列正交）**：轉檔不只輸出 `.nmea`，
+  再加一種 **Racelogic VBOX `.vbo`**，讓 log 直接在 **Circuit Tools 3**（Racelogic 官方、免費、
+  賽道分析等級）開啟。**相對 RC3 `.nmea` 的關鍵價值**：NMEA 只有 15 個固定類比槽（要槽位對應、
+  多數欄位塞不下），VBO 把**所有通道**當具名 custom channel + 單位全帶過去 → 每個 ECU 通道都到得了分析軟體。
+  - **接法**：架構已預留——只是新增 `VboExporter implements Exporter`（`fileExtension='vbo'`）+ 轉檔器 UI
+    加一個輸出格式選擇器（目前寫死 RC3）。
+  - **重用現有**：四種格式皆已解析成正規化 `LogSession`（具名通道）、GPS 走共用 `makeFixResolver`
+    （整數度分 + mxApp 十進位），故**直接 iterate session 通道、不寫死欄位索引**（四格式自動支援），
+    heading 重用 `computeSmoothedCourses`，衍生避震 mm 比照 RC3 路線餵入。
+  - **參考腳本**：`C:\Data\repo\LOGAtest1\loga_to_vbo.py`（full 模式 = Circuit Tools 全通道；
+    `--slim` = RaceChrono `rc_` 前綴子集——slim 與現有 RC3 路線重疊，**初版只做 full**）。
+  - **只需移植 VBO 格式本身**：`[header]`（顯示名，一行一個）/`[column names]`（短 id，空白分隔）/
+    `[comments]`/`[data]`；9 個標準欄 = sats、time（`SSSSSS.SS`＝當天 00:00 起算秒數 UTC）、
+    lat/lon **以「分」表示**且 **VBO 慣例經度正值=西**（負=東）、緯度正=北（**≠ NMEA，易錯**）、
+    velocity km/h、heading、height(0)、vert-velocity(0)、elapsed_time(s，Circuit Tools 3 需要) + custom channels。
+  - **決策（做時再定）**：先 full-only；通道全倒 vs 加「選通道」選項（之後）；格式選擇器在轉檔器 UI 的位置；
+    可拿 Python 輸出對 fixture 當 **golden test**（比照當初 loga2nmea.py）。
 - 每階段內再細分小 commit。
 - **設計原則**：功能能力以**實際欄位**（`session.has(...)`）判斷，不以檔頭/格式硬編；
   檔頭僅決定如何解析結構。
