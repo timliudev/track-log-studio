@@ -85,6 +85,8 @@ export default {
     mapWest: 'West (left)',
     trackColor: 'Track colour',
     colormap: 'Colormap',
+    resetView: 'Reset view',
+    zoomHint: 'Scroll to zoom, drag to pan, pinch to zoom, double-click to reset',
   },
   suspension: {
     heading: 'Suspension calibration',
