@@ -221,24 +221,26 @@ const rows = computed<Row[]>(() => {
           :class="{ selected: lapStore.isSelected(r.index), excluded: lapStore.isExcluded(r.index) }"
           @click="emit('select', r.index)"
         >
-          <td class="lap-cell">
-            <button
-              type="button"
-              class="exclude"
-              :class="{ on: lapStore.isExcluded(r.index) }"
-              :title="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-              :aria-label="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-              :aria-pressed="lapStore.isExcluded(r.index)"
-              @click.stop="lapStore.toggleExcluded(r.index)"
-            >
-              ⦸
-            </button>
-            <span
-              v-if="lapStore.isSelected(r.index)"
-              class="swatch"
-              :style="{ background: swatchColor(r.index) }"
-            />
-            {{ r.index + 1 }}
+          <td>
+            <div class="lap-cell">
+              <button
+                type="button"
+                class="exclude"
+                :class="{ on: lapStore.isExcluded(r.index) }"
+                :title="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+                :aria-label="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+                :aria-pressed="lapStore.isExcluded(r.index)"
+                @click.stop="lapStore.toggleExcluded(r.index)"
+              >
+                ⦸
+              </button>
+              <span
+                v-if="lapStore.isSelected(r.index)"
+                class="swatch"
+                :style="{ background: swatchColor(r.index) }"
+              />
+              {{ r.index + 1 }}
+            </div>
           </td>
           <td>
             <span v-if="r.index === bestLapIndex" class="mark" :title="t('analyzer.bestLap')">⚡</span>
