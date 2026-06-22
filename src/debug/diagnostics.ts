@@ -230,6 +230,48 @@ export function initDiagnostics(): void {
   document.addEventListener('freeze', () => push('FREEZE', `mem=${memStr()}`))
   document.addEventListener('resume', () => push('resume', `mem=${memStr()}`))
 
+  // ── service worker: prime suspect for a no-error nav=reload. The PWA is set
+  // to autoUpdate, which reloads the page on `controllerchange`; a SW stuck
+  // re-installing (e.g. on the Workers deploy) makes that loop. If a
+  // SW-CONTROLLERCHANGE lands right before a reload, that's the cause.
+  if ('serviceWorker' in navigator) {
+    const sw = navigator.serviceWorker
+    push('sw', `controllerAtLoad=${sw.controller ? 'yes' : 'none'}`)
+    sw.addEventListener('controllerchange', () =>
+      push('SW-CONTROLLERCHANGE', 'new SW took control → autoUpdate reloads here'),
+    )
+    sw.getRegistration()
+      .then((reg) => {
+        if (!reg) {
+          push('sw', 'no registration')
+          return
+        }
+        push('sw', `active=${reg.active?.state ?? '?'} waiting=${!!reg.waiting} installing=${!!reg.installing}`)
+        reg.addEventListener('updatefound', () => {
+          const inst = reg.installing
+          push('SW-UPDATEFOUND', `installing=${inst?.state ?? '?'}`)
+          inst?.addEventListener('statechange', () => push('sw', `installing→${inst.state}`))
+        })
+      })
+      .catch((e) => push('sw', `getRegistration err ${e}`))
+  }
+
+  // ── file-input marker: separates "reload follows the file pick" (Android may
+  // kill a backgrounded tab while the picker is open) from a SW reload loop
+  // (which fires with no file involved). Captured globally so it works for any
+  // <input type=file> in the app.
+  document.addEventListener(
+    'change',
+    (e) => {
+      const t = e.target
+      if (t instanceof HTMLInputElement && t.type === 'file') {
+        const f = t.files?.[0]
+        push('FILE-INPUT', f ? `${f.name} ${(f.size / 1048576).toFixed(1)}MB mem=${memStr()}` : 'no file')
+      }
+    },
+    true,
+  )
+
   // ── live memory sampler: tracks peak + refreshes the header (not stored) ──
   setInterval(() => {
     memStr()
