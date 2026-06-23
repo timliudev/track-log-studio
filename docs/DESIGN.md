@@ -299,23 +299,32 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **歸屬**：本質上和分析器的「圈/區段」是同一類東西——一段被選出的軌跡片段配一個衍生數值，
     因此**併入 lap/segment 架構**：視為 `LapMetric` 的新 variant + `computeMetric` 的新 case（見 §11 Phase 4 E、
     架構鐵則），不另起爐灶。掃描演算法（滑動視窗找最佳區段）為唯一新增的計算。
-- **`.vbo` 輸出格式（Phase 1 轉檔器延伸；idea，已記錄，與分析器佇列正交）**：轉檔不只輸出 `.nmea`，
-  再加一種 **Racelogic VBOX `.vbo`**，讓 log 直接在 **Circuit Tools 3**（Racelogic 官方、免費、
-  賽道分析等級）開啟。**相對 RC3 `.nmea` 的關鍵價值**：NMEA 只有 15 個固定類比槽（要槽位對應、
+- **`.vbo` 輸出格式（Phase 1 轉檔器延伸；✅ 已實作 2026-06-23）**：轉檔除了 `.nmea`，再加
+  **Racelogic VBOX `.vbo`**，讓 log 直接在 **Circuit Tools 3**（Racelogic 官方、免費、賽道分析等級）
+  與 **RaceChrono** 開啟。**相對 RC3 `.nmea` 的關鍵價值**：NMEA 只有 15 個固定類比槽（要槽位對應、
   多數欄位塞不下），VBO 把**所有通道**當具名 custom channel + 單位全帶過去 → 每個 ECU 通道都到得了分析軟體。
-  - **接法**：架構已預留——只是新增 `VboExporter implements Exporter`（`fileExtension='vbo'`）+ 轉檔器 UI
-    加一個輸出格式選擇器（目前寫死 RC3）。
-  - **重用現有**：四種格式皆已解析成正規化 `LogSession`（具名通道）、GPS 走共用 `makeFixResolver`
-    （整數度分 + mxApp 十進位），故**直接 iterate session 通道、不寫死欄位索引**（四格式自動支援），
-    heading 重用 `computeSmoothedCourses`，衍生避震 mm 比照 RC3 路線餵入。
-  - **參考腳本**：`C:\Data\repo\LOGAtest1\loga_to_vbo.py`（full 模式 = Circuit Tools 全通道；
-    `--slim` = RaceChrono `rc_` 前綴子集——slim 與現有 RC3 路線重疊，**初版只做 full**）。
-  - **只需移植 VBO 格式本身**：`[header]`（顯示名，一行一個）/`[column names]`（短 id，空白分隔）/
-    `[comments]`/`[data]`；9 個標準欄 = sats、time（`SSSSSS.SS`＝當天 00:00 起算秒數 UTC）、
-    lat/lon **以「分」表示**且 **VBO 慣例經度正值=西**（負=東）、緯度正=北（**≠ NMEA，易錯**）、
-    velocity km/h、heading、height(0)、vert-velocity(0)、elapsed_time(s，Circuit Tools 3 需要) + custom channels。
-  - **決策（做時再定）**：先 full-only；通道全倒 vs 加「選通道」選項（之後）；格式選擇器在轉檔器 UI 的位置；
-    可拿 Python 輸出對 fixture 當 **golden test**（比照當初 loga2nmea.py）。
+  - **輸出（每個 .loga 產 3 檔）**：`_ct.vbo`（Circuit Tools，[header] 用原始 ECU 名）、
+    `_rc.vbo`（RaceChrono，`rc_` 官方識別符 + 內嵌 channel map）、`_channels.csv`（頻道對照表，
+    含中文說明，UTF-8 BOM）。轉檔器 UI 加「輸出格式 NMEA / VBO」分段選擇器；選 VBO 時隱藏 RC3
+    槽位對應面板（VBO 自動輸出全通道，免對應）。
+  - **實作**：`domain/export/vbo/`（`VboExporter.ts`＝`convertToVbo()`；`semantic.ts`＝語意對照表 +
+    通用桶 `Allocator`（rc_<base>_1..63 溢出）；`format.ts`＝printf 風格數值）。重用 `makeFixResolver`
+    （GPS 整數度分 + mxApp 十進位雙編碼）、`computeSmoothedCourses`（航向），衍生避震 mm 比照 RC3 餵入，
+    **直接 iterate session 通道、不寫死索引**（四格式自動支援）。未知通道自動歸入通用 `analog`/`digital` 桶。
+  - **VBO 格式**：`[header]`（顯示名一行一個）/`[channel units]`/`[comments]`/`[column names]`
+    （短 id 空白分隔）/`[data]`；7 標準欄 = sats、time（`HHMMSS.sss` UTC 當日）、lat/lon
+    （**以「分」表示**，**VBO 慣例經度正值=西**、緯度正=北，**≠ NMEA 易錯**）、velocity km/h、heading、height(0)。
+  - **時間欄來源優先序**：① `GPS_UTC_hh/mm/ss/ms` 有效（非全 0）→ 直接用真 UTC；② 否則
+    Created Date 當日時分秒為基準 + `Time` 欄經過時間；③ 無 Time 欄 → 基準 + 取樣率合成；
+    ④ 連 Created Date 都無 → 00:00:00 起算。GPS_UTC 四欄已納入 `GPS_CONSUMED`（折進 time 欄，不重複輸出成 analog）。
+  - **Circuit Tools 卡死修正**：註解內絕不能出現 `[ ]`（字面 `[header]` 會被當區段標記，解析器在註解
+    中途重入區段解析而卡死）→ `_ct` 改用與 `_rc` 相同的 bracket-free channel map，且所有註解一律把
+    `[ ]` 換成 `( )`（`safeComment`）。
+  - **參考腳本**：`C:\Data\repo\LOGAtest2\loga2vbo.py`（取代舊 LOGAtest1 版；`_ct`/`_rc`/`_channels`
+    三輸出 + bracket 修正）。**初版三檔全做**（不再 full-only；RaceChrono 雖與 RC3 nmea 重疊仍一併輸出）。
+  - **回歸測試**：用**截斷版 golden**（header + 前 40 列，避免 ~23MB 全檔進 repo）以 Python 輸出對齊
+    （`_ct`/`_rc` 容差比對、CSV byte-for-byte）+ GPS_UTC 來源 / 無括號註解 / 經度反向慣例守門
+    （`test/export/vbo.test.ts`、fixtures `vbo.*`）。
 - 每階段內再細分小 commit。
 - **設計原則**：功能能力以**實際欄位**（`session.has(...)`）判斷，不以檔頭/格式硬編；
   檔頭僅決定如何解析結構。
@@ -388,6 +397,16 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
     （true=系統記憶體壓力丟棄分頁自動重載，非 JS 崩潰）、navigation type、window error/rejection
     （含 stack）、pagehide/freeze/visibility 生命週期、JS heap 記憶體（現值/峰值）寫進 localStorage、
     **重整後顯示在畫面角落**。用法：手機開 `?debug=1` → 載檔重現 → 看面板最後幾筆判斷死因。
+
+### 新增點子（2026-06-23 實機回饋，待細化）
+- **快速篩選無用圈（時間帶過濾）**：設一個有效圈速區間，超出者自動標記無用圈剔除。
+  例：ARK 完整圈 46~53s → 區間外自動排除。歸入 #1 Lap 管理 / `LapMetric` 有效性旗標 + UI 區間輸入。
+- **Sector 完整性判定有效圈**：每個彎/sector 都有經過才算有效圈（例：ARK 12 彎 → 12 sector 全通過），
+  濾掉「切西瓜到空地等待」的假圈。**開放問題（待討論）**：如何判斷彎真的有跑過——彎速？逐 sector
+  通過閘門的幾何判定？TBD。與 #9 E 手動 sector 同源，但新增「有效性」準則。
+- **Track 獨立匯入檔 + 雲端同步（分流儲存）**：track 可獨立匯入、**自動推導 sector 與起終點線**
+  （目前為手動，見 §6.2 / #8 D）；並雲端同步。**儲存分流**：普世性賽道 → **GitHub** 共享庫；
+  個人設定 / 個人圈速紀錄 → 綁**個人 Google Drive**。把 #8 D「雲端同步延後」往前推並具體化。
 
 ### 已知驗證限制
 - 無頭預覽（preview 工具）下 track `<canvas>` 寬度為 0、`preview_screenshot` 逾時 →

@@ -131,6 +131,7 @@ export default {
     notes: {
       racechrono: 'The converted .nmea is for importing into a RaceChrono DIY device.',
       importGuide: 'Import guide',
+      vbo: 'The .vbo files are for Racelogic Circuit Tools 3 (and RaceChrono). Every ECU channel is exported; see the _channels.csv map for what each one is.',
       raceModule:
         'An aRacer Race Module is required for GPS positioning on the map; without GPS you can still convert sensor data (RC3), with the timestamp synthesized from the conversion time.',
     },
@@ -173,6 +174,15 @@ export default {
       search: 'Search channels…',
       pick: 'Pick channel',
       needFile: 'Load a file first to pick channels',
+    },
+    format: {
+      label: 'Output format',
+      hint: {
+        nmea: 'RaceChrono DIY .nmea — GPS + RC3 sensor slots (mapped below).',
+        vbo: 'Racelogic VBOX .vbo for Circuit Tools 3 — every channel exported automatically. Produces _ct.vbo, _rc.vbo and a _channels.csv map per log.',
+      },
+      vboPanelNote:
+        'VBO exports every channel automatically, so there is no field mapping to set. Each .loga produces _ct.vbo (Circuit Tools, original ECU names), _rc.vbo (RaceChrono identifiers) and a _channels.csv cross-reference.',
     },
     convert: {
       button: 'Convert',

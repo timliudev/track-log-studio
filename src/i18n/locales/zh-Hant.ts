@@ -131,6 +131,7 @@ export default {
     notes: {
       racechrono: '轉換後的 .nmea 檔供 RaceChrono DIY 裝置匯入使用。',
       importGuide: '匯入說明',
+      vbo: '.vbo 檔供 Racelogic Circuit Tools 3（與 RaceChrono）使用。會輸出所有 ECU 通道；各通道對應請見 _channels.csv 對照表。',
       raceModule:
         '需安裝 aRacer Race Module 才有 GPS 數據可於底圖對位；若無 GPS，仍可轉出感測器數據（RC3），此時時間戳以轉檔當下時間合成。',
     },
@@ -173,6 +174,15 @@ export default {
       search: '搜尋欄位…',
       pick: '選擇欄位',
       needFile: '請先載入檔案以選擇欄位',
+    },
+    format: {
+      label: '輸出格式',
+      hint: {
+        nmea: 'RaceChrono DIY .nmea — GPS + RC3 感測器槽位（於下方對應）。',
+        vbo: 'Racelogic VBOX .vbo，給 Circuit Tools 3 用 — 自動輸出所有通道。每個 log 會產生 _ct.vbo、_rc.vbo 與 _channels.csv 對照表。',
+      },
+      vboPanelNote:
+        'VBO 會自動輸出所有通道，無需設定欄位對應。每個 .loga 會產生 _ct.vbo（Circuit Tools，原始 ECU 名稱）、_rc.vbo（RaceChrono 識別符）與 _channels.csv 對照表。',
     },
     convert: {
       button: '轉換',
