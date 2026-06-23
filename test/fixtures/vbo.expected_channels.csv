@@ -1,0 +1,147 @@
+﻿ECU 欄位,中文說明,Circuit Tools 顯示,RaceChrono 顯示(約略),RaceChrono rc_ 識別符,單位,類型
+satellites,(GPS/標準頻道),satellites,satellites,—,count,GPS
+time,(GPS/標準頻道),time,time,—,s,GPS
+latitude,(GPS/標準頻道),latitude,latitude,—,minutes,GPS
+longitude,(GPS/標準頻道),longitude,longitude,—,minutes,GPS
+velocity kmh,(GPS/標準頻道),velocity kmh,velocity kmh,—,km/h,GPS
+heading,(GPS/標準頻道),heading,heading,—,degrees,GPS
+height,(GPS/標準頻道),height,height,—,m,GPS
+RPM,引擎轉速,RPM,Rpm,rc_rpm,rpm,語意
+Cyl1_Eng_AP,1缸進氣壓力(補償),Cyl1_Eng_AP,Analog 1,rc_analog_1,raw,類比
+Cyl1ExpectMAP,1缸進氣壓力,Cyl1ExpectMAP,Analog 2,rc_analog_2,raw,類比
+AFR,系統空燃比,AFR,Air Fuel Ratio,rc_air_fuel_ratio,afr,語意
+Fuel_CL,含氧感知器閉迴路即時修正值,Fuel_CL,Digital 1,rc_digital_1,bool,數位
+AFR_WBO2_CAL,寬域空燃比 AFR讀值,AFR_WBO2_CAL,Air Fuel Ratio 2,rc_air_fuel_ratio_2,afr,語意
+Cyl1_Final_VM,1缸最終進氣效率,Cyl1_Final_VM,Analog 3,rc_analog_3,raw,類比
+SA,點火角度,SA,Timing Advance,rc_timing_advance,deg,語意
+Cyl1_Comn_FuelPW,1缸噴油脈寬,Cyl1_Comn_FuelPW,Analog 4,rc_analog_4,raw,類比
+T_Air_indx,進氣溫度,T_Air_indx,Intake Temp,rc_intake_temp,degC,語意
+TPS_indx,TPS開度,TPS_indx,Digital 2,rc_digital_2,bool,數位
+TPS_Percent,TPS開度百分比,TPS_Percent,Throttle Pos,rc_throttle_pos,%,語意
+T_Eng,引擎溫度,T_Eng,Coolant Temp,rc_coolant_temp,degC,語意
+P_Atm,大氣壓力,P_Atm,Analog 5,rc_analog_5,raw,類比
+Fuel1.Dec_FC_En,減速斷油作動,Fuel1.Dec_FC_En,Digital 3,rc_digital_3,bool,數位
+Volt_Batt_indx,電瓶電壓,Volt_Batt_indx,Ecu Voltage,rc_ecu_voltage,V,語意
+Miss_CRK_Cnt,曲軸識別錯誤數,Miss_CRK_Cnt,Digital 4,rc_digital_4,bool,數位
+Cyl1_Injector_Period_Rate,1號噴嘴使用率,Cyl1_Injector_Period_Rate,Analog 6,rc_analog_6,raw,類比
+Vehicle_Speed,車速,Vehicle_Speed,Wheel Speed,rc_wheel_speed,km/h,語意
+IR_LapNumber,圈數,IR_LapNumber,Digital 5,rc_digital_5,bool,數位
+IR_LapTime,當圈時間,IR_LapTime,Digital 6,rc_digital_6,bool,數位
+Cyl1s_Comn_FuelPW,1缸副噴油脈寬,Cyl1s_Comn_FuelPW,Digital 7,rc_digital_7,bool,數位
+Engine_Brake,引擎剎車,Engine_Brake,Digital 8,rc_digital_8,bool,數位
+SimRPM,引擎模擬轉速,SimRPM,Digital 9,rc_digital_9,bool,數位
+TC_VSSF,前輪輪速,TC_VSSF,Wheel Speed Front,rc_wheel_speed_front,km/h,語意
+TC_VSSR,後輪輪速,TC_VSSR,Wheel Speed Rear,rc_wheel_speed_rear,km/h,語意
+TC_Slip_Thre,TCS作動的打滑率門檻值,TC_Slip_Thre,Digital 10,rc_digital_10,bool,數位
+MapNum,Map Number,MapNum,Digital 11,rc_digital_11,bool,數位
+TC_Lean_Angle,傾角,TC_Lean_Angle,Lean Angle,rc_lean_angle,deg,語意
+TC_Yforce,Y軸加速度,TC_Yforce,Y Acc,rc_y_acc,g,語意
+TC_Xangle_dps,X軸角速率,TC_Xangle_dps,X Rate Of Rotation,rc_x_rate_of_rotation,deg/s,語意
+TC_VSSFRRate,前後輪速滑差比,TC_VSSFRRate,Digital 12,rc_digital_12,bool,數位
+Malf8.Malf_On,故障發生!!,Malf8.Malf_On,Digital 13,rc_digital_13,bool,數位
+Quick_Shift_Act,快排作動,Quick_Shift_Act,Digital 14,rc_digital_14,bool,數位
+Pit_SW_On,Pit限轉功能開關,Pit_SW_On,Digital 15,rc_digital_15,bool,數位
+EngineBrakeEn,引擎剎車作動,EngineBrakeEn,Digital 16,rc_digital_16,bool,數位
+TCCtrAct,循跡控制作動,TCCtrAct,Digital 17,rc_digital_17,bool,數位
+GPS_Weak,GPS訊號強度不足,GPS_Weak,Digital 18,rc_digital_18,bool,數位
+DragTargetPhaseMin,起跑功能初始階段,DragTargetPhaseMin,Digital 19,rc_digital_19,bool,數位
+DragTargetPhaseMax,起跑功能結束階段,DragTargetPhaseMax,Digital 20,rc_digital_20,bool,數位
+DragTargetMode,起跑功能模式,DragTargetMode,Digital 21,rc_digital_21,bool,數位
+DragTargetUnit,起跑功能單位,DragTargetUnit,Digital 22,rc_digital_22,bool,數位
+DragStatus,起跑功能狀態,DragStatus,Analog 7,rc_analog_7,raw,類比
+DragStatus.Drag_Error,_,DragStatus.Drag_Error,Digital 23,rc_digital_23,bool,數位
+DragStatus.Drag_Prepare,_,DragStatus.Drag_Prepare,Digital 24,rc_digital_24,bool,數位
+DragStatus.Drag_Ready,_,DragStatus.Drag_Ready,Digital 25,rc_digital_25,bool,數位
+DragStatus.Drag_Run,_,DragStatus.Drag_Run,Digital 26,rc_digital_26,bool,數位
+DragStatus.Drag_Finish,_,DragStatus.Drag_Finish,Digital 27,rc_digital_27,bool,數位
+DragRound,起跑功能回數,DragRound,Digital 28,rc_digital_28,bool,數位
+DragPhase,起跑功能階段,DragPhase,Digital 29,rc_digital_29,bool,數位
+DragDist,起跑功能距離,DragDist,Digital 30,rc_digital_30,bool,數位
+DragTime,起跑功能時間,DragTime,Digital 31,rc_digital_31,bool,數位
+DragSpeed,起跑功能車速,DragSpeed,Digital 32,rc_digital_32,bool,數位
+EXIN_AD1,外部電壓1,EXIN_AD1,Digital 33,rc_digital_33,bool,數位
+EXIN_AD2,外部電壓2,EXIN_AD2,Digital 34,rc_digital_34,bool,數位
+EXIN_AD3,外部電壓3,EXIN_AD3,Digital 35,rc_digital_35,bool,數位
+SuspensionAD1,SUS電壓1,SuspensionAD1,Digital 36,rc_digital_36,bool,數位
+SuspensionAD2,SUS電壓2,SuspensionAD2,Digital 37,rc_digital_37,bool,數位
+Fuel.NBO2_BL_En,窄域長效學習開始作動,Fuel.NBO2_BL_En,Digital 38,rc_digital_38,bool,數位
+Fuel.NBO2_CL_En,窄域即時修正作動,Fuel.NBO2_CL_En,Digital 39,rc_digital_39,bool,數位
+Fuel.NBO2_Rdy,窄域含氧感知器已準備,Fuel.NBO2_Rdy,Digital 40,rc_digital_40,bool,數位
+Fuel.NBO2_CLReset,窄域即時學習重置,Fuel.NBO2_CLReset,Digital 41,rc_digital_41,bool,數位
+Mode.Stall,熄火,Mode.Stall,Digital 42,rc_digital_42,bool,數位
+Mode.Crank,啟動,Mode.Crank,Digital 43,rc_digital_43,bool,數位
+Mode.Idle,怠速,Mode.Idle,Digital 44,rc_digital_44,bool,數位
+Mode.Key_On,開機,Mode.Key_On,Digital 45,rc_digital_45,bool,數位
+Mode.Run,引擎運行,Mode.Run,Digital 46,rc_digital_46,bool,數位
+Fuel5.WBO2_Ready,寬域含氧感知器已準備,Fuel5.WBO2_Ready,Digital 47,rc_digital_47,bool,數位
+Fuel5.WBO2_AT_En,寬域含氧感知器自動調校作動,Fuel5.WBO2_AT_En,Digital 48,rc_digital_48,bool,數位
+Fuel8.RPM_Limit,限轉作動,Fuel8.RPM_Limit,Digital 49,rc_digital_49,bool,數位
+LC_SW_On,起跑模式作動,LC_SW_On,Digital 50,rc_digital_50,bool,數位
+Fuel8.Race_Launch_Ready,起跑模式已準備,Fuel8.Race_Launch_Ready,Digital 51,rc_digital_51,bool,數位
+Fuel8.Valet_Trig,防盜/泊車模式作動,Fuel8.Valet_Trig,Digital 52,rc_digital_52,bool,數位
+Malf0.P0106,壓力感知器相關問題,Malf0.P0106,Digital 53,rc_digital_53,bool,數位
+Malf0.P0107,壓力感知器斷路,Malf0.P0107,Digital 54,rc_digital_54,bool,數位
+Malf0.P0108,壓力感知器短路至電瓶,Malf0.P0108,Digital 55,rc_digital_55,bool,數位
+Malf0.P0112,進氣溫度感知器短路至地,Malf0.P0112,Digital 56,rc_digital_56,bool,數位
+Malf0.P0113,進氣溫度感知器斷路,Malf0.P0113,Digital 57,rc_digital_57,bool,數位
+Malf0.P0117,引擎溫度感知器短路至地,Malf0.P0117,Digital 58,rc_digital_58,bool,數位
+Malf0.P0118,引擎溫度感知器斷路,Malf0.P0118,Digital 59,rc_digital_59,bool,數位
+Malf0.P0563,電瓶電壓過高,Malf0.P0563,Digital 60,rc_digital_60,bool,數位
+Malf1.P0122,TPS斷路,Malf1.P0122,Digital 61,rc_digital_61,bool,數位
+Malf1.P0123,TPS短路至電瓶,Malf1.P0123,Digital 62,rc_digital_62,bool,數位
+Malf1.P0131,含氧感知器短路至地,Malf1.P0131,Digital 63,rc_digital_63,bool,數位
+Malf1.P0132,含氧感知器短路至電瓶,Malf1.P0132,Analog 8,rc_analog_8,bool,數位
+Malf1.P0134,含氧感知器無反應,Malf1.P0134,Analog 9,rc_analog_9,bool,數位
+Malf1.P0231,油泵斷路,Malf1.P0231,Analog 10,rc_analog_10,bool,數位
+Malf1.P0232,油泵短路至電瓶,Malf1.P0232,Analog 11,rc_analog_11,bool,數位
+Malf1.P0601,EEPROM錯誤,Malf1.P0601,Analog 12,rc_analog_12,bool,數位
+Malf2.P0261,噴嘴斷路,Malf2.P0261,Analog 13,rc_analog_13,bool,數位
+Malf2.P0262,噴嘴斷路至電瓶,Malf2.P0262,Analog 14,rc_analog_14,bool,數位
+Malf2.P1351,點火線圈斷路,Malf2.P1351,Analog 15,rc_analog_15,bool,數位
+Malf2.P0351,點火線圈短路至電瓶,Malf2.P0351,Analog 16,rc_analog_16,bool,數位
+Malf3.P1499,排氣溫度過高,Malf3.P1499,Analog 17,rc_analog_17,bool,數位
+Malf3.P0335,曲軸位置感知器問題,Malf3.P0335,Analog 18,rc_analog_18,bool,數位
+Malf3.P0298,引擎溫度過高,Malf3.P0298,Analog 19,rc_analog_19,bool,數位
+Malf4.P1352,第二缸點火線圈斷路,Malf4.P1352,Analog 20,rc_analog_20,bool,數位
+Malf4.P0352,第二缸點火線圈短路至電瓶,Malf4.P0352,Analog 21,rc_analog_21,bool,數位
+Malf4.P1131,含氧感知器太稀,Malf4.P1131,Analog 22,rc_analog_22,bool,數位
+Malf4.P1132,含氧感知器太濃,Malf4.P1132,Analog 23,rc_analog_23,bool,數位
+Malf4.P0264,第二缸噴嘴斷路,Malf4.P0264,Analog 24,rc_analog_24,bool,數位
+Malf4.P0265,第二缸噴嘴斷路至電瓶,Malf4.P0265,Analog 25,rc_analog_25,bool,數位
+Malf4.P1500,傾倒閥做動,Malf4.P1500,Analog 26,rc_analog_26,bool,數位
+Malf4.P1335,曲軸位置感知器斷路,Malf4.P1335,Analog 27,rc_analog_27,bool,數位
+Malf5.P0135,含氧感知器加熱器短路至電瓶,Malf5.P0135,Analog 28,rc_analog_28,bool,數位
+Malf5.P1135,含氧感知器加熱器斷路,Malf5.P1135,Analog 29,rc_analog_29,bool,數位
+Malf5.P0505,ISC步進馬達步數基準點問題,Malf5.P0505,Analog 30,rc_analog_30,bool,數位
+Malf5.P1509,ISC步進馬達驅動電路過熱,Malf5.P1509,Analog 31,rc_analog_31,bool,數位
+Malf5.P0263,噴嘴使用率過高!!,Malf5.P0263,Analog 32,rc_analog_32,bool,數位
+Malf5.P0222,TPS2開路,Malf5.P0222,Analog 33,rc_analog_33,bool,數位
+Malf5.P0223,TPS2短路到電瓶,Malf5.P0223,Analog 34,rc_analog_34,bool,數位
+Malf5.P0660,副節流閥作動器異常,Malf5.P0660,Analog 35,rc_analog_35,bool,數位
+NBO2_AD,窄頻含氧感知器數位值,NBO2_AD,Analog 36,rc_analog_36,raw,類比
+CO_PW_Mult,噴油脈寬補償值,CO_PW_Mult,Analog 37,rc_analog_37,bool,數位
+ISC_Air_Flow,ISC空氣流量值,ISC_Air_Flow,Analog 38,rc_analog_38,raw,類比
+Acc_Fuel_Mult,加速增濃補償,Acc_Fuel_Mult,Analog 39,rc_analog_39,bool,數位
+GearNum,檔位,GearNum,Gear,rc_gear,gear,語意
+GearPosition_AD,檔位感測器AD,GearPosition_AD,Analog 40,rc_analog_40,bool,數位
+QuickShift_AD,快排感測器AD,QuickShift_AD,Analog 41,rc_analog_41,bool,數位
+TC_LevelN,循跡控制等級,TC_LevelN,Analog 42,rc_analog_42,raw,類比
+TC_Slip_Rate,循跡系統打滑率,TC_Slip_Rate,Analog 43,rc_analog_43,bool,數位
+TC_TorqRedSASum,TC_TorqRedSASum,TC_TorqRedSASum,Analog 44,rc_analog_44,bool,數位
+EngineBrake_Cut_Target,引擎剎車切斷目標百分比,EngineBrake_Cut_Target,Analog 45,rc_analog_45,bool,數位
+Cyl2_Comn_FuelPW,2缸噴油脈寬,Cyl2_Comn_FuelPW,Analog 46,rc_analog_46,bool,數位
+Cyl3_Comn_FuelPW,3缸噴油脈寬,Cyl3_Comn_FuelPW,Analog 47,rc_analog_47,bool,數位
+Cyl4_Comn_FuelPW,4缸噴油脈寬,Cyl4_Comn_FuelPW,Analog 48,rc_analog_48,bool,數位
+QuickShift_CL_CutTime,閉迴路快排切斷動力時間,QuickShift_CL_CutTime,Analog 49,rc_analog_49,bool,數位
+QSDeltaRPMTarget,閉迴路快排目標下降轉速,QSDeltaRPMTarget,Analog 50,rc_analog_50,bool,數位
+LaunchTorqRedSASum,起跑模式降低點火角度,LaunchTorqRedSASum,Analog 51,rc_analog_51,bool,數位
+TC_Launch_Level,起跑模式等級,TC_Launch_Level,Analog 52,rc_analog_52,bool,數位
+Horsepower,即時馬力(HP),Horsepower,Analog 53,rc_analog_53,bool,數位
+Torque,即時扭力(Nm),Torque,Engine Torque,rc_engine_torque,Nm,語意
+TC_VSSREstRate,前後輪速滑差比,TC_VSSREstRate,Analog 54,rc_analog_54,bool,數位
+TC_Xforce,X軸加速度,TC_Xforce,X Acc,rc_x_acc,g,語意
+TC_Zforce,Z軸加速度,TC_Zforce,Z Acc,rc_z_acc,g,語意
+TC_Yangle_dps,Y軸角速率,TC_Yangle_dps,Y Rate Of Rotation,rc_y_rate_of_rotation,deg/s,語意
+TC_Zangle_dps,Z軸角速率,TC_Zangle_dps,Z Rate Of Rotation,rc_z_rate_of_rotation,deg/s,語意
+Front Suspension,前避震行程,Front Suspension,Analog 55,rc_analog_55,raw,類比
+Rear Suspension,後避震行程,Rear Suspension,Analog 56,rc_analog_56,raw,類比
