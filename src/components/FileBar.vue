@@ -1,25 +1,35 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFileStore } from '@/stores/fileStore'
 import { useLogImport } from '@/composables/useLogImport'
-import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
+import { sniff, detectImporter, allImportExtensions } from '@/domain/import/registry'
 import { extractLogFiles } from '@/domain/import/zip'
 
 const { t, tm, rt } = useI18n()
 const fileStore = useFileStore()
 const { parseFile } = useLogImport()
 
-/** Import one log file (.loga → parse worker, .nmea → NMEA reader). */
+/** File input accept list, derived from the importer registry plus .zip. */
+const acceptExtensions = computed(() =>
+  [...allImportExtensions().map((e) => `.${e}`), '.zip'].join(','),
+)
+
+/**
+ * Import one log file. The importer is chosen by the registry (extension + a
+ * content sniff), then all formats parse in the shared worker, selected there
+ * by the importer id.
+ */
 async function importOne(file: File): Promise<void> {
   const id = fileStore.beginImport(file)
   try {
-    if (file.name.toLowerCase().endsWith('.nmea')) {
-      const session = nmeaToSession(await file.text())
-      fileStore.completeImport(id, session)
-    } else {
-      const session = await parseFile(file, (f) => fileStore.setProgress(id, f))
-      fileStore.completeImport(id, session)
+    const imp = detectImporter(await sniff(file))
+    if (!imp) {
+      fileStore.failImport(id, t('fileBar.unsupported', { name: file.name }))
+      return
     }
+    const session = await parseFile(file, imp.id, (f) => fileStore.setProgress(id, f))
+    fileStore.completeImport(id, session)
   } catch (e) {
     fileStore.failImport(id, e instanceof Error ? e.message : String(e))
   }
@@ -70,7 +80,7 @@ function onChange(e: Event): void {
         type="file"
         name="logfile"
         multiple
-        accept=".loga,.nmea,.zip"
+        :accept="acceptExtensions"
         class="hidden"
         @change="onChange"
       />

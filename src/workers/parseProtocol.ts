@@ -3,6 +3,8 @@ import type { LogMeta } from '@/domain/model/types'
 /** Message posted to the parse worker. The File is read inside the worker. */
 export interface ParseRequest {
   id: number
+  /** Which registered importer parses this file, e.g. 'loga' | 'nmea'. */
+  importerId: string
   file: File
 }
 
