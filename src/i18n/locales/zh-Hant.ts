@@ -184,6 +184,25 @@ export default {
       vboPanelNote:
         'VBO 會自動輸出所有通道，無需設定欄位對應。每個 .loga 會產生 _ct.vbo（Circuit Tools，原始 ECU 名稱）、_rc.vbo（RaceChrono 識別符）與 _channels.csv 對照表。',
     },
+    vboMap: {
+      heading: '頻道對照',
+      hint: '所有 ECU 通道都會輸出。下表是每個通道在 Circuit Tools / RaceChrono 的對應（同時存成 _channels.csv）。',
+      needFile: '載入 .loga 即可預覽頻道對照。',
+      count: '{n} 個通道',
+      col: {
+        ecu: 'ECU 通道',
+        desc: '說明',
+        rcId: 'RaceChrono 識別符',
+        unit: '單位',
+        kind: '類型',
+      },
+      kind: {
+        gps: 'GPS',
+        semantic: '語意',
+        analog: '類比',
+        digital: '數位',
+      },
+    },
     convert: {
       button: '轉換',
       converting: '轉換中…',
