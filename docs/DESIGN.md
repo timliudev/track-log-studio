@@ -24,7 +24,7 @@
 - **觸控 / 滑鼠 / 觸控板**：統一以 Pointer Events 處理，設定可調。
 - **設定永久化 + 匯出**：所有設定本地保存，可匯出 JSON 方便轉移。
 - **多語系**：繁體中文 / 英文，自動偵測 `navigator.language`，可手動。
-- **部署**：build 成靜態檔 → GitHub → **Cloudflare Pages**（純靜態，免後端 / 免 Worker）。
+- **部署**：build 成靜態檔 → GitHub → **Cloudflare Workers（靜態資產）**，由 **Workers Builds**（接 GitHub）自動建置部署（純靜態，無自寫後端邏輯）。
 - **未來預留 Google Ads**（非目前必要）。
 
 ---
@@ -228,8 +228,8 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 ## 10. 部署 (#6)
 
-- `npm run build` → 靜態 `dist/` → push GitHub → **Cloudflare Pages** 托管。
-- 純靜態 SPA/PWA，**不需要後端、不需要 Cloudflare Worker**。
+- `npm run build` → 靜態 `dist/` → push GitHub → **Cloudflare Workers（靜態資產 / Workers Builds）** 托管。
+- 純靜態 SPA/PWA，**無自寫後端邏輯**；Cloudflare Workers 僅作靜態資產托管（SPA fallback），非執行應用程式碼。
 - Node.js 僅開發期跑 Vite，上線後無伺服器執行。
 
 ---
@@ -341,8 +341,9 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **版本策略**：無 release tag，**以 commit hash 當版本**；footer build 戳記由
   `vite.config.ts` 的 `__BUILD_SHA__` 注入（CF_PAGES_COMMIT_SHA→GITHUB_SHA→`git rev-parse`），
   CI/CD 每次部署自動更新。里程碑才鬆散打 tag。
-- **Cloudflare Pages** 由使用者在後台接 Git（prod=main、build `npm run build`、output `dist`、
-  Node 由 `.nvmrc`=22）；無需 repo 密鑰。
+- **Cloudflare Workers（靜態資產）** 由使用者在後台接 Git（**Workers Builds**，prod=`main`、
+  build `npm run build`、輸出 `dist`、Node 由 `.nvmrc`=22）；設定見 `wrangler.jsonc`，無需 repo 密鑰。
+  正式網址 `https://track-log-studio.timliudev.workers.dev`。（非 Pages——Pages 後台只有另一個專案。）
 - **分析 / 廣告**（未來）：GA4 / Cloudflare Web Analytics / AdSense 用**公開 ID**(`VITE_*` env)，
   非密鑰；lazy-load、離線不載、守隱私。
 
@@ -435,7 +436,7 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 ## 附錄：討論過程摘要 (Decision Log)
 
 - **純前端可行性**：確認可行；瀏覽器最跨平台、純地端、人機互動導向，是正確選擇。
-- **Vue 不需後端**：澄清 Vue 為純前端框架，build 成靜態檔即可，部署到 Cloudflare Pages 無需後端。
+- **Vue 不需後端**：澄清 Vue 為純前端框架，build 成靜態檔即可，部署到 Cloudflare（Workers 靜態資產）無需自寫後端。
 - **語言 / 框架**：TS + Vue 3.5+（最新版）+ Composition API；務實 FP 風格。
 - **架構**：由嚴格 Clean Architecture 降溫為主流 Vue feature-based，但保留純 TS `domain/` 層以利測試與解耦。
 - **欄位選擇**：槽位導向 + 可搜尋下拉（桌面下拉內嵌搜尋 / 手機全螢幕挑選頁）。
