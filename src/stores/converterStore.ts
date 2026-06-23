@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { LogSession } from '@/domain/model/LogSession'
 import { Rc3NmeaExporter } from '@/domain/export/rc3Nmea/Rc3NmeaExporter'
-import { convertToVbo } from '@/domain/export/vbo/VboExporter'
+import { convertToVbo, buildVboDisplayMap, type VboMapRow } from '@/domain/export/vbo/VboExporter'
 import {
   DEFAULT_PRESET,
   SLOT_IDS,
@@ -117,6 +117,19 @@ export const useConverterStore = defineStore('converter', () => {
   const readySessions = computed(() => fileStore.readySessions)
   const savableEntries = computed(() => fileStore.savableEntries)
 
+  /**
+   * VBO channel cross-reference (same content as the _channels.csv) for the
+   * first ready .loga, used by the converter UI to preview what each ECU channel
+   * becomes in Circuit Tools / RaceChrono. Empty until a log is loaded.
+   */
+  const vboChannelMap = computed<VboMapRow[]>(() => {
+    const file = fileStore.readyFiles.find((f) => f.fileType === 'loga')
+    if (!file) return []
+    const session = fileStore.getSession(file.id)
+    if (!session) return []
+    return buildVboDisplayMap(applyDerivedChannels(session, suspension.config))
+  })
+
   // --- Thin delegation wrappers (keeps backward compat with tests) ---
   function beginImport(file: File): number { return fileStore.beginImport(file) }
   function setProgress(id: number, fraction: number): void { fileStore.setProgress(id, fraction) }
@@ -214,6 +227,7 @@ export const useConverterStore = defineStore('converter', () => {
     readyFiles,
     readySessions,
     savableEntries,
+    vboChannelMap,
     slotIds: SLOT_IDS,
     setSlot,
     applyPreset,
