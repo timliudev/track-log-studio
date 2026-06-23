@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { useI18n } from 'vue-i18n'
 import { useConverterStore } from '@/stores/converterStore'
 import ConverterNotes from './ConverterNotes.vue'
 import PresetBar from './PresetBar.vue'
 import SlotMappingPanel from './SlotMappingPanel.vue'
+import VboChannelMap from './VboChannelMap.vue'
 import ConvertResults from './ConvertResults.vue'
 
-const { t } = useI18n()
 const { outputFormat } = storeToRefs(useConverterStore())
 </script>
 
@@ -19,13 +18,13 @@ const { outputFormat } = storeToRefs(useConverterStore())
         <ConvertResults />
       </div>
       <div class="col">
-        <!-- RC3 slot mapping only applies to the .nmea format; .vbo exports
-             every channel automatically, so show a short note instead. -->
+        <!-- RC3 slot mapping only applies to .nmea; .vbo exports every channel
+             automatically, so show the channel cross-reference instead. -->
         <template v-if="outputFormat === 'nmea'">
           <PresetBar />
           <SlotMappingPanel />
         </template>
-        <p v-else class="vbo-note">{{ t('converter.format.vboPanelNote') }}</p>
+        <VboChannelMap v-else />
       </div>
     </div>
   </div>
@@ -51,12 +50,6 @@ const { outputFormat } = storeToRefs(useConverterStore())
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   padding: calc(var(--space) * 2);
-}
-.vbo-note {
-  margin: 0;
-  font-size: 0.9rem;
-  line-height: 1.6;
-  color: var(--color-text-muted);
 }
 @media (max-width: 880px) {
   .grid {

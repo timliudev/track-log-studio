@@ -27,18 +27,32 @@ const BASE_HEADER: ReadonlyArray<readonly [string, string, string]> = [
 export type VboKind = 'semantic' | 'analog' | 'digital'
 
 /** One non-GPS ECU channel resolved for both .vbo flavours. */
-interface VboChannel {
+export interface VboChannel {
   /** Original ECU canonical name (Circuit Tools header). */
   readonly ctTitle: string
   /** ECU name sanitised for the [column names] token (spaces/dots → '_'). */
   readonly ctToken: string
   /** RaceChrono `rc_` identifier (its header *and* token). */
   readonly rcName: string
+  /** Approximate RaceChrono App display label for {@link rcName}. */
+  readonly rcLabel: string
   readonly unit: string
   readonly data: Float32Array
   readonly scale: number
   readonly kind: VboKind
   readonly description: string
+}
+
+/** One row of the channel cross-reference, for the UI preview / _channels.csv. */
+export interface VboMapRow {
+  /** ECU canonical name, or the standard GPS channel title. */
+  readonly ecu: string
+  /** ECU description (after '/'), empty for GPS standard channels. */
+  readonly description: string
+  /** RaceChrono `rc_` identifier, or '' for the GPS standard channels. */
+  readonly rcId: string
+  readonly unit: string
+  readonly kind: VboKind | 'gps'
 }
 
 /** One output file produced from a single .loga. */
@@ -124,6 +138,89 @@ function csvField(value: string): string {
 
 function dd(v: number): string {
   return v.toString().padStart(2, '0')
+}
+
+/**
+ * Classify every non-GPS channel and assign its RaceChrono `rc_` identifier:
+ * known signals map to a semantic identifier + SI unit; pure 0/1 columns become
+ * generic digital; everything else generic analog (sequential allocation, so the
+ * order matches the .vbo output). Shared by the exporter and the UI preview.
+ */
+export function buildVboCatalog(session: LogSession): VboChannel[] {
+  const n = session.rowCount
+  const alloc = new Allocator()
+  const channels: VboChannel[] = []
+  for (const ch of session.channels) {
+    const name = ch.name
+    if (name === '' || GPS_CONSUMED.has(name)) continue
+
+    let isDigital = true
+    for (let i = 0; i < n; i++) {
+      const v = cell(ch.data, i)
+      if (v !== 0 && v !== 1) {
+        isDigital = false
+        break
+      }
+    }
+
+    let rcName: string
+    let scale: number
+    let unit: string
+    let kind: VboKind
+    const sem = SEMANTIC[name]
+    if (sem) {
+      rcName = `rc_${sem.ident}`
+      scale = sem.scale
+      unit = sem.unit
+      kind = 'semantic'
+    } else if (isDigital) {
+      // digital bucket spills into analog when full
+      rcName = alloc.take([...DIGITAL_BASES, ...ANALOG_BASES])
+      scale = 1
+      unit = 'bool'
+      kind = 'digital'
+    } else {
+      rcName = alloc.take(ANALOG_BASES)
+      scale = 1
+      unit = 'raw'
+      kind = 'analog'
+    }
+
+    channels.push({
+      ctTitle: name,
+      ctToken: name.replace(/ /g, '_').replace(/\./g, '_'),
+      rcName,
+      rcLabel: humanize(rcName),
+      unit,
+      data: ch.data,
+      scale,
+      kind,
+      description: ch.description ?? '',
+    })
+  }
+  return channels
+}
+
+/**
+ * The channel cross-reference as display rows: the 7 standard GPS channels
+ * followed by every ECU channel's rc_ mapping. Same content as _channels.csv,
+ * for rendering an in-app preview.
+ */
+export function buildVboDisplayMap(session: LogSession): VboMapRow[] {
+  const rows: VboMapRow[] = []
+  for (const [title, , unit] of BASE_HEADER) {
+    rows.push({ ecu: title, description: '', rcId: '', unit, kind: 'gps' })
+  }
+  for (const c of buildVboCatalog(session)) {
+    rows.push({
+      ecu: c.ctTitle,
+      description: c.description,
+      rcId: c.rcName,
+      unit: c.unit,
+      kind: c.kind,
+    })
+  }
+  return rows
 }
 
 /**
@@ -214,62 +311,14 @@ export function convertToVbo(
   }
 
   // --- Classify each non-GPS channel and assign an rc_ identifier ---
-  const alloc = new Allocator()
-  const channels: VboChannel[] = []
-  for (const ch of session.channels) {
-    const name = ch.name
-    if (name === '' || GPS_CONSUMED.has(name)) continue
-
-    let isDigital = true
-    for (let i = 0; i < n; i++) {
-      const v = cell(ch.data, i)
-      if (v !== 0 && v !== 1) {
-        isDigital = false
-        break
-      }
-    }
-
-    let rcName: string
-    let scale: number
-    let unit: string
-    let kind: VboKind
-    const sem = SEMANTIC[name]
-    if (sem) {
-      rcName = `rc_${sem.ident}`
-      scale = sem.scale
-      unit = sem.unit
-      kind = 'semantic'
-    } else if (isDigital) {
-      // digital bucket spills into analog when full
-      rcName = alloc.take([...DIGITAL_BASES, ...ANALOG_BASES])
-      scale = 1
-      unit = 'bool'
-      kind = 'digital'
-    } else {
-      rcName = alloc.take(ANALOG_BASES)
-      scale = 1
-      unit = 'raw'
-      kind = 'analog'
-    }
-
-    channels.push({
-      ctTitle: name,
-      ctToken: name.replace(/ /g, '_').replace(/\./g, '_'),
-      rcName,
-      unit,
-      data: ch.data,
-      scale,
-      kind,
-      description: ch.description ?? '',
-    })
-  }
+  const channels = buildVboCatalog(session)
 
   // Channel-map comment block — shared by both flavours. (Circuit Tools hangs
   // on the literal "[header]", so _ct gets this bracket-free map too instead of
   // a "[header] uses original ECU names" note.)
   const commentMap = ['Channel map  ECU_name | RaceChrono_label | rc_id | unit']
   for (const c of channels) {
-    commentMap.push(`  ${c.ctTitle} | ${humanize(c.rcName)} | ${c.rcName} | ${c.unit}`)
+    commentMap.push(`  ${c.ctTitle} | ${c.rcLabel} | ${c.rcName} | ${c.unit}`)
   }
 
   // --- Render a .vbo (ct = ECU names, rc = rc_ identifiers) ---
@@ -346,7 +395,7 @@ export function convertToVbo(
         c.ctTitle,
         c.description,
         c.ctTitle,
-        humanize(c.rcName),
+        c.rcLabel,
         c.rcName,
         c.unit,
         kindLabel[c.kind],
