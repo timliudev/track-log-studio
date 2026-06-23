@@ -184,6 +184,25 @@ export default {
       vboPanelNote:
         'VBO exports every channel automatically, so there is no field mapping to set. Each .loga produces _ct.vbo (Circuit Tools, original ECU names), _rc.vbo (RaceChrono identifiers) and a _channels.csv cross-reference.',
     },
+    vboMap: {
+      heading: 'Channel map',
+      hint: 'Every ECU channel is exported. This is what each one becomes in Circuit Tools / RaceChrono (also saved as _channels.csv).',
+      needFile: 'Load a .loga to preview the channel map.',
+      count: '{n} channels',
+      col: {
+        ecu: 'ECU channel',
+        desc: 'Description',
+        rcId: 'RaceChrono id',
+        unit: 'Unit',
+        kind: 'Type',
+      },
+      kind: {
+        gps: 'GPS',
+        semantic: 'Semantic',
+        analog: 'Analog',
+        digital: 'Digital',
+      },
+    },
     convert: {
       button: 'Convert',
       converting: 'Converting…',
