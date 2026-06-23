@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { useConverterStore } from '@/stores/converterStore'
 
 const { t } = useI18n()
+const { outputFormat } = storeToRefs(useConverterStore())
 
 // TODO: replace with the user's own import walkthrough once provided. For now
 // this points at the RaceChrono DIY data-format article.
@@ -10,7 +13,10 @@ const IMPORT_GUIDE_URL = 'https://racechrono.com/article/2572'
 
 <template>
   <section class="notes">
-    <p class="note">
+    <p v-if="outputFormat === 'vbo'" class="note">
+      {{ t('converter.notes.vbo') }}
+    </p>
+    <p v-else class="note">
       {{ t('converter.notes.racechrono') }}
       <a :href="IMPORT_GUIDE_URL" target="_blank" rel="noopener noreferrer">
         {{ t('converter.notes.importGuide') }} ↗
