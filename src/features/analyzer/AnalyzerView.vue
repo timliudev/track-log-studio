@@ -146,6 +146,31 @@ function onXZoom(r: { min: number; max: number } | null): void {
 function onSelect(e: Event): void {
   analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
 }
+
+// --- Valid lap-time band (時間帶過濾): laps whose time is outside [min, max]
+// seconds are auto-excluded via the lapStore. Each input is independent; an
+// empty field leaves that side open, and clearing both removes the band. ---
+const bandMin = computed<number | null>({
+  get: () => lapStore.lapTimeBand?.minSec ?? null,
+  set: (v) => lapStore.setLapTimeBand({ minSec: v, maxSec: lapStore.lapTimeBand?.maxSec ?? null }),
+})
+const bandMax = computed<number | null>({
+  get: () => lapStore.lapTimeBand?.maxSec ?? null,
+  set: (v) => lapStore.setLapTimeBand({ minSec: lapStore.lapTimeBand?.minSec ?? null, maxSec: v }),
+})
+
+/** Parse a band <input>'s value to seconds, or null when blank/non-numeric. */
+function onBandInput(which: 'min' | 'max', e: Event): void {
+  const raw = (e.target as HTMLInputElement).value.trim()
+  const v = raw === '' ? null : Number(raw)
+  const sec = v != null && Number.isFinite(v) ? v : null
+  if (which === 'min') bandMin.value = sec
+  else bandMax.value = sec
+}
+
+// How many laps the band currently excludes (0 when no band) — a quick sanity
+// readout so the user can see the filter is doing something.
+const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
 </script>
 
 <template>
@@ -219,6 +244,43 @@ function onSelect(e: Event): void {
           <button type="button" class="reset" @click="resetLine">
             {{ t('analyzer.resetLine') }}
           </button>
+        </div>
+        <div class="band" role="group" :aria-label="t('analyzer.lapBand')">
+          <span class="band-label">{{ t('analyzer.lapBand') }}</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.1"
+            class="band-input"
+            :value="bandMin ?? ''"
+            :placeholder="t('analyzer.lapBandMin')"
+            :aria-label="t('analyzer.lapBandMin')"
+            @input="onBandInput('min', $event)"
+          />
+          <span class="band-sep">–</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.1"
+            class="band-input"
+            :value="bandMax ?? ''"
+            :placeholder="t('analyzer.lapBandMax')"
+            :aria-label="t('analyzer.lapBandMax')"
+            @input="onBandInput('max', $event)"
+          />
+          <button
+            v-if="lapStore.lapTimeBand"
+            type="button"
+            class="band-clear"
+            @click="lapStore.clearLapTimeBand()"
+          >
+            {{ t('analyzer.lapBandClear') }}
+          </button>
+          <span v-if="bandExcludedCount > 0" class="band-count">
+            {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
+          </span>
         </div>
         <LapTable
           :laps="laps"
@@ -392,6 +454,46 @@ function onSelect(e: Event): void {
 .reset:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--space);
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+.band-label {
+  flex: 0 0 auto;
+}
+.band-input {
+  width: 64px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: inherit;
+}
+.band-sep {
+  color: var(--color-text-muted);
+}
+.band-clear {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.band-clear:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.band-count {
+  color: var(--color-text-muted);
 }
 .add {
   align-self: flex-start;

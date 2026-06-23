@@ -226,10 +226,10 @@ const rows = computed<Row[]>(() => {
               <button
                 type="button"
                 class="exclude"
-                :class="{ on: lapStore.isExcluded(r.index) }"
-                :title="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-                :aria-label="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-                :aria-pressed="lapStore.isExcluded(r.index)"
+                :class="{ on: lapStore.isManuallyExcluded(r.index) }"
+                :title="lapStore.isManuallyExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+                :aria-label="lapStore.isManuallyExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+                :aria-pressed="lapStore.isManuallyExcluded(r.index)"
                 @click.stop="lapStore.toggleExcluded(r.index)"
               >
                 ⦸
