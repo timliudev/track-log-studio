@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { LogSession } from '@/domain/model/LogSession'
 import { Rc3NmeaExporter } from '@/domain/export/rc3Nmea/Rc3NmeaExporter'
+import { convertToVbo } from '@/domain/export/vbo/VboExporter'
 import {
   DEFAULT_PRESET,
   SLOT_IDS,
@@ -29,6 +30,9 @@ export interface ConvertResult {
 
 export type PresetId = 'default' | 'custom' | `user${number}`
 
+/** Output format the converter writes: RaceChrono .nmea or Racelogic VBOX .vbo. */
+export type OutputFormat = 'nmea' | 'vbo'
+
 const STORAGE_KEY = 'aracer-loga.converter.v1'
 const USER_PRESET_COUNT = 5
 
@@ -36,6 +40,7 @@ interface Persisted {
   mapping: Rc3Mapping
   userPresets: (SavedPreset | null)[]
   activePresetId: PresetId
+  outputFormat: OutputFormat
 }
 
 function clone(mapping: Rc3Mapping): Rc3Mapping {
@@ -65,16 +70,18 @@ export const useConverterStore = defineStore('converter', () => {
     persisted.userPresets ?? Array.from({ length: USER_PRESET_COUNT }, () => null),
   )
   const activePresetId = ref<PresetId>(persisted.activePresetId ?? 'default')
+  const outputFormat = ref<OutputFormat>(persisted.outputFormat ?? 'nmea')
   const results = ref<ConvertResult[]>([])
   const isConverting = ref(false)
 
   watch(
-    [mapping, userPresets, activePresetId],
+    [mapping, userPresets, activePresetId, outputFormat],
     () => {
       const data: Persisted = {
         mapping: mapping.value,
         userPresets: userPresets.value,
         activePresetId: activePresetId.value,
+        outputFormat: outputFormat.value,
       }
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -157,11 +164,20 @@ export const useConverterStore = defineStore('converter', () => {
   }
 
   // --- conversion ---
-  function outputName(logName: string): string {
-    return logName.replace(/\.loga$/i, '') + '.nmea'
+  function setOutputFormat(format: OutputFormat): void {
+    outputFormat.value = format
   }
 
-  /** Convert all ready loga files with the current mapping; stores results. */
+  /** Log file name without the `.loga` extension. */
+  function stemOf(logName: string): string {
+    return logName.replace(/\.loga$/i, '')
+  }
+
+  /**
+   * Convert all ready loga files into the selected output format; stores
+   * results. .nmea yields one file per log; .vbo yields three (_ct, _rc and a
+   * _channels.csv cross-reference).
+   */
   function convertAll(): ConvertResult[] {
     isConverting.value = true
     try {
@@ -170,10 +186,14 @@ export const useConverterStore = defineStore('converter', () => {
         const session = fileStore.getSession(f.id)
         if (!session) continue
         const augmented = applyDerivedChannels(session, suspension.config)
-        out.push({
-          name: outputName(f.name),
-          content: exporter.export(augmented, mapping.value),
-        })
+        const stem = stemOf(f.name)
+        if (outputFormat.value === 'vbo') {
+          for (const art of convertToVbo(augmented, f.name)) {
+            out.push({ name: `${stem}${art.suffix}.${art.ext}`, content: art.content })
+          }
+        } else {
+          out.push({ name: `${stem}.nmea`, content: exporter.export(augmented, mapping.value) })
+        }
       }
       results.value = out
       return out
@@ -186,6 +206,7 @@ export const useConverterStore = defineStore('converter', () => {
     mapping,
     userPresets,
     activePresetId,
+    outputFormat,
     files,
     results,
     isConverting,
@@ -198,6 +219,7 @@ export const useConverterStore = defineStore('converter', () => {
     applyPreset,
     saveToUser,
     reset,
+    setOutputFormat,
     beginImport,
     setProgress,
     completeImport,
