@@ -22,6 +22,12 @@ describe('fileStore', () => {
     expect(s.files[0].fileType).toBe('nmea')
   })
 
+  it('vbo files get fileType vbo', () => {
+    const s = useFileStore()
+    s.beginImport(new File(['x'], 'run.vbo'))
+    expect(s.files[0].fileType).toBe('vbo')
+  })
+
   it('completeImport marks ready and getSession returns session', () => {
     const s = useFileStore()
     const session = parseLoga(loadFixture('super2.loga'))

@@ -10,7 +10,15 @@ export interface ImportedFile {
   formatId: string | null
   rowCount: number
   error: string | null
-  fileType: 'loga' | 'nmea'
+  fileType: 'loga' | 'nmea' | 'vbo'
+}
+
+/** Map a file name to its import fileType (analyzer + converter gating). */
+function fileTypeOf(name: string): ImportedFile['fileType'] {
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.nmea')) return 'nmea'
+  if (lower.endsWith('.vbo')) return 'vbo'
+  return 'loga'
 }
 
 export const useFileStore = defineStore('file', () => {
@@ -54,7 +62,7 @@ export const useFileStore = defineStore('file', () => {
 
   function beginImport(file: File): number {
     const id = nextId++
-    const fileType: 'loga' | 'nmea' = file.name.toLowerCase().endsWith('.nmea') ? 'nmea' : 'loga'
+    const fileType = fileTypeOf(file.name)
     originalFiles.set(id, file)
     files.value.push({
       id,
