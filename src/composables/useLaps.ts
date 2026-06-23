@@ -105,6 +105,11 @@ export function useLaps(): {
       : []
   })
 
+  // Keep the store's copy of the detected laps in sync so it can derive the
+  // time-band (out-of-band) exclusions from lap times. The store owns the
+  // resulting "excluded" union; this is just the feed.
+  watch(laps, (next) => lapStore.setLaps(next), { immediate: true })
+
   /**
    * Re-seed the start/finish line to a fresh default from the current track.
    * (Clearing alone would leave the line null until the next file change, since
@@ -129,6 +134,7 @@ export function useLaps(): {
         // them all on file change.
         lapStore.clearSelection()
         lapStore.clearExcluded()
+        lapStore.clearLapTimeBand()
         lapStore.clearOffsets()
       }
       if (next && lapStore.line == null) {

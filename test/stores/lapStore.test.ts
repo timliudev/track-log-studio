@@ -1,6 +1,12 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, it, expect } from 'vitest'
 import { useLapStore } from '@/stores/lapStore'
+import type { Lap } from '@/domain/model/Lap'
+
+/** Build a Lap with a lap time given in seconds (the band works in seconds). */
+function lap(index: number, lapTimeSec: number): Lap {
+  return { index, startIdx: index * 10, endIdx: index * 10 + 10, lapTimeMs: lapTimeSec * 1000 }
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -115,6 +121,78 @@ describe('lapStore', () => {
     s.clearExcluded()
     expect(s.isSelected(2)).toBe(true)
     expect(s.isExcluded(2)).toBe(false)
+  })
+
+  it('starts with no lap-time band and an excluded set equal to manual', () => {
+    const s = useLapStore()
+    expect(s.lapTimeBand).toBeNull()
+    expect(s.bandExcluded).toEqual([])
+    s.toggleExcluded(2)
+    // With no band, the effective excluded union equals the manual set exactly.
+    expect(s.excluded).toEqual(s.manualExcluded)
+    expect(s.excluded).toEqual([2])
+  })
+
+  it('setting a band folds out-of-band laps into the excluded set', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 51), lap(3, 40)])
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    // 60s (slow) and 40s (fast) are out of band.
+    expect([...s.bandExcluded].sort()).toEqual([1, 3])
+    expect([...s.excluded].sort()).toEqual([1, 3])
+    expect(s.isExcluded(1)).toBe(true)
+    expect(s.isExcluded(0)).toBe(false)
+    // Band exclusion is NOT a manual exclusion.
+    expect(s.isManuallyExcluded(1)).toBe(false)
+  })
+
+  it('clearing the band restores the previous (manual-only) excluded set', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 51)])
+    s.toggleExcluded(0)
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    expect([...s.excluded].sort()).toEqual([0, 1])
+    s.clearLapTimeBand()
+    expect(s.lapTimeBand).toBeNull()
+    expect(s.excluded).toEqual([0])
+  })
+
+  it('band composes with a manual exclusion (union, de-duplicated)', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 40)])
+    s.toggleExcluded(0) // manual
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 }) // out-of-band: 1, 2
+    expect([...s.excluded].sort()).toEqual([0, 1, 2])
+    // A lap that is BOTH manually excluded and out-of-band appears once.
+    s.toggleExcluded(1)
+    expect([...s.excluded].sort()).toEqual([0, 1, 2])
+    expect(s.excluded.filter((x) => x === 1)).toHaveLength(1)
+  })
+
+  it('an all-null band is normalised to no constraint', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 60)])
+    s.setLapTimeBand({ minSec: null, maxSec: null })
+    expect(s.lapTimeBand).toBeNull()
+    expect(s.excluded).toEqual([])
+  })
+
+  it('an only-max band excludes only the slow laps', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 40)])
+    s.setLapTimeBand({ minSec: null, maxSec: 53 })
+    expect(s.excluded).toEqual([1])
+  })
+
+  it('clearExcluded clears manual exclusions but leaves band exclusions', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60)])
+    s.toggleExcluded(0)
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    s.clearExcluded()
+    expect(s.manualExcluded).toEqual([])
+    // The band's out-of-band lap (index 1) survives clearExcluded.
+    expect(s.excluded).toEqual([1])
   })
 
   it('offsetOf returns 0 for laps with no nudge, per axis', () => {
