@@ -2,25 +2,51 @@
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useConverterStore } from '@/stores/converterStore'
+import type { OutputFormat } from '@/stores/converterStore'
 import { downloadText, downloadZip } from './download'
 
 const { t } = useI18n()
 const store = useConverterStore()
-const { results, isConverting, readyFiles } = storeToRefs(store)
+const { results, isConverting, readyFiles, outputFormat } = storeToRefs(store)
+
+const FORMATS: { id: OutputFormat; label: string }[] = [
+  { id: 'nmea', label: 'NMEA (.nmea)' },
+  { id: 'vbo', label: 'VBO (.vbo)' },
+]
 
 function onConvert(): void {
   const out = store.convertAll()
-  // Single file: download immediately. Batch: user picks ZIP / per-file below.
+  // Single file: download immediately. Batch (or .vbo's 3 files): pick below.
   if (out.length === 1) downloadText(out[0].name, out[0].content)
 }
 
 function downloadAllZip(): void {
-  downloadZip('loga-nmea.zip', results.value)
+  const zipName = outputFormat.value === 'vbo' ? 'loga-vbo.zip' : 'loga-nmea.zip'
+  downloadZip(zipName, results.value)
 }
 </script>
 
 <template>
   <section class="results">
+    <div class="format" role="radiogroup" :aria-label="t('converter.format.label')">
+      <span class="format-label">{{ t('converter.format.label') }}</span>
+      <div class="seg">
+        <button
+          v-for="f in FORMATS"
+          :key="f.id"
+          type="button"
+          role="radio"
+          :aria-checked="outputFormat === f.id"
+          class="seg-btn"
+          :class="{ active: outputFormat === f.id }"
+          @click="store.setOutputFormat(f.id)"
+        >
+          {{ f.label }}
+        </button>
+      </div>
+    </div>
+    <p class="format-hint muted">{{ t(`converter.format.hint.${outputFormat}`) }}</p>
+
     <button
       type="button"
       class="btn-primary"
@@ -89,6 +115,40 @@ function downloadAllZip(): void {
 .muted {
   color: var(--color-text-muted);
   font-size: 0.9rem;
+}
+.format {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.format-label {
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.seg-btn {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: none;
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--color-border);
+}
+.seg-btn.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.format-hint {
+  margin: 0;
 }
 .row {
   display: flex;

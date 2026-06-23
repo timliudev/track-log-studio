@@ -8,3 +8,7 @@
 *.woff2 binary
 *.loga binary
 *.nmea -text
+# .vbo and the golden channel CSVs are CRLF byte-exact reference data (the VBO
+# spec mandates CRLF); never normalise or the golden tests break on Linux CI.
+*.vbo -text
+test/fixtures/*.csv -text
