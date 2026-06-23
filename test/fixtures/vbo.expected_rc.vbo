@@ -1,0 +1,486 @@
+File created on 21/06/2026 at 16:25:24
+
+[header]
+satellites
+time
+latitude
+longitude
+velocity kmh
+heading
+height
+rc_rpm
+rc_analog_1
+rc_analog_2
+rc_air_fuel_ratio
+rc_digital_1
+rc_air_fuel_ratio_2
+rc_analog_3
+rc_timing_advance
+rc_analog_4
+rc_intake_temp
+rc_digital_2
+rc_throttle_pos
+rc_coolant_temp
+rc_analog_5
+rc_digital_3
+rc_ecu_voltage
+rc_digital_4
+rc_analog_6
+rc_wheel_speed
+rc_digital_5
+rc_digital_6
+rc_digital_7
+rc_digital_8
+rc_digital_9
+rc_wheel_speed_front
+rc_wheel_speed_rear
+rc_digital_10
+rc_digital_11
+rc_lean_angle
+rc_y_acc
+rc_x_rate_of_rotation
+rc_digital_12
+rc_digital_13
+rc_digital_14
+rc_digital_15
+rc_digital_16
+rc_digital_17
+rc_digital_18
+rc_digital_19
+rc_digital_20
+rc_digital_21
+rc_digital_22
+rc_analog_7
+rc_digital_23
+rc_digital_24
+rc_digital_25
+rc_digital_26
+rc_digital_27
+rc_digital_28
+rc_digital_29
+rc_digital_30
+rc_digital_31
+rc_digital_32
+rc_digital_33
+rc_digital_34
+rc_digital_35
+rc_digital_36
+rc_digital_37
+rc_digital_38
+rc_digital_39
+rc_digital_40
+rc_digital_41
+rc_digital_42
+rc_digital_43
+rc_digital_44
+rc_digital_45
+rc_digital_46
+rc_digital_47
+rc_digital_48
+rc_digital_49
+rc_digital_50
+rc_digital_51
+rc_digital_52
+rc_digital_53
+rc_digital_54
+rc_digital_55
+rc_digital_56
+rc_digital_57
+rc_digital_58
+rc_digital_59
+rc_digital_60
+rc_digital_61
+rc_digital_62
+rc_digital_63
+rc_analog_8
+rc_analog_9
+rc_analog_10
+rc_analog_11
+rc_analog_12
+rc_analog_13
+rc_analog_14
+rc_analog_15
+rc_analog_16
+rc_analog_17
+rc_analog_18
+rc_analog_19
+rc_analog_20
+rc_analog_21
+rc_analog_22
+rc_analog_23
+rc_analog_24
+rc_analog_25
+rc_analog_26
+rc_analog_27
+rc_analog_28
+rc_analog_29
+rc_analog_30
+rc_analog_31
+rc_analog_32
+rc_analog_33
+rc_analog_34
+rc_analog_35
+rc_analog_36
+rc_analog_37
+rc_analog_38
+rc_analog_39
+rc_gear
+rc_analog_40
+rc_analog_41
+rc_analog_42
+rc_analog_43
+rc_analog_44
+rc_analog_45
+rc_analog_46
+rc_analog_47
+rc_analog_48
+rc_analog_49
+rc_analog_50
+rc_analog_51
+rc_analog_52
+rc_analog_53
+rc_engine_torque
+rc_analog_54
+rc_x_acc
+rc_z_acc
+rc_y_rate_of_rotation
+rc_z_rate_of_rotation
+rc_analog_55
+rc_analog_56
+
+[channel units]
+count
+s
+minutes
+minutes
+km/h
+degrees
+m
+rpm
+raw
+raw
+afr
+bool
+afr
+raw
+deg
+raw
+degC
+bool
+%
+degC
+raw
+bool
+V
+bool
+raw
+km/h
+bool
+bool
+bool
+bool
+bool
+km/h
+km/h
+bool
+bool
+deg
+g
+deg/s
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+raw
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+raw
+bool
+raw
+bool
+gear
+bool
+bool
+raw
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+bool
+Nm
+bool
+g
+g
+deg/s
+deg/s
+raw
+raw
+
+[comments]
+Converted from vbo.loga by loga2vbo.py (_rc)
+Log created: 2026-06-21 16:25:24
+Channel map  ECU_name | RaceChrono_label | rc_id | unit
+  RPM | Rpm | rc_rpm | rpm
+  Cyl1_Eng_AP | Analog 1 | rc_analog_1 | raw
+  Cyl1ExpectMAP | Analog 2 | rc_analog_2 | raw
+  AFR | Air Fuel Ratio | rc_air_fuel_ratio | afr
+  Fuel_CL | Digital 1 | rc_digital_1 | bool
+  AFR_WBO2_CAL | Air Fuel Ratio 2 | rc_air_fuel_ratio_2 | afr
+  Cyl1_Final_VM | Analog 3 | rc_analog_3 | raw
+  SA | Timing Advance | rc_timing_advance | deg
+  Cyl1_Comn_FuelPW | Analog 4 | rc_analog_4 | raw
+  T_Air_indx | Intake Temp | rc_intake_temp | degC
+  TPS_indx | Digital 2 | rc_digital_2 | bool
+  TPS_Percent | Throttle Pos | rc_throttle_pos | %
+  T_Eng | Coolant Temp | rc_coolant_temp | degC
+  P_Atm | Analog 5 | rc_analog_5 | raw
+  Fuel1.Dec_FC_En | Digital 3 | rc_digital_3 | bool
+  Volt_Batt_indx | Ecu Voltage | rc_ecu_voltage | V
+  Miss_CRK_Cnt | Digital 4 | rc_digital_4 | bool
+  Cyl1_Injector_Period_Rate | Analog 6 | rc_analog_6 | raw
+  Vehicle_Speed | Wheel Speed | rc_wheel_speed | km/h
+  IR_LapNumber | Digital 5 | rc_digital_5 | bool
+  IR_LapTime | Digital 6 | rc_digital_6 | bool
+  Cyl1s_Comn_FuelPW | Digital 7 | rc_digital_7 | bool
+  Engine_Brake | Digital 8 | rc_digital_8 | bool
+  SimRPM | Digital 9 | rc_digital_9 | bool
+  TC_VSSF | Wheel Speed Front | rc_wheel_speed_front | km/h
+  TC_VSSR | Wheel Speed Rear | rc_wheel_speed_rear | km/h
+  TC_Slip_Thre | Digital 10 | rc_digital_10 | bool
+  MapNum | Digital 11 | rc_digital_11 | bool
+  TC_Lean_Angle | Lean Angle | rc_lean_angle | deg
+  TC_Yforce | Y Acc | rc_y_acc | g
+  TC_Xangle_dps | X Rate Of Rotation | rc_x_rate_of_rotation | deg/s
+  TC_VSSFRRate | Digital 12 | rc_digital_12 | bool
+  Malf8.Malf_On | Digital 13 | rc_digital_13 | bool
+  Quick_Shift_Act | Digital 14 | rc_digital_14 | bool
+  Pit_SW_On | Digital 15 | rc_digital_15 | bool
+  EngineBrakeEn | Digital 16 | rc_digital_16 | bool
+  TCCtrAct | Digital 17 | rc_digital_17 | bool
+  GPS_Weak | Digital 18 | rc_digital_18 | bool
+  DragTargetPhaseMin | Digital 19 | rc_digital_19 | bool
+  DragTargetPhaseMax | Digital 20 | rc_digital_20 | bool
+  DragTargetMode | Digital 21 | rc_digital_21 | bool
+  DragTargetUnit | Digital 22 | rc_digital_22 | bool
+  DragStatus | Analog 7 | rc_analog_7 | raw
+  DragStatus.Drag_Error | Digital 23 | rc_digital_23 | bool
+  DragStatus.Drag_Prepare | Digital 24 | rc_digital_24 | bool
+  DragStatus.Drag_Ready | Digital 25 | rc_digital_25 | bool
+  DragStatus.Drag_Run | Digital 26 | rc_digital_26 | bool
+  DragStatus.Drag_Finish | Digital 27 | rc_digital_27 | bool
+  DragRound | Digital 28 | rc_digital_28 | bool
+  DragPhase | Digital 29 | rc_digital_29 | bool
+  DragDist | Digital 30 | rc_digital_30 | bool
+  DragTime | Digital 31 | rc_digital_31 | bool
+  DragSpeed | Digital 32 | rc_digital_32 | bool
+  EXIN_AD1 | Digital 33 | rc_digital_33 | bool
+  EXIN_AD2 | Digital 34 | rc_digital_34 | bool
+  EXIN_AD3 | Digital 35 | rc_digital_35 | bool
+  SuspensionAD1 | Digital 36 | rc_digital_36 | bool
+  SuspensionAD2 | Digital 37 | rc_digital_37 | bool
+  Fuel.NBO2_BL_En | Digital 38 | rc_digital_38 | bool
+  Fuel.NBO2_CL_En | Digital 39 | rc_digital_39 | bool
+  Fuel.NBO2_Rdy | Digital 40 | rc_digital_40 | bool
+  Fuel.NBO2_CLReset | Digital 41 | rc_digital_41 | bool
+  Mode.Stall | Digital 42 | rc_digital_42 | bool
+  Mode.Crank | Digital 43 | rc_digital_43 | bool
+  Mode.Idle | Digital 44 | rc_digital_44 | bool
+  Mode.Key_On | Digital 45 | rc_digital_45 | bool
+  Mode.Run | Digital 46 | rc_digital_46 | bool
+  Fuel5.WBO2_Ready | Digital 47 | rc_digital_47 | bool
+  Fuel5.WBO2_AT_En | Digital 48 | rc_digital_48 | bool
+  Fuel8.RPM_Limit | Digital 49 | rc_digital_49 | bool
+  LC_SW_On | Digital 50 | rc_digital_50 | bool
+  Fuel8.Race_Launch_Ready | Digital 51 | rc_digital_51 | bool
+  Fuel8.Valet_Trig | Digital 52 | rc_digital_52 | bool
+  Malf0.P0106 | Digital 53 | rc_digital_53 | bool
+  Malf0.P0107 | Digital 54 | rc_digital_54 | bool
+  Malf0.P0108 | Digital 55 | rc_digital_55 | bool
+  Malf0.P0112 | Digital 56 | rc_digital_56 | bool
+  Malf0.P0113 | Digital 57 | rc_digital_57 | bool
+  Malf0.P0117 | Digital 58 | rc_digital_58 | bool
+  Malf0.P0118 | Digital 59 | rc_digital_59 | bool
+  Malf0.P0563 | Digital 60 | rc_digital_60 | bool
+  Malf1.P0122 | Digital 61 | rc_digital_61 | bool
+  Malf1.P0123 | Digital 62 | rc_digital_62 | bool
+  Malf1.P0131 | Digital 63 | rc_digital_63 | bool
+  Malf1.P0132 | Analog 8 | rc_analog_8 | bool
+  Malf1.P0134 | Analog 9 | rc_analog_9 | bool
+  Malf1.P0231 | Analog 10 | rc_analog_10 | bool
+  Malf1.P0232 | Analog 11 | rc_analog_11 | bool
+  Malf1.P0601 | Analog 12 | rc_analog_12 | bool
+  Malf2.P0261 | Analog 13 | rc_analog_13 | bool
+  Malf2.P0262 | Analog 14 | rc_analog_14 | bool
+  Malf2.P1351 | Analog 15 | rc_analog_15 | bool
+  Malf2.P0351 | Analog 16 | rc_analog_16 | bool
+  Malf3.P1499 | Analog 17 | rc_analog_17 | bool
+  Malf3.P0335 | Analog 18 | rc_analog_18 | bool
+  Malf3.P0298 | Analog 19 | rc_analog_19 | bool
+  Malf4.P1352 | Analog 20 | rc_analog_20 | bool
+  Malf4.P0352 | Analog 21 | rc_analog_21 | bool
+  Malf4.P1131 | Analog 22 | rc_analog_22 | bool
+  Malf4.P1132 | Analog 23 | rc_analog_23 | bool
+  Malf4.P0264 | Analog 24 | rc_analog_24 | bool
+  Malf4.P0265 | Analog 25 | rc_analog_25 | bool
+  Malf4.P1500 | Analog 26 | rc_analog_26 | bool
+  Malf4.P1335 | Analog 27 | rc_analog_27 | bool
+  Malf5.P0135 | Analog 28 | rc_analog_28 | bool
+  Malf5.P1135 | Analog 29 | rc_analog_29 | bool
+  Malf5.P0505 | Analog 30 | rc_analog_30 | bool
+  Malf5.P1509 | Analog 31 | rc_analog_31 | bool
+  Malf5.P0263 | Analog 32 | rc_analog_32 | bool
+  Malf5.P0222 | Analog 33 | rc_analog_33 | bool
+  Malf5.P0223 | Analog 34 | rc_analog_34 | bool
+  Malf5.P0660 | Analog 35 | rc_analog_35 | bool
+  NBO2_AD | Analog 36 | rc_analog_36 | raw
+  CO_PW_Mult | Analog 37 | rc_analog_37 | bool
+  ISC_Air_Flow | Analog 38 | rc_analog_38 | raw
+  Acc_Fuel_Mult | Analog 39 | rc_analog_39 | bool
+  GearNum | Gear | rc_gear | gear
+  GearPosition_AD | Analog 40 | rc_analog_40 | bool
+  QuickShift_AD | Analog 41 | rc_analog_41 | bool
+  TC_LevelN | Analog 42 | rc_analog_42 | raw
+  TC_Slip_Rate | Analog 43 | rc_analog_43 | bool
+  TC_TorqRedSASum | Analog 44 | rc_analog_44 | bool
+  EngineBrake_Cut_Target | Analog 45 | rc_analog_45 | bool
+  Cyl2_Comn_FuelPW | Analog 46 | rc_analog_46 | bool
+  Cyl3_Comn_FuelPW | Analog 47 | rc_analog_47 | bool
+  Cyl4_Comn_FuelPW | Analog 48 | rc_analog_48 | bool
+  QuickShift_CL_CutTime | Analog 49 | rc_analog_49 | bool
+  QSDeltaRPMTarget | Analog 50 | rc_analog_50 | bool
+  LaunchTorqRedSASum | Analog 51 | rc_analog_51 | bool
+  TC_Launch_Level | Analog 52 | rc_analog_52 | bool
+  Horsepower | Analog 53 | rc_analog_53 | bool
+  Torque | Engine Torque | rc_engine_torque | Nm
+  TC_VSSREstRate | Analog 54 | rc_analog_54 | bool
+  TC_Xforce | X Acc | rc_x_acc | g
+  TC_Zforce | Z Acc | rc_z_acc | g
+  TC_Yangle_dps | Y Rate Of Rotation | rc_y_rate_of_rotation | deg/s
+  TC_Zangle_dps | Z Rate Of Rotation | rc_z_rate_of_rotation | deg/s
+  Front Suspension | Analog 55 | rc_analog_55 | raw
+  Rear Suspension | Analog 56 | rc_analog_56 | raw
+
+[column names]
+sats time lat long velocity heading height rc_rpm rc_analog_1 rc_analog_2 rc_air_fuel_ratio rc_digital_1 rc_air_fuel_ratio_2 rc_analog_3 rc_timing_advance rc_analog_4 rc_intake_temp rc_digital_2 rc_throttle_pos rc_coolant_temp rc_analog_5 rc_digital_3 rc_ecu_voltage rc_digital_4 rc_analog_6 rc_wheel_speed rc_digital_5 rc_digital_6 rc_digital_7 rc_digital_8 rc_digital_9 rc_wheel_speed_front rc_wheel_speed_rear rc_digital_10 rc_digital_11 rc_lean_angle rc_y_acc rc_x_rate_of_rotation rc_digital_12 rc_digital_13 rc_digital_14 rc_digital_15 rc_digital_16 rc_digital_17 rc_digital_18 rc_digital_19 rc_digital_20 rc_digital_21 rc_digital_22 rc_analog_7 rc_digital_23 rc_digital_24 rc_digital_25 rc_digital_26 rc_digital_27 rc_digital_28 rc_digital_29 rc_digital_30 rc_digital_31 rc_digital_32 rc_digital_33 rc_digital_34 rc_digital_35 rc_digital_36 rc_digital_37 rc_digital_38 rc_digital_39 rc_digital_40 rc_digital_41 rc_digital_42 rc_digital_43 rc_digital_44 rc_digital_45 rc_digital_46 rc_digital_47 rc_digital_48 rc_digital_49 rc_digital_50 rc_digital_51 rc_digital_52 rc_digital_53 rc_digital_54 rc_digital_55 rc_digital_56 rc_digital_57 rc_digital_58 rc_digital_59 rc_digital_60 rc_digital_61 rc_digital_62 rc_digital_63 rc_analog_8 rc_analog_9 rc_analog_10 rc_analog_11 rc_analog_12 rc_analog_13 rc_analog_14 rc_analog_15 rc_analog_16 rc_analog_17 rc_analog_18 rc_analog_19 rc_analog_20 rc_analog_21 rc_analog_22 rc_analog_23 rc_analog_24 rc_analog_25 rc_analog_26 rc_analog_27 rc_analog_28 rc_analog_29 rc_analog_30 rc_analog_31 rc_analog_32 rc_analog_33 rc_analog_34 rc_analog_35 rc_analog_36 rc_analog_37 rc_analog_38 rc_analog_39 rc_gear rc_analog_40 rc_analog_41 rc_analog_42 rc_analog_43 rc_analog_44 rc_analog_45 rc_analog_46 rc_analog_47 rc_analog_48 rc_analog_49 rc_analog_50 rc_analog_51 rc_analog_52 rc_analog_53 rc_engine_torque rc_analog_54 rc_x_acc rc_z_acc rc_y_rate_of_rotation rc_z_rate_of_rotation rc_analog_55 rc_analog_56
+
+[data]
+012 162524.000 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2042 40.98 40.98 9.2 0 25.6 190 8.5 2.875 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.0249 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.086 1.017 -2.21 -0.04 -91 -132
+012 162524.031 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1919 41.7 40.98 9.2 0 25.6 190 8.5 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.024 1.89 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0882 1.015 -2.21 -0.04 -91 -132
+012 162524.062 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2015 41.7 41.7 9.2 0 25.6 190 8.25 2.875 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.0249 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0887 1.011 -2.21 -0.04 -91 -132
+012 162524.094 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2035 40.98 40.98 9.2 0 25.6 190 8.25 2.875 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.026 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0905 1.019 -2.21 -0.04 -91 -132
+012 162524.125 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1976 40.98 40.98 9.2 0 25.6 190 8.5 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.024 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.09 1.016 -2.21 -0.04 -91 -132
+012 162524.156 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1897 41.7 41.7 9.2 0 25.6 190 8.5 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.022 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0897 1.01 -2.19 -0.04 -91 -132
+012 162524.188 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1944 41.7 41.7 9.2 0 25.6 190 11 2.875 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.024 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0874 1.017 -2.19 -0.04 -91 -132
+012 162524.219 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1932 42.42 42.42 9.2 0 25.6 190 9.5 2.875 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.026 1.79 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0878 1.021 -2.19 -0.04 -91 -132
+012 162524.250 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1871 42.42 42.42 9.4 0 25.6 190 10 2.917 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.027 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0872 1.019 -2.18 -0.04 -91 -132
+012 162524.281 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1791 41.7 41.7 9.4 0 25.6 190 12 2.917 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.027 1.79 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.086 1.019 -2.21 -0.04 -91 -132
+012 162524.312 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1956 41.7 41.7 9.4 0 25.6 190 14.5 2.821 26 0 0 42 100 0 12.9 0 3.91 0 0 0 0 0 0 0 0 0 1 0 -0.023 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0874 1.006 -2.22 -0.04 -91 -132
+012 162524.344 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2025 41.7 41.7 9.4 0 25.6 190 9.25 2.821 26 0 0 42 100 0 12.9 0 3.91 0 0 0 0 0 0 0 0 0 1 0 -0.027 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0873 1.018 -2.21 -0.04 -91 -132
+012 162524.375 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1952 41.7 41.7 9.4 0 25.6 191 9.25 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.024 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.087 1.016 -2.21 -0.04 -91 -132
+012 162524.406 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1857 40.98 40.98 9.4 0 25.6 191 12.25 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.023 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0889 1.012 -2.2 -0.04 -91 -132
+012 162524.438 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1992 40.98 40.98 9.4 0 25.6 190 12.25 2.784 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.023 1.5 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0865 1.011 -2.18 -0.04 -91 -132
+012 162524.469 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2043 41.7 41.7 9.4 0 25.6 190 8.75 2.784 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.0249 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0841 1.021 -2.18 -0.04 -91 -132
+012 162524.500 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1976 41.7 40.98 9.4 0 25.6 191 8.75 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.026 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0852 1.023 -2.17 -0.04 -91 -132
+012 162524.531 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1892 40.98 40.98 9.4 0 25.6 191 8.75 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.021 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0861 1.023 -2.16 -0.04 -91 -132
+012 162524.562 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2050 40.98 40.98 9.4 0 25.6 190 7.75 2.784 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.021 1.5 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.085 1.017 -2.14 -0.04 -91 -132
+012 162524.594 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2104 40.26 40.26 9.4 0 25.6 190 7.5 2.784 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.022 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0828 1.023 -2.15 -0.04 -91 -132
+012 162524.625 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2066 40.98 40.98 9.4 0 25.6 190 7.75 2.736 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.024 1.79 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0863 1.025 -2.16 -0.04 -91 -132
+012 162524.656 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1998 40.98 40.98 9.4 0 25.6 190 8.75 2.784 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.024 1.79 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0861 1.021 -2.18 -0.04 -91 -132
+012 162524.688 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2020 42.42 42.42 9.4 0 25.6 190 8.25 2.784 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0878 1.018 -2.18 -0.04 -91 -132
+012 162524.719 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1997 42.42 42.42 9.4 0 25.6 190 8.75 2.864 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0883 1.01 -2.18 -0.04 -91 -132
+012 162524.750 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1925 41.7 41.7 9.4 0 25.6 190 10.25 2.864 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.5 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0883 1.011 -2.18 -0.04 -91 -132
+012 162524.781 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1834 41.7 41.7 9.4 0 25.6 190 13 2.821 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.022 1.39 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0882 1.017 -2.15 -0.04 -91 -132
+012 162524.812 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1974 41.7 41.7 9.4 0 25.6 190 8.75 2.821 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.021 1.5 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0861 1.017 -2.14 -0.04 -91 -132
+012 162524.844 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2028 41.7 41.7 9.4 0 25.6 191 8 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0874 1.015 -2.14 -0.04 -91 -132
+012 162524.875 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1965 41.7 41.7 9.4 0 25.6 191 9 2.832 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.019 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 40.23 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.088 1.013 -2.15 -0.04 -91 -132
+012 162524.906 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1889 41.7 41.7 9.4 0 25.6 190 11.25 2.821 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.022 1.5 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0877 1.022 -2.14 -0.04 -91 -132
+012 162524.938 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1976 42.42 42.42 9.4 0 25.6 190 8.75 2.821 26 0 0 42 100 0 13 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.024 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0864 1.018 -2.17 -0.04 -91 -132
+012 162524.969 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1989 42.42 42.42 9.6 0 25.6 190 8.75 2.811 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.022 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.088 1.018 -2.19 -0.04 -91 -132
+012 162525.000 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1934 41.7 41.7 9.6 0 25.6 190 10 2.811 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.021 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0864 1.01 -2.21 -0.04 -91 -132
+012 162525.031 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1858 41.7 41.7 9.6 0 25.6 190 12.25 2.768 26 0 0 42 100 0 12.9 0 3.91 0 0 0 0 0 0 0 0 0 1 0 -0.019 1.79 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0876 1.006 -2.27 -0.03 -91 -132
+012 162525.062 +01386.23850 -07213.31410 000.000 000.00 +00000.00 1999 41.7 41.7 9.6 0 25.6 190 8.75 2.768 26 0 0 42 100 0 12.9 0 3.91 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.69 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0878 1.01 -2.28 -0.03 -91 -132
+012 162525.094 +01386.23850 -07213.31410 001.000 000.00 +00000.00 2008 41.7 41.7 9.6 0 25.6 191 7.75 2.784 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.019 1.5 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0888 1.008 -2.28 -0.03 -91 -132
+012 162525.125 +01386.23850 -07213.31410 001.000 000.00 +00000.00 1931 40.98 40.98 9.6 0 25.6 191 8.5 2.784 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.39 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0884 1.008 -2.28 -0.03 -91 -132
+012 162525.156 +01386.23850 -07213.31410 001.000 000.00 +00000.00 2027 40.98 40.98 9.6 0 25.6 190 10 2.731 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0886 1.005 -2.28 -0.03 -91 -132
+012 162525.188 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2053 40.98 40.98 9.6 0 25.6 190 8 2.731 26 0 0 42 100 0 12.9 0 4.3 0 0 0 0 0 0 0 0 0 1 0 -0.0199 1.5 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0878 1.009 -2.28 -0.03 -91 -132
+012 162525.219 +01386.23850 -07213.31410 000.000 000.00 +00000.00 2017 40.98 40.98 9.6 0 25.6 191 7.75 2.741 26 0 0 42 100 0 12.9 0 4.69 0 0 0 0 0 0 0 0 0 1 0 -0.021 1.59 0 1 0 0 0 0 0 0 1 1 1 4 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 78 0 39.06 0 0 0 0 7 0 0 0 0 0 0 0 0 0 0 0 0 0 -0.0876 1.01 -2.28 -0.03 -91 -132

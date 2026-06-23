@@ -49,4 +49,21 @@ describe('converterStore', () => {
     expect(results[0].content).toContain('$RC3')
     expect(s.availableChannels.length).toBeGreaterThan(0)
   })
+
+  it('convertAll in .vbo mode emits _ct, _rc and _channels.csv per log', () => {
+    const s = useConverterStore()
+    const session = parseLoga(loadFixture('super2.loga'))
+    const id = s.beginImport(new File(['x'], 'Super2.loga'))
+    s.completeImport(id, session)
+
+    s.setOutputFormat('vbo')
+    const results = s.convertAll()
+    expect(results.map((r) => r.name)).toEqual([
+      'Super2_ct.vbo',
+      'Super2_rc.vbo',
+      'Super2_channels.csv',
+    ])
+    expect(results[0].content).toContain('[header]')
+    expect(results[1].content).toContain('rc_rpm')
+  })
 })
