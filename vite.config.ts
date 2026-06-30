@@ -38,7 +38,7 @@ export default defineConfig({
     // App shell + assets are precached; large .loga files are user-provided at
     // runtime and never cached.
     workbox: {
-      globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+      globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,wasm}'],
     },
     manifest: {
       name: 'Track Log Studio',
