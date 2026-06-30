@@ -3,7 +3,9 @@ import { parseLoga } from '@/domain/parsing/LogaParser'
 import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
 import { parseVbo } from '@/domain/import/vbo/parseVbo'
 import { parseRcz } from '@/domain/import/rcz/parseRcz'
+import { parseRcnx } from '@/domain/import/rcnx/parseRcnx'
 import { parseXrk } from '@/domain/import/xrk/parseXrk'
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { ParseRequest, ParseResponse } from './parseProtocol'
 
@@ -35,6 +37,7 @@ const WORKER_PARSERS: Record<string, WorkerParser> = {
   nmea: { binary: false, parse: (input) => nmeaToSession(input as string) },
   vbo: { binary: false, parse: (input) => parseVbo(input as string) },
   rcz: { binary: true, parse: (input) => parseRcz(input as Uint8Array) },
+  rcnx: { binary: true, parse: (input) => parseRcnx(input as Uint8Array, sqlWasmUrl) },
   xrk: { binary: true, parse: (input) => parseXrk(input as Uint8Array) },
 }
 

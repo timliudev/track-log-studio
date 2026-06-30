@@ -3,6 +3,7 @@ import { logaImporter } from './loga/LogaImporter'
 import { nmeaImporter } from './nmea/NmeaImporter'
 import { vboImporter } from './vbo/VboImporter'
 import { rczImporter } from './rcz/RczImporter'
+import { rcnxImporter } from './rcnx/RcnxImporter'
 import { xrkImporter } from './xrk/XrkImporter'
 
 /** Registry of known importers. Order matters: first match wins. */
@@ -11,6 +12,7 @@ export const IMPORTERS: readonly Importer[] = [
   nmeaImporter,
   vboImporter,
   rczImporter,
+  rcnxImporter,
   xrkImporter,
 ]
 
