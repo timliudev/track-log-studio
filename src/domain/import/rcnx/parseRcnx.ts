@@ -10,7 +10,7 @@
  *  - `summary_N.txt` — UTF-16LE text, alternating key-line / value-line.
  *
  * The pipeline returns ONE LogSession per file, so we pick the session with the
- * most WayPoints (proxied by the largest `sess_N.db` byte length).
+ * most WayPoints (counted via `SELECT COUNT(*)` per `sess_N.db`).
  *
  * `WayPoints` columns → canonical channels (units already correct, no scaling):
  *   time*1000 + ms − t0 → Time (ms, first = 0)
@@ -70,35 +70,55 @@ export async function parseRcnx(
     entries.set(stripNul(name), data)
   }
 
-  // --- pick the session with the most WayPoints (largest sess_N.db) ---
-  let chosenN = -1
-  let chosenBytes: Uint8Array | null = null
-  let chosenLen = -1
-  const sessionIds = new Set<number>()
+  // --- collect all sess_N.db candidates ---
+  const sessions: { n: number; bytes: Uint8Array }[] = []
   for (const [name, data] of entries) {
     const m = name.match(/^sess_(\d+)\.db$/)
     if (!m) continue
-    const n = Number(m[1])
-    sessionIds.add(n)
-    if (data.byteLength > chosenLen) {
-      chosenLen = data.byteLength
-      chosenN = n
-      chosenBytes = data
+    sessions.push({ n: Number(m[1]), bytes: data })
+  }
+  if (sessions.length === 0) {
+    throw new Error('RCNX: no sess_N.db found in archive')
+  }
+  // Stable order by index so ties resolve deterministically (lowest N first).
+  sessions.sort((a, b) => a.n - b.n)
+
+  // --- init sql.js (WASM) ---
+  const initSqlJs = (await import('sql.js')).default
+  const SQL = await initSqlJs(
+    wasmLocateUrl ? { locateFile: () => wasmLocateUrl } : undefined,
+  )
+
+  // --- pick the session with the most WayPoints ---
+  // db byte length is only a coarse proxy (small sessions can share a page
+  // count), so count rows directly with a cheap COUNT(*) per session.
+  let chosenN = -1
+  let chosenBytes: Uint8Array | null = null
+  let bestCount = -1
+  for (const s of sessions) {
+    const probe = new SQL.Database(s.bytes)
+    let count = 0
+    try {
+      const r = probe.exec('SELECT COUNT(*) FROM WayPoints')
+      count = Number(r[0]?.values?.[0]?.[0] ?? 0)
+    } finally {
+      probe.close()
+    }
+    if (count > bestCount) {
+      bestCount = count
+      chosenN = s.n
+      chosenBytes = s.bytes
     }
   }
   if (!chosenBytes || chosenN < 0) {
-    throw new Error('RCNX: no sess_N.db found in archive')
+    throw new Error('RCNX: no readable sess_N.db found in archive')
   }
 
   // --- summary_N.txt for the chosen session (optional, for metadata) ---
   const summaryBytes = entries.get(`summary_${chosenN}.txt`)
   const summary = summaryBytes ? parseSummary(summaryBytes) : {}
 
-  // --- init sql.js (WASM) and open the session db ---
-  const initSqlJs = (await import('sql.js')).default
-  const SQL = await initSqlJs(
-    wasmLocateUrl ? { locateFile: () => wasmLocateUrl } : undefined,
-  )
+  // --- open the chosen session db ---
   const db = new SQL.Database(chosenBytes)
 
   let model = summary.model
@@ -171,7 +191,7 @@ export async function parseRcnx(
     if (summary.sName) headerInfo.trackName = String(summary.sName)
     if (model) headerInfo.model = String(model)
     if (summary.nHz) headerInfo.sampleRateHz = String(summary.nHz)
-    headerInfo.sessionCount = String(sessionIds.size)
+    headerInfo.sessionCount = String(sessions.length)
     headerInfo.sessionIndex = String(chosenN)
 
     const meta: LogMeta = { formatId: 'rcnx', createdDate, headerInfo }
