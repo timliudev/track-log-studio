@@ -8,6 +8,7 @@ import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
+import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
@@ -68,6 +69,13 @@ const mapGates = computed(() => [
   ...sectorStore.gates.map((line) => ({ line, confirmed: true })),
   ...sectorStore.suggestions.map((s) => ({ line: s.line, confirmed: false })),
 ])
+
+// TrackMap emits (index, line) when a confirmed gate's handle is dragged;
+// sectorStore.gates is the single owner of gate geometry, so forward straight
+// into its action rather than mutating anything locally.
+function onUpdateGate(index: number, line: LapLine): void {
+  sectorStore.setGate(index, line)
+}
 
 // --- Track heatmap (#10/#11): colour the track by a channel's value. ---
 // Channels offered for colouring (all of them, sorted), for the picker.
@@ -216,6 +224,7 @@ const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
           :gates="mapGates"
           @cursor="analyzer.setCursor"
           @update:line="lapStore.setLine($event)"
+          @update:gate="onUpdateGate"
         />
         <div class="track-color">
           <label class="tc-channel">
