@@ -4,6 +4,14 @@ import { COLORMAP_IDS, type ColormapId } from '@/domain/analysis/colormap'
 
 export type XAxis = 'time' | 'distance'
 
+/** Phase 7 — acceleration/drag test condition: which of the two
+ *  `accelTest.ts` searches to run and its parameters. Discriminated union so
+ *  the panel/store only ever hold ONE condition's params at a time (switching
+ *  type doesn't require clearing unrelated fields — see `setAccelCondition`). */
+export type AccelCondition =
+  | { kind: 'distance'; distanceM: number; minEntrySpeedKmh: number | null }
+  | { kind: 'speed'; fromKmh: number; toKmh: number }
+
 /**
  * How a chart plots its channels:
  * - `timeline`: each channel over the full session, shared X (time/distance).
@@ -45,6 +53,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // like trackColorChannel — off by default, and only meaningful for the
   // single currently-selected lap (see AnalyzerView's cornerApexes computed).
   const showCornerSpeed = ref(false)
+  // Phase 7 — acceleration/drag test (加速測試): the panel's condition config.
+  // Transient like the other analyzer toggles above (not persisted); the
+  // RESULT itself is not stored here — it's derived in AnalyzerView from this
+  // config + the active session (see accelTest.ts), same "one owner, derive
+  // via computed" rule as cornerApexes.
+  const accelCondition = ref<AccelCondition>({
+    kind: 'distance',
+    distanceM: 100,
+    minEntrySpeedKmh: null,
+  })
   let nextId = 2
 
   function setXRange(range: { min: number; max: number } | null): void {
@@ -69,6 +87,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setShowCornerSpeed(on: boolean): void {
     showCornerSpeed.value = on
+  }
+
+  function setAccelCondition(condition: AccelCondition): void {
+    accelCondition.value = condition
   }
 
   function addChart(): void {
@@ -99,12 +121,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     trackColorChannel,
     trackColormap,
     showCornerSpeed,
+    accelCondition,
     setXRange,
     setCursor,
     setOverlayCursor,
     setTrackColorChannel,
     setTrackColormap,
     setShowCornerSpeed,
+    setAccelCondition,
     addChart,
     removeChart,
     setChartChannels,
