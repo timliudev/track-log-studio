@@ -99,9 +99,12 @@ function isLatLon(v: unknown): v is { lat: number; lon: number } {
 function isLapMetric(v: unknown): boolean {
   if (typeof v !== 'object' || v === null) return false
   const o = v as Record<string, unknown>
-  if (o.kind === 'lapTime' || o.kind === 'distance') return true
+  if (o.kind === 'lapTime' || o.kind === 'distance' || o.kind === 'delta') return true
   if (o.kind === 'channel') {
     return typeof o.channel === 'string' && typeof o.agg === 'string'
+  }
+  if (o.kind === 'sectorTime') {
+    return typeof o.sector === 'number'
   }
   return false
 }
