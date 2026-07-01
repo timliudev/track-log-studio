@@ -2,9 +2,11 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLapStore, type LapMetricColumn } from '@/stores/lapStore'
+import { useSectorStore } from '@/stores/sectorStore'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { type Aggregation } from '@/domain/analysis/lapAggregate'
 import { computeMetric, type LapContext } from '@/domain/analysis/lapMetrics'
+import { computeSectorTimes } from '@/domain/analysis/sectorTiming'
 import { fastestLapIndex, slowestLapIndex } from '@/domain/analysis/bestLap'
 import { formatLapTime } from '@/domain/analysis/format'
 import { lapColor } from './lapColors'
@@ -25,6 +27,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const lapStore = useLapStore()
+const sectorStore = useSectorStore()
 
 // Selection changes are routed to the parent (which owns the zoom coupling) so
 // it can decide whether to also reset the zoom; we never mutate the selection
@@ -42,11 +45,33 @@ const cumDistM = computed<Float64Array | null>(() =>
     : null,
 )
 
+// Per-lap sector timings (§11 E): recomputed whenever laps/track/timeMs/gates
+// change. Empty when there's no track/time axis yet; with zero gates every lap
+// still gets a single (whole-lap) "sector 0" timing from computeSectorTimes.
+const sectorTimings = computed(() =>
+  props.track && props.timeMs
+    ? computeSectorTimes(props.laps, props.track, props.timeMs, sectorStore.gates)
+    : [],
+)
+
+// The fastest INCLUDED lap's total time, feeding the `delta` metric (delta to
+// best lap — the standard definition, vs. delta to the theoretical-best/optimal
+// lap which would always be non-negative and less intuitive per-lap).
+const bestLapTimeMs = computed<number | null>(() => {
+  const i = fastestLapIndex(props.laps, lapStore.excluded)
+  if (i == null) return null
+  const lap = props.laps.find((l) => l.index === i)
+  return lap ? lap.lapTimeMs : null
+})
+
 // One context for every per-lap value: built-in #/time/distance columns and the
-// configurable channel columns all source their numbers through computeMetric(ctx).
+// configurable channel/sector/delta columns all source their numbers through
+// computeMetric(ctx).
 const ctx = computed<LapContext>(() => ({
   session: props.session,
   cumDistM: cumDistM.value,
+  sectorTimings: sectorTimings.value,
+  bestLapTimeMs: bestLapTimeMs.value,
 }))
 
 // Sorted channel options for each column's picker (same idiom as TimeSeriesChart).
@@ -81,7 +106,8 @@ const worstLapIndex = computed<number | null>(() => {
 /**
  * Localized header for a configurable column's metric. Channel kind →
  * `${channel} · ${aggLabel}` (placeholder label until a channel is picked);
- * built-in kinds map to their own header label.
+ * built-in kinds map to their own header label; sectorTime shows its 1-based
+ * sector number (§11 E sectors are 0-based internally, 1-based for humans).
  */
 function columnHeader(metric: LapMetricColumn['metric']): string {
   switch (metric.kind) {
@@ -91,6 +117,10 @@ function columnHeader(metric: LapMetricColumn['metric']): string {
       return t('analyzer.lapTime')
     case 'distance':
       return t('analyzer.lapDistance')
+    case 'sectorTime':
+      return t('analyzer.sectorTimeColumn', { n: metric.sector + 1 })
+    case 'delta':
+      return t('analyzer.deltaColumn')
   }
 }
 
@@ -99,6 +129,18 @@ function formatValue(v: number): string {
   if (Number.isNaN(v)) return '—'
   return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1)
 }
+
+/** Format a sector/delta time (ms) as seconds with a sign for delta, '—' for NaN. */
+function formatMsColumn(v: number, signed: boolean): string {
+  if (Number.isNaN(v)) return '—'
+  const sec = v / 1000
+  const text = Math.abs(sec).toFixed(3)
+  if (!signed) return text
+  return sec > 0 ? `+${text}` : sec < 0 ? `-${text}` : text
+}
+
+/** How many sector slots exist for the sector-column picker (gates + 1). */
+const sectorCount = computed(() => sectorStore.gates.length + 1)
 
 interface Row {
   index: number
@@ -117,7 +159,12 @@ const rows = computed<Row[]>(() => {
     // configurable columns, so every displayed number has one source of truth.
     const lapTimeMs = computeMetric({ kind: 'lapTime' }, l, c)
     const distanceM = computeMetric({ kind: 'distance' }, l, c)
-    const cells = cols.map((col) => formatValue(computeMetric(col.metric, l, c)))
+    const cells = cols.map((col) => {
+      const v = computeMetric(col.metric, l, c)
+      if (col.metric.kind === 'sectorTime') return formatMsColumn(v, false)
+      if (col.metric.kind === 'delta') return formatMsColumn(v, true)
+      return formatValue(v)
+    })
 
     return {
       index: l.index,
@@ -148,9 +195,9 @@ const rows = computed<Row[]>(() => {
       </button>
     </div>
 
-    <!-- Column editor: one row per configured column. The editor is channel-
-         focused, so only channel-kind metrics expose the picker + agg toggle;
-         other metric kinds (future delta/sector) would render their own editor. -->
+    <!-- Column editor: one row per configured column. channel-kind exposes the
+         channel picker + agg toggle; sectorTime-kind exposes the sector-index
+         picker; delta needs no per-column config. -->
     <div class="columns-editor">
       <div v-for="col in lapStore.columns" :key="col.id" class="column-row">
         <template v-if="col.metric.kind === 'channel'">
@@ -172,6 +219,20 @@ const rows = computed<Row[]>(() => {
             </button>
           </div>
         </template>
+        <template v-else-if="col.metric.kind === 'sectorTime'">
+          <select
+            class="sector-select"
+            :value="col.metric.sector"
+            @change="lapStore.setColumnSector(col.id, Number(($event.target as HTMLSelectElement).value))"
+          >
+            <option v-for="s in sectorCount" :key="s - 1" :value="s - 1">
+              {{ t('analyzer.sectorTimeColumn', { n: s }) }}
+            </option>
+          </select>
+        </template>
+        <span v-else-if="col.metric.kind === 'delta'" class="column-label">
+          {{ t('analyzer.deltaColumn') }}
+        </span>
         <button
           type="button"
           class="remove"
@@ -182,13 +243,29 @@ const rows = computed<Row[]>(() => {
           ×
         </button>
       </div>
-      <button
-        type="button"
-        class="add-column"
-        @click="lapStore.addColumn({ kind: 'channel', channel: '', agg: 'max' })"
-      >
-        {{ t('analyzer.addColumn') }}
-      </button>
+      <div class="add-column-row">
+        <button
+          type="button"
+          class="add-column"
+          @click="lapStore.addColumn({ kind: 'channel', channel: '', agg: 'max' })"
+        >
+          {{ t('analyzer.addColumn') }}
+        </button>
+        <button
+          type="button"
+          class="add-column"
+          @click="lapStore.addColumn({ kind: 'sectorTime', sector: 0 })"
+        >
+          {{ t('analyzer.addSectorColumn') }}
+        </button>
+        <button
+          type="button"
+          class="add-column"
+          @click="lapStore.addColumn({ kind: 'delta' })"
+        >
+          {{ t('analyzer.addDeltaColumn') }}
+        </button>
+      </div>
     </div>
 
     <button
@@ -226,10 +303,10 @@ const rows = computed<Row[]>(() => {
               <button
                 type="button"
                 class="exclude"
-                :class="{ on: lapStore.isExcluded(r.index) }"
-                :title="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-                :aria-label="lapStore.isExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-                :aria-pressed="lapStore.isExcluded(r.index)"
+                :class="{ on: lapStore.isManuallyExcluded(r.index) }"
+                :title="lapStore.isManuallyExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+                :aria-label="lapStore.isManuallyExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
+                :aria-pressed="lapStore.isManuallyExcluded(r.index)"
                 @click.stop="lapStore.toggleExcluded(r.index)"
               >
                 ⦸
@@ -332,6 +409,11 @@ const rows = computed<Row[]>(() => {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+.add-column-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .add-column {
   background: var(--color-bg);
   color: var(--color-text);
@@ -344,6 +426,18 @@ const rows = computed<Row[]>(() => {
 .add-column:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.sector-select {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font: inherit;
+}
+.column-label {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
 }
 
 .empty {

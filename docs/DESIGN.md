@@ -399,9 +399,16 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
     （含 stack）、pagehide/freeze/visibility 生命週期、JS heap 記憶體（現值/峰值）寫進 localStorage、
     **重整後顯示在畫面角落**。用法：手機開 `?debug=1` → 載檔重現 → 看面板最後幾筆判斷死因。
 
+> **格式對稱補強**：**VBO 已可匯入**（feature/vbo-import，`parseVbo` + `VboImporter`），
+> 與既有 VBO 匯出形成對稱，**分析器可直接開啟 `.vbo`**。匯入 / 匯出 / `LogSession` 的整體
+> 格式轉換架構與擴充計畫見 [`ARCHITECTURE-FORMATS.md`](./ARCHITECTURE-FORMATS.md)；
+> 二進位 / ZIP 格式（XRK / RCZ / Qstarz）研究見 [`FORMAT-SUPPORT-RESEARCH.md`](./FORMAT-SUPPORT-RESEARCH.md)。
+
 ### 新增點子（2026-06-23 實機回饋，待細化）
-- **快速篩選無用圈（時間帶過濾）**：設一個有效圈速區間，超出者自動標記無用圈剔除。
-  例：ARK 完整圈 46~53s → 區間外自動排除。歸入 #1 Lap 管理 / `LapMetric` 有效性旗標 + UI 區間輸入。
+- ~~**快速篩選無用圈（時間帶過濾）**：設一個有效圈速區間，超出者自動標記無用圈剔除。
+  例：ARK 完整圈 46~53s → 區間外自動排除。歸入 #1 Lap 管理 / `LapMetric` 有效性旗標 + UI 區間輸入。~~
+  **DONE**（feature/lap-timeband-filter）：`lapValidity` 計算有效性 + `lapStore` 以**聯集**排除
+  （手動排除 ∪ 時間帶區間外），UI 提供有效圈速**區間輸入**。
 - **Sector 完整性判定有效圈**：每個彎/sector 都有經過才算有效圈（例：ARK 12 彎 → 12 sector 全通過），
   濾掉「切西瓜到空地等待」的假圈。**開放問題（待討論）**：如何判斷彎真的有跑過——彎速？逐 sector
   通過閘門的幾何判定？TBD。與 #9 E 手動 sector 同源，但新增「有效性」準則。

@@ -1,6 +1,29 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, it, expect } from 'vitest'
 import { useLapStore } from '@/stores/lapStore'
+import { useSectorStore } from '@/stores/sectorStore'
+import type { Lap } from '@/domain/model/Lap'
+import type { GpsTrack } from '@/domain/analysis/gpsTrack'
+import type { LapLine } from '@/domain/analysis/laps'
+
+/** Build a Lap with a lap time given in seconds (the band works in seconds). */
+function lap(index: number, lapTimeSec: number): Lap {
+  return { index, startIdx: index * 10, endIdx: index * 10 + 10, lapTimeMs: lapTimeSec * 1000 }
+}
+
+/** Build a GpsTrack from lat/lon arrays, marking every sample valid by default. */
+function makeTrack(lat: number[], lon: number[]): GpsTrack {
+  return {
+    lat: new Float64Array(lat),
+    lon: new Float64Array(lon),
+    valid: new Uint8Array(lat.length).fill(1),
+  }
+}
+
+/** A vertical gate line at lon = x, spanning lat [-1, 1]. */
+function gateAt(lon: number): LapLine {
+  return { a: { lat: -1, lon }, b: { lat: 1, lon } }
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -115,6 +138,160 @@ describe('lapStore', () => {
     s.clearExcluded()
     expect(s.isSelected(2)).toBe(true)
     expect(s.isExcluded(2)).toBe(false)
+  })
+
+  it('starts with no lap-time band and an excluded set equal to manual', () => {
+    const s = useLapStore()
+    expect(s.lapTimeBand).toBeNull()
+    expect(s.bandExcluded).toEqual([])
+    s.toggleExcluded(2)
+    // With no band, the effective excluded union equals the manual set exactly.
+    expect(s.excluded).toEqual(s.manualExcluded)
+    expect(s.excluded).toEqual([2])
+  })
+
+  it('setting a band folds out-of-band laps into the excluded set', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 51), lap(3, 40)])
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    // 60s (slow) and 40s (fast) are out of band.
+    expect([...s.bandExcluded].sort()).toEqual([1, 3])
+    expect([...s.excluded].sort()).toEqual([1, 3])
+    expect(s.isExcluded(1)).toBe(true)
+    expect(s.isExcluded(0)).toBe(false)
+    // Band exclusion is NOT a manual exclusion.
+    expect(s.isManuallyExcluded(1)).toBe(false)
+  })
+
+  it('clearing the band restores the previous (manual-only) excluded set', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 51)])
+    s.toggleExcluded(0)
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    expect([...s.excluded].sort()).toEqual([0, 1])
+    s.clearLapTimeBand()
+    expect(s.lapTimeBand).toBeNull()
+    expect(s.excluded).toEqual([0])
+  })
+
+  it('band composes with a manual exclusion (union, de-duplicated)', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 40)])
+    s.toggleExcluded(0) // manual
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 }) // out-of-band: 1, 2
+    expect([...s.excluded].sort()).toEqual([0, 1, 2])
+    // A lap that is BOTH manually excluded and out-of-band appears once.
+    s.toggleExcluded(1)
+    expect([...s.excluded].sort()).toEqual([0, 1, 2])
+    expect(s.excluded.filter((x) => x === 1)).toHaveLength(1)
+  })
+
+  it('an all-null band is normalised to no constraint', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 60)])
+    s.setLapTimeBand({ minSec: null, maxSec: null })
+    expect(s.lapTimeBand).toBeNull()
+    expect(s.excluded).toEqual([])
+  })
+
+  it('an only-max band excludes only the slow laps', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60), lap(2, 40)])
+    s.setLapTimeBand({ minSec: null, maxSec: 53 })
+    expect(s.excluded).toEqual([1])
+  })
+
+  it('clearExcluded clears manual exclusions but leaves band exclusions', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60)])
+    s.toggleExcluded(0)
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    s.clearExcluded()
+    expect(s.manualExcluded).toEqual([])
+    // The band's out-of-band lap (index 1) survives clearExcluded.
+    expect(s.excluded).toEqual([1])
+  })
+
+  it('starts with an empty sector-invalid set (no track, no gates)', () => {
+    const s = useLapStore()
+    expect(s.sectorInvalid).toEqual([])
+    expect(s.excluded).toEqual([])
+  })
+
+  it('setTrack alone (no gates confirmed) contributes nothing to excluded — zero regression', () => {
+    const s = useLapStore()
+    // A lap that runs 0..10 along lon, but with no gates confirmed in sectorStore.
+    s.setLaps([{ index: 0, startIdx: 0, endIdx: 10, lapTimeMs: 50000 }])
+    s.setTrack(
+      makeTrack(
+        Array.from({ length: 11 }, () => 0),
+        Array.from({ length: 11 }, (_, i) => i),
+      ),
+    )
+    expect(s.sectorInvalid).toEqual([])
+    expect(s.excluded).toEqual([])
+  })
+
+  it('confirming sector gates folds gate-missing laps into excluded (cross-store read from sectorStore)', () => {
+    const s = useLapStore()
+    const sectors = useSectorStore()
+    const track = makeTrack(
+      Array.from({ length: 11 }, () => 0),
+      Array.from({ length: 11 }, (_, i) => i),
+    )
+    s.setTrack(track)
+    s.setLaps([
+      { index: 0, startIdx: 0, endIdx: 10, lapTimeMs: 50000 }, // crosses both gates: valid
+      { index: 1, startIdx: 0, endIdx: 5, lapTimeMs: 25000 }, // stops short of gate@7.5: invalid
+    ])
+    // No gates yet -> nothing sector-invalid.
+    expect(s.sectorInvalid).toEqual([])
+    sectors.addGate(gateAt(3.5))
+    sectors.addGate(gateAt(7.5))
+    expect(s.sectorInvalid).toEqual([1])
+    expect(s.excluded).toEqual([1])
+    expect(s.isExcluded(1)).toBe(true)
+    expect(s.isExcluded(0)).toBe(false)
+    // Not a manual exclusion.
+    expect(s.isManuallyExcluded(1)).toBe(false)
+  })
+
+  it('sector-invalid composes with manual and band exclusions (union, de-duplicated)', () => {
+    const s = useLapStore()
+    const sectors = useSectorStore()
+    const track = makeTrack(
+      Array.from({ length: 11 }, () => 0),
+      Array.from({ length: 11 }, (_, i) => i),
+    )
+    s.setTrack(track)
+    s.setLaps([
+      { index: 0, startIdx: 0, endIdx: 10, lapTimeMs: 48000 },
+      { index: 1, startIdx: 0, endIdx: 5, lapTimeMs: 60000 }, // out-of-band AND sector-invalid
+      { index: 2, startIdx: 0, endIdx: 10, lapTimeMs: 51000 },
+    ])
+    s.toggleExcluded(2) // manual
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 }) // out-of-band: lap 1 (60s)
+    sectors.addGate(gateAt(3.5))
+    sectors.addGate(gateAt(7.5)) // lap 1 (ends at lon 5) never reaches this gate
+    expect([...s.excluded].sort()).toEqual([1, 2])
+    expect(s.excluded.filter((x) => x === 1)).toHaveLength(1)
+  })
+
+  it('clearing gates (sectorStore.clearGates) restores excluded to manual+band only', () => {
+    const s = useLapStore()
+    const sectors = useSectorStore()
+    const track = makeTrack(
+      Array.from({ length: 11 }, () => 0),
+      Array.from({ length: 11 }, (_, i) => i),
+    )
+    s.setTrack(track)
+    s.setLaps([{ index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 25000 }])
+    sectors.addGate(gateAt(3.5))
+    sectors.addGate(gateAt(7.5))
+    expect(s.excluded).toEqual([0])
+    sectors.clearGates()
+    expect(s.sectorInvalid).toEqual([])
+    expect(s.excluded).toEqual([])
   })
 
   it('offsetOf returns 0 for laps with no nudge, per axis', () => {

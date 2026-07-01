@@ -17,17 +17,43 @@ const props = defineProps<{
    */
   highlightLaps?: { startIdx: number; endIdx: number; color: string; offset?: { x: number; y: number } }[]
   /**
+   * Chart-zoom-follow focus (#7): a session index span to emphasize when the
+   * user has narrowed a TIMELINE chart's visible X range, derived by the
+   * caller (see `AnalyzerView`'s `focusRange`, already null'd out whenever
+   * `highlightLaps` is non-empty — lap selection takes precedence, so this
+   * and `highlightLaps` are never both drawn at once). Rendered via the same
+   * "faint full track + bright segment" path as `highlightLaps`, and — when
+   * it's a genuine sub-segment — the view auto-fits to its bbox.
+   */
+  focusRange?: { startIdx: number; endIdx: number } | null
+  /**
    * Per-sample normalised value in [0, 1] (NaN where uncoloured) for the track
    * heatmap, or null to draw the plain track. Colours come from {@link colormap}.
    */
   colorValues?: Float64Array | null
   colormap?: ColormapId
+  /**
+   * Sector gates: confirmed (solid, numbered) and pending auto-detected
+   * suggestions (dashed, awaiting user accept/reject) — same line shape as
+   * the start/finish line, drawn smaller and in a distinct colour so they
+   * don't read as another start/finish.
+   */
+  gates?: { line: LapLine; confirmed: boolean }[]
 }>()
+
+// Fixed, theme-independent colour for sector gates — distinct from the accent
+// red (cursor / start-finish handles) and from the lap-identity palette.
+const GATE_COLOR = '#00c2ff'
 
 // Number of discrete colour buckets: caps strokes per frame regardless of
 // sample count, so the heatmap stays as cheap as the plain single-stroke track.
 const HEAT_BUCKETS = 32
-const emit = defineEmits<{ cursor: [number | null]; 'update:line': [LapLine] }>()
+const emit = defineEmits<{
+  cursor: [number | null]
+  'update:line': [LapLine]
+  /** A confirmed gate's endpoint was dragged: (gate index into `props.gates`, new line). */
+  'update:gate': [number, LapLine]
+}>()
 
 const { t } = useI18n()
 
@@ -58,6 +84,13 @@ let baseMinY = NaN
 let baseMaxY = NaN
 let lastW = 0
 let lastH = 0
+// Base-pixel bbox of the CURRENT focusRange span (#7), captured alongside the
+// full-track bbox each draw; used to auto-fit the view (see watch below).
+// NaN when there's no focus range or it has no valid fixes.
+let focusMinX = NaN
+let focusMaxX = NaN
+let focusMinY = NaN
+let focusMaxY = NaN
 
 const showReset = computed(() => zoom.value !== 1 || panX.value !== 0 || panY.value !== 0)
 
@@ -120,11 +153,18 @@ function draw(): void {
   const n = track.valid.length
   px = new Float64Array(n)
   py = new Float64Array(n)
-  // Track the base-pixel bbox while projecting so panning can be clamped.
+  // Track the base-pixel bbox while projecting so panning can be clamped, and
+  // (when a focusRange is present) that span's own base-pixel bbox for #7's
+  // auto-fit.
   let bMinX = Infinity
   let bMaxX = -Infinity
   let bMinY = Infinity
   let bMaxY = -Infinity
+  const focusBBox = props.focusRange
+  let fMinX = Infinity
+  let fMaxX = -Infinity
+  let fMinY = Infinity
+  let fMaxY = -Infinity
   for (let i = 0; i < n; i++) {
     if (!track.valid[i]) {
       px[i] = NaN
@@ -136,6 +176,12 @@ function draw(): void {
     if (p.x > bMaxX) bMaxX = p.x
     if (p.y < bMinY) bMinY = p.y
     if (p.y > bMaxY) bMaxY = p.y
+    if (focusBBox && i >= focusBBox.startIdx && i <= focusBBox.endIdx) {
+      if (p.x < fMinX) fMinX = p.x
+      if (p.x > fMaxX) fMaxX = p.x
+      if (p.y < fMinY) fMinY = p.y
+      if (p.y > fMaxY) fMaxY = p.y
+    }
     px[i] = p.x * z + tx
     py[i] = p.y * z + ty
   }
@@ -144,6 +190,17 @@ function draw(): void {
     baseMaxX = bMaxX
     baseMinY = bMinY
     baseMaxY = bMaxY
+  }
+  if (fMinX <= fMaxX) {
+    focusMinX = fMinX
+    focusMaxX = fMaxX
+    focusMinY = fMinY
+    focusMaxY = fMaxY
+  } else {
+    focusMinX = NaN
+    focusMaxX = NaN
+    focusMinY = NaN
+    focusMaxY = NaN
   }
 
   // Helper: stroke the polyline over sample range [lo, hi] (inclusive), breaking
@@ -223,7 +280,19 @@ function draw(): void {
     }
   }
 
-  const highlightLaps = props.highlightLaps ?? []
+  // Emphasis segments: an explicit lap SELECTION takes precedence (enforced
+  // by the caller — AnalyzerView nulls `focusRange` whenever `highlightLaps`
+  // is non-empty), else a chart-zoom-follow `focusRange` (#7) becomes a
+  // single emphasized segment in the same faint-track + bright-segment style,
+  // coloured with the accent colour so it reads as "in-progress view", not a
+  // lap identity.
+  const focus = props.focusRange
+  const highlightLaps =
+    props.highlightLaps?.length
+      ? props.highlightLaps
+      : focus
+        ? [{ startIdx: focus.startIdx, endIdx: focus.endIdx, color: cssVar('--color-accent') }]
+        : []
   const heat = !!colorVals
 
   // Full-track polyline. With no selection it's the normal muted track (or the
@@ -237,8 +306,9 @@ function draw(): void {
     strokeRange(0, n - 1)
   }
 
-  // Selected laps: each [startIdx, endIdx] segment, thicker. Heatmap-coloured by
-  // value when a heatmap channel is chosen, else its per-lap identity color.
+  // Selected laps (or the focus segment): each [startIdx, endIdx] span,
+  // thicker. Heatmap-coloured by value when a heatmap channel is chosen, else
+  // its identity color (lap colour, or the accent colour for a focus range).
   for (const lap of highlightLaps) {
     const lo = Math.max(0, Math.min(lap.startIdx, lap.endIdx))
     const hi = Math.min(n - 1, Math.max(lap.startIdx, lap.endIdx))
@@ -324,6 +394,39 @@ function draw(): void {
     }
   }
 
+  // Sector gates: a short perpendicular segment + numbered marker at each
+  // gate's midpoint. Confirmed gates are solid; pending suggestions dashed —
+  // deliberately smaller/thinner than the checkered start/finish band so the
+  // two never get confused.
+  const gates = props.gates ?? []
+  gates.forEach((g, i) => {
+    const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
+    const b = proj.toPixel(g.line.b.lat, g.line.b.lon)
+    ctx.strokeStyle = GATE_COLOR
+    ctx.lineWidth = g.confirmed ? 3 : 2
+    ctx.setLineDash(g.confirmed ? [] : [5, 4])
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    const mx = (a.x + b.x) / 2
+    const my = (a.y + b.y) / 2
+    ctx.fillStyle = cssVar('--color-surface')
+    ctx.beginPath()
+    ctx.arc(mx, my, 9, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = GATE_COLOR
+    ctx.stroke()
+    ctx.fillStyle = cssVar('--color-text')
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(String(i + 1), mx, my)
+  })
+
   // cursor marker
   const ci = props.cursorIdx
   if (ci != null && ci >= 0 && ci < n && !Number.isNaN(px[ci])) {
@@ -377,6 +480,54 @@ function resetView(): void {
   draw()
 }
 
+// Auto-fit margin around the focus segment's bbox, in CSS px (keeps the
+// emphasized segment from touching the canvas edge).
+const FOCUS_FIT_PAD = 48
+// A focus bbox smaller than this fraction of the canvas (at zoom 1) isn't
+// worth auto-fitting — it's already comfortably visible, so leave the user's
+// current pan/zoom alone (conservative: emphasize always via the draw path
+// above, auto-fit only for a real, zoomable-in sub-segment).
+const FOCUS_FIT_MIN_FRACTION = 0.4
+
+/**
+ * Auto-fit the view (zoom/pan) to the focus segment's base-pixel bbox
+ * (captured during the last draw() as focusMinX/Y..focusMaxX/Y), when that
+ * bbox is a real sub-segment worth zooming into. Conservative by design —
+ * see the task's "don't fight the user's manual pan/zoom" rule:
+ *  - Only runs on a focusRange prop CHANGE (the watcher below), never on
+ *    every draw/redraw, so panning/zooming the map manually while a focus is
+ *    active is never overridden.
+ *  - Skips entirely if the focus bbox already fills most of the canvas at
+ *    zoom 1 (FOCUS_FIT_MIN_FRACTION) — a "sub-range" that's actually most of
+ *    the visible track doesn't need zooming in further.
+ *  - Skips if there's no valid bbox (no fixes in range) or no canvas size yet.
+ */
+function fitToFocus(): void {
+  if (!lastW || !lastH || Number.isNaN(focusMinX) || Number.isNaN(baseMinX)) return
+  const fw = focusMaxX - focusMinX
+  const fh = focusMaxY - focusMinY
+  // Degenerate bbox (e.g. a single point / straight line with ~0 extent on
+  // one axis) — still worth centring/zooming on, so only bail on truly empty.
+  if (fw < 0 || fh < 0) return
+
+  const bw = Math.max(baseMaxX - baseMinX, 1e-9)
+  const bh = Math.max(baseMaxY - baseMinY, 1e-9)
+  if (fw >= bw * FOCUS_FIT_MIN_FRACTION && fh >= bh * FOCUS_FIT_MIN_FRACTION) return
+
+  const availW = Math.max(lastW - 2 * FOCUS_FIT_PAD, 1)
+  const availH = Math.max(lastH - 2 * FOCUS_FIT_PAD, 1)
+  const scaleX = fw > 1e-9 ? availW / fw : MAX_ZOOM
+  const scaleY = fh > 1e-9 ? availH / fh : MAX_ZOOM
+  const z2 = clampZoom(Math.min(scaleX, scaleY))
+
+  const cx = (focusMinX + focusMaxX) / 2
+  const cy = (focusMinY + focusMaxY) / 2
+  zoom.value = z2
+  panX.value = lastW / 2 - cx * z2
+  panY.value = lastH / 2 - cy * z2
+  clampPan()
+}
+
 function onWheel(e: WheelEvent): void {
   const pos = clientPos(e)
   if (!pos) return
@@ -392,8 +543,14 @@ function onWheel(e: WheelEvent): void {
 const pointers = new Map<number, { x: number; y: number }>()
 type Mode = 'idle' | 'line' | 'pan' | 'pinch'
 let mode: Mode = 'idle'
-// Which start/finish handle is being dragged ('a' | 'b') in 'line' mode.
-let dragging: 'a' | 'b' | null = null
+// Which handle is being dragged in 'line' mode, and on what target: the
+// start/finish line, or a confirmed gate (by index into props.gates). Only
+// CONFIRMED gates are draggable — suggestions stay non-interactive (the user
+// must accept them first). Reuses the exact same hit radius, pointer-capture
+// and toGeo conversion as the start/finish line; only the emitted event and
+// its target line differ.
+type DragTarget = { kind: 'line' } | { kind: 'gate'; index: number }
+let dragging: { target: DragTarget; handle: 'a' | 'b' } | null = null
 let panLast: { x: number; y: number } | null = null
 let pinchLast: { dist: number; cx: number; cy: number } | null = null
 
@@ -410,17 +567,47 @@ function twoPointers(): [{ x: number; y: number }, { x: number; y: number }] | n
   return [it.next().value!, it.next().value!]
 }
 
-/** Which start/finish handle (if any) is under the pointer, within the hit radius. */
-function handleAt(mx: number, my: number): 'a' | 'b' | null {
-  if (!props.line || !projection) return null
-  const a = projection.toPixel(props.line.a.lat, props.line.a.lon)
-  const b = projection.toPixel(props.line.b.lat, props.line.b.lon)
+/** Squared-distance hit test for a single line's two endpoints, shared below. */
+function nearestHandle(
+  line: LapLine,
+  mx: number,
+  my: number,
+): { handle: 'a' | 'b'; distSq: number } | null {
+  if (!projection) return null
+  const a = projection.toPixel(line.a.lat, line.a.lon)
+  const b = projection.toPixel(line.b.lat, line.b.lon)
   const da = (a.x - mx) ** 2 + (a.y - my) ** 2
   const db = (b.x - mx) ** 2 + (b.y - my) ** 2
   const hit = HANDLE_HIT * HANDLE_HIT
-  if (da <= hit && da <= db) return 'a'
-  if (db <= hit) return 'b'
-  return null
+  if (da > hit && db > hit) return null
+  return da <= db ? { handle: 'a', distSq: da } : { handle: 'b', distSq: db }
+}
+
+/**
+ * Which handle (if any) is under the pointer, within the hit radius — checked
+ * across the start/finish line AND every CONFIRMED gate (suggestions are
+ * excluded, matching their non-interactive dashed rendering). When several
+ * targets' handles overlap, the closest one wins.
+ */
+function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | 'b' } | null {
+  if (!projection) return null
+  let best: { target: DragTarget; handle: 'a' | 'b'; distSq: number } | null = null
+
+  if (props.line) {
+    const hit = nearestHandle(props.line, mx, my)
+    if (hit) best = { target: { kind: 'line' }, handle: hit.handle, distSq: hit.distSq }
+  }
+
+  const gates = props.gates ?? []
+  gates.forEach((g, index) => {
+    if (!g.confirmed) return
+    const hit = nearestHandle(g.line, mx, my)
+    if (hit && (!best || hit.distSq < best.distSq)) {
+      best = { target: { kind: 'gate', index }, handle: hit.handle, distSq: hit.distSq }
+    }
+  })
+
+  return best ? { target: best.target, handle: best.handle } : null
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -439,7 +626,8 @@ function onPointerDown(e: PointerEvent): void {
     return
   }
 
-  // Single pointer: grab a start/finish handle if one is under it, else pan.
+  // Single pointer: grab a start/finish or confirmed-gate handle if one is
+  // under it, else pan.
   const h = handleAt(pos.x, pos.y)
   if (h) {
     mode = 'line'
@@ -474,13 +662,23 @@ function onPointerMove(e: PointerEvent): void {
     return
   }
 
-  if (mode === 'line' && dragging && projection && props.line) {
+  if (mode === 'line' && dragging && projection) {
     const pos = clientPos(e)
     if (!pos) return
     const geo = projection.toGeo(pos.x, pos.y)
-    const next: LapLine = { a: { ...props.line.a }, b: { ...props.line.b } }
-    next[dragging] = { lat: geo.lat, lon: geo.lon }
-    emit('update:line', next)
+    const { target, handle } = dragging
+    if (target.kind === 'line') {
+      if (!props.line) return
+      const next: LapLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+      next[handle] = { lat: geo.lat, lon: geo.lon }
+      emit('update:line', next)
+    } else {
+      const g = (props.gates ?? [])[target.index]
+      if (!g) return
+      const next: LapLine = { a: { ...g.line.a }, b: { ...g.line.b } }
+      next[handle] = { lat: geo.lat, lon: geo.lon }
+      emit('update:gate', target.index, next)
+    }
     return
   }
 
@@ -563,8 +761,22 @@ watch(() => props.track, () => resetView())
 watch(() => props.cursorIdx, () => draw())
 watch(() => props.line, () => draw())
 watch(() => props.highlightLaps, () => draw())
+// #7: on a focusRange CHANGE (not every draw — see fitToFocus's docs), draw
+// once to (re)capture this range's base-pixel bbox, auto-fit the view to it
+// when it's a real sub-segment, then draw again to render at the new
+// zoom/pan. Emphasis rendering itself happens unconditionally inside draw()
+// (already covered by this watch firing draw() at least once).
+watch(
+  () => props.focusRange,
+  (r) => {
+    draw()
+    if (r) fitToFocus()
+    draw()
+  },
+)
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
+watch(() => props.gates, () => draw())
 </script>
 
 <template>

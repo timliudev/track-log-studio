@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vitest/config'
+import { loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { VitePWA } from 'vite-plugin-pwa'
 
@@ -28,54 +29,77 @@ function buildSha(): string {
 
 // Note: defineConfig from 'vitest/config' extends Vite's config with the `test`
 // field, so the unit-test setup lives alongside the build setup in one file.
-export default defineConfig({
-  plugins: [vue(), VitePWA({
-    // autoUpdate (was 'prompt' but the update-prompt UI was never wired, so
-    // returning visitors got stuck on the first cached build). During rapid
-    // continuous deploys we want new builds to apply automatically on next
-    // load instead of serving a stale service-worker cache.
-    registerType: 'autoUpdate',
-    // App shell + assets are precached; large .loga files are user-provided at
-    // runtime and never cached.
-    workbox: {
-      globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
-    },
-    manifest: {
-      name: 'Track Log Studio',
-      short_name: 'TrackLogStudio',
-      description:
-        'Track Log Studio — convert aRacer ECU .loga logs to RaceChrono .nmea and analyse laps & telemetry.',
-      lang: 'zh-Hant',
-      start_url: '/',
-      display: 'standalone',
-      background_color: '#0f1115',
-      theme_color: '#0f1115',
-      // SVG icon for Phase 0 — replace with rasterised PNG (192/512 +
-      // maskable) before production for the broadest install support.
-      icons: [
-        {
-          src: 'app-icon.svg',
-          sizes: 'any',
-          type: 'image/svg+xml',
-          purpose: 'any maskable',
+export default defineConfig(({ mode }) => {
+  // loadEnv reads .env / .env.local / .env.[mode].local (gitignored) into a
+  // plain object — needed because THIS config file runs in Node before Vite's
+  // own client-side import.meta.env replacement exists, so process.env alone
+  // wouldn't see .env.local's contents.
+  const env = loadEnv(mode, process.cwd(), '')
+
+  return {
+    plugins: [
+      vue(),
+      VitePWA({
+        // autoUpdate (was 'prompt' but the update-prompt UI was never wired, so
+        // returning visitors got stuck on the first cached build). During rapid
+        // continuous deploys we want new builds to apply automatically on next
+        // load instead of serving a stale service-worker cache.
+        registerType: 'autoUpdate',
+        // App shell + assets are precached; large .loga files are user-provided at
+        // runtime and never cached.
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,wasm}'],
         },
-      ],
+        manifest: {
+          name: 'Track Log Studio',
+          short_name: 'TrackLogStudio',
+          description:
+            'Track Log Studio — convert aRacer ECU .loga logs to RaceChrono .nmea and analyse laps & telemetry.',
+          lang: 'zh-Hant',
+          start_url: '/',
+          display: 'standalone',
+          background_color: '#0f1115',
+          theme_color: '#0f1115',
+          // SVG icon for Phase 0 — replace with rasterised PNG (192/512 +
+          // maskable) before production for the broadest install support.
+          icons: [
+            {
+              src: 'app-icon.svg',
+              sizes: 'any',
+              type: 'image/svg+xml',
+              purpose: 'any maskable',
+            },
+          ],
+        },
+      }),
+      cloudflare(),
+    ],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
     },
-  }), cloudflare()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    worker: {
+      format: 'es',
     },
-  },
-  worker: {
-    format: 'es',
-  },
-  define: {
-    __BUILD_SHA__: JSON.stringify(buildSha()),
-    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
-  },
-  test: {
-    environment: 'node',
-    include: ['test/**/*.test.ts'],
-  },
+    server: {
+      // Vite blocks unrecognised Host headers by default (DNS-rebinding guard).
+      // When testing from a phone over LAN by hostname (mDNS/Windows computer
+      // name) rather than IP, that hostname needs allowlisting — but a personal
+      // machine name has no place in this PUBLIC repo, so it's read from a
+      // gitignored `.env.local` (VITE_DEV_ALLOWED_HOSTS=comma,separated,hosts)
+      // instead of hardcoded here. Unset → vite's own default (localhost only).
+      allowedHosts: env.VITE_DEV_ALLOWED_HOSTS
+        ? env.VITE_DEV_ALLOWED_HOSTS.split(',').map((h) => h.trim())
+        : undefined,
+    },
+    define: {
+      __BUILD_SHA__: JSON.stringify(buildSha()),
+      __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+    },
+    test: {
+      environment: 'node',
+      include: ['test/**/*.test.ts'],
+    },
+  }
 })

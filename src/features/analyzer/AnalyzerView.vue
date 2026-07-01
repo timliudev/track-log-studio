@@ -6,24 +6,36 @@ import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
+import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
 import { useLapStore } from '@/stores/lapStore'
+import { useSectorStore } from '@/stores/sectorStore'
+import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
+import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
+import SectorPanel from './SectorPanel.vue'
+import TrackFilePanel from './TrackFilePanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
+const sectorStore = useSectorStore()
 const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
+// Local track-setup persistence (§11 D): auto-restores/saves the start/finish
+// line, sector gates and lap-table columns per circuit (GPS-keyed). Registered
+// AFTER useLaps() so its restore (async, via store actions) runs after — and
+// overrides — useLaps()'s synchronous default-line seeding on file change.
+useCircuitPersistence()
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
@@ -58,6 +70,37 @@ const highlightLaps = computed(() =>
 // The map-alignment panel applies to whatever laps are drawn on the map, so it
 // shows whenever ≥2 laps are selected (independent of any overlay chart).
 const showMapAlign = computed(() => selectedLaps.value.length >= 2)
+
+// #7: derive the track map's chart-zoom-follow focus from the shared xRange.
+// xRange is written ONLY by timeline-mode charts (overlay charts live in a
+// lap-relative grid and structurally never call setXRange — see
+// TimeSeriesChart.vue's onXZoom), so no separate mode flag is needed here;
+// xRangeToFocusIndices also treats a (near-)whole-session range as "no focus"
+// so the map isn't emphasizing everything. DERIVED, not stored — no
+// state-writing watcher.
+//
+// Precedence: an explicit LAP SELECTION (highlightLaps non-empty) always wins
+// over chart-range focus — selecting laps is a deliberate, higher-intent
+// choice than an in-progress chart zoom, and the two would otherwise fight
+// over the map's single "emphasized segment" visual. Chart-range focus only
+// applies when nothing is selected.
+const focusRange = computed(() =>
+  highlightLaps.value.length > 0 ? null : xRangeToFocusIndices(xRange.value, xValues.value),
+)
+
+// Sector gates for the track map: confirmed gates (solid) plus any pending
+// auto-detected suggestions awaiting accept/reject (dashed) — see SectorPanel.
+const mapGates = computed(() => [
+  ...sectorStore.gates.map((line) => ({ line, confirmed: true })),
+  ...sectorStore.suggestions.map((s) => ({ line: s.line, confirmed: false })),
+])
+
+// TrackMap emits (index, line) when a confirmed gate's handle is dragged;
+// sectorStore.gates is the single owner of gate geometry, so forward straight
+// into its action rather than mutating anything locally.
+function onUpdateGate(index: number, line: LapLine): void {
+  sectorStore.setGate(index, line)
+}
 
 // --- Track heatmap (#10/#11): colour the track by a channel's value. ---
 // Channels offered for colouring (all of them, sorted), for the picker.
@@ -146,6 +189,35 @@ function onXZoom(r: { min: number; max: number } | null): void {
 function onSelect(e: Event): void {
   analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
 }
+
+// --- Valid lap-time band (時間帶過濾): laps whose time is outside [min, max]
+// seconds are auto-excluded via the lapStore. Each input is independent; an
+// empty field leaves that side open, and clearing both removes the band. ---
+const bandMin = computed<number | null>({
+  get: () => lapStore.lapTimeBand?.minSec ?? null,
+  set: (v) => lapStore.setLapTimeBand({ minSec: v, maxSec: lapStore.lapTimeBand?.maxSec ?? null }),
+})
+const bandMax = computed<number | null>({
+  get: () => lapStore.lapTimeBand?.maxSec ?? null,
+  set: (v) => lapStore.setLapTimeBand({ minSec: lapStore.lapTimeBand?.minSec ?? null, maxSec: v }),
+})
+
+/** Parse a band <input>'s value to seconds, or null when blank/non-numeric. */
+function onBandInput(which: 'min' | 'max', e: Event): void {
+  const raw = (e.target as HTMLInputElement).value.trim()
+  const v = raw === '' ? null : Number(raw)
+  const sec = v != null && Number.isFinite(v) ? v : null
+  if (which === 'min') bandMin.value = sec
+  else bandMax.value = sec
+}
+
+// How many laps the band currently excludes (0 when no band) — a quick sanity
+// readout so the user can see the filter is doing something.
+const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
+
+// How many laps fail the sector-gate-crossing check (0 when no gates are
+// confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
+const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
 </script>
 
 <template>
@@ -176,10 +248,13 @@ function onSelect(e: Event): void {
           :cursor-idx="cursorIdx"
           :line="lapStore.line"
           :highlight-laps="highlightLaps"
+          :focus-range="focusRange"
           :color-values="colorValues"
           :colormap="trackColormap"
+          :gates="mapGates"
           @cursor="analyzer.setCursor"
           @update:line="lapStore.setLine($event)"
+          @update:gate="onUpdateGate"
         />
         <div class="track-color">
           <label class="tc-channel">
@@ -220,6 +295,50 @@ function onSelect(e: Event): void {
             {{ t('analyzer.resetLine') }}
           </button>
         </div>
+        <div class="band" role="group" :aria-label="t('analyzer.lapBand')">
+          <span class="band-label">{{ t('analyzer.lapBand') }}</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.1"
+            class="band-input"
+            :value="bandMin ?? ''"
+            :placeholder="t('analyzer.lapBandMin')"
+            :aria-label="t('analyzer.lapBandMin')"
+            @input="onBandInput('min', $event)"
+          />
+          <span class="band-sep">–</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.1"
+            class="band-input"
+            :value="bandMax ?? ''"
+            :placeholder="t('analyzer.lapBandMax')"
+            :aria-label="t('analyzer.lapBandMax')"
+            @input="onBandInput('max', $event)"
+          />
+          <button
+            v-if="lapStore.lapTimeBand"
+            type="button"
+            class="band-clear"
+            @click="lapStore.clearLapTimeBand()"
+          >
+            {{ t('analyzer.lapBandClear') }}
+          </button>
+          <span v-if="bandExcludedCount > 0" class="band-count">
+            {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
+          </span>
+        </div>
+        <SectorPanel
+          :laps="laps"
+          :invalid-count="sectorInvalidCount"
+          :track="track"
+          :time-ms="timeMs"
+        />
+        <TrackFilePanel :track="track" />
         <LapTable
           :laps="laps"
           :track="track"
@@ -392,6 +511,46 @@ function onSelect(e: Event): void {
 .reset:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--space);
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+}
+.band-label {
+  flex: 0 0 auto;
+}
+.band-input {
+  width: 64px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font: inherit;
+}
+.band-sep {
+  color: var(--color-text-muted);
+}
+.band-clear {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.band-clear:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.band-count {
+  color: var(--color-text-muted);
 }
 .add {
   align-self: flex-start;
