@@ -138,6 +138,15 @@ export default {
     accelNoMatch: 'No matching segment found in this recording.',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: 'Focus this segment',
+    gg: {
+      title: 'G-G diagram (friction circle)',
+      xAxis: 'X-axis channel',
+      yAxis: 'Y-axis channel',
+      noChannels: 'No force channels found (e.g. TC_Xforce / TC_Yforce).',
+      pickBoth: 'Pick a channel for both X and Y.',
+      session: 'Whole session',
+      lapSeries: 'Lap {n}',
+    },
     trackFile: {
       export: 'Export track setup',
       import: 'Import track setup',
