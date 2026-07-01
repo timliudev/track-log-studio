@@ -55,11 +55,17 @@ export function invalidSectorLapIndices(
 
   for (const lap of laps) {
     const start = Math.max(0, lap.startIdx)
-    const end = Math.min(track.valid.length, lap.endIdx)
+    // Inclusive of `endIdx`: a lap spans samples [startIdx, endIdx] (endIdx is
+    // the boundary sample where the NEXT crossing occurs — see lapsFromCrossings
+    // in laps.ts), and the final segment (endIdx-1, endIdx) is the one whose
+    // crossing closes this lap. A gate crossed right at the line (e.g. the last
+    // sector gate coinciding with, or sitting just before, the finish) must
+    // still count towards THIS lap, so that segment has to be tested too.
+    const end = Math.min(track.valid.length - 1, lap.endIdx)
 
     let gatePtr = 0
     let prev = -1
-    for (let i = start; i < end && gatePtr < planarGates.length; i++) {
+    for (let i = start; i <= end && gatePtr < planarGates.length; i++) {
       if (!valid[i]) continue
       if (prev >= 0) {
         const g = planarGates[gatePtr]
