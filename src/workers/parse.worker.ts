@@ -24,6 +24,7 @@ interface WorkerParser {
   parse: (
     input: string | Uint8Array,
     onProgress?: ProgressFn,
+    sessionIndex?: number,
   ) => LogSession | Promise<LogSession>
 }
 
@@ -37,7 +38,11 @@ const WORKER_PARSERS: Record<string, WorkerParser> = {
   nmea: { binary: false, parse: (input) => nmeaToSession(input as string) },
   vbo: { binary: false, parse: (input) => parseVbo(input as string) },
   rcz: { binary: true, parse: (input) => parseRcz(input as Uint8Array) },
-  rcnx: { binary: true, parse: (input) => parseRcnx(input as Uint8Array, sqlWasmUrl) },
+  rcnx: {
+    binary: true,
+    parse: (input, _onProgress, sessionIndex) =>
+      parseRcnx(input as Uint8Array, sqlWasmUrl, sessionIndex),
+  },
   xrk: { binary: true, parse: (input) => parseXrk(input as Uint8Array) },
 }
 
@@ -45,7 +50,7 @@ const WORKER_PARSERS: Record<string, WorkerParser> = {
 // channels are returned with their Float32Array buffers transferred (zero-copy)
 // so the main thread can rebuild a LogSession.
 ctx.onmessage = async (event: MessageEvent<ParseRequest>) => {
-  const { id, importerId, file } = event.data
+  const { id, importerId, file, sessionIndex } = event.data
   try {
     const entry = WORKER_PARSERS[importerId]
     if (!entry) {
@@ -59,9 +64,13 @@ ctx.onmessage = async (event: MessageEvent<ParseRequest>) => {
     const input: string | Uint8Array = entry.binary
       ? new Uint8Array(await file.arrayBuffer())
       : await file.text()
-    const session = await entry.parse(input, (fraction) => {
-      ctx.postMessage({ id, kind: 'progress', fraction } satisfies ParseResponse)
-    })
+    const session = await entry.parse(
+      input,
+      (fraction) => {
+        ctx.postMessage({ id, kind: 'progress', fraction } satisfies ParseResponse)
+      },
+      sessionIndex,
+    )
 
     const channels = session.channels.map((c) => ({
       name: c.name,

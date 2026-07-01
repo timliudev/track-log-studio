@@ -38,6 +38,18 @@ export default {
       ],
       untestedItems: ['RC super', 'RC superXX', 'RC mini X', 'RC mini XX', 'aRacer Race Module 3'],
     },
+    rcnxPicker: {
+      title: 'This .rcnx has {n} sessions — pick one to open',
+      fileLabel: 'File',
+      session: 'Session {n}',
+      waypoints: '{n} points',
+      duration: '{m} min',
+      hasLaps: 'lap data available',
+      noLaps: 'no lap data',
+      recommended: '(largest)',
+      open: 'Open',
+      cancel: 'Cancel',
+    },
   },
   analyzer: {
     noFiles: 'No logs loaded — use the file bar above to load a .loga, .nmea or .zip file.',

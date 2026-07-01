@@ -38,6 +38,18 @@ export default {
       ],
       untestedItems: ['RC super', 'RC superXX', 'RC mini X', 'RC mini XX', 'aRacer Race Module 3'],
     },
+    rcnxPicker: {
+      title: '這個 .rcnx 檔含 {n} 個 session，請選擇要開啟的一個',
+      fileLabel: '檔案',
+      session: 'Session {n}',
+      waypoints: '{n} 個點',
+      duration: '{m} 分鐘',
+      hasLaps: '含圈速資料',
+      noLaps: '無圈速資料',
+      recommended: '（資料最多）',
+      open: '開啟',
+      cancel: '取消',
+    },
   },
   analyzer: {
     noFiles: '尚未載入記錄，請點選上方「載入記錄」選取 .loga、.nmea 或 .zip 檔案。',
