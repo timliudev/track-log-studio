@@ -7,6 +7,7 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useLapStore } from '@/stores/lapStore'
+import { useSectorStore } from '@/stores/sectorStore'
 import { lapColor } from './lapColors'
 import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
@@ -15,12 +16,14 @@ import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
+import SectorPanel from './SectorPanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
+const sectorStore = useSectorStore()
 const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
@@ -58,6 +61,13 @@ const highlightLaps = computed(() =>
 // The map-alignment panel applies to whatever laps are drawn on the map, so it
 // shows whenever ≥2 laps are selected (independent of any overlay chart).
 const showMapAlign = computed(() => selectedLaps.value.length >= 2)
+
+// Sector gates for the track map: confirmed gates (solid) plus any pending
+// auto-detected suggestions awaiting accept/reject (dashed) — see SectorPanel.
+const mapGates = computed(() => [
+  ...sectorStore.gates.map((line) => ({ line, confirmed: true })),
+  ...sectorStore.suggestions.map((s) => ({ line: s.line, confirmed: false })),
+])
 
 // --- Track heatmap (#10/#11): colour the track by a channel's value. ---
 // Channels offered for colouring (all of them, sorted), for the picker.
@@ -203,6 +213,7 @@ const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
           :highlight-laps="highlightLaps"
           :color-values="colorValues"
           :colormap="trackColormap"
+          :gates="mapGates"
           @cursor="analyzer.setCursor"
           @update:line="lapStore.setLine($event)"
         />
@@ -282,6 +293,7 @@ const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
             {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
           </span>
         </div>
+        <SectorPanel :laps="laps" />
         <LapTable
           :laps="laps"
           :track="track"
