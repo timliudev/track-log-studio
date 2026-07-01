@@ -38,7 +38,12 @@ const GATE_COLOR = '#00c2ff'
 // Number of discrete colour buckets: caps strokes per frame regardless of
 // sample count, so the heatmap stays as cheap as the plain single-stroke track.
 const HEAT_BUCKETS = 32
-const emit = defineEmits<{ cursor: [number | null]; 'update:line': [LapLine] }>()
+const emit = defineEmits<{
+  cursor: [number | null]
+  'update:line': [LapLine]
+  /** A confirmed gate's endpoint was dragged: (gate index into `props.gates`, new line). */
+  'update:gate': [number, LapLine]
+}>()
 
 const { t } = useI18n()
 
@@ -436,8 +441,14 @@ function onWheel(e: WheelEvent): void {
 const pointers = new Map<number, { x: number; y: number }>()
 type Mode = 'idle' | 'line' | 'pan' | 'pinch'
 let mode: Mode = 'idle'
-// Which start/finish handle is being dragged ('a' | 'b') in 'line' mode.
-let dragging: 'a' | 'b' | null = null
+// Which handle is being dragged in 'line' mode, and on what target: the
+// start/finish line, or a confirmed gate (by index into props.gates). Only
+// CONFIRMED gates are draggable — suggestions stay non-interactive (the user
+// must accept them first). Reuses the exact same hit radius, pointer-capture
+// and toGeo conversion as the start/finish line; only the emitted event and
+// its target line differ.
+type DragTarget = { kind: 'line' } | { kind: 'gate'; index: number }
+let dragging: { target: DragTarget; handle: 'a' | 'b' } | null = null
 let panLast: { x: number; y: number } | null = null
 let pinchLast: { dist: number; cx: number; cy: number } | null = null
 
@@ -454,17 +465,47 @@ function twoPointers(): [{ x: number; y: number }, { x: number; y: number }] | n
   return [it.next().value!, it.next().value!]
 }
 
-/** Which start/finish handle (if any) is under the pointer, within the hit radius. */
-function handleAt(mx: number, my: number): 'a' | 'b' | null {
-  if (!props.line || !projection) return null
-  const a = projection.toPixel(props.line.a.lat, props.line.a.lon)
-  const b = projection.toPixel(props.line.b.lat, props.line.b.lon)
+/** Squared-distance hit test for a single line's two endpoints, shared below. */
+function nearestHandle(
+  line: LapLine,
+  mx: number,
+  my: number,
+): { handle: 'a' | 'b'; distSq: number } | null {
+  if (!projection) return null
+  const a = projection.toPixel(line.a.lat, line.a.lon)
+  const b = projection.toPixel(line.b.lat, line.b.lon)
   const da = (a.x - mx) ** 2 + (a.y - my) ** 2
   const db = (b.x - mx) ** 2 + (b.y - my) ** 2
   const hit = HANDLE_HIT * HANDLE_HIT
-  if (da <= hit && da <= db) return 'a'
-  if (db <= hit) return 'b'
-  return null
+  if (da > hit && db > hit) return null
+  return da <= db ? { handle: 'a', distSq: da } : { handle: 'b', distSq: db }
+}
+
+/**
+ * Which handle (if any) is under the pointer, within the hit radius — checked
+ * across the start/finish line AND every CONFIRMED gate (suggestions are
+ * excluded, matching their non-interactive dashed rendering). When several
+ * targets' handles overlap, the closest one wins.
+ */
+function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | 'b' } | null {
+  if (!projection) return null
+  let best: { target: DragTarget; handle: 'a' | 'b'; distSq: number } | null = null
+
+  if (props.line) {
+    const hit = nearestHandle(props.line, mx, my)
+    if (hit) best = { target: { kind: 'line' }, handle: hit.handle, distSq: hit.distSq }
+  }
+
+  const gates = props.gates ?? []
+  gates.forEach((g, index) => {
+    if (!g.confirmed) return
+    const hit = nearestHandle(g.line, mx, my)
+    if (hit && (!best || hit.distSq < best.distSq)) {
+      best = { target: { kind: 'gate', index }, handle: hit.handle, distSq: hit.distSq }
+    }
+  })
+
+  return best ? { target: best.target, handle: best.handle } : null
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -483,7 +524,8 @@ function onPointerDown(e: PointerEvent): void {
     return
   }
 
-  // Single pointer: grab a start/finish handle if one is under it, else pan.
+  // Single pointer: grab a start/finish or confirmed-gate handle if one is
+  // under it, else pan.
   const h = handleAt(pos.x, pos.y)
   if (h) {
     mode = 'line'
@@ -518,13 +560,23 @@ function onPointerMove(e: PointerEvent): void {
     return
   }
 
-  if (mode === 'line' && dragging && projection && props.line) {
+  if (mode === 'line' && dragging && projection) {
     const pos = clientPos(e)
     if (!pos) return
     const geo = projection.toGeo(pos.x, pos.y)
-    const next: LapLine = { a: { ...props.line.a }, b: { ...props.line.b } }
-    next[dragging] = { lat: geo.lat, lon: geo.lon }
-    emit('update:line', next)
+    const { target, handle } = dragging
+    if (target.kind === 'line') {
+      if (!props.line) return
+      const next: LapLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+      next[handle] = { lat: geo.lat, lon: geo.lon }
+      emit('update:line', next)
+    } else {
+      const g = (props.gates ?? [])[target.index]
+      if (!g) return
+      const next: LapLine = { a: { ...g.line.a }, b: { ...g.line.b } }
+      next[handle] = { lat: geo.lat, lon: geo.lon }
+      emit('update:gate', target.index, next)
+    }
     return
   }
 
