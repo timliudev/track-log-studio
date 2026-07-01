@@ -39,13 +39,32 @@ export interface DetectCornersOptions {
   minSpacingM?: number
 }
 
-// Calibrated 2026-07-01 against one real track (ARK, two separate raceAmp
-// sessions, ~50-57s laps) — see analyzer-feature-ideas memory / DESIGN.md
-// corner-detection spike notes. Landed both signals near the track's known
-// ~12 corners, with substantially overlapping positions between the two
-// independently-derived signals. NOT yet proven to generalise to a
-// differently-scaled track — treat as a reasonable starting point, not a
-// universal constant.
+// Calibrated 2026-07-01, RE-VALIDATED 2026-07-02 against two independent real
+// raceAmp .loga sessions on the same physical circuit (ARK, 23.10/120.22;
+// b1(5).loga and b1(9).loga — see LogaExample/, gitignored). Track has a
+// documented ~12 corners (DESIGN.md). A throwaway script (loga importer -> ECU
+// lap-channel laps -> curvatureSignal/leanAngleSignal -> findPeaks + NMS,
+// deleted after use) swept minSpacingM in {15,20,25,30,35} and
+// minProminence/minValue around the existing values:
+//  - minSpacingM=15: the tightest real consecutive-apex gap measured on a
+//    reference lap was ~15.1m (b1(9) lap 5); raising spacing to 20+ started
+//    silently merging that pair (and others in the 20-30m range) into one
+//    apex, i.e. eating real distinct corners (the ARK combo case) rather than
+//    only deduplicating GPS-noise fragments. 15 is the largest value that
+//    doesn't do this on either session — keep as-is.
+//  - curvature minProminence=0.9 / minValue=1.4: of the threshold combos
+//    tried, this pair gave the per-lap count closest to the known ~12 (mean
+//    ~12.1 across 13 real "full-ish" laps from both sessions, e.g. b1(5) lap3
+//    (reference, 746.6m/50.6s) -> 11 corners, b1(9) lap5 (reference,
+//    748.1m/50.3s) -> curvature-only 10 corners); raising minValue to 1.8
+//    dropped the mean to ~9.1 by cutting real-but-shallow high-speed corners.
+//  - Cross-session apex agreement (same lap-relative distance, independently
+//    detected): 10/11 reference-lap apexes landed within 20m of a same-signal
+//    apex in the other session (6/11 within 10m) — the residual offset looks
+//    like a small systematic shift from the ECU lap-boundary crossing point
+//    differing slightly session-to-session, not detector noise.
+// NOT yet proven to generalise to a differently-scaled track (e.g. a big
+// circuit with long, gentle corners) — treat as a reasonable starting point.
 export const CURVATURE_DEFAULTS: Required<DetectCornersOptions> = {
   minProminence: 0.9,
   minValue: 1.4,
@@ -54,6 +73,16 @@ export const CURVATURE_DEFAULTS: Required<DetectCornersOptions> = {
 }
 
 // Lean angle is in degrees, not deg/m, hence its own scale of defaults.
+// Re-validated 2026-07-02 (see CURVATURE_DEFAULTS comment for method): only
+// b1(9).loga carries real |TC_Lean_Angle| values (b1(5).loga's channel is
+// present but degenerate — see isDegenerateLeanSignal below — so it always
+// falls back to curvature and couldn't be used for this signal's sweep).
+// prom=10/val=16/spacing=15 (current values) gave a tight, stable count on
+// b1(9)'s steady-state laps 4-6: [13, 12, 12] apexes — right at the track's
+// known ~12. Pushing spacing to 25-30 does tighten the count further (down to
+// ~11) but that's from merging real apexes, the same failure mode as
+// curvature's spacing sweep, not from removing noise — not worth the
+// trade-off given lean-angle is already the more stable of the two signals.
 export const LEAN_ANGLE_DEFAULTS: Required<DetectCornersOptions> = {
   minProminence: 10,
   minValue: 16,
@@ -268,6 +297,12 @@ export function detectCorners(
  * a lap that never actually completed the track. Falls back to every
  * non-excluded lap if none look "plausible" (e.g. every lap looks short).
  * Returns undefined if there's nothing to pick from.
+ *
+ * Re-verified 2026-07-02 against real data: b1(5).loga's ECU lap channel
+ * produces exactly this pattern (laps of ~746-799m/~51-97s, plus a trailing
+ * lap 6 at 144.0m/21.41s) and the median±20% filter correctly excludes lap 6
+ * from the candidate pool, landing on lap 3 (746.6m/50.59s, the fastest of
+ * the plausible ones) rather than the short lap.
  */
 export function pickReferenceLap(
   track: GpsTrack,
