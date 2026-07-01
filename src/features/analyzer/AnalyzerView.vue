@@ -313,7 +313,12 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
             {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
           </span>
         </div>
-        <SectorPanel :laps="laps" :invalid-count="sectorInvalidCount" />
+        <SectorPanel
+          :laps="laps"
+          :invalid-count="sectorInvalidCount"
+          :track="track"
+          :time-ms="timeMs"
+        />
         <TrackFilePanel :track="track" />
         <LapTable
           :laps="laps"
