@@ -30,7 +30,7 @@ interface Crossing {
 }
 
 /** A 2D planar point in metres, local to the lap line's midpoint. */
-interface PlanarPoint {
+export interface PlanarPoint {
   x: number
   y: number
 }
@@ -39,8 +39,12 @@ interface PlanarPoint {
  * Project a lat/lon to a local planar frame centred on (lat0, lon0). Longitude
  * is scaled by cos(lat0) so x and y share the same (degree) scale; the absolute
  * unit is irrelevant because every intersection test below is sign-based.
+ *
+ * Exported so other modules that need the SAME planar-projection + crossing
+ * test (e.g. sector-gate validity) reuse this exact geometry rather than
+ * re-deriving a subtly different one.
  */
-function project(
+export function project(
   lat: number,
   lon: number,
   lat0: number,
@@ -60,7 +64,7 @@ function cross(a: PlanarPoint, b: PlanarPoint, c: PlanarPoint): number {
  * orientation test). Collinear/endpoint-touch cases are treated as non-crossing
  * to avoid double-counting a track grazing the line.
  */
-function segmentsIntersect(
+export function segmentsIntersect(
   p1: PlanarPoint,
   p2: PlanarPoint,
   q1: PlanarPoint,
