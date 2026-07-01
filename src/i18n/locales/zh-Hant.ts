@@ -102,6 +102,15 @@ export default {
     sectorAccept: '接受',
     sectorReject: '拒絕',
     sectorInvalidCount: '{x} 圈未通過 sector 檢查',
+    trackFile: {
+      export: '匯出賽道設定',
+      import: '匯入賽道設定',
+      noGps: '此記錄無 GPS，無法定位賽道',
+      importOk: '已匯入賽道設定（{key}）',
+      importFailed: '匯入失敗：{reason}',
+      savedCount: '已儲存 {n} 個賽道設定',
+      delete: '刪除',
+    },
   },
   suspension: {
     heading: '避震校正',

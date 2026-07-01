@@ -102,6 +102,15 @@ export default {
     sectorAccept: 'Accept',
     sectorReject: 'Reject',
     sectorInvalidCount: '{x} laps failed sector check',
+    trackFile: {
+      export: 'Export track setup',
+      import: 'Import track setup',
+      noGps: 'No GPS in this recording — can’t locate a circuit',
+      importOk: 'Track setup imported ({key})',
+      importFailed: 'Import failed: {reason}',
+      savedCount: '{n} saved track setups',
+      delete: 'Delete',
+    },
   },
   suspension: {
     heading: 'Suspension calibration',
