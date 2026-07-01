@@ -19,6 +19,7 @@ import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
 import SectorPanel from './SectorPanel.vue'
+import TrackFilePanel from './TrackFilePanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
@@ -313,6 +314,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           </span>
         </div>
         <SectorPanel :laps="laps" :invalid-count="sectorInvalidCount" />
+        <TrackFilePanel :track="track" />
         <LapTable
           :laps="laps"
           :track="track"
