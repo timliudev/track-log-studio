@@ -6,6 +6,7 @@ import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
+import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
@@ -28,6 +29,11 @@ const sectorStore = useSectorStore()
 const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap } = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
+// Local track-setup persistence (§11 D): auto-restores/saves the start/finish
+// line, sector gates and lap-table columns per circuit (GPS-keyed). Registered
+// AFTER useLaps() so its restore (async, via store actions) runs after — and
+// overrides — useLaps()'s synchronous default-line seeding on file change.
+useCircuitPersistence()
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
