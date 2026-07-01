@@ -1,8 +1,13 @@
 import type { GpsTrack } from './gpsTrack'
 import type { LogSession } from '@/domain/model/LogSession'
+import type { LapLine } from './laps'
+import type { Lap } from '@/domain/model/Lap'
 import { cumulativeDistanceM } from './distance'
 import { computeSmoothedCourses } from '@/domain/export/rc3Nmea/heading'
+import { toRadians, toDegrees } from '@/domain/export/rc3Nmea/geo'
 import { findPeaks } from './signalPeaks'
+
+const EARTH_R = 6371000
 
 /** A detected corner: one apex found on a reference lap's track. */
 export interface Corner {
@@ -34,16 +39,32 @@ export interface DetectCornersOptions {
   minSpacingM?: number
 }
 
-// NOTE: these are first-pass guesses for the curvature (deg/m) signal, not yet
-// calibrated against real track data — see docs/DESIGN.md corner-detection
-// spike notes. TC_Lean_Angle-based detection (deg, not deg/m) needs its own
-// tuned defaults; pass opts explicitly for that path for now.
-const DEFAULTS: Required<DetectCornersOptions> = {
-  minProminence: 0.15,
-  minValue: 0.25,
+// Calibrated 2026-07-01 against one real track (ARK, two separate raceAmp
+// sessions, ~50-57s laps) — see analyzer-feature-ideas memory / DESIGN.md
+// corner-detection spike notes. Landed both signals near the track's known
+// ~12 corners, with substantially overlapping positions between the two
+// independently-derived signals. NOT yet proven to generalise to a
+// differently-scaled track — treat as a reasonable starting point, not a
+// universal constant.
+export const CURVATURE_DEFAULTS: Required<DetectCornersOptions> = {
+  minProminence: 0.9,
+  minValue: 1.4,
   smoothHalfWidth: 2,
   minSpacingM: 15,
 }
+
+// Lean angle is in degrees, not deg/m, hence its own scale of defaults.
+export const LEAN_ANGLE_DEFAULTS: Required<DetectCornersOptions> = {
+  minProminence: 10,
+  minValue: 16,
+  smoothHalfWidth: 2,
+  minSpacingM: 15,
+}
+
+// Below this, a lean-angle channel is treated as unpopulated (present in the
+// format but never actually written by this ECU/session — observed for real
+// on one sample) rather than usable signal; callers fall back to curvature.
+const LEAN_ANGLE_DEGENERATE_MAX_DEG = 3
 
 /** Simple centred box-smooth (index-domain, not distance-domain — good enough
  *  for a roughly-constant-rate GPS fix stream; a variable-rate stream would
@@ -122,7 +143,7 @@ export function curvatureSignal(
     rate[k] = Math.abs(angleDiffDeg(headings[k], headings[k + 1])) / dd
   }
 
-  const smoothed = boxSmooth(rate, DEFAULTS.smoothHalfWidth)
+  const smoothed = boxSmooth(rate, CURVATURE_DEFAULTS.smoothHalfWidth)
   return {
     index: idxs.slice(0, n),
     distanceM: Float64Array.from(dist.slice(0, n)),
@@ -154,7 +175,15 @@ export function leanAngleSignal(
     value[k] = Math.abs(ch.data[i])
     distanceM[k] = fullDist[i]
   }
-  return { index: idxs, distanceM, value: boxSmooth(value, DEFAULTS.smoothHalfWidth) }
+  return { index: idxs, distanceM, value: boxSmooth(value, LEAN_ANGLE_DEFAULTS.smoothHalfWidth) }
+}
+
+/** True when a lean-angle signal never exceeds a trivial floor — i.e. the
+ *  channel exists but this session never actually wrote real values to it. */
+function isDegenerateLeanSignal(sig: ReferenceSignal): boolean {
+  let max = 0
+  for (let i = 0; i < sig.value.length; i++) if (sig.value[i] > max) max = sig.value[i]
+  return max < LEAN_ANGLE_DEGENERATE_MAX_DEG
 }
 
 /**
@@ -175,8 +204,13 @@ function suppressNearby(corners: Corner[], minSpacingM: number): Corner[] {
   return accepted.sort((a, b) => a.distanceM - b.distanceM)
 }
 
-function toCorners(track: GpsTrack, sig: ReferenceSignal, opts: DetectCornersOptions): Corner[] {
-  const { minProminence, minValue, minSpacingM } = { ...DEFAULTS, ...opts }
+function toCorners(
+  track: GpsTrack,
+  sig: ReferenceSignal,
+  defaults: Required<DetectCornersOptions>,
+  opts: DetectCornersOptions,
+): Corner[] {
+  const { minProminence, minValue, minSpacingM } = { ...defaults, ...opts }
   const peaks = findPeaks(sig.value, { minProminence, minValue })
   const corners = peaks.map((p) => {
     const i = sig.index[p.index]
@@ -199,14 +233,16 @@ export function detectCornersByCurvature(
   endIdx: number = track.valid.length,
   opts: DetectCornersOptions = {},
 ): Corner[] {
-  return toCorners(track, curvatureSignal(track, startIdx, endIdx), opts)
+  return toCorners(track, curvatureSignal(track, startIdx, endIdx), CURVATURE_DEFAULTS, opts)
 }
 
 /**
- * Detect corners using |TC_Lean_Angle| when the session has it, else fall
- * back to curvature. `opts` for the lean-angle path should typically use a
- * degrees-of-lean floor (e.g. minValue ~8) rather than the curvature
- * deg/metre defaults — pass explicitly when calling with lean angle.
+ * Detect corners using |TC_Lean_Angle| when the session has it AND the
+ * channel actually carries real values this session (see
+ * {@link isDegenerateLeanSignal} — the format can list the channel while the
+ * ECU never wrote to it), else fall back to curvature. Each path uses its own
+ * calibrated defaults ({@link LEAN_ANGLE_DEFAULTS} / {@link CURVATURE_DEFAULTS});
+ * `opts` overrides whichever path is actually used.
  */
 export function detectCorners(
   session: LogSession,
@@ -216,6 +252,91 @@ export function detectCorners(
   opts: DetectCornersOptions = {},
 ): { source: 'leanAngle' | 'curvature'; corners: Corner[] } {
   const lean = leanAngleSignal(session, track, startIdx, endIdx)
-  if (lean) return { source: 'leanAngle', corners: toCorners(track, lean, opts) }
+  if (lean && !isDegenerateLeanSignal(lean)) {
+    return { source: 'leanAngle', corners: toCorners(track, lean, LEAN_ANGLE_DEFAULTS, opts) }
+  }
   return { source: 'curvature', corners: detectCornersByCurvature(track, startIdx, endIdx, opts) }
+}
+
+/**
+ * Pick a lap to use as the corner-detection reference: the fastest lap among
+ * those with a plausible total distance (within 20% of the median distance
+ * across non-excluded laps). A raw "fastest by time" pick can be fooled by a
+ * broken/partial lap — e.g. a pit-lane sliver that's numerically quick but
+ * covers a fraction of the track (observed for real: a 21s "lap" covering
+ * 0.14km amid a set of ~50s/~0.75km laps) — so corners would be detected off
+ * a lap that never actually completed the track. Falls back to every
+ * non-excluded lap if none look "plausible" (e.g. every lap looks short).
+ * Returns undefined if there's nothing to pick from.
+ */
+export function pickReferenceLap(
+  track: GpsTrack,
+  laps: Lap[],
+  excluded: readonly number[],
+): Lap | undefined {
+  const skip = new Set(excluded)
+  const included = laps.filter((l) => !skip.has(l.index))
+  if (included.length === 0) return undefined
+
+  const fullDist = cumulativeDistanceM(track.lat, track.lon, track.valid)
+  const distanceOf = (l: Lap): number => {
+    const n = fullDist.length
+    if (n === 0) return 0
+    const end = Math.min(l.endIdx, n - 1)
+    const start = Math.min(l.startIdx, n - 1)
+    return fullDist[end] - fullDist[start]
+  }
+
+  const distances = included.map(distanceOf)
+  const sorted = [...distances].sort((a, b) => a - b)
+  const median = sorted[Math.floor(sorted.length / 2)]
+  const plausible =
+    median > 0 ? included.filter((_, i) => Math.abs(distances[i] - median) <= median * 0.2) : included
+  const pool = plausible.length > 0 ? plausible : included
+
+  let best: Lap | undefined
+  for (const l of pool) {
+    if (!Number.isFinite(l.lapTimeMs) || l.lapTimeMs <= 0) continue
+    if (!best || l.lapTimeMs < best.lapTimeMs) best = l
+  }
+  return best
+}
+
+/** Local heading (deg, compass bearing) at `index`, from a small window of
+ *  neighbouring valid fixes on either side — same smoothing as the curvature
+ *  signal, just windowed around one point instead of a whole lap. */
+function headingAtIndex(track: GpsTrack, index: number, halfWindow = 6): number {
+  const before: number[] = []
+  for (let k = index; k >= 0 && before.length <= halfWindow; k--) if (track.valid[k]) before.unshift(k)
+  const after: number[] = []
+  for (let k = index + 1; k < track.valid.length && after.length < halfWindow; k++) {
+    if (track.valid[k]) after.push(k)
+  }
+  const idxs = [...before, ...after]
+  if (idxs.length < 2) return 0
+  const lat = idxs.map((i) => track.lat[i])
+  const lon = idxs.map((i) => track.lon[i])
+  const headings = computeSmoothedCourses(lat, lon)
+  return headings[Math.max(0, before.length - 1)]
+}
+
+/**
+ * A {@link LapLine} gate perpendicular to the local track heading at a
+ * corner's apex, `halfWidthM` metres to each side — the same shape as the
+ * start/finish line, so it reuses all existing crossing-detection and (once
+ * wired up) drag-handle UI unchanged.
+ */
+export function cornerGateLine(track: GpsTrack, corner: Corner, halfWidthM = 15): LapLine {
+  const heading = headingAtIndex(track, corner.index)
+  const rad = toRadians(heading)
+  const cosLat = Math.cos(toRadians(corner.lat)) || 1
+  // Perpendicular unit vector (east, north) — rotate the heading vector -90°.
+  const east = Math.cos(rad)
+  const north = -Math.sin(rad)
+  const dLat = toDegrees((north * halfWidthM) / EARTH_R)
+  const dLon = toDegrees((east * halfWidthM) / (EARTH_R * cosLat))
+  return {
+    a: { lat: corner.lat + dLat, lon: corner.lon + dLon },
+    b: { lat: corner.lat - dLat, lon: corner.lon - dLon },
+  }
 }
