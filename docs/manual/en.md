@@ -59,6 +59,10 @@ Once installed, the app works **offline** (previously loaded pages and code are 
 
 The app auto-detects the format from the file extension and content on upload — you don't need to manually pick "which format to import."
 
+#### RCNX multi-session files
+
+A single `.rcnx` file can contain multiple sessions (separate recordings). If more than one session is detected, loading it opens a picker asking you to choose which one to open, listing each session's point count, duration (minutes), and whether it has lap data — the session with the most data is flagged as the recommended default. Click a session to open it, or "Cancel" to abandon the import. If that session's analysis data (the `sana` database) already contains lap records, lap boundaries are imported automatically from that source (i.e. ECU-based lap splitting — no need to drag the start/finish line manually).
+
 ### 2.5 Supported export formats
 
 - RaceChrono DIY `.nmea` (NMEA 0183 `$GPRMC` + `$RC3`)
@@ -144,6 +148,8 @@ The app auto-splits laps based on the start/finish line (or the ECU's built-in l
 
 - Default columns: **#** (lap number), **Lap time**, **Distance**.
 - **Add column**: add a **Max / Min / Avg** column for any channel (e.g. "peak speed this lap"); columns can also be removed.
+- **Add sector time**: requires at least one confirmed sector gate (see section 4.5); once added, pick "Sector 1," "Sector 2," etc. from the dropdown to show the time taken through that segment on each lap.
+- **Add delta**: adds a "Delta" column showing each lap's time relative to the fastest lap currently in the (non-excluded) list — a positive value means slower than the fastest lap.
 - **Markers**:
   - The fastest lap (⚡) and slowest lap (🐢) are marked automatically (excluded laps are not considered).
   - Each lap can be manually "excluded" (useful for track-cutting, pit-in/out, or start laps — excluded laps are omitted from the fastest-lap pick), and "re-included" later.
@@ -166,6 +172,7 @@ Set a min/max "Valid lap-time band (s)"; any lap outside that range is automatic
 - **Touch gestures**: pinch-to-zoom and drag-to-pan are supported for the chart's X-axis range (uPlot's built-in mouse drag-zoom is mouse-only, so touch devices get an equivalent gesture-based implementation).
 - **Overlay alignment**: when comparing laps in overlay mode, if a slight time offset between laps causes corners/braking points to not line up, use "Shift earlier (left)" / "Shift later (right)" to nudge each lap's start offset individually so the features align — this does not affect actual lap times or track data. "Reset this lap" or "Reset all" undoes the nudges.
 - **Map alignment**: if GNSS drift causes a lap's racing line to appear offset on the map relative to other laps, use "North / South / East / West" to nudge that lap's position on the map to realign it — again, this does not affect lap times or the underlying data. Each lap can be reset individually.
+- **Chart box-zoom → map focus**: when you box-select (drag-zoom, or pinch on touch) a sub-range on a Timeline chart while **no laps are checked** in the lap table, the track map highlights the corresponding stretch of track and auto-fits/zooms to it. If laps are checked, the overlay-selection highlight on the map takes precedence and the box-zoom focus is not shown.
 
 ### 4.5 Sector gates (corner validation)
 
@@ -177,8 +184,40 @@ The Sector feature locates corners along the track and sets up a series of "gate
 4. **Drag to adjust**: confirmed sector gates can be dragged directly on the track map to reposition them (only confirmed gates are draggable — pending suggestions must be accepted first).
 5. "Clear all" removes every confirmed gate at once, to start over.
 6. Once gates are set, the lap table and stats show "N laps failed sector check" — meaning those laps' tracks didn't pass through all configured gates in order, which can indicate cutting a corner, missing part of the track, or a GPS glitch. This result also feeds into the overall lap-exclusion logic.
+7. **Theoretical best lap**: once at least one sector gate is confirmed, the Sector panel shows a "Theoretical best lap" — a hypothetical lap time made by summing the best time recorded in each sector across all non-excluded laps, along with which lap owns each sector's best time. If there isn't enough lap data yet to compute it, a message explains that it can't be calculated.
 
 > This feature requires valid GPS track coordinates to work.
+
+### 4.6 Corner speed markers
+
+Below the Sector panel, check "Show corner minimum-speed markers" to mark each corner's lowest-speed point (the apex) on the track map:
+
+- The map shows numbered markers (1, 2, 3, …) colour-coded by speed (green → red, with slower corners more red), making the slowest corner on track immediately obvious.
+- Below the toggle, a list shows each marker's **lap distance** (km) and **speed** (km/h).
+- **Only shown when exactly one lap is checked**: with no lap selected, or multiple laps selected, a hint asks you to check a single lap in the lap table first.
+- Requires a speed channel in the log (`GPS_Speed` or `Vehicle_Speed`); if none is present, a hint says no speed channel is available.
+
+### 4.7 Acceleration test
+
+Below the corner-speed panel, search the **entire session** (not limited to one lap) for the best-matching acceleration segment:
+
+- **Condition type**:
+  - **Distance**: enter a target distance (metres); the app finds the fastest segment anywhere in the session that covers that distance. Optionally set a "minimum entry speed" to only consider segments that start at or above that speed (leave blank for no limit, including a standing start).
+  - **Speed range**: enter a "from" and "to" speed (km/h); the app finds the fastest segment that accelerates from the first speed to the second.
+- Once a best segment is found, it shows: **elapsed time**, **distance**, and **entry → exit speed**.
+- "Focus this segment": zooms the charts and map to where this best segment occurred.
+- Requires a speed channel (`GPS_Speed` or `Vehicle_Speed`); if no segment in the whole session matches the condition, a "no match" hint is shown.
+
+### 4.8 Local persistence and track files
+
+The Analyzer identifies "which circuit this is" from GPS location, and automatically saves that circuit's start/finish line, confirmed sector gates, and lap-table column setup locally in the browser (IndexedDB). The next time you load a log recorded at the same circuit (same GPS location), these settings are **restored automatically** — no need to redrag the start/finish line or re-detect corners.
+
+This panel sits after Sector / Corner speed / Acceleration test and before the lap table, and offers:
+
+- **Export track setup**: bundles the current circuit's start/finish line, sector gates, and lap-table columns into a JSON "track file" you can download for backup or to share with someone else.
+- **Import track setup**: import a previously exported JSON track file; if it matches the circuit currently open, it's applied immediately.
+- **Saved circuits list**: expand "N saved track setups" to see each saved circuit's name and last-updated time, with a "Delete" button for each.
+- If the current log has no valid GPS coordinates, the circuit can't be identified, so export is disabled and a hint is shown instead.
 
 ---
 
@@ -251,6 +290,12 @@ The footer at the bottom of the page shows "build \<sha\> · \<date\>." Include 
 | 欄位組合 / Preset | Preset | A saved RC3 field-mapping configuration |
 | RC3 欄位對應 | RC3 field mapping | The configuration of which loga channel maps to which sensor slot in NMEA/RC3 output |
 | 有效圈速區間 | Valid lap-time band | A lap-time filter range used to auto-exclude junk laps that are too short or too long |
+| 理論最佳圈 | Theoretical best lap / optimal lap | A hypothetical lap time made by summing each sector's best recorded time |
+| 差距 | Delta | A lap's time difference from the current fastest lap; positive means slower |
+| 彎道速度標記 | Corner speed marker | A map marker showing a corner's lowest-speed point (the apex) |
+| 直線加速測試 | Acceleration test | Searches the whole session for the best segment matching a distance or speed-range condition |
+| 軌跡檔 | Track file | An exported/imported JSON track setup (start/finish line + sector gates + lap-table columns) |
+| RCNX 多 session | RCNX multi-session | A single `.rcnx` file containing multiple recordings; you pick one on load |
 
 ---
 
