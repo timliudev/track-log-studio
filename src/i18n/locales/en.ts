@@ -101,6 +101,7 @@ export default {
     sectorRejectAll: 'Reject all',
     sectorAccept: 'Accept',
     sectorReject: 'Reject',
+    sectorInvalidCount: '{x} laps failed sector check',
   },
   suspension: {
     heading: 'Suspension calibration',
