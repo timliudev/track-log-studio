@@ -251,6 +251,16 @@ export const useLapStore = defineStore('lap', () => {
     if (col && col.metric.kind === 'channel') col.metric.agg = agg
   }
 
+  /**
+   * Ergonomic editor for sectorTime-kind columns: set which sector (0-based,
+   * start/finish -> gate1 is sector 0) the column shows. No-op if the id is
+   * unknown or the column's metric is not a sectorTime kind.
+   */
+  function setColumnSector(id: number, sector: number): void {
+    const col = columns.value.find((c) => c.id === id)
+    if (col && col.metric.kind === 'sectorTime') col.metric.sector = sector
+  }
+
   return {
     line,
     source,
@@ -287,5 +297,6 @@ export const useLapStore = defineStore('lap', () => {
     removeColumn,
     setColumnChannel,
     setColumnAgg,
+    setColumnSector,
   }
 })

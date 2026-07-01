@@ -21,6 +21,8 @@ function fullSetup(): CircuitSetup {
       { id: 1, metric: { kind: 'lapTime' } },
       { id: 2, metric: { kind: 'distance' } },
       { id: 3, metric: { kind: 'channel', channel: 'GPS_Speed', agg: 'max' } },
+      { id: 4, metric: { kind: 'sectorTime', sector: 1 } },
+      { id: 5, metric: { kind: 'delta' } },
     ],
     updatedAt: 1_700_000_000_000,
   }
@@ -112,6 +114,11 @@ describe('exportCircuitSetupJson / importCircuitSetupJson', () => {
 
   it('rejects an unknown metric kind', () => {
     const bad = { ...fullSetup(), columns: [{ id: 1, metric: { kind: 'bogus' } }] }
+    expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
+  })
+
+  it('rejects a sectorTime-kind column missing "sector"', () => {
+    const bad = { ...fullSetup(), columns: [{ id: 1, metric: { kind: 'sectorTime' } }] }
     expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
   })
 
