@@ -110,6 +110,10 @@ export default {
     optimalLapTime: '理論最佳圈：{t}',
     optimalLapSector: 'S{n}：{t}（第 {lap} 圈）',
     optimalLapNoData: '完整圈數還不夠，無法計算理論最佳圈。',
+    cornerSpeedToggle: '顯示彎道最低速度標記',
+    cornerSpeedNoChannel: '無速度頻道（GPS_Speed / Vehicle_Speed）可用。',
+    cornerSpeedSelectLap: '請選擇單一圈以顯示該圈的彎道速度。',
+    cornerSpeedNone: '此圈未偵測到彎道。',
     trackFile: {
       export: '匯出賽道設定',
       import: '匯入賽道設定',

@@ -39,6 +39,14 @@ const props = defineProps<{
    * don't read as another start/finish.
    */
   gates?: { line: LapLine; confirmed: boolean }[]
+  /**
+   * Corner-speed apex markers (彎道速度): numbered dots at each corner's
+   * minimum-speed point, colour-graded green (fast) -> red (slow) by
+   * `speedFrac` (0..1, normalised across the SAME lap's apexes so the
+   * gradient is meaningful regardless of the channel's absolute range).
+   * Caller (AnalyzerView) decides when this is populated (single-lap rule).
+   */
+  cornerApexes?: { lat: number; lon: number; speedKmh: number; speedFrac: number }[]
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
@@ -101,6 +109,17 @@ const HANDLE_HIT = 22
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'
+}
+
+/** Simple 2-colour lerp for corner-apex markers: red (slow, frac=0) ->
+ *  green (fast, frac=1). Deliberately independent of the heatmap colormaps
+ *  (turbo/viridis/…) so apex markers stay legible over any active heatmap. */
+function apexColor(frac: number): string {
+  const t = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0
+  const r = Math.round(220 - 160 * t)
+  const g = Math.round(60 + 140 * t)
+  const b = 60
+  return `rgb(${r}, ${g}, ${b})`
 }
 
 function draw(): void {
@@ -425,6 +444,26 @@ function draw(): void {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(String(i + 1), mx, my)
+  })
+
+  // Corner-speed apexes (彎道速度): numbered markers colour-graded green (fast)
+  // -> red (slow) by speedFrac, drawn as filled circles (round, unlike the
+  // square gate/start-finish handles) so they read as a distinct marker kind.
+  const apexes = props.cornerApexes ?? []
+  apexes.forEach((a, i) => {
+    const p = proj.toPixel(a.lat, a.lon)
+    ctx.fillStyle = apexColor(a.speedFrac)
+    ctx.beginPath()
+    ctx.arc(p.x, p.y, 9, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = cssVar('--color-surface')
+    ctx.stroke()
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 10px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(String(i + 1), p.x, p.y)
   })
 
   // cursor marker
@@ -777,6 +816,7 @@ watch(
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
 watch(() => props.gates, () => draw())
+watch(() => props.cornerApexes, () => draw())
 </script>
 
 <template>

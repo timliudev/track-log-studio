@@ -14,12 +14,14 @@ import { lapColor } from './lapColors'
 import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
+import { detectCornerApexes, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
 import SectorPanel from './SectorPanel.vue'
+import CornerSpeedPanel from './CornerSpeedPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
@@ -28,7 +30,8 @@ const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
 const sectorStore = useSectorStore()
-const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap } = storeToRefs(analyzer)
+const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap, showCornerSpeed } =
+  storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
 // Local track-setup persistence (§11 D): auto-restores/saves the start/finish
@@ -101,6 +104,51 @@ const mapGates = computed(() => [
 function onUpdateGate(index: number, line: LapLine): void {
   sectorStore.setGate(index, line)
 }
+
+// --- Corner speed apexes (彎道速度): RaceChrono-style per-corner min speed. ---
+// Speed channel resolution mirrors useLaps.ts's default lap-table column seed
+// (GPS_Speed -> Vehicle_Speed -> unavailable).
+const speedChannelName = computed(() => (session.value ? resolveSpeedChannel(session.value) : null))
+const speedAvailable = computed(() => speedChannelName.value != null)
+
+// Multi-lap rule: corner apexes are only meaningful for ONE lap at a time (a
+// numbered marker per corner doesn't generalise to overlaying several laps'
+// apex sets on the same points), so this is populated only when exactly one
+// lap is selected. With zero or 2+ laps selected, apexes is null and the map/
+// panel show their respective "select exactly one lap" hints.
+const focusedLap = computed(() => (selectedLaps.value.length === 1 ? selectedLaps.value[0] : null))
+
+const cornerApexes = computed(() => {
+  if (!showCornerSpeed.value) return null
+  const lap = focusedLap.value
+  const tk = track.value
+  const chName = speedChannelName.value
+  if (!lap || !tk || !chName) return null
+  const ch = session.value?.get(chName)
+  if (!ch) return null
+  return detectCornerApexes(tk, ch.data, lap.startIdx, lap.endIdx)
+})
+
+// Map markers need a per-lap-normalised speedFrac (0..1, fast=1) so the
+// green/red gradient is meaningful regardless of the channel's absolute
+// range — normalised across THIS lap's own apexes, not the whole session.
+const mapCornerApexes = computed(() => {
+  const apexes = cornerApexes.value
+  if (!apexes || apexes.length === 0) return []
+  let min = Infinity
+  let max = -Infinity
+  for (const a of apexes) {
+    if (a.speedKmh < min) min = a.speedKmh
+    if (a.speedKmh > max) max = a.speedKmh
+  }
+  const span = max - min
+  return apexes.map((a) => ({
+    lat: a.lat,
+    lon: a.lon,
+    speedKmh: a.speedKmh,
+    speedFrac: span > 1e-6 ? (a.speedKmh - min) / span : 1,
+  }))
+})
 
 // --- Track heatmap (#10/#11): colour the track by a channel's value. ---
 // Channels offered for colouring (all of them, sorted), for the picker.
@@ -252,6 +300,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           :color-values="colorValues"
           :colormap="trackColormap"
           :gates="mapGates"
+          :corner-apexes="mapCornerApexes"
           @cursor="analyzer.setCursor"
           @update:line="lapStore.setLine($event)"
           @update:gate="onUpdateGate"
@@ -338,6 +387,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           :track="track"
           :time-ms="timeMs"
         />
+        <CornerSpeedPanel :apexes="cornerApexes" :speed-available="speedAvailable" />
         <TrackFilePanel :track="track" />
         <LapTable
           :laps="laps"
