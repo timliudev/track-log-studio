@@ -101,6 +101,7 @@ export default {
     sectorRejectAll: '全部拒絕',
     sectorAccept: '接受',
     sectorReject: '拒絕',
+    sectorInvalidCount: '{x} 圈未通過 sector 檢查',
   },
   suspension: {
     heading: '避震校正',

@@ -6,7 +6,7 @@ import type { Lap } from '@/domain/model/Lap'
 import { useSectorStore } from '@/stores/sectorStore'
 import { useSectors } from '@/composables/useSectors'
 
-const props = defineProps<{ laps: Lap[] }>()
+const props = defineProps<{ laps: Lap[]; invalidCount: number }>()
 
 const { t } = useI18n()
 const sectorStore = useSectorStore()
@@ -27,6 +27,9 @@ const { runAutoDetect } = useSectors(lapsRef)
       <button v-if="gates.length > 0" type="button" class="clear" @click="sectorStore.clearGates()">
         {{ t('analyzer.sectorClearGates') }}
       </button>
+      <span v-if="invalidCount > 0" class="invalid-count">
+        {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
+      </span>
     </div>
 
     <div v-if="suggestions.length > 0" class="suggestions">
@@ -87,6 +90,10 @@ const { runAutoDetect } = useSectors(lapsRef)
   color: var(--color-accent);
 }
 .count {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+.invalid-count {
   font-size: 0.85rem;
   color: var(--color-text-muted);
 }
