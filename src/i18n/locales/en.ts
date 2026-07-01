@@ -110,6 +110,10 @@ export default {
     optimalLapTime: 'Optimal lap: {t}',
     optimalLapSector: 'S{n}: {t} (lap {lap})',
     optimalLapNoData: 'Not enough complete laps yet to compute a theoretical best.',
+    cornerSpeedToggle: 'Show corner apex speeds',
+    cornerSpeedNoChannel: 'No speed channel (GPS_Speed / Vehicle_Speed) available.',
+    cornerSpeedSelectLap: 'Select exactly one lap to see its corner apex speeds.',
+    cornerSpeedNone: 'No corners detected on this lap.',
     trackFile: {
       export: 'Export track setup',
       import: 'Import track setup',
