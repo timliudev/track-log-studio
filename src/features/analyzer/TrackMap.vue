@@ -22,7 +22,18 @@ const props = defineProps<{
    */
   colorValues?: Float64Array | null
   colormap?: ColormapId
+  /**
+   * Sector gates: confirmed (solid, numbered) and pending auto-detected
+   * suggestions (dashed, awaiting user accept/reject) — same line shape as
+   * the start/finish line, drawn smaller and in a distinct colour so they
+   * don't read as another start/finish.
+   */
+  gates?: { line: LapLine; confirmed: boolean }[]
 }>()
+
+// Fixed, theme-independent colour for sector gates — distinct from the accent
+// red (cursor / start-finish handles) and from the lap-identity palette.
+const GATE_COLOR = '#00c2ff'
 
 // Number of discrete colour buckets: caps strokes per frame regardless of
 // sample count, so the heatmap stays as cheap as the plain single-stroke track.
@@ -324,6 +335,39 @@ function draw(): void {
     }
   }
 
+  // Sector gates: a short perpendicular segment + numbered marker at each
+  // gate's midpoint. Confirmed gates are solid; pending suggestions dashed —
+  // deliberately smaller/thinner than the checkered start/finish band so the
+  // two never get confused.
+  const gates = props.gates ?? []
+  gates.forEach((g, i) => {
+    const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
+    const b = proj.toPixel(g.line.b.lat, g.line.b.lon)
+    ctx.strokeStyle = GATE_COLOR
+    ctx.lineWidth = g.confirmed ? 3 : 2
+    ctx.setLineDash(g.confirmed ? [] : [5, 4])
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    const mx = (a.x + b.x) / 2
+    const my = (a.y + b.y) / 2
+    ctx.fillStyle = cssVar('--color-surface')
+    ctx.beginPath()
+    ctx.arc(mx, my, 9, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = GATE_COLOR
+    ctx.stroke()
+    ctx.fillStyle = cssVar('--color-text')
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(String(i + 1), mx, my)
+  })
+
   // cursor marker
   const ci = props.cursorIdx
   if (ci != null && ci >= 0 && ci < n && !Number.isNaN(px[ci])) {
@@ -565,6 +609,7 @@ watch(() => props.line, () => draw())
 watch(() => props.highlightLaps, () => draw())
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
+watch(() => props.gates, () => draw())
 </script>
 
 <template>
