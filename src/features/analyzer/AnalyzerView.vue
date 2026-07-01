@@ -181,6 +181,10 @@ function onBandInput(which: 'min' | 'max', e: Event): void {
 // How many laps the band currently excludes (0 when no band) — a quick sanity
 // readout so the user can see the filter is doing something.
 const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
+
+// How many laps fail the sector-gate-crossing check (0 when no gates are
+// confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
+const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
 </script>
 
 <template>
@@ -293,7 +297,7 @@ const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
             {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
           </span>
         </div>
-        <SectorPanel :laps="laps" />
+        <SectorPanel :laps="laps" :invalid-count="sectorInvalidCount" />
         <LapTable
           :laps="laps"
           :track="track"

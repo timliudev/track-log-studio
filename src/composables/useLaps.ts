@@ -110,6 +110,11 @@ export function useLaps(): {
   // resulting "excluded" union; this is just the feed.
   watch(laps, (next) => lapStore.setLaps(next), { immediate: true })
 
+  // Same "just the feed" pattern for the active track, so the store can derive
+  // sector-gate-crossing validity (which needs the raw GPS fixes, not just lap
+  // boundaries) without reaching into useActiveSession itself.
+  watch(track, (next) => lapStore.setTrack(next), { immediate: true })
+
   /**
    * Re-seed the start/finish line to a fresh default from the current track.
    * (Clearing alone would leave the line null until the next file change, since
