@@ -31,6 +31,24 @@
 - **追加功能全排入佇列**（不衝突可併行，順序自行判斷）：彎道速度標記、#7 圖表框選→
   地圖聚焦、Phase 7 直線加速測試、圖表觸控手勢 #8。
 
+## Sub-agent 使用的 model（可查核）
+
+本夜所有 sub-agent 皆以 Agent 工具參數 `model: "sonnet"` 啟動 → 對應 **Claude Sonnet 5
+（`claude-sonnet-5`）**。註：Agent 工具沒有「思考強度/effort」欄位，「high」是透過指令
+（每個 prompt 明確要求 "HIGH diligence"）約束，非參數設定。逐一紀錄於各 Task 段落。
+
+## 文件語言決定（使用者拍板）
+
+- **使用手冊**：分兩檔 `docs/manual/zh-Hant.md`（繁中主）+ `docs/manual/en.md`（英譯）。
+- **設計文件 / 夜間報告**：維持繁中為主、技術名詞夾英文，單份。
+- 使用手冊將於功能穩定後由專責 sub-agent 產出並持續更新。
+
+## 中斷與恢復紀錄
+
+過程曾兩次因主行程結束（token limit / process exit）中斷背景 agent；靠小步 commit 恢復。
+第二波三個任務中斷時各自進度：export-registry 已 2 commit、chart-touch 1 commit + wip、
+persistence 0 commit（重啟）。殘留未 commit 者已先存成檢查點再續作。
+
 ## 平行化策略
 
 以 git worktree 隔離讓互不影響的功能同時進行；共用 store/檔案且有相依（E 依賴 #2）者則
