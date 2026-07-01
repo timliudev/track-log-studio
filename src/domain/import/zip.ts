@@ -1,4 +1,5 @@
 import { unzipSync, type UnzipFileInfo } from 'fflate'
+import { allImportExtensions } from './registry'
 
 /** A log file extracted from a zip: base name plus its raw bytes. */
 export interface ExtractedLog {
@@ -27,8 +28,9 @@ const MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024 // 512 MB
  *  - **Zip slip / path traversal**: entry paths are reduced to their base name
  *    (`split('/').pop()`), so a crafted `../../etc/...` name can't escape. We
  *    never touch the filesystem anyway — entries become in-memory Files.
- *  - **Extension allowlist**: only `.loga` / `.nmea` entries are inflated;
- *    everything else (scripts, READMEs, executables) is skipped, not decoded.
+ *  - **Extension allowlist**: only entries whose extension is registered in the
+ *    importer registry ({@link allImportExtensions}, e.g. `.loga` / `.nmea`) are
+ *    inflated; everything else (scripts, READMEs, executables) is skipped.
  *
  * @param maxBytes total uncompressed budget; defaults to the 512 MB safety cap.
  */
@@ -37,10 +39,11 @@ export function extractLogFiles(
   maxBytes: number = MAX_UNCOMPRESSED_BYTES,
 ): ExtractedLog[] {
   let totalUncompressed = 0
+  const allowed = allImportExtensions().map((e) => `.${e}`)
 
   const filter = (file: UnzipFileInfo): boolean => {
     const lower = file.name.toLowerCase()
-    if (!lower.endsWith('.loga') && !lower.endsWith('.nmea')) return false
+    if (!allowed.some((ext) => lower.endsWith(ext))) return false
     totalUncompressed += file.originalSize
     if (totalUncompressed > maxBytes) {
       throw new Error(

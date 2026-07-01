@@ -1,4 +1,8 @@
-/** Identifier for each recognised .loga header variant. */
+/**
+ * Identifier for each recognised .loga header variant. This is the subset of
+ * `LogMeta.formatId` values produced by .loga parsing (see LogaParser /
+ * HeaderDetector); other importers may produce their own formatId strings.
+ */
 export type LogaFormatId = 'super2' | 'superX' | 'raceAmp' | 'mxApp' | 'nmea'
 
 /**
@@ -19,7 +23,12 @@ export interface Channel {
 
 /** Header-derived metadata about a parsed log. */
 export interface LogMeta {
-  readonly formatId: LogaFormatId
+  /**
+   * Importer-specific format identifier. Widened to `string` so new importers
+   * (e.g. VBO) can supply their own ids; .loga parsing produces the
+   * `LogaFormatId` subset.
+   */
+  readonly formatId: string
   readonly createdDate: Date | null
   /** Extra header key/values (e.g. ECU SN, Hardware ID, Table ID). */
   readonly headerInfo: Readonly<Record<string, string>>

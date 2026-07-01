@@ -10,7 +10,25 @@ export interface ImportedFile {
   formatId: string | null
   rowCount: number
   error: string | null
-  fileType: 'loga' | 'nmea'
+  fileType: 'loga' | 'nmea' | 'vbo' | 'rcz' | 'xrk' | 'rcnx'
+}
+
+/**
+ * Map a file name to its import fileType, used ONLY to gate the .loga
+ * in-place patch flow (`savableEntries` / `patchLogaText`) — that flow rewrites
+ * the original .loga text byte-for-byte and only makes sense for a real .loga
+ * source. Export-to-any-format (the registry in `domain/export/registry.ts`)
+ * does not consult this at all; it works off any ready LogSession regardless
+ * of source format.
+ */
+function fileTypeOf(name: string): ImportedFile['fileType'] {
+  const lower = name.toLowerCase()
+  if (lower.endsWith('.nmea')) return 'nmea'
+  if (lower.endsWith('.vbo')) return 'vbo'
+  if (lower.endsWith('.rcz')) return 'rcz'
+  if (lower.endsWith('.xrk')) return 'xrk'
+  if (lower.endsWith('.rcnx')) return 'rcnx'
+  return 'loga'
 }
 
 export const useFileStore = defineStore('file', () => {
@@ -54,7 +72,7 @@ export const useFileStore = defineStore('file', () => {
 
   function beginImport(file: File): number {
     const id = nextId++
-    const fileType: 'loga' | 'nmea' = file.name.toLowerCase().endsWith('.nmea') ? 'nmea' : 'loga'
+    const fileType = fileTypeOf(file.name)
     originalFiles.set(id, file)
     files.value.push({
       id,

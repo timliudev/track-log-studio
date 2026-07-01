@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { LogSession } from '@/domain/model/LogSession'
-import { Rc3NmeaExporter } from '@/domain/export/rc3Nmea/Rc3NmeaExporter'
-import { convertToVbo, buildVboDisplayMap, type VboMapRow } from '@/domain/export/vbo/VboExporter'
+import { getExportFormat } from '@/domain/export/registry'
+import { buildVboDisplayMap, type VboMapRow } from '@/domain/export/vbo/VboExporter'
 import {
   DEFAULT_PRESET,
   SLOT_IDS,
@@ -55,8 +55,6 @@ function loadPersisted(): Partial<Persisted> {
     return {}
   }
 }
-
-const exporter = new Rc3NmeaExporter()
 
 /**
  * Converter state: the working RC3 slot mapping, user presets (persisted) and
@@ -119,11 +117,12 @@ export const useConverterStore = defineStore('converter', () => {
 
   /**
    * VBO channel cross-reference (same content as the _channels.csv) for the
-   * first ready .loga, used by the converter UI to preview what each ECU channel
-   * becomes in Circuit Tools / RaceChrono. Empty until a log is loaded.
+   * first ready session (any imported format — loga/nmea/vbo/rcz/xrk/rcnx),
+   * used by the converter UI to preview what each channel becomes in Circuit
+   * Tools / RaceChrono. Empty until a session is loaded.
    */
   const vboChannelMap = computed<VboMapRow[]>(() => {
-    const file = fileStore.readyFiles.find((f) => f.fileType === 'loga')
+    const file = fileStore.readyFiles[0]
     if (!file) return []
     const session = fileStore.getSession(file.id)
     if (!session) return []
@@ -181,31 +180,32 @@ export const useConverterStore = defineStore('converter', () => {
     outputFormat.value = format
   }
 
-  /** Log file name without the `.loga` extension. */
+  /** Log file name without its extension. */
   function stemOf(logName: string): string {
-    return logName.replace(/\.loga$/i, '')
+    return logName.replace(/\.[^./]+$/, '')
   }
 
   /**
-   * Convert all ready loga files into the selected output format; stores
-   * results. .nmea yields one file per log; .vbo yields three (_ct, _rc and a
-   * _channels.csv cross-reference).
+   * Convert every ready session — any imported format (loga/nmea/vbo/rcz/xrk/
+   * rcnx) — into the selected output format via the export registry; stores
+   * results. .nmea yields one file per session; .vbo yields three (_ct, _rc
+   * and a _channels.csv cross-reference).
    */
   function convertAll(): ConvertResult[] {
     isConverting.value = true
     try {
+      const format = getExportFormat(outputFormat.value)
+      if (!format) return (results.value = [])
+
       const out: ConvertResult[] = []
-      for (const f of fileStore.readyFiles.filter((f) => f.fileType === 'loga')) {
+      for (const f of fileStore.readyFiles) {
         const session = fileStore.getSession(f.id)
         if (!session) continue
         const augmented = applyDerivedChannels(session, suspension.config)
         const stem = stemOf(f.name)
-        if (outputFormat.value === 'vbo') {
-          for (const art of convertToVbo(augmented, f.name)) {
-            out.push({ name: `${stem}${art.suffix}.${art.ext}`, content: art.content })
-          }
-        } else {
-          out.push({ name: `${stem}.nmea`, content: exporter.export(augmented, mapping.value) })
+        const options = format.id === 'nmea' ? { mapping: mapping.value } : undefined
+        for (const art of format.exportSession(augmented, f.name, options)) {
+          out.push({ name: `${stem}${art.suffix}.${art.ext}`, content: art.content })
         }
       }
       results.value = out

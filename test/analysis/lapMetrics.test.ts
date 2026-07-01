@@ -88,4 +88,65 @@ describe('computeMetric', () => {
       ).toBe(true)
     })
   })
+
+  describe("kind 'sectorTime'", () => {
+    it("returns this lap's sector time by index, found via lapIndex", () => {
+      const ctx: LapContext = {
+        session: null,
+        cumDistM: null,
+        sectorTimings: [
+          { lapIndex: 0, sectorTimesMs: [1000, 2000, 3000], complete: true },
+          { lapIndex: 1, sectorTimesMs: [900, 1900, 2900], complete: true },
+        ],
+      }
+      expect(computeMetric({ kind: 'sectorTime', sector: 1 }, lap, ctx)).toBe(2000)
+    })
+
+    it('returns NaN when there is no timing entry for this lap', () => {
+      const ctx: LapContext = { session: null, cumDistM: null, sectorTimings: [] }
+      expect(Number.isNaN(computeMetric({ kind: 'sectorTime', sector: 0 }, lap, ctx))).toBe(true)
+    })
+
+    it('returns NaN when the sector index is out of range (e.g. incomplete lap)', () => {
+      const ctx: LapContext = {
+        session: null,
+        cumDistM: null,
+        sectorTimings: [{ lapIndex: 0, sectorTimesMs: [1000], complete: false }],
+      }
+      expect(Number.isNaN(computeMetric({ kind: 'sectorTime', sector: 1 }, lap, ctx))).toBe(true)
+    })
+
+    it('returns NaN when sectorTimings is absent from the context', () => {
+      const ctx: LapContext = { session: null, cumDistM: null }
+      expect(Number.isNaN(computeMetric({ kind: 'sectorTime', sector: 0 }, lap, ctx))).toBe(true)
+    })
+  })
+
+  describe("kind 'delta'", () => {
+    it("returns this lap's time minus the best lap's time", () => {
+      const ctx: LapContext = { session: null, cumDistM: null, bestLapTimeMs: 90000 }
+      expect(computeMetric({ kind: 'delta' }, lap, ctx)).toBe(92345 - 90000)
+    })
+
+    it('returns 0 for the best lap itself', () => {
+      const ctx: LapContext = { session: null, cumDistM: null, bestLapTimeMs: 92345 }
+      expect(computeMetric({ kind: 'delta' }, lap, ctx)).toBe(0)
+    })
+
+    it('returns NaN when bestLapTimeMs is null (no qualifying lap)', () => {
+      const ctx: LapContext = { session: null, cumDistM: null, bestLapTimeMs: null }
+      expect(Number.isNaN(computeMetric({ kind: 'delta' }, lap, ctx))).toBe(true)
+    })
+
+    it('returns NaN when bestLapTimeMs is absent from the context', () => {
+      const ctx: LapContext = { session: null, cumDistM: null }
+      expect(Number.isNaN(computeMetric({ kind: 'delta' }, lap, ctx))).toBe(true)
+    })
+
+    it("returns NaN when this lap's own lapTimeMs is not finite", () => {
+      const broken: Lap = { index: 0, startIdx: 1, endIdx: 4, lapTimeMs: NaN }
+      const ctx: LapContext = { session: null, cumDistM: null, bestLapTimeMs: 90000 }
+      expect(Number.isNaN(computeMetric({ kind: 'delta' }, broken, ctx))).toBe(true)
+    })
+  })
 })

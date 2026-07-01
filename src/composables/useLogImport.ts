@@ -37,18 +37,23 @@ function ensureWorker(): Worker {
 }
 
 /**
- * Parse .loga files off the main thread. Parsing is serialised through a single
- * worker (memory-friendly for large files); progress is reported per file.
+ * Parse log files off the main thread. Parsing is serialised through a single
+ * worker (memory-friendly for large files); progress is reported per file. The
+ * importer is selected in the worker by `importerId`.
  */
 export function useLogImport(): {
-  parseFile: (file: File, onProgress?: ProgressFn) => Promise<LogSession>
+  parseFile: (file: File, importerId: string, onProgress?: ProgressFn) => Promise<LogSession>
 } {
-  function parseFile(file: File, onProgress?: ProgressFn): Promise<LogSession> {
+  function parseFile(
+    file: File,
+    importerId: string,
+    onProgress?: ProgressFn,
+  ): Promise<LogSession> {
     const w = ensureWorker()
     const id = nextId++
     return new Promise<LogSession>((resolve, reject) => {
       pending.set(id, { resolve, reject, onProgress })
-      w.postMessage({ id, file } satisfies ParseRequest)
+      w.postMessage({ id, importerId, file } satisfies ParseRequest)
     })
   }
 

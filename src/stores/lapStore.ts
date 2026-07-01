@@ -1,9 +1,14 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { LapLine } from '@/domain/analysis/laps'
 import type { Aggregation } from '@/domain/analysis/lapAggregate'
 import type { LapMetric } from '@/domain/analysis/lapMetrics'
+import { outOfBandLapIndices, type LapTimeBand } from '@/domain/analysis/lapValidity'
+import { invalidSectorLapIndices } from '@/domain/analysis/sectorValidity'
+import type { GpsTrack } from '@/domain/analysis/gpsTrack'
+import type { Lap } from '@/domain/model/Lap'
 import type { XAxis } from '@/stores/analyzerStore'
+import { useSectorStore } from '@/stores/sectorStore'
 
 /** How laps are detected: a user-placed start/finish line, or the ECU channel. */
 export type LapSource = 'line' | 'ecu'
@@ -47,10 +52,48 @@ export const useLapStore = defineStore('lap', () => {
   // lap's color (assigned by order) stays stable as laps are added/removed.
   // Drives chart zoom and the colored segments on the track map.
   const selected = ref<number[]>([])
-  // Indices of laps the user has marked as garbage (e.g. an off-track "cut" lap)
-  // so they don't pollute best-lap / future optimal-time & delta computations.
-  // Order is irrelevant (membership only), unlike `selected`.
-  const excluded = ref<number[]>([])
+  // Indices of laps the user has MANUALLY marked as garbage (e.g. an off-track
+  // "cut" lap) so they don't pollute best-lap / future optimal-time & delta
+  // computations. Order is irrelevant (membership only), unlike `selected`.
+  const manualExcluded = ref<number[]>([])
+  // The currently-detected laps, kept here so the store can derive validity-based
+  // exclusions (out-of-band laps) from lap times. Pushed in by `useLaps`; the
+  // single feed for the time-band filter and the sector-completeness rule below.
+  const laps = ref<Lap[]>([])
+  // The active session's GPS track, kept here (same "pushed in" pattern as
+  // `laps`) so the store can derive sector-gate-crossing validity without
+  // reaching into `useActiveSession` itself. Pushed in by `useLaps`.
+  const track = ref<GpsTrack | null>(null)
+  // Optional valid-lap-time band (seconds, inclusive bounds, either side null to
+  // leave it open). When null/empty the included set is identical to manual-only.
+  const lapTimeBand = ref<LapTimeBand | null>(null)
+
+  // Cross-store read: confirmed sector gates live in sectorStore (drawn/accepted
+  // via SectorPanel). Read here, at store setup, same pattern as
+  // `converterStore` reading `fileStore`/`suspensionStore`.
+  const sectorStore = useSectorStore()
+
+  // Lap indices excluded because their lap time falls outside the band; empty
+  // when no band is set. A SEPARATE exclusion reason that unions with the manual
+  // one — the sector-completeness rule below unions in the very same way.
+  const bandExcluded = computed<number[]>(() => outOfBandLapIndices(laps.value, lapTimeBand.value))
+
+  // Lap indices excluded because they fail to cross every confirmed sector gate,
+  // in order (missed gate, or an infield cut / 切西瓜 that crosses them out of
+  // sequence). Empty whenever there is no track yet or no gates are confirmed —
+  // so with zero gates this term contributes nothing, keeping `excluded`
+  // byte-identical to before sector gates existed.
+  const sectorInvalid = computed<number[]>(() =>
+    track.value ? invalidSectorLapIndices(laps.value, track.value, sectorStore.gates) : [],
+  )
+
+  // The effective exclusion set feeding best-lap / delta / overlays: a lap is
+  // excluded iff it is MANUALLY excluded OR out-of-band OR sector-invalid. With
+  // no band and no confirmed gates this equals `manualExcluded` exactly (no
+  // regression). De-duplicated so a lap excluded for multiple reasons appears once.
+  const excluded = computed<number[]>(() => [
+    ...new Set([...manualExcluded.value, ...bandExcluded.value, ...sectorInvalid.value]),
+  ])
   // User-configured statistics columns for the lap table.
   const columns = ref<LapMetricColumn[]>([])
   // Monotonic id source so column ids stay unique across add/remove.
@@ -88,21 +131,56 @@ export const useLapStore = defineStore('lap', () => {
     return selected.value.includes(i)
   }
 
-  /** Mark lap `i` as garbage, or un-mark it when already excluded. */
+  /** Manually mark lap `i` as garbage, or un-mark it when already manually excluded. */
   function toggleExcluded(i: number): void {
-    excluded.value = excluded.value.includes(i)
-      ? excluded.value.filter((x) => x !== i)
-      : [...excluded.value, i]
+    manualExcluded.value = manualExcluded.value.includes(i)
+      ? manualExcluded.value.filter((x) => x !== i)
+      : [...manualExcluded.value, i]
   }
 
-  /** Whether lap `i` is currently excluded as garbage. */
+  /** Whether lap `i` is MANUALLY excluded (the user's per-lap toggle state). */
+  function isManuallyExcluded(i: number): boolean {
+    return manualExcluded.value.includes(i)
+  }
+
+  /**
+   * Whether lap `i` is excluded for ANY reason (manual OR out-of-band OR
+   * sector-invalid) — i.e. omitted from best-lap / delta / overlays. This is
+   * what UI should test to dim a row; {@link isManuallyExcluded} is for the
+   * per-lap toggle's pressed state.
+   */
   function isExcluded(i: number): boolean {
     return excluded.value.includes(i)
   }
 
-  /** Clear all garbage-lap exclusions. */
+  /** Clear all MANUAL garbage-lap exclusions (the band, if any, still applies). */
   function clearExcluded(): void {
-    excluded.value = []
+    manualExcluded.value = []
+  }
+
+  /** Replace the detected-laps the store derives band exclusions from. */
+  function setLaps(next: Lap[]): void {
+    laps.value = next
+  }
+
+  /** Replace the active session's GPS track the store derives sector-gate validity from. */
+  function setTrack(next: GpsTrack | null): void {
+    track.value = next
+  }
+
+  /**
+   * Set the valid lap-time band (seconds, inclusive). Either bound may be null to
+   * leave that side open; an all-null band clears the constraint. Out-of-band
+   * laps are then folded into the excluded set automatically.
+   */
+  function setLapTimeBand(band: LapTimeBand | null): void {
+    lapTimeBand.value =
+      band && (band.minSec != null || band.maxSec != null) ? band : null
+  }
+
+  /** Clear the valid lap-time band (manual exclusions are untouched). */
+  function clearLapTimeBand(): void {
+    lapTimeBand.value = null
   }
 
   /** This lap's CHART shift for `axis` (0 when none set). */
@@ -173,11 +251,25 @@ export const useLapStore = defineStore('lap', () => {
     if (col && col.metric.kind === 'channel') col.metric.agg = agg
   }
 
+  /**
+   * Ergonomic editor for sectorTime-kind columns: set which sector (0-based,
+   * start/finish -> gate1 is sector 0) the column shows. No-op if the id is
+   * unknown or the column's metric is not a sectorTime kind.
+   */
+  function setColumnSector(id: number, sector: number): void {
+    const col = columns.value.find((c) => c.id === id)
+    if (col && col.metric.kind === 'sectorTime') col.metric.sector = sector
+  }
+
   return {
     line,
     source,
     selected,
     excluded,
+    manualExcluded,
+    bandExcluded,
+    sectorInvalid,
+    lapTimeBand,
     columns,
     offsets,
     setLine,
@@ -187,8 +279,13 @@ export const useLapStore = defineStore('lap', () => {
     clearSelection,
     isSelected,
     toggleExcluded,
+    isManuallyExcluded,
     isExcluded,
     clearExcluded,
+    setLaps,
+    setTrack,
+    setLapTimeBand,
+    clearLapTimeBand,
     offsetOf,
     mapOffsetOf,
     nudgeOffset,
@@ -200,5 +297,6 @@ export const useLapStore = defineStore('lap', () => {
     removeColumn,
     setColumnChannel,
     setColumnAgg,
+    setColumnSector,
   }
 })
