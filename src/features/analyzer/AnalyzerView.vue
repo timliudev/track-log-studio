@@ -15,6 +15,8 @@ import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import { detectCornerApexes, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
+import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
@@ -22,6 +24,7 @@ import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
 import SectorPanel from './SectorPanel.vue'
 import CornerSpeedPanel from './CornerSpeedPanel.vue'
+import AccelTestPanel from './AccelTestPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
@@ -149,6 +152,42 @@ const mapCornerApexes = computed(() => {
     speedFrac: span > 1e-6 ? (a.speedKmh - min) / span : 1,
   }))
 })
+
+// --- Acceleration/drag test (Phase 7, 加速測試): whole-SESSION search, not
+// a per-lap metric — see accelTest.ts's module doc for why. Speed channel
+// resolution reuses the same speedChannelName as corner-speed above. Distance
+// is always needed (both search kinds interpolate/report distanceM), so this
+// is unavailable without a GPS track even for the speed-threshold condition.
+const accelResult = computed<AccelSegment | null>(() => {
+  const chName = speedChannelName.value
+  const s = session.value
+  const tk = track.value
+  const tMs = timeMs.value
+  if (!chName || !s || !tk || !tMs) return null
+  const ch = s.get(chName)
+  if (!ch) return null
+  const cumDist = cumulativeDistanceM(tk.lat, tk.lon, tk.valid)
+  const cond = analyzer.accelCondition
+  if (cond.kind === 'distance') {
+    if (!(cond.distanceM > 0)) return null
+    return fastestDistanceSegment(cumDist, tMs, ch.data, {
+      distanceM: cond.distanceM,
+      minEntrySpeedKmh: cond.minEntrySpeedKmh ?? undefined,
+    })
+  }
+  return fastestSpeedSegment(tMs, ch.data, cumDist, { fromKmh: cond.fromKmh, toKmh: cond.toKmh })
+})
+
+// Focus the found segment: zoom the shared xRange to its span (same
+// select->zoom coupling as onLapSelect) and clear any lap selection so the
+// zoomed range isn't immediately overridden by the lap-selection focus
+// precedence in `focusRange` above.
+function onAccelFocus(segment: AccelSegment): void {
+  const xs = xValues.value
+  if (!xs || segment.startIdx >= xs.length || segment.endIdx >= xs.length) return
+  lapStore.clearSelection()
+  analyzer.setXRange({ min: xs[segment.startIdx], max: xs[segment.endIdx] })
+}
 
 // --- Track heatmap (#10/#11): colour the track by a channel's value. ---
 // Channels offered for colouring (all of them, sorted), for the picker.
@@ -388,6 +427,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           :time-ms="timeMs"
         />
         <CornerSpeedPanel :apexes="cornerApexes" :speed-available="speedAvailable" />
+        <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
         <TrackFilePanel :track="track" />
         <LapTable
           :laps="laps"
