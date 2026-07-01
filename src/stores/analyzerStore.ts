@@ -41,6 +41,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // like charts/cursor — not persisted (persistence is queue item D).
   const trackColorChannel = ref<string | null>(null)
   const trackColormap = ref<ColormapId>(COLORMAP_IDS[0])
+  // Corner-speed apex markers (RaceChrono-style min-speed labels): transient,
+  // like trackColorChannel — off by default, and only meaningful for the
+  // single currently-selected lap (see AnalyzerView's cornerApexes computed).
+  const showCornerSpeed = ref(false)
   let nextId = 2
 
   function setXRange(range: { min: number; max: number } | null): void {
@@ -61,6 +65,10 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setTrackColormap(id: ColormapId): void {
     trackColormap.value = id
+  }
+
+  function setShowCornerSpeed(on: boolean): void {
+    showCornerSpeed.value = on
   }
 
   function addChart(): void {
@@ -90,11 +98,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     overlayCursorIdx,
     trackColorChannel,
     trackColormap,
+    showCornerSpeed,
     setXRange,
     setCursor,
     setOverlayCursor,
     setTrackColorChannel,
     setTrackColormap,
+    setShowCornerSpeed,
     addChart,
     removeChart,
     setChartChannels,
