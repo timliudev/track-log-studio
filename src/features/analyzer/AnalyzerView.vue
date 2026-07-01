@@ -26,6 +26,7 @@ import SectorPanel from './SectorPanel.vue'
 import CornerSpeedPanel from './CornerSpeedPanel.vue'
 import AccelTestPanel from './AccelTestPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
+import GgPanel from './GgPanel.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
@@ -445,6 +446,10 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
 
       <div v-if="showAlign" class="card">
         <LapAlignPanel :selected-laps="selectedLaps" />
+      </div>
+
+      <div v-if="session" class="card">
+        <GgPanel :session="session" :selected-laps="selectedLaps" />
       </div>
 
       <div v-for="c in charts" :key="c.id" class="card">

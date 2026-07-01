@@ -138,6 +138,15 @@ export default {
     accelNoMatch: '整份記錄中找不到符合條件的區段。',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: '聚焦此區段',
+    gg: {
+      title: 'G-G 圖（摩擦圓）',
+      xAxis: 'X 軸頻道',
+      yAxis: 'Y 軸頻道',
+      noChannels: '找不到力值頻道（如 TC_Xforce / TC_Yforce）。',
+      pickBoth: '請選擇 X 與 Y 軸的頻道。',
+      session: '整份記錄',
+      lapSeries: '第 {n} 圈',
+    },
     trackFile: {
       export: '匯出賽道設定',
       import: '匯入賽道設定',
