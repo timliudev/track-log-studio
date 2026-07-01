@@ -72,7 +72,7 @@ npm test         # 執行單元測試
 
 `npm run build` 產生的 `dist/` 為純靜態檔，由 **Cloudflare Workers**（靜態資產 +
 Workers Builds，推上 GitHub 後自動建置部署）托管，無需自寫後端邏輯。
-線上版：<https://track-log-studio.timliudev.workers.dev>
+線上版：<https://tracklogstudio.timliudev.com/>
 
 ## 參考 Reference
 
