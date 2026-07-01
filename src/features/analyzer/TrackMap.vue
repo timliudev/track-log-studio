@@ -17,6 +17,16 @@ const props = defineProps<{
    */
   highlightLaps?: { startIdx: number; endIdx: number; color: string; offset?: { x: number; y: number } }[]
   /**
+   * Chart-zoom-follow focus (#7): a session index span to emphasize when the
+   * user has narrowed a TIMELINE chart's visible X range, derived by the
+   * caller (see `AnalyzerView`'s `focusRange`, already null'd out whenever
+   * `highlightLaps` is non-empty — lap selection takes precedence, so this
+   * and `highlightLaps` are never both drawn at once). Rendered via the same
+   * "faint full track + bright segment" path as `highlightLaps`, and — when
+   * it's a genuine sub-segment — the view auto-fits to its bbox.
+   */
+  focusRange?: { startIdx: number; endIdx: number } | null
+  /**
    * Per-sample normalised value in [0, 1] (NaN where uncoloured) for the track
    * heatmap, or null to draw the plain track. Colours come from {@link colormap}.
    */
@@ -74,6 +84,13 @@ let baseMinY = NaN
 let baseMaxY = NaN
 let lastW = 0
 let lastH = 0
+// Base-pixel bbox of the CURRENT focusRange span (#7), captured alongside the
+// full-track bbox each draw; used to auto-fit the view (see watch below).
+// NaN when there's no focus range or it has no valid fixes.
+let focusMinX = NaN
+let focusMaxX = NaN
+let focusMinY = NaN
+let focusMaxY = NaN
 
 const showReset = computed(() => zoom.value !== 1 || panX.value !== 0 || panY.value !== 0)
 
@@ -136,11 +153,18 @@ function draw(): void {
   const n = track.valid.length
   px = new Float64Array(n)
   py = new Float64Array(n)
-  // Track the base-pixel bbox while projecting so panning can be clamped.
+  // Track the base-pixel bbox while projecting so panning can be clamped, and
+  // (when a focusRange is present) that span's own base-pixel bbox for #7's
+  // auto-fit.
   let bMinX = Infinity
   let bMaxX = -Infinity
   let bMinY = Infinity
   let bMaxY = -Infinity
+  const focusBBox = props.focusRange
+  let fMinX = Infinity
+  let fMaxX = -Infinity
+  let fMinY = Infinity
+  let fMaxY = -Infinity
   for (let i = 0; i < n; i++) {
     if (!track.valid[i]) {
       px[i] = NaN
@@ -152,6 +176,12 @@ function draw(): void {
     if (p.x > bMaxX) bMaxX = p.x
     if (p.y < bMinY) bMinY = p.y
     if (p.y > bMaxY) bMaxY = p.y
+    if (focusBBox && i >= focusBBox.startIdx && i <= focusBBox.endIdx) {
+      if (p.x < fMinX) fMinX = p.x
+      if (p.x > fMaxX) fMaxX = p.x
+      if (p.y < fMinY) fMinY = p.y
+      if (p.y > fMaxY) fMaxY = p.y
+    }
     px[i] = p.x * z + tx
     py[i] = p.y * z + ty
   }
@@ -160,6 +190,17 @@ function draw(): void {
     baseMaxX = bMaxX
     baseMinY = bMinY
     baseMaxY = bMaxY
+  }
+  if (fMinX <= fMaxX) {
+    focusMinX = fMinX
+    focusMaxX = fMaxX
+    focusMinY = fMinY
+    focusMaxY = fMaxY
+  } else {
+    focusMinX = NaN
+    focusMaxX = NaN
+    focusMinY = NaN
+    focusMaxY = NaN
   }
 
   // Helper: stroke the polyline over sample range [lo, hi] (inclusive), breaking
@@ -239,7 +280,19 @@ function draw(): void {
     }
   }
 
-  const highlightLaps = props.highlightLaps ?? []
+  // Emphasis segments: an explicit lap SELECTION takes precedence (enforced
+  // by the caller — AnalyzerView nulls `focusRange` whenever `highlightLaps`
+  // is non-empty), else a chart-zoom-follow `focusRange` (#7) becomes a
+  // single emphasized segment in the same faint-track + bright-segment style,
+  // coloured with the accent colour so it reads as "in-progress view", not a
+  // lap identity.
+  const focus = props.focusRange
+  const highlightLaps =
+    props.highlightLaps?.length
+      ? props.highlightLaps
+      : focus
+        ? [{ startIdx: focus.startIdx, endIdx: focus.endIdx, color: cssVar('--color-accent') }]
+        : []
   const heat = !!colorVals
 
   // Full-track polyline. With no selection it's the normal muted track (or the
@@ -253,8 +306,9 @@ function draw(): void {
     strokeRange(0, n - 1)
   }
 
-  // Selected laps: each [startIdx, endIdx] segment, thicker. Heatmap-coloured by
-  // value when a heatmap channel is chosen, else its per-lap identity color.
+  // Selected laps (or the focus segment): each [startIdx, endIdx] span,
+  // thicker. Heatmap-coloured by value when a heatmap channel is chosen, else
+  // its identity color (lap colour, or the accent colour for a focus range).
   for (const lap of highlightLaps) {
     const lo = Math.max(0, Math.min(lap.startIdx, lap.endIdx))
     const hi = Math.min(n - 1, Math.max(lap.startIdx, lap.endIdx))
@@ -424,6 +478,54 @@ function resetView(): void {
   panX.value = 0
   panY.value = 0
   draw()
+}
+
+// Auto-fit margin around the focus segment's bbox, in CSS px (keeps the
+// emphasized segment from touching the canvas edge).
+const FOCUS_FIT_PAD = 48
+// A focus bbox smaller than this fraction of the canvas (at zoom 1) isn't
+// worth auto-fitting — it's already comfortably visible, so leave the user's
+// current pan/zoom alone (conservative: emphasize always via the draw path
+// above, auto-fit only for a real, zoomable-in sub-segment).
+const FOCUS_FIT_MIN_FRACTION = 0.4
+
+/**
+ * Auto-fit the view (zoom/pan) to the focus segment's base-pixel bbox
+ * (captured during the last draw() as focusMinX/Y..focusMaxX/Y), when that
+ * bbox is a real sub-segment worth zooming into. Conservative by design —
+ * see the task's "don't fight the user's manual pan/zoom" rule:
+ *  - Only runs on a focusRange prop CHANGE (the watcher below), never on
+ *    every draw/redraw, so panning/zooming the map manually while a focus is
+ *    active is never overridden.
+ *  - Skips entirely if the focus bbox already fills most of the canvas at
+ *    zoom 1 (FOCUS_FIT_MIN_FRACTION) — a "sub-range" that's actually most of
+ *    the visible track doesn't need zooming in further.
+ *  - Skips if there's no valid bbox (no fixes in range) or no canvas size yet.
+ */
+function fitToFocus(): void {
+  if (!lastW || !lastH || Number.isNaN(focusMinX) || Number.isNaN(baseMinX)) return
+  const fw = focusMaxX - focusMinX
+  const fh = focusMaxY - focusMinY
+  // Degenerate bbox (e.g. a single point / straight line with ~0 extent on
+  // one axis) — still worth centring/zooming on, so only bail on truly empty.
+  if (fw < 0 || fh < 0) return
+
+  const bw = Math.max(baseMaxX - baseMinX, 1e-9)
+  const bh = Math.max(baseMaxY - baseMinY, 1e-9)
+  if (fw >= bw * FOCUS_FIT_MIN_FRACTION && fh >= bh * FOCUS_FIT_MIN_FRACTION) return
+
+  const availW = Math.max(lastW - 2 * FOCUS_FIT_PAD, 1)
+  const availH = Math.max(lastH - 2 * FOCUS_FIT_PAD, 1)
+  const scaleX = fw > 1e-9 ? availW / fw : MAX_ZOOM
+  const scaleY = fh > 1e-9 ? availH / fh : MAX_ZOOM
+  const z2 = clampZoom(Math.min(scaleX, scaleY))
+
+  const cx = (focusMinX + focusMaxX) / 2
+  const cy = (focusMinY + focusMaxY) / 2
+  zoom.value = z2
+  panX.value = lastW / 2 - cx * z2
+  panY.value = lastH / 2 - cy * z2
+  clampPan()
 }
 
 function onWheel(e: WheelEvent): void {
@@ -659,6 +761,19 @@ watch(() => props.track, () => resetView())
 watch(() => props.cursorIdx, () => draw())
 watch(() => props.line, () => draw())
 watch(() => props.highlightLaps, () => draw())
+// #7: on a focusRange CHANGE (not every draw — see fitToFocus's docs), draw
+// once to (re)capture this range's base-pixel bbox, auto-fit the view to it
+// when it's a real sub-segment, then draw again to render at the new
+// zoom/pan. Emphasis rendering itself happens unconditionally inside draw()
+// (already covered by this watch firing draw() at least once).
+watch(
+  () => props.focusRange,
+  (r) => {
+    draw()
+    if (r) fitToFocus()
+    draw()
+  },
+)
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
 watch(() => props.gates, () => draw())

@@ -12,6 +12,7 @@ import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
+import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
@@ -69,6 +70,23 @@ const highlightLaps = computed(() =>
 // The map-alignment panel applies to whatever laps are drawn on the map, so it
 // shows whenever ≥2 laps are selected (independent of any overlay chart).
 const showMapAlign = computed(() => selectedLaps.value.length >= 2)
+
+// #7: derive the track map's chart-zoom-follow focus from the shared xRange.
+// xRange is written ONLY by timeline-mode charts (overlay charts live in a
+// lap-relative grid and structurally never call setXRange — see
+// TimeSeriesChart.vue's onXZoom), so no separate mode flag is needed here;
+// xRangeToFocusIndices also treats a (near-)whole-session range as "no focus"
+// so the map isn't emphasizing everything. DERIVED, not stored — no
+// state-writing watcher.
+//
+// Precedence: an explicit LAP SELECTION (highlightLaps non-empty) always wins
+// over chart-range focus — selecting laps is a deliberate, higher-intent
+// choice than an in-progress chart zoom, and the two would otherwise fight
+// over the map's single "emphasized segment" visual. Chart-range focus only
+// applies when nothing is selected.
+const focusRange = computed(() =>
+  highlightLaps.value.length > 0 ? null : xRangeToFocusIndices(xRange.value, xValues.value),
+)
 
 // Sector gates for the track map: confirmed gates (solid) plus any pending
 // auto-detected suggestions awaiting accept/reject (dashed) — see SectorPanel.
@@ -230,6 +248,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           :cursor-idx="cursorIdx"
           :line="lapStore.line"
           :highlight-laps="highlightLaps"
+          :focus-range="focusRange"
           :color-values="colorValues"
           :colormap="trackColormap"
           :gates="mapGates"
