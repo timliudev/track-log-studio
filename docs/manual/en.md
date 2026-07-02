@@ -142,9 +142,7 @@ Go to the "Analyzer" tab and use the "Load files" control at the top to pick a `
 - **Zoom / pan**: scroll to zoom, drag to pan; on touch devices, pinch to zoom and drag to pan.
 - **Reset view**: one click restores the default zoom and position (double-click the map also resets it).
 - **Start/finish line**: drag the two endpoints on the track to set the start/finish line used for lap splitting; "Reset line" restores the default position.
-- **Track colour / heatmap**: pick a channel (e.g. speed, brake, throttle) and the track line is colour-coded by that channel's value, making it easy to spot where a value is especially high or low along the track.
-  - **Colormap**: switch between `turbo` (blue→green→yellow→red), `viridis` (colour-blind-friendly, purple→green→yellow), `plasma`, and `coolwarm`.
-  - With no channel selected, the track is drawn as a plain, single-colour line.
+- **Track channel markers**: see section 4.6 — track colouring and extrema marking are now a single "pick a channel" control.
 
 ### 4.3 Lap table
 
@@ -195,18 +193,22 @@ The Sector feature sets up a series of "gates" along the track to check whether 
 
 > This feature requires valid GPS track coordinates to work.
 
-### 4.6 Corner speed markers
+### 4.6 Track channel markers
 
-Below the Sector panel, check "Show corner minimum-speed markers" to mark each corner's lowest-speed point (the apex) on the track map:
+Below the Sector panel, the "Track channel markers" panel lets you pick **one channel** (speed, RPM, G, brake, throttle — any channel), then independently check any combination of three options:
 
-- The map shows numbered markers (1, 2, 3, …) colour-coded by speed (green → red, with slower corners more red), making the slowest corner on track immediately obvious.
-- Below the toggle, a list shows each marker's **lap distance** (km) and **speed** (km/h).
-- **Only shown when exactly one lap is checked**: with no lap selected, or multiple laps selected, a hint asks you to check a single lap in the lap table first.
-- Requires a speed channel in the log (`GPS_Speed` or `Vehicle_Speed`); if none is present, a hint says no speed channel is available.
+- **Track colour**: colour-code the track polyline by that channel's value (this is the same heatmap feature from section 4.2, now consolidated into this one panel).
+  - **Colormap**: switch between `turbo` (blue→green→yellow→red), `viridis` (colour-blind-friendly, purple→green→yellow), `plasma`, and `coolwarm`.
+- **Mark minima**: mark the channel's local minimum points on the track map (e.g. picking the speed channel reproduces the old "corner apex" minimum-speed markers).
+- **Mark maxima**: mark the channel's local maximum points on the track map (e.g. RPM peaks on each shift point).
+- Both marker kinds can be shown at once; minima are drawn as **circles** and maxima as **diamonds** on the map, colour-coded by value (green → red) so they're distinguishable at a glance. Each kind is numbered independently (minima #1, #2, … and maxima #1, #2, … don't share a sequence).
+- Below the toggles, a list shows each marker's **kind** (min/max), **lap distance** (km), and **value**.
+- **Markers are only shown when exactly one lap is checked**: with no lap selected, or multiple laps selected, a hint asks you to check a single lap first; if no channel is picked yet, a hint asks you to pick one. Track colouring isn't subject to this rule — it applies to the whole track even with no lap selected.
+- The old "corner speed markers" feature is now just "pick the speed channel + check Mark minima" — it isn't a separate feature anymore.
 
 ### 4.7 Acceleration test
 
-Below the corner-speed panel, search the **entire session** (not limited to one lap) for the best-matching acceleration segment:
+Below the track-channel-markers panel, search the **entire session** (not limited to one lap) for the best-matching acceleration segment:
 
 - **Condition type**:
   - **Distance**: enter a target distance (metres); the app finds the fastest segment anywhere in the session that covers that distance. Optionally set a "minimum entry speed" to only consider segments that start at or above that speed (leave blank for no limit, including a standing start).
@@ -237,7 +239,7 @@ Validated against a real .loga recording containing acceleration-test segments: 
 
 The Analyzer identifies "which circuit this is" from GPS location, and automatically saves that circuit's start/finish line, sector gates, and lap-table column setup locally in the browser (IndexedDB). The next time you load a log recorded at the same circuit (same GPS location), these settings are **restored automatically** — no need to redrag the start/finish line or re-detect corners.
 
-This panel sits after Sector / Corner speed / Acceleration test / Gear ratio calculator and before the lap table, and offers:
+This panel sits after Sector / Track channel markers / Acceleration test / Gear ratio calculator and before the lap table, and offers:
 
 - **Export track setup**: bundles the current circuit's start/finish line, sector gates, and lap-table columns into a JSON "track file" you can download for backup or to share with someone else.
 - **Import track setup**: import a previously exported JSON track file; if it matches the circuit currently open, it's applied immediately.
@@ -312,13 +314,14 @@ The footer at the bottom of the page shows "build \<sha\> · \<date\>." Include 
 | 對位微調 | Alignment | Manually nudging the time or map offset between laps so feature points line up |
 | 軌跡上色 / 熱力圖 | Track colour / heatmap | Colour-coding the track line by a channel's value |
 | 色階 | Colormap | The gradient colour scheme used by the heatmap (turbo/viridis/plasma/coolwarm) |
+| 軌跡通道標記 | Track channel markers | The unified panel: pick one channel, then independently toggle track colouring / mark minima / mark maxima |
 | 避震校正 | Suspension calibration | Converting suspension voltage into travel (mm) |
 | 欄位組合 / Preset | Preset | A saved RC3 field-mapping configuration |
 | RC3 欄位對應 | RC3 field mapping | The configuration of which loga channel maps to which sensor slot in NMEA/RC3 output |
 | 有效圈速區間 | Valid lap-time band | A lap-time filter range used to auto-exclude junk laps that are too short or too long |
 | 理論最佳圈 | Theoretical best lap / optimal lap | A hypothetical lap time made by summing each sector's best recorded time |
 | 差距 | Delta | A lap's time difference from the current fastest lap; positive means slower |
-| 彎道速度標記 | Corner speed marker | A map marker showing a corner's lowest-speed point (the apex) |
+| 極值標記 | Extremum marker | A map marker showing a channel's local minimum/maximum point (circle = minimum, diamond = maximum) |
 | 直線加速測試 | Acceleration test | Searches the whole session for the best segment matching a distance or speed-range condition |
 | 軌跡檔 | Track file | An exported/imported JSON track setup (start/finish line + sector gates + lap-table columns) |
 | RCNX 多 session | RCNX multi-session | A single `.rcnx` file containing multiple recordings; you pick one on load |

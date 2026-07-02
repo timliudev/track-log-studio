@@ -43,13 +43,16 @@ const props = defineProps<{
    */
   gates?: { line: LapLine; confirmed: boolean }[]
   /**
-   * Corner-speed apex markers (彎道速度): numbered dots at each corner's
-   * minimum-speed point, colour-graded green (fast) -> red (slow) by
-   * `speedFrac` (0..1, normalised across the SAME lap's apexes so the
-   * gradient is meaningful regardless of the channel's absolute range).
-   * Caller (AnalyzerView) decides when this is populated (single-lap rule).
+   * A9 — unified extrema markers (generalised from the old speed-only corner
+   * apexes): numbered markers at a channel's local minima/maxima,
+   * colour-graded green (fast/low) -> red (slow/high) by `valueFrac` (0..1,
+   * normalised across the SAME lap's own extrema set so the gradient is
+   * meaningful regardless of the channel's absolute range). `kind`
+   * distinguishes minima from maxima visually (round vs diamond) so both can
+   * be shown together without reading as the same marker type. Caller
+   * (AnalyzerView) decides when this is populated (single-lap rule).
    */
-  cornerApexes?: { lat: number; lon: number; speedKmh: number; speedFrac: number }[]
+  extremaMarkers?: { lat: number; lon: number; value: number; valueFrac: number; kind: 'min' | 'max' }[]
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
@@ -114,10 +117,10 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'
 }
 
-/** Simple 2-colour lerp for corner-apex markers: red (slow, frac=0) ->
- *  green (fast, frac=1). Deliberately independent of the heatmap colormaps
- *  (turbo/viridis/…) so apex markers stay legible over any active heatmap. */
-function apexColor(frac: number): string {
+/** Simple 2-colour lerp for extrema markers: red (frac=0) -> green (frac=1).
+ *  Deliberately independent of the heatmap colormaps (turbo/viridis/…) so
+ *  markers stay legible over any active heatmap. */
+function extremumColor(frac: number): string {
   const t = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0
   const r = Math.round(220 - 160 * t)
   const g = Math.round(60 + 140 * t)
@@ -448,15 +451,33 @@ function draw(): void {
     ctx.fillText(String(i + 1), mx, my)
   })
 
-  // Corner-speed apexes (彎道速度): numbered markers colour-graded green (fast)
-  // -> red (slow) by speedFrac, drawn as filled circles (round, unlike the
-  // square gate/start-finish handles) so they read as a distinct marker kind.
-  const apexes = props.cornerApexes ?? []
-  apexes.forEach((a, i) => {
-    const p = proj.toPixel(a.lat, a.lon)
-    ctx.fillStyle = apexColor(a.speedFrac)
+  // A9 — unified extrema markers: numbered markers colour-graded green->red
+  // by valueFrac. MIN markers are filled circles (round, unlike the square
+  // gate/start-finish handles) — same visual as the old corner-apex markers.
+  // MAX markers are filled diamonds so the two kinds stay visually distinct
+  // at a glance when both are shown together on the same lap. Numbering is
+  // independent per kind (each starts at 1) so a "min #2" and "max #2" can
+  // coexist without implying an order between the two sets.
+  const extrema = props.extremaMarkers ?? []
+  let minSeen = 0
+  let maxSeen = 0
+  const MARK_R = 9
+  extrema.forEach((m) => {
+    const p = proj.toPixel(m.lat, m.lon)
+    const label = m.kind === 'min' ? String(++minSeen) : String(++maxSeen)
+    ctx.fillStyle = extremumColor(m.valueFrac)
     ctx.beginPath()
-    ctx.arc(p.x, p.y, 9, 0, Math.PI * 2)
+    if (m.kind === 'min') {
+      ctx.arc(p.x, p.y, MARK_R, 0, Math.PI * 2)
+    } else {
+      // Diamond: same bounding radius as the circle so the two kinds read as
+      // the same "size" of marker, just a different silhouette.
+      ctx.moveTo(p.x, p.y - MARK_R)
+      ctx.lineTo(p.x + MARK_R, p.y)
+      ctx.lineTo(p.x, p.y + MARK_R)
+      ctx.lineTo(p.x - MARK_R, p.y)
+      ctx.closePath()
+    }
     ctx.fill()
     ctx.lineWidth = 1.5
     ctx.strokeStyle = cssVar('--color-surface')
@@ -465,7 +486,7 @@ function draw(): void {
     ctx.font = 'bold 10px sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(String(i + 1), p.x, p.y)
+    ctx.fillText(label, p.x, p.y)
   })
 
   // cursor marker
@@ -814,7 +835,7 @@ watch(
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
 watch(() => props.gates, () => draw())
-watch(() => props.cornerApexes, () => draw())
+watch(() => props.extremaMarkers, () => draw())
 </script>
 
 <template>
