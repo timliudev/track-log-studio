@@ -109,6 +109,30 @@ describe('fastestDistanceSegment', () => {
     expect(impossible).toBeNull()
   })
 
+  it('is a no-op when the gate is at/below the winning window\'s own entry speed (B1)', () => {
+    // Reproduces the user-reported "changing min-entry-speed has no effect"
+    // observation: on a monotonic ramp the ungated winner already enters at
+    // the ramp's near-top speed, so any threshold <= that entry speed can't
+    // exclude it — the result is IDENTICAL to the ungated search. This is
+    // correct trap-timer semantics (the gate only ever narrows the candidate
+    // set), not a bug — see the 'honors a rolling-start...' test above for
+    // the case where raising the gate ABOVE the winner's entry speed does
+    // change the result.
+    const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 200, n: 101 }])
+    const ungated = fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 50 })
+    expect(ungated).not.toBeNull()
+
+    // Any threshold at/below the ungated winner's entry speed must reproduce
+    // the exact same window (start/end/time/distance all unchanged).
+    for (const thresh of [0, ungated!.entrySpeedKmh / 2, ungated!.entrySpeedKmh]) {
+      const gated = fastestDistanceSegment(cumDistM, timeMs, speedKmh, {
+        distanceM: 50,
+        minEntrySpeedKmh: thresh,
+      })
+      expect(gated).toEqual(ungated)
+    }
+  })
+
   it('returns null when no window covers the requested distance', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 50, n: 10 }])
     const result = fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 1_000_000 })
