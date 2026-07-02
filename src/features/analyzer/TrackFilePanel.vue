@@ -58,8 +58,10 @@ async function importFile(e: Event): Promise<void> {
     // immediately via the store actions (same restore path as auto-restore).
     if (activeKey.value && setup.key === activeKey.value) {
       if (setup.line) lapStore.setLine(setup.line)
-      sectorStore.clearGates()
-      for (const gate of setup.gates) sectorStore.addGate(gate)
+      // Importing a track file is not a manual edit — use `loadDetected` (not
+      // `addGate` per gate) so `sectorStore.edited` stays false, same
+      // reasoning as the auto-restore path in useCircuitPersistence.ts.
+      sectorStore.loadDetected(setup.gates)
       for (const col of [...lapStore.columns]) lapStore.removeColumn(col.id)
       for (const col of setup.columns) lapStore.addColumn(col.metric)
     }

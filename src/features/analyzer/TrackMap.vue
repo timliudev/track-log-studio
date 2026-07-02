@@ -33,10 +33,13 @@ const props = defineProps<{
   colorValues?: Float64Array | null
   colormap?: ColormapId
   /**
-   * Sector gates: confirmed (solid, numbered) and pending auto-detected
-   * suggestions (dashed, awaiting user accept/reject) — same line shape as
-   * the start/finish line, drawn smaller and in a distinct colour so they
-   * don't read as another start/finish.
+   * Sector gates (A1+A15: auto-detection loads directly as usable gates, no
+   * separate suggestion/review step, so every gate is always `confirmed:
+   * true` in practice — the flag is kept so a future "just-detected,
+   * unedited" visual distinction is trivial to add) — same line shape as the
+   * start/finish line, drawn smaller and in a distinct colour so they don't
+   * read as another start/finish. Solid + numbered; draggable at either
+   * endpoint.
    */
   gates?: { line: LapLine; confirmed: boolean }[]
   /**
@@ -414,9 +417,8 @@ function draw(): void {
   }
 
   // Sector gates: a short perpendicular segment + numbered marker at each
-  // gate's midpoint. Confirmed gates are solid; pending suggestions dashed —
-  // deliberately smaller/thinner than the checkered start/finish band so the
-  // two never get confused.
+  // gate's midpoint — deliberately smaller/thinner than the checkered
+  // start/finish band so the two never get confused.
   const gates = props.gates ?? []
   gates.forEach((g, i) => {
     const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
@@ -583,11 +585,9 @@ const pointers = new Map<number, { x: number; y: number }>()
 type Mode = 'idle' | 'line' | 'pan' | 'pinch'
 let mode: Mode = 'idle'
 // Which handle is being dragged in 'line' mode, and on what target: the
-// start/finish line, or a confirmed gate (by index into props.gates). Only
-// CONFIRMED gates are draggable — suggestions stay non-interactive (the user
-// must accept them first). Reuses the exact same hit radius, pointer-capture
-// and toGeo conversion as the start/finish line; only the emitted event and
-// its target line differ.
+// start/finish line, or a gate (by index into props.gates). Reuses the exact
+// same hit radius, pointer-capture and toGeo conversion as the start/finish
+// line; only the emitted event and its target line differ.
 type DragTarget = { kind: 'line' } | { kind: 'gate'; index: number }
 let dragging: { target: DragTarget; handle: 'a' | 'b' } | null = null
 let panLast: { x: number; y: number } | null = null
@@ -624,9 +624,8 @@ function nearestHandle(
 
 /**
  * Which handle (if any) is under the pointer, within the hit radius — checked
- * across the start/finish line AND every CONFIRMED gate (suggestions are
- * excluded, matching their non-interactive dashed rendering). When several
- * targets' handles overlap, the closest one wins.
+ * across the start/finish line AND every gate. When several targets' handles
+ * overlap, the closest one wins.
  */
 function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | 'b' } | null {
   if (!projection) return null
@@ -639,7 +638,6 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 
   const gates = props.gates ?? []
   gates.forEach((g, index) => {
-    if (!g.confirmed) return
     const hit = nearestHandle(g.line, mx, my)
     if (hit && (!best || hit.distSq < best.distSq)) {
       best = { target: { kind: 'gate', index }, handle: hit.handle, distSq: hit.distSq }
