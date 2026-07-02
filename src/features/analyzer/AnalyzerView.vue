@@ -25,6 +25,7 @@ import MapAlignPanel from './MapAlignPanel.vue'
 import SectorPanel from './SectorPanel.vue'
 import CornerSpeedPanel from './CornerSpeedPanel.vue'
 import AccelTestPanel from './AccelTestPanel.vue'
+import GearPanel from './GearPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
 // Lazy: GgPanel pulls in echarts (~480 kB raw / ~164 kB gzip) — async import
 // splits it (and echarts) into its own chunk so the main bundle stays lean and
@@ -430,6 +431,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
         />
         <CornerSpeedPanel :apexes="cornerApexes" :speed-available="speedAvailable" />
         <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
+        <GearPanel :session="session" />
         <TrackFilePanel :track="track" />
         <LapTable
           :laps="laps"

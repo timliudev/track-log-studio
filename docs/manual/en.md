@@ -215,16 +215,36 @@ Below the corner-speed panel, search the **entire session** (not limited to one 
 - "Focus this segment": zooms the charts and map to where this best segment occurred.
 - Requires a speed channel (`GPS_Speed` or `Vehicle_Speed`); if no segment in the whole session matches the condition, a "no match" hint is shown.
 
-### 4.8 Local persistence and track files
+### 4.8 Gear ratio calculator
+
+Below the acceleration test panel, a motorcycle drivetrain gear-ratio calculator is available in two modes (tab toggle):
+
+- **MT (chain-drive geared bike)**: enter the primary reduction ratio, each gear's ratio (1–6 gears, count adjustable), final-drive sprocket teeth (front/rear), rear wheel circumference (mm), and redline/shift RPM. This produces:
+  - A per-gear table of **total reduction** and **speed at redline** (click a row to expand a compact RPM↔speed lookup table for that gear).
+  - The **theoretical top speed** (top gear's speed at redline).
+  - The **RPM drop on each upshift** (e.g. how far RPM falls shifting 1st→2nd at redline).
+- **CVT (scooter)**: enter the CVT ratio range (low/high), final/gear reduction, wheel circumference, and engine max RPM. This produces the speed range at max RPM across the CVT's ratio span (the high-ratio end is the top speed).
+
+**Recover ratio from recording** (shown only when a session is loaded and it has both an RPM (`RPM`) and a speed (`GPS_Speed` / `Vehicle_Speed`) channel):
+
+- Enter the wheel circumference; the app computes `ratio(t) = engine RPM / wheel RPM` (wheel RPM derived from road speed) at every sample across the whole recording, automatically filtering out samples below 5 km/h (standing starts, clutch slip) and any non-finite RPM/speed values as noise.
+- **MT mode**: the filtered ratio samples are clustered (3% tolerance) to find the most stable "plateaus" — the actual total reduction per gear — shown side-by-side with the calculator's configured values above (detected vs. configured), useful for checking whether the real drivetrain ratio has drifted from the nominal spec (tyre wear, sprocket swaps, etc).
+- **CVT mode**: plots "speed vs. ratio" as a scatter (reusing the existing UPlotChart component), showing how the CVT's ratio varies continuously with road speed.
+
+Validated against a real .loga recording containing acceleration-test segments: with a gear-count hint (e.g. 6), the detector found 6 plateaus spaced roughly 5–13% apart from each other — consistent with real motorcycle gear spacing. Without a gear-count hint, a continuous acceleration ramp gets sliced into many small plateaus (since the ramp itself is near-continuous) — so a gear-count hint (or a wider tolerance) matters for acceleration-heavy recordings.
+
+### 4.9 Local persistence and track files
 
 The Analyzer identifies "which circuit this is" from GPS location, and automatically saves that circuit's start/finish line, sector gates, and lap-table column setup locally in the browser (IndexedDB). The next time you load a log recorded at the same circuit (same GPS location), these settings are **restored automatically** — no need to redrag the start/finish line or re-detect corners.
 
-This panel sits after Sector / Corner speed / Acceleration test and before the lap table, and offers:
+This panel sits after Sector / Corner speed / Acceleration test / Gear ratio calculator and before the lap table, and offers:
 
 - **Export track setup**: bundles the current circuit's start/finish line, sector gates, and lap-table columns into a JSON "track file" you can download for backup or to share with someone else.
 - **Import track setup**: import a previously exported JSON track file; if it matches the circuit currently open, it's applied immediately.
 - **Saved circuits list**: expand "N saved track setups" to see each saved circuit's name and last-updated time, with a "Delete" button for each.
 - If the current log has no valid GPS coordinates, the circuit can't be identified, so export is disabled and a hint is shown instead.
+
+> The gear ratio calculator's inputs are currently transient (reset on page reload) — not yet part of local persistence; a natural follow-up is folding it into the track setup above or its own storage.
 
 ---
 
