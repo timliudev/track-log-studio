@@ -83,6 +83,8 @@ export default {
     removeColumn: 'Remove column',
     excludeLap: 'Exclude this lap (garbage, omit from best lap)',
     includeLap: 'Re-include lap',
+    excludedByBand: 'Auto-excluded by the valid lap-time band',
+    excludedBySector: 'Auto-excluded — failed sector check',
     bestLap: 'Fastest lap',
     slowestLap: 'Slowest lap',
     modeTimeline: 'Timeline',

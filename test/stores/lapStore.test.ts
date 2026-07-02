@@ -294,6 +294,50 @@ describe('lapStore', () => {
     expect(s.excluded).toEqual([])
   })
 
+  it('exclusionReason returns null for an included lap', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48)])
+    expect(s.exclusionReason(0)).toBeNull()
+  })
+
+  it('exclusionReason identifies manual exclusion', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48)])
+    s.toggleExcluded(0)
+    expect(s.exclusionReason(0)).toBe('manual')
+  })
+
+  it('exclusionReason identifies band exclusion', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 48), lap(1, 60)])
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    expect(s.exclusionReason(1)).toBe('band')
+    expect(s.exclusionReason(0)).toBeNull()
+  })
+
+  it('exclusionReason identifies sector-invalid exclusion', () => {
+    const s = useLapStore()
+    const sectors = useSectorStore()
+    const track = makeTrack(
+      Array.from({ length: 11 }, () => 0),
+      Array.from({ length: 11 }, (_, i) => i),
+    )
+    s.setTrack(track)
+    s.setLaps([{ index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 25000 }])
+    sectors.addGate(gateAt(3.5))
+    sectors.addGate(gateAt(7.5))
+    expect(s.exclusionReason(0)).toBe('sector')
+  })
+
+  it('exclusionReason prefers manual when a lap is both manual and auto-excluded', () => {
+    const s = useLapStore()
+    s.setLaps([lap(0, 60)])
+    s.toggleExcluded(0)
+    s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+    expect(s.isExcluded(0)).toBe(true)
+    expect(s.exclusionReason(0)).toBe('manual')
+  })
+
   it('offsetOf returns 0 for laps with no nudge, per axis', () => {
     const s = useLapStore()
     expect(s.offsetOf(0, 'time')).toBe(0)
