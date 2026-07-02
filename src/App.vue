@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
@@ -7,6 +7,7 @@ import ConverterView from '@/features/converter/ConverterView.vue'
 import AnalyzerView from '@/features/analyzer/AnalyzerView.vue'
 import SettingsView from '@/features/settings/SettingsView.vue'
 import FileBar from '@/components/FileBar.vue'
+import BottomNav from '@/components/BottomNav.vue'
 
 const { t } = useI18n()
 
@@ -16,7 +17,21 @@ useTheme()
 useLocale()
 
 type Tab = 'converter' | 'analyzer' | 'settings'
+const tabOrder: Tab[] = ['converter', 'analyzer', 'settings']
 const tab = ref<Tab>('converter')
+
+// Direction-aware slide: figure out whether the newly selected tab sits to
+// the right or left of the previous one so the <Transition> can slide the
+// incoming view from the matching side (B5).
+const transitionName = ref<'slide-left' | 'slide-right'>('slide-left')
+function selectTab(next: Tab) {
+  const from = tabOrder.indexOf(tab.value)
+  const to = tabOrder.indexOf(next)
+  transitionName.value = to >= from ? 'slide-left' : 'slide-right'
+  tab.value = next
+}
+
+const activeView = computed(() => tab.value)
 
 // Build identity injected at compile time (see vite.config.ts `define`).
 const buildSha = __BUILD_SHA__
@@ -32,12 +47,13 @@ const buildDate = __BUILD_DATE__
       </div>
     </header>
 
-    <nav class="tabs">
+    <nav class="tabs" :aria-label="t('nav.mainLabel')">
       <button
         type="button"
         class="tab"
         :class="{ active: tab === 'converter' }"
-        @click="tab = 'converter'"
+        :aria-current="tab === 'converter' ? 'page' : undefined"
+        @click="selectTab('converter')"
       >
         {{ t('nav.converter') }}
       </button>
@@ -45,7 +61,8 @@ const buildDate = __BUILD_DATE__
         type="button"
         class="tab"
         :class="{ active: tab === 'analyzer' }"
-        @click="tab = 'analyzer'"
+        :aria-current="tab === 'analyzer' ? 'page' : undefined"
+        @click="selectTab('analyzer')"
       >
         {{ t('nav.analyzer') }}
       </button>
@@ -53,7 +70,8 @@ const buildDate = __BUILD_DATE__
         type="button"
         class="tab tab--right"
         :class="{ active: tab === 'settings' }"
-        @click="tab = 'settings'"
+        :aria-current="tab === 'settings' ? 'page' : undefined"
+        @click="selectTab('settings')"
       >
         {{ t('nav.settings') }}
       </button>
@@ -62,10 +80,14 @@ const buildDate = __BUILD_DATE__
     <FileBar v-if="tab !== 'settings'" />
 
     <main class="content">
-      <ConverterView v-if="tab === 'converter'" />
-      <AnalyzerView v-else-if="tab === 'analyzer'" />
-      <SettingsView v-else-if="tab === 'settings'" />
+      <Transition :name="transitionName" mode="out-in">
+        <ConverterView v-if="activeView === 'converter'" key="converter" />
+        <AnalyzerView v-else-if="activeView === 'analyzer'" key="analyzer" />
+        <SettingsView v-else-if="activeView === 'settings'" key="settings" />
+      </Transition>
     </main>
+
+    <BottomNav :tab="tab" @update:tab="selectTab" />
 
     <footer class="site-footer">
       <a
@@ -149,7 +171,66 @@ const buildDate = __BUILD_DATE__
 }
 .content {
   flex: 1;
+  min-width: 0;
   padding: calc(var(--space) * 2);
+  /* Non-linear transition support: the view container establishes the
+     positioning context that slide-enter/leave transforms animate within. */
+  position: relative;
+  overflow-x: clip;
+}
+
+/* Below 768px the top tab row gives way to the iOS-style bottom bar
+   (BottomNav.vue mirrors this breakpoint), and the content area reserves
+   room at the bottom so the fixed bar never overlaps scrolled content. */
+@media (max-width: 768px) {
+  .tabs {
+    display: none;
+  }
+  .content {
+    padding-bottom: calc(var(--space) * 2 + 56px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* View-switch transition: a subtle non-linear slide+fade, direction-aware
+   via the `slide-left` / `slide-right` name picked in selectTab(). */
+.slide-left-enter-active,
+.slide-left-leave-active,
+.slide-right-enter-active,
+.slide-right-leave-active {
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.slide-left-enter-from {
+  opacity: 0;
+  transform: translateX(24px);
+}
+.slide-left-leave-to {
+  opacity: 0;
+  transform: translateX(-24px);
+}
+.slide-right-enter-from {
+  opacity: 0;
+  transform: translateX(-24px);
+}
+.slide-right-leave-to {
+  opacity: 0;
+  transform: translateX(24px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-left-enter-active,
+  .slide-left-leave-active,
+  .slide-right-enter-active,
+  .slide-right-leave-active {
+    transition: opacity 0.15s linear;
+  }
+  .slide-left-enter-from,
+  .slide-left-leave-to,
+  .slide-right-enter-from,
+  .slide-right-leave-to {
+    transform: none;
+  }
 }
 .site-footer {
   display: flex;

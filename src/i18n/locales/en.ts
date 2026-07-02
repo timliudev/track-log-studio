@@ -11,6 +11,7 @@ export default {
     analyzer: 'Analyzer',
     analyzerSoon: '(Phase 4)',
     settings: 'Settings',
+    mainLabel: 'Main navigation',
   },
   settings: {
     heading: 'Settings',
