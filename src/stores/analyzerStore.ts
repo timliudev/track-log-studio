@@ -20,18 +20,37 @@ export type AccelCondition =
  */
 export type ChartMode = 'timeline' | 'overlay'
 
-/** One chart on the analyzer dashboard. */
-export interface ChartConfig {
+/** A time-series chart (existing behaviour, unchanged): N channels over a
+ *  shared X (time/distance or lap-relative overlay — see {@link ChartMode}). */
+export interface TimeSeriesChartConfig {
+  kind: 'timeseries'
   id: number
   channels: string[]
   mode: ChartMode
 }
 
+/** A10+A12 — XY scatter chart: any two channels plotted against each other
+ *  (free choice, not limited to force channels — the friction-circle G-G
+ *  diagram is just the default/featured use). Independent per-instance state,
+ *  same as timeseries charts; does NOT participate in the shared X
+ *  cursor/zoom (different axis domain — see ScatterChart.vue). */
+export interface ScatterChartConfig {
+  kind: 'scatter'
+  id: number
+  xChannel: string | null
+  yChannel: string | null
+}
+
+/** One chart on the analyzer dashboard. Discriminated on `kind` so existing
+ *  timeseries behaviour stays byte-compatible; charts are transient UI state
+ *  (not persisted), so this shape can evolve freely. */
+export type ChartConfig = TimeSeriesChartConfig | ScatterChartConfig
+
 /** Transient analyzer UI state. The data itself comes from converterStore. */
 export const useAnalyzerStore = defineStore('analyzer', () => {
   const activeFileId = ref<number | null>(null)
   const xAxis = ref<XAxis>('time')
-  const charts = ref<ChartConfig[]>([{ id: 1, channels: [], mode: 'timeline' }])
+  const charts = ref<ChartConfig[]>([{ kind: 'timeseries', id: 1, channels: [], mode: 'timeline' }])
   // Shared X-axis zoom range across all charts (null = auto / full extent).
   const xRange = ref<{ min: number; max: number } | null>(null)
   // Shared hovered sample index across charts + track map (null = no hover).
@@ -111,8 +130,27 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     accelCondition.value = condition
   }
 
-  function addChart(): void {
-    charts.value.push({ id: nextId++, channels: [], mode: 'timeline' })
+  /** Add a new chart. `kind` defaults to 'timeseries' (existing behaviour,
+   *  unchanged call sites keep working). For 'scatter', callers may pass an
+   *  initial X/Y pick (e.g. AnalyzerView defaulting to TC_Xforce/TC_Yforce
+   *  for the friction-circle convenience when those channels exist) — the
+   *  store itself doesn't know about sessions/channels. */
+  function addChart(kind?: 'timeseries'): void
+  function addChart(kind: 'scatter', initial?: { xChannel?: string | null; yChannel?: string | null }): void
+  function addChart(
+    kind: ChartConfig['kind'] = 'timeseries',
+    initial?: { xChannel?: string | null; yChannel?: string | null },
+  ): void {
+    if (kind === 'scatter') {
+      charts.value.push({
+        kind: 'scatter',
+        id: nextId++,
+        xChannel: initial?.xChannel ?? null,
+        yChannel: initial?.yChannel ?? null,
+      })
+    } else {
+      charts.value.push({ kind: 'timeseries', id: nextId++, channels: [], mode: 'timeline' })
+    }
   }
 
   function removeChart(id: number): void {
@@ -121,12 +159,22 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setChartChannels(id: number, channels: string[]): void {
     const chart = charts.value.find((c) => c.id === id)
-    if (chart) chart.channels = channels
+    if (chart && chart.kind === 'timeseries') chart.channels = channels
   }
 
   function setChartMode(id: number, mode: ChartMode): void {
     const chart = charts.value.find((c) => c.id === id)
-    if (chart) chart.mode = mode
+    if (chart && chart.kind === 'timeseries') chart.mode = mode
+  }
+
+  /** Set a scatter chart's X and/or Y channel (whichever is provided);
+   *  omitted sides are left unchanged — mirrors setChartChannels' "only
+   *  touch the targeted chart" contract. */
+  function setChartXY(id: number, axis: 'x' | 'y', channel: string | null): void {
+    const chart = charts.value.find((c) => c.id === id)
+    if (!chart || chart.kind !== 'scatter') return
+    if (axis === 'x') chart.xChannel = channel
+    else chart.yChannel = channel
   }
 
   return {
@@ -155,5 +203,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     removeChart,
     setChartChannels,
     setChartMode,
+    setChartXY,
   }
 })
