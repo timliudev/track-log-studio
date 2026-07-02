@@ -3,6 +3,7 @@ import { useActiveSession } from '@/composables/useActiveSession'
 import { useLapStore } from '@/stores/lapStore'
 import { timeSeconds } from '@/domain/analysis/timeAxis'
 import { detectLapsByChannel, detectLapsByLine, type LapLine } from '@/domain/analysis/laps'
+import { suggestLapTimeBand } from '@/domain/analysis/lapValidity'
 import { toRadians } from '@/domain/export/rc3Nmea/geo'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
@@ -146,6 +147,32 @@ export function useLaps(): {
         const seeded = defaultLine(next)
         if (seeded) lapStore.setLine(seeded)
       }
+    },
+    { immediate: true },
+  )
+
+  // Auto-suggest the valid lap-time band (A8): once per NEW session/track —
+  // never on every `laps` recompute — and only while the band is UNSET, so a
+  // user clearing it (or editing it) is never silently overwritten. `pending`
+  // tracks whether the current track still owes its one suggestion attempt;
+  // it's set on every track-identity change (including to null->something)
+  // and cleared as soon as laps are available to suggest from (or the track
+  // goes away), so it fires exactly once laps first become non-empty.
+  let pendingBandSuggestion = false
+  watch(track, (next, prev) => {
+    if (next !== prev) pendingBandSuggestion = next != null
+  })
+  watch(
+    laps,
+    (next) => {
+      if (!pendingBandSuggestion) return
+      if (next.length === 0) return
+      const t = track.value
+      if (!t) return
+      pendingBandSuggestion = false
+      if (lapStore.lapTimeBand != null) return // never overwrite a user-set band
+      const suggestion = suggestLapTimeBand(t, next)
+      if (suggestion) lapStore.setLapTimeBand(suggestion)
     },
     { immediate: true },
   )
