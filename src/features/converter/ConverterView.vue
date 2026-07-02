@@ -19,12 +19,15 @@ const { outputFormat } = storeToRefs(useConverterStore())
       </div>
       <div class="col">
         <!-- RC3 slot mapping only applies to .nmea; .vbo exports every channel
-             automatically, so show the channel cross-reference instead. -->
+             automatically, so show the channel cross-reference instead. .csv
+             also exports every channel automatically but under its own plain
+             names (no RaceChrono rc_ identifiers), so the VBO-specific map
+             doesn't apply there — the format hint below covers it instead. -->
         <template v-if="outputFormat === 'nmea'">
           <PresetBar />
           <SlotMappingPanel />
         </template>
-        <VboChannelMap v-else />
+        <VboChannelMap v-else-if="outputFormat === 'vbo'" />
       </div>
     </div>
   </div>
