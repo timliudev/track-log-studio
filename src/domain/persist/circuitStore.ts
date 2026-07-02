@@ -57,10 +57,24 @@ export async function getCircuitSetup(key: string): Promise<CircuitSetup | null>
   return value ?? null
 }
 
+/**
+ * Deep-clone a setup into plain (structured-cloneable) data. Callers hand us
+ * LIVE Pinia state (`lapStore.line`, `sectorStore.gates`, …) which are Vue
+ * reactive Proxies — IndexedDB's structured clone REJECTS Proxies with
+ * `DataCloneError`, and because auto-save fires as a fire-and-forget promise
+ * the failure is silent (found live 2026-07-02: the auto-save watcher never
+ * persisted anything). All CircuitSetup fields are JSON-safe by construction
+ * (geo points, string/enum metrics, numbers), so a JSON round-trip is a
+ * lossless way to strip every Proxy at any depth.
+ */
+export function toPlainSetup(setup: CircuitSetup): CircuitSetup {
+  return JSON.parse(JSON.stringify(setup)) as CircuitSetup
+}
+
 /** Insert or overwrite the saved setup for `setup.key`. */
 export async function putCircuitSetup(setup: CircuitSetup): Promise<void> {
   const db = await getDb()
-  await db.put(STORE_NAME, setup)
+  await db.put(STORE_NAME, toPlainSetup(setup))
 }
 
 /** List every saved circuit, most-recently-updated first. */
