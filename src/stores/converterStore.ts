@@ -30,8 +30,13 @@ export interface ConvertResult {
 
 export type PresetId = 'default' | 'custom' | `user${number}`
 
-/** Output format the converter writes: RaceChrono .nmea or Racelogic VBOX .vbo. */
-export type OutputFormat = 'nmea' | 'vbo'
+/**
+ * Output format the converter writes: RaceChrono .nmea, Racelogic VBOX .vbo,
+ * or a generic .csv. Kept as a literal union (rather than `ExportFormat['id']`)
+ * so persisted values are still checked against the known set; new formats
+ * must be added here as well as to the export registry.
+ */
+export type OutputFormat = 'nmea' | 'vbo' | 'csv'
 
 const STORAGE_KEY = 'aracer-loga.converter.v1'
 const USER_PRESET_COUNT = 5
