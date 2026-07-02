@@ -115,6 +115,9 @@ function fmtDist(v: number): string {
           @input="onMinEntryInput"
         />
       </label>
+      <p v-if="props.result != null" class="hint min-entry-hint">
+        {{ t('analyzer.accelMinEntryHint', { entry: fmtSpeed(props.result.entrySpeedKmh) }) }}
+      </p>
     </div>
 
     <div v-else class="row params">
@@ -215,6 +218,11 @@ function fmtDist(v: number): string {
   margin: 0;
   font-size: 0.85rem;
   color: var(--color-text-muted);
+}
+.min-entry-hint {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  opacity: 0.8;
 }
 .result {
   display: flex;

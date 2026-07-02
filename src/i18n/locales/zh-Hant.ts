@@ -132,6 +132,7 @@ export default {
     accelDistanceM: '距離 (m)',
     accelMinEntry: '起始最低速度 (km/h)',
     accelMinEntryPlaceholder: '不限（含靜止起步）',
+    accelMinEntryHint: '門檻高於目前最速區段的進入速度（{entry}）時才會影響結果。',
     accelFromKmh: '起始速度 (km/h)',
     accelToKmh: '目標速度 (km/h)',
     accelNoChannel: '無速度頻道（GPS_Speed / Vehicle_Speed）可用。',
