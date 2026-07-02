@@ -7,14 +7,13 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
+import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
-import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
-import { colormapSwatches } from '@/domain/analysis/colormap'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
@@ -171,8 +170,6 @@ function onAccelFocus(segment: AccelSegment): void {
   analyzer.setXRange({ min: xs[segment.startIdx], max: xs[segment.endIdx] })
 }
 
-// --- Track heatmap (#10/#11, now A9-unified): colour the track by the
-// SINGLE chosen trackChannel's value, when trackColorEnabled. ---
 // Channels offered for the picker (all of them, sorted) — this is now the
 // ONLY channel picker on the page; TrackChannelPanel owns rendering it.
 const channelOptions = computed(() =>
@@ -181,34 +178,16 @@ const channelOptions = computed(() =>
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 
-// Resolved channel DATA for the chosen trackChannel — own lookup (useTrackExtrema
-// now has its own copy of this same lookup internally).
-const trackChannelData = computed(() => {
-  const name = trackChannel.value
-  if (!name) return null
-  return session.value?.get(name) ?? null
-})
-
-// Normalise the chosen channel over the track (null when colouring is off,
-// no channel chosen, or the channel/track is absent).
-const heatNorm = computed(() => {
-  const tk = track.value
-  const ch = trackChannelData.value
-  if (!trackColorEnabled.value || !tk || !ch) return null
-  return normalizeChannel(ch.data, tk.valid)
-})
-const colorValues = computed(() => heatNorm.value?.norm ?? null)
-
-// Legend: a CSS gradient of the active colormap + the channel's min/max.
-const legendGradient = computed(
-  () => `linear-gradient(to right, ${colormapSwatches(trackColormap.value, 16).join(',')})`,
+// --- Track heatmap (#10/#11, now A9-unified): colour the track by the
+// SINGLE chosen trackChannel's value, when trackColorEnabled — see
+// useTrackHeatmap.ts. ---
+const { heatNorm, colorValues, legendGradient, fmtVal } = useTrackHeatmap(
+  session,
+  track,
+  trackChannel,
+  trackColormap,
+  trackColorEnabled,
 )
-// Compact value label for the legend ends — fewer decimals as magnitude grows.
-function fmtVal(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  const a = Math.abs(v)
-  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
-}
 
 // Lap selection from the table is routed here so this component (which owns the
 // select↔zoom coupling) stays the single place that decides zoom side-effects.
