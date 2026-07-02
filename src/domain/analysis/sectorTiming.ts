@@ -1,8 +1,7 @@
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LapLine } from '@/domain/analysis/laps'
-import { project, segmentsIntersect, type PlanarPoint } from '@/domain/analysis/laps'
-import { toRadians } from '@/domain/export/rc3Nmea/geo'
+import { planarGate, walkLapGates, type PlanarPoint } from '@/domain/analysis/laps'
 
 /** Per-lap sector timing: one time per sector (start/finish -> gate1 -> … -> finish). */
 export interface LapSectorTimes {
@@ -17,32 +16,6 @@ export interface LapSectorTimes {
    *  its trailing sector(s) cannot be timed; `complete` is false and
    *  `sectorTimesMs` is padded with NaN for the un-timed sectors. */
   complete: boolean
-}
-
-/**
- * Planar-projected gate, precomputed once per gate (own local frame, mirroring
- * {@link invalidSectorLapIndices}'s precompute so the two stay geometrically
- * identical).
- */
-interface PlanarGate {
-  lat0: number
-  lon0: number
-  cosLat0: number
-  a: PlanarPoint
-  b: PlanarPoint
-}
-
-function planarGate(g: LapLine): PlanarGate {
-  const lat0 = (g.a.lat + g.b.lat) / 2
-  const lon0 = (g.a.lon + g.b.lon) / 2
-  const cosLat0 = Math.cos(toRadians(lat0))
-  return {
-    lat0,
-    lon0,
-    cosLat0,
-    a: project(g.a.lat, g.a.lon, lat0, lon0, cosLat0),
-    b: project(g.b.lat, g.b.lon, lat0, lon0, cosLat0),
-  }
 }
 
 /**
@@ -94,7 +67,6 @@ export function computeSectorTimes(
   gates: readonly LapLine[],
 ): LapSectorTimes[] {
   const planarGates = gates.map(planarGate)
-  const { lat, lon, valid } = track
   const out: LapSectorTimes[] = []
 
   for (const lap of laps) {
@@ -108,27 +80,16 @@ export function computeSectorTimes(
       continue
     }
 
-    let gatePtr = 0
     let boundaryTime = timeMs[start]
-    let prev = -1
 
-    for (let i = start; i <= end && gatePtr < planarGates.length; i++) {
-      if (!valid[i]) continue
-      if (prev >= 0) {
-        const g = planarGates[gatePtr]
-        const p1 = project(lat[prev], lon[prev], g.lat0, g.lon0, g.cosLat0)
-        const p2 = project(lat[i], lon[i], g.lat0, g.lon0, g.cosLat0)
-        if (segmentsIntersect(p1, p2, g.a, g.b)) {
-          const crossTime = interpolatedCrossingTimeMs(p1, p2, g.a, g.b, timeMs[prev], timeMs[i])
-          sectorTimesMs[gatePtr] = crossTime - boundaryTime
-          boundaryTime = crossTime
-          gatePtr++
-        }
-      }
-      prev = i
-    }
+    const crossed = walkLapGates(track, lap, planarGates, ({ gateIdx, p1, p2, prevIdx, idx }) => {
+      const g = planarGates[gateIdx]
+      const crossTime = interpolatedCrossingTimeMs(p1, p2, g.a, g.b, timeMs[prevIdx], timeMs[idx])
+      sectorTimesMs[gateIdx] = crossTime - boundaryTime
+      boundaryTime = crossTime
+    })
 
-    const complete = gatePtr >= planarGates.length
+    const complete = crossed >= planarGates.length
     if (complete) {
       // Final sector: last gate (or the lap start, with zero gates) -> finish.
       sectorTimesMs[sectorCount - 1] = timeMs[end] - boundaryTime

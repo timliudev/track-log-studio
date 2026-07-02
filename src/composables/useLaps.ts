@@ -4,6 +4,7 @@ import { useLapStore } from '@/stores/lapStore'
 import { timeSeconds } from '@/domain/analysis/timeAxis'
 import { detectLapsByChannel, detectLapsByLine, type LapLine } from '@/domain/analysis/laps'
 import { suggestLapTimeBand } from '@/domain/analysis/lapValidity'
+import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { toRadians } from '@/domain/export/rc3Nmea/geo'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
@@ -185,11 +186,7 @@ export function useLaps(): {
     session,
     (s) => {
       if (!s || lapStore.columns.length > 0) return
-      const speed = s.has('GPS_Speed')
-        ? 'GPS_Speed'
-        : s.has('Vehicle_Speed')
-          ? 'Vehicle_Speed'
-          : null
+      const speed = resolveSpeedChannel(s)
       if (speed) lapStore.addColumn({ kind: 'channel', channel: speed, agg: 'max' })
     },
     { immediate: true },

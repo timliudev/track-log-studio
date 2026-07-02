@@ -108,8 +108,9 @@ function onUpdateGate(index: number, line: LapLine): void {
   sectorStore.setGate(index, line)
 }
 
-// Speed channel resolution mirrors useLaps.ts's default lap-table column seed
-// (GPS_Speed -> Vehicle_Speed -> unavailable) — still needed by AccelTestPanel.
+// Same resolveSpeedChannel useLaps.ts uses to seed the default lap-table
+// column (GPS_Speed -> Vehicle_Speed -> unavailable) — still needed here by
+// AccelTestPanel.
 const speedChannelName = computed(() => (session.value ? resolveSpeedChannel(session.value) : null))
 const speedAvailable = computed(() => speedChannelName.value != null)
 

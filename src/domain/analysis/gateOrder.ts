@@ -1,9 +1,8 @@
 import type { GpsTrack } from './gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LapLine } from './laps'
-import { project, segmentsIntersect } from './laps'
+import { planarGate, project, segmentsIntersect } from './laps'
 import { cumulativeDistanceM } from './distance'
-import { toRadians } from '@/domain/export/rc3Nmea/geo'
 
 /**
  * Lap-relative distance (m) at which `gate` sits along `lap`'s span of
@@ -38,12 +37,9 @@ export function gatePositionOnLap(track: GpsTrack, lap: Lap, gate: LapLine): num
   const lapStartM = fullDist[start]
 
   // Planar frame centred on the gate's own midpoint (matches sectorTiming.ts /
-  // sectorValidity.ts's per-gate local frame).
-  const lat0 = (gate.a.lat + gate.b.lat) / 2
-  const lon0 = (gate.a.lon + gate.b.lon) / 2
-  const cosLat0 = Math.cos(toRadians(lat0))
-  const qa = project(gate.a.lat, gate.a.lon, lat0, lon0, cosLat0)
-  const qb = project(gate.b.lat, gate.b.lon, lat0, lon0, cosLat0)
+  // sectorValidity.ts's per-gate local frame, via the same {@link planarGate}
+  // precompute they use).
+  const { lat0, lon0, cosLat0, a: qa, b: qb } = planarGate(gate)
 
   let prev = -1
   let nearestIdx = -1
