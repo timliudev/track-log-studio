@@ -19,8 +19,8 @@ export default {
     timezoneAuto: 'Auto (browser)',
   },
   fileBar: {
-    load: 'Load files (.loga / .nmea / .zip)',
-    loadTitle: '.zip = a log exported via the aRacer x Tune app’s share feature (auto-extracted)',
+    load: 'Load files',
+    loadTitle: 'Supported formats: {exts}',
     rows: '{n} rows',
     error: 'Parse failed',
     unsupported: 'Unsupported file format: {name}',
