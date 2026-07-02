@@ -15,17 +15,40 @@ const props = defineProps<{
   invalidCount: number
   track: GpsTrack | null
   timeMs: Float64Array | null
+  /** Current map hover sample, so "add gate" can drop a gate at the cursor
+   *  position rather than always at the reference lap's midpoint. */
+  cursorIdx: number | null
 }>()
 
 const { t } = useI18n()
 const sectorStore = useSectorStore()
 const lapStore = useLapStore()
-const { gates, suggestions } = storeToRefs(sectorStore)
+const { gates, edited } = storeToRefs(sectorStore)
 const lapsRef = computed(() => props.laps)
-const { runAutoDetect } = useSectors(lapsRef)
+const { runAutoDetect, addGateAtCursor, reorderGates } = useSectors(lapsRef)
 
-// Theoretical-best (optimal) lap: only meaningful once at least one gate is
-// confirmed AND laps/track/time are available — derived, not stored, so it
+// Re-detect clobbers any manual edits (add/remove/drag) — confirm first so a
+// user who's been hand-tuning gates doesn't lose that work to an accidental
+// re-click. No confirm needed when the set is untouched since detect (or
+// empty) — re-running detect is then a safe no-op-ish refresh.
+function onAutoDetect(): void {
+  if (edited.value && gates.value.length > 0 && !window.confirm(t('analyzer.sectorRedetectConfirm'))) {
+    return
+  }
+  runAutoDetect()
+}
+
+function onAddGate(): void {
+  addGateAtCursor(props.cursorIdx)
+}
+
+function onRemoveGate(i: number): void {
+  sectorStore.removeGate(i)
+  reorderGates()
+}
+
+// Theoretical-best (optimal) lap: only meaningful once at least one gate
+// exists AND laps/track/time are available — derived, not stored, so it
 // stays in sync with laps/gates/exclusions automatically.
 const optimalLap = computed(() => {
   if (gates.value.length === 0 || !props.track || !props.timeMs) return null
@@ -41,8 +64,11 @@ const hasOptimalData = computed(
 <template>
   <div class="sector-panel">
     <div class="row">
-      <button type="button" class="detect" @click="runAutoDetect">
+      <button type="button" class="detect" @click="onAutoDetect">
         {{ t('analyzer.sectorAutoDetect') }}
+      </button>
+      <button type="button" class="add" @click="onAddGate">
+        {{ t('analyzer.sectorAddGate') }}
       </button>
       <span class="count">
         {{ t('analyzer.sectorGateCount', { n: gates.length }) }}
@@ -54,6 +80,21 @@ const hasOptimalData = computed(
         {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
       </span>
     </div>
+
+    <ul v-if="gates.length > 0" class="gate-list">
+      <li v-for="(_g, i) in gates" :key="i">
+        <span class="gate-index">{{ i + 1 }}</span>
+        <span class="gate-label">{{ t('analyzer.sectorGateLabel', { n: i + 1 }) }}</span>
+        <button
+          type="button"
+          class="gate-remove"
+          :aria-label="t('analyzer.sectorRemoveGate', { n: i + 1 })"
+          @click="onRemoveGate(i)"
+        >
+          ✕
+        </button>
+      </li>
+    </ul>
 
     <!-- Theoretical-best (optimal) lap summary (§11 E): min per-sector time
          across complete, non-excluded laps, and which lap owns each best. -->
@@ -76,34 +117,6 @@ const hasOptimalData = computed(
         </ul>
       </template>
       <p v-else class="optimal-empty">{{ t('analyzer.optimalLapNoData') }}</p>
-    </div>
-
-    <div v-if="suggestions.length > 0" class="suggestions">
-      <div class="sug-header">
-        <span>{{ t('analyzer.sectorSuggestionCount', { n: suggestions.length }) }}</span>
-        <div class="sug-actions">
-          <button type="button" @click="sectorStore.acceptAllSuggestions()">
-            {{ t('analyzer.sectorAcceptAll') }}
-          </button>
-          <button type="button" @click="sectorStore.clearSuggestions()">
-            {{ t('analyzer.sectorRejectAll') }}
-          </button>
-        </div>
-      </div>
-      <ul class="sug-list">
-        <li v-for="(s, i) in suggestions" :key="i">
-          <span class="sug-index">{{ i + 1 }}</span>
-          <span class="sug-dist">{{ (s.lapDistanceM / 1000).toFixed(2) }} km</span>
-          <span class="sug-buttons">
-            <button type="button" class="accept" @click="sectorStore.acceptSuggestion(i)">
-              {{ t('analyzer.sectorAccept') }}
-            </button>
-            <button type="button" class="reject" @click="sectorStore.rejectSuggestion(i)">
-              {{ t('analyzer.sectorReject') }}
-            </button>
-          </span>
-        </li>
-      </ul>
     </div>
   </div>
 </template>
@@ -154,7 +167,8 @@ const hasOptimalData = computed(
   align-items: center;
   gap: 10px;
 }
-.detect {
+.detect,
+.add {
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
@@ -163,7 +177,8 @@ const hasOptimalData = computed(
   font: inherit;
   cursor: pointer;
 }
-.detect:hover {
+.detect:hover,
+.add:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
@@ -185,33 +200,7 @@ const hasOptimalData = computed(
   cursor: pointer;
   padding: 0;
 }
-.suggestions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.sug-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-.sug-actions {
-  display: flex;
-  gap: 8px;
-}
-.sug-actions button {
-  background: var(--color-bg);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 4px 8px;
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-.sug-list {
+.gate-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -221,16 +210,16 @@ const hasOptimalData = computed(
   max-height: 180px;
   overflow-y: auto;
 }
-.sug-list li {
+.gate-list li {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 4px 8px;
   border-radius: var(--radius);
   background: var(--color-bg);
   font-size: 0.85rem;
 }
-.sug-index {
+.gate-index {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -243,15 +232,11 @@ const hasOptimalData = computed(
   font-size: 0.75rem;
   line-height: 1;
 }
-.sug-dist {
+.gate-label {
+  flex: 1;
   color: var(--color-text);
-  margin-left: 6px;
 }
-.sug-buttons {
-  display: flex;
-  gap: 6px;
-}
-.sug-buttons button {
+.gate-remove {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 2px 8px;
@@ -259,13 +244,9 @@ const hasOptimalData = computed(
   font-size: 0.8rem;
   cursor: pointer;
   background: var(--color-surface);
-  color: var(--color-text);
+  color: var(--color-text-muted);
 }
-.sug-buttons .accept:hover {
-  border-color: #00c2ff;
-  color: #00c2ff;
-}
-.sug-buttons .reject:hover {
+.gate-remove:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }

@@ -150,7 +150,7 @@ The app auto-splits laps based on the start/finish line (or the ECU's built-in l
 
 - Default columns: **#** (lap number), **Lap time**, **Distance**.
 - **Add column**: add a **Max / Min / Avg** column for any channel (e.g. "peak speed this lap"); columns can also be removed.
-- **Add sector time**: requires at least one confirmed sector gate (see section 4.5); once added, pick "Sector 1," "Sector 2," etc. from the dropdown to show the time taken through that segment on each lap.
+- **Add sector time**: requires at least one sector gate (see section 4.5); once added, pick "Sector 1," "Sector 2," etc. from the dropdown to show the time taken through that segment on each lap.
 - **Add delta**: adds a "Delta" column showing each lap's time relative to the fastest lap currently in the (non-excluded) list — a positive value means slower than the fastest lap.
 - **Markers**:
   - The fastest lap (⚡) and slowest lap (🐢) are marked automatically (excluded laps are not considered).
@@ -178,15 +178,18 @@ Set a min/max "Valid lap-time band (s)"; any lap outside that range is automatic
 
 ### 4.5 Sector gates (corner validation)
 
-The Sector feature locates corners along the track and sets up a series of "gates" to check whether each lap actually drove through every corner in order (catching track-cutting or shortcuts that would otherwise be mistaken for a valid lap).
+The Sector feature sets up a series of "gates" along the track to check whether each lap actually drove through every corner in order (catching track-cutting or shortcuts that would otherwise be mistaken for a valid lap). Gates can be auto-detected, manually added/removed, or dragged into place at any time — there's no separate "confirm before use" step.
 
-1. Click "Auto-detect corners" — the app analyzes the track and finds candidate corner locations.
-2. Detected candidates appear in a list; "Accept" or "Reject" each one individually, or use "Accept all" / "Reject all" to handle them in bulk.
-3. Accepted candidates become confirmed **sector gates**, and the count shows as "N sector gates confirmed."
-4. **Drag to adjust**: confirmed sector gates can be dragged directly on the track map to reposition them (only confirmed gates are draggable — pending suggestions must be accepted first).
-5. "Clear all" removes every confirmed gate at once, to start over.
-6. Once gates are set, the lap table and stats show "N laps failed sector check" — meaning those laps' tracks didn't pass through all configured gates in order, which can indicate cutting a corner, missing part of the track, or a GPS glitch. This result also feeds into the overall lap-exclusion logic.
-7. **Theoretical best lap**: once at least one sector gate is confirmed, the Sector panel shows a "Theoretical best lap" — a hypothetical lap time made by summing the best time recorded in each sector across all non-excluded laps, along with which lap owns each sector's best time. If there isn't enough lap data yet to compute it, a message explains that it can't be calculated.
+1. Click "Auto-detect corners" — the app analyzes the track and **immediately** sets the detected corner positions as the current sector gates (no per-item review needed). The gate list shows numbered entries right away, they're drawn on the map right away, and lap sector timing/validity apply the new gates right away.
+2. The current gate count shows as "N sector gates," with each gate listed below by number.
+3. **Add a gate**: click "+ Add gate" to insert a new gate at the track position under the current map cursor (or near the middle of the reference lap if you haven't hovered the map yet); its orientation is set automatically to match the local direction of travel.
+4. **Remove a gate**: each entry in the gate list has a "✕" button to remove that gate individually.
+5. **Drag to adjust**: any gate can be dragged directly on the track map to reposition either endpoint (same as the start/finish line).
+6. After adding, removing, or dragging a gate, the set is **automatically re-sorted** by each gate's actual position along the direction of travel on the reference lap — sector order (which sector timing and validity both depend on) always stays correct without any manual reordering.
+7. "Clear all" removes every gate at once, to start over.
+8. **Re-running auto-detect**: if the current gate set has been manually added to/removed from/dragged since the last detect, clicking "Auto-detect corners" again first asks for confirmation (so a manual adjustment isn't accidentally overwritten). If nothing has been manually edited yet (e.g. right after a detect, or right after restoring a saved circuit), the new detection result applies immediately.
+9. Once gates are set, the lap table and stats show "N laps failed sector check" — meaning those laps' tracks didn't pass through all configured gates in order, which can indicate cutting a corner, missing part of the track, or a GPS glitch. This result also feeds into the overall lap-exclusion logic.
+10. **Theoretical best lap**: once at least one sector gate exists, the Sector panel shows a "Theoretical best lap" — a hypothetical lap time made by summing the best time recorded in each sector across all non-excluded laps, along with which lap owns each sector's best time. If there isn't enough lap data yet to compute it, a message explains that it can't be calculated.
 
 > This feature requires valid GPS track coordinates to work.
 
@@ -212,7 +215,7 @@ Below the corner-speed panel, search the **entire session** (not limited to one 
 
 ### 4.8 Local persistence and track files
 
-The Analyzer identifies "which circuit this is" from GPS location, and automatically saves that circuit's start/finish line, confirmed sector gates, and lap-table column setup locally in the browser (IndexedDB). The next time you load a log recorded at the same circuit (same GPS location), these settings are **restored automatically** — no need to redrag the start/finish line or re-detect corners.
+The Analyzer identifies "which circuit this is" from GPS location, and automatically saves that circuit's start/finish line, sector gates, and lap-table column setup locally in the browser (IndexedDB). The next time you load a log recorded at the same circuit (same GPS location), these settings are **restored automatically** — no need to redrag the start/finish line or re-detect corners.
 
 This panel sits after Sector / Corner speed / Acceleration test and before the lap table, and offers:
 
@@ -281,8 +284,7 @@ The footer at the bottom of the page shows "build \<sha\> · \<date\>." Include 
 | 切西瓜 | Cutting the track / invalid lap | An abnormal lap where the driving line deviates from the real track (a shortcut); usually excluded manually or via sector checks |
 | 排除（圈） | Exclude (lap) | Marking a lap so it's omitted from stats like the fastest lap |
 | 起終點線 | Start/finish line | The reference line used to split laps; draggable |
-| Sector 閘門 | Sector gate | Checkpoints placed along the track to verify a lap passed through every corner |
-| 候選彎道 | Candidate corner / suggestion | An auto-detected corner awaiting manual confirmation as a sector gate |
+| Sector 閘門 | Sector gate | Checkpoints placed along the track to verify a lap passed through every corner; can be auto-detected, manually added/removed, or dragged |
 | 疊圈 | Overlay (mode) | A chart view mode that overlays multiple laps' data on one graph |
 | 時間軸 | Timeline (mode) | A chart view mode showing the raw time series for the whole session |
 | 對位微調 | Alignment | Manually nudging the time or map offset between laps so feature points line up |
