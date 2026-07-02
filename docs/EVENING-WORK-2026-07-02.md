@@ -36,4 +36,22 @@
 
 ## 進度日誌
 
-（隨波次更新）
+### ✅ UX 快修批次（已併入 develop `628e888`，450 tests 綠）
+- `feature/ux-batch-0702` @ `f56637a`。model: Sonnet 5。
+- **A4** 候選彎道清單加編號徽章（呼應地圖 gate 編號）。
+- **A7** 排除視覺統一：`lapStore.exclusionReason(i)`（manual > band > sector 優先序），
+  ⦸ 反映聯集狀態，自動排除者顯示「開啟但不可手動解除」+ 原因 tooltip
+  （i18n `excludedByBand`/`excludedBySector`）。
+- **A8** 有效圈速區間自動帶入：純 `suggestLapTimeBand`（距離合理圈的中位圈時 ±20%），
+  僅未設定時、每新 session 帶一次，不覆蓋使用者值。
+- **B3** 載入按鈕→`＋ 載入記錄` + tooltip 由 import registry 衍生（不再手寫格式清單）。
+- **B4** 主題/語言由 header 搬入設定分頁（保留 name/a11y 屬性）。
+- 16 新測試。**待視覺驗收**：A4 徽章樣式、A7 tooltip、B3 提示、B4 設定版面。
+
+### 🔄 進行中（6 agent 平行，isolated worktrees）
+- 波1：`fix/rcnx-wasm`（A16 wasm MIME）｜`fix/chart-mode-selection`（A13 + B1 驗證）
+- 波2：`feature/gate-flow`（A1+A15 流程重設計）｜`feature/csv-export`（B2 改 CSV）｜
+  `feature/gear-calc`（A11 齒比雙層）｜`feature/bottom-nav`（B5 底部導航）
+
+### ⏳ 波3（等 gate-flow 併入後依序）
+- A9 標記與上色整合 → A10+A12 G-G 圖表化 → B7 架構審查 → 手冊總同步 → 報告完稿
