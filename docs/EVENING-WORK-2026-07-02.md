@@ -48,10 +48,37 @@
 - **B4** 主題/語言由 header 搬入設定分頁（保留 name/a11y 屬性）。
 - 16 新測試。**待視覺驗收**：A4 徽章樣式、A7 tooltip、B3 提示、B4 設定版面。
 
-### 🔄 進行中（6 agent 平行，isolated worktrees）
-- 波1：`fix/rcnx-wasm`（A16 wasm MIME）｜`fix/chart-mode-selection`（A13 + B1 驗證）
-- 波2：`feature/gate-flow`（A1+A15 流程重設計）｜`feature/csv-export`（B2 改 CSV）｜
-  `feature/gear-calc`（A11 齒比雙層）｜`feature/bottom-nav`（B5 底部導航）
+### ✅ A16 rcnx wasm 修復（develop `b286b76`）
+- `fix/rcnx-wasm` @ `b97a156`。**root cause 出乎意料**：worker 路徑本來就對；壞的是
+  FileBar 主執行緒的多 session 預掃描 `listRcnxSessions(bytes)` 漏傳 wasmLocateUrl →
+  sql.js 自行定位到不存在的根路徑 → dev SPA fallback 回 index.html（`3c 21 64 6f`）。
+  修：FileBar 以 `?url` import 傳同一 URL。dev + prod（wrangler preview）皆驗 magic bytes。
 
-### ⏳ 波3（等 gate-flow 併入後依序）
-- A9 標記與上色整合 → A10+A12 G-G 圖表化 → B7 架構審查 → 手冊總同步 → 報告完稿
+### ✅ B5 底部導航（develop `c45ab8b`）
+- `feature/bottom-nav` @ `512932e`。≤768px iOS 式底部 tab bar（≥44px、safe-area-inset、
+  aria-current），桌機保留頂部 nav；切換 slide+fade 250ms 方向感知、
+  prefers-reduced-motion 降級。**待實機驗收**動畫手感與 iPhone safe-area。
+
+### ✅ A1+A15 gate 流程重設計（develop `ccc33b1`，455 tests）
+- `feature/gate-flow` @ `95a67c8`。**suggestions/accept/reject 層整個刪除**；偵測直接
+  載入為可用 gates；隨時＋新增（地圖游標處）/✕移除/拖曳；編輯後依參考圈 crossing 位置
+  自動重排（`gateOrder.ts`）；edited 旗標 → 手動編輯後 re-detect 需確認覆蓋；持久化/
+  軌跡檔匯入走 loadDetected 不誤標。手冊 §4.5 重寫。**待視覺驗收**：地圖新增/確認對話框。
+
+### ✅ B2 CSV 輸出（develop `e47e023`，463 tests）
+- `feature/csv-export` @ `5046165`。第三種輸出格式：全通道+GPS（共用 makeFixResolver、
+  含衍生懸吊），LF/UTF-8 無 BOM/NaN=空格/去浮點雜訊。RS3 可匯入。ARCHITECTURE-FORMATS
+  §7 重寫 + 手冊更新。
+
+### ✅ A11 齒比計算器（develop `8ce939c`，493 tests，build 綠）
+- `feature/gear-calc` @ `f79b740`。純 `drivetrain.ts`（30 測試，Python 手算 fixtures）：
+  MT 總減速/各檔極速/RPM↔速度/換檔掉轉；CVT 比域極速。log 反推 ratio(t)=RPM/輪轉速
+  + greedy 聚類偵測檔位水平段（gearCount 提示下 b1(9) 實檔驗出 6 檔合理間距；無提示時
+  連續加速會碎裂 — 已記載於手冊）。GearPanel + drivetrainStore（暫態；規格持久化列
+  follow-up）。**待視覺驗收**：面板版面。
+
+### 🔄 進行中
+- `fix/chart-mode-selection`（A13 + B1 驗證）｜`feature/marker-color-merge`（A9 整合）
+
+### ⏳ 接續
+- A10+A12 G-G 圖表化（等 A9）→ B7 架構審查 → 手冊總校 → 報告完稿
