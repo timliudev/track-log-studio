@@ -10,7 +10,7 @@
 
 兩大功能：
 
-1. **轉檔器（Converter）**：把 aRacer ECU 的 `.loga` 記錄檔轉換成 [RaceChrono](https://racechrono.com/) DIY 可匯入的 `.nmea`（NMEA 0183 + `$RC3` 感測器槽位），或轉成 Racelogic `.vbo`（給 Circuit Tools 3 / RaceChrono 使用）。
+1. **轉檔器（Converter）**：把 aRacer ECU 的 `.loga` 記錄檔轉換成 [RaceChrono](https://racechrono.com/) DIY 可匯入的 `.nmea`（NMEA 0183 + `$RC3` 感測器槽位）、Racelogic `.vbo`（給 Circuit Tools 3 / RaceChrono 使用），或通用 `.csv`（給 Race Studio 3 / Excel / Python 等任何工具使用）。
 2. **分析器（Analyzer）**：直接在瀏覽器裡看軌跡地圖、切圈、比較圈速、畫遙測圖表、看賽道熱力圖。
 
 > **商標聲明：** Track Log Studio 為獨立的非官方工具，與 aRacer、RaceChrono 無任何隸屬或背書關係；文中提及僅用於描述相容性。aRacer 與 RaceChrono 為其各自所有者的商標。
@@ -70,12 +70,13 @@
 - RaceChrono DIY `.nmea`（NMEA 0183 `$GPRMC` + `$RC3`）
 - 校正後的 `.loga`（把避震行程等衍生通道寫回新的 `.loga`）
 - Racelogic `.vbo`（`_ct.vbo` + `_rc.vbo` + `_channels.csv` 對照表）
+- 通用 `.csv`（給 Race Studio 3 / Excel / Python 等工具使用；`Time`/`GPS_Lat`/`GPS_Lon`/`GPS_Speed` + 所有其他通道，每筆取樣一列）
 
 ---
 
 ## 3. 轉檔器 Converter
 
-轉檔器負責把 `.loga` 轉成 RaceChrono 可讀的 `.nmea`，或轉成 Circuit Tools 3 可讀的 `.vbo`。
+轉檔器負責把 `.loga` 轉成 RaceChrono 可讀的 `.nmea`、Circuit Tools 3 可讀的 `.vbo`，或通用的 `.csv`。
 
 ### 3.1 載入檔案
 
@@ -93,6 +94,7 @@
   - `_ct.vbo`（Circuit Tools 用，保留原始 ECU 通道名稱）
   - `_rc.vbo`（RaceChrono 用，通道以 RaceChrono 識別符命名）
   - `_channels.csv`（通道對照表：ECU 通道 / 說明 / RaceChrono 識別符 / 單位 / 類型）
+- **CSV**：自動輸出**所有**通道（含避震衍生通道），不需要手動設定欄位對應，也沒有 Race Studio 3 以外的目標軟體限制。每個 `.loga` 產生一個 `.csv`：欄位依序為 `Time`、`GPS_Lat`、`GPS_Lon`、`GPS_Speed`，之後接每個其他通道（以 aRacer 原始通道名稱命名），每筆取樣一列。無 GPS 定位的列，經緯度欄位留空；無值的取樣格留空（不會填 0）。換行採 `\n`（LF only），UTF-8 不含 BOM。
 
 ### 3.3 RC3 欄位對應（僅 NMEA 模式）
 

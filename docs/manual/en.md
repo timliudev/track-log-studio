@@ -10,7 +10,7 @@
 
 Two main features:
 
-1. **Converter**: converts aRacer ECU `.loga` logs into a [RaceChrono](https://racechrono.com/) DIY-importable `.nmea` (NMEA 0183 + `$RC3` sensor slots), or into a Racelogic `.vbo` (for Circuit Tools 3 / RaceChrono).
+1. **Converter**: converts aRacer ECU `.loga` logs into a [RaceChrono](https://racechrono.com/) DIY-importable `.nmea` (NMEA 0183 + `$RC3` sensor slots), a Racelogic `.vbo` (for Circuit Tools 3 / RaceChrono), or a generic `.csv` (for Race Studio 3, Excel, Python, or any other tool).
 2. **Analyzer**: view the track map, split laps, compare lap times, plot telemetry charts, and view a track heatmap, directly in the browser.
 
 > **Trademark notice:** Track Log Studio is an independent, unofficial tool and is not affiliated with or endorsed by aRacer or RaceChrono; those names are used only to describe compatibility. aRacer and RaceChrono are trademarks of their respective owners.
@@ -70,12 +70,13 @@ A single `.rcnx` file can contain multiple sessions (separate recordings). If mo
 - RaceChrono DIY `.nmea` (NMEA 0183 `$GPRMC` + `$RC3`)
 - A calibrated `.loga` (derived channels such as suspension travel written back into a new `.loga`)
 - Racelogic `.vbo` (`_ct.vbo` + `_rc.vbo` + a `_channels.csv` map)
+- A generic `.csv` (for Race Studio 3 / Excel / Python and similar tools; `Time`/`GPS_Lat`/`GPS_Lon`/`GPS_Speed` plus every other channel, one row per sample)
 
 ---
 
 ## 3. Converter
 
-The Converter turns `.loga` into an `.nmea` readable by RaceChrono, or into a `.vbo` readable by Circuit Tools 3.
+The Converter turns `.loga` into an `.nmea` readable by RaceChrono, a `.vbo` readable by Circuit Tools 3, or a generic `.csv`.
 
 ### 3.1 Loading files
 
@@ -93,6 +94,7 @@ Under "Output format," choose:
   - `_ct.vbo` (for Circuit Tools, keeps original ECU channel names)
   - `_rc.vbo` (for RaceChrono, channels named with RaceChrono identifiers)
   - `_channels.csv` (a channel cross-reference: ECU channel / description / RaceChrono id / unit / type)
+- **CSV**: automatically exports **every** channel (including derived suspension channels) — no field mapping needed, and no target-app naming constraints beyond Race Studio 3. Each `.loga` produces one `.csv`: columns are `Time`, `GPS_Lat`, `GPS_Lon`, `GPS_Speed`, followed by every other channel (named with its original aRacer channel name), one row per sample. Rows with no GPS fix leave the lat/lon cells empty; samples with no value are left empty too (never `0`). Line endings are `\n` (LF only), UTF-8 without a BOM.
 
 ### 3.3 RC3 field mapping (NMEA mode only)
 

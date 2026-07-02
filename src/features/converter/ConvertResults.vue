@@ -12,6 +12,7 @@ const { results, isConverting, readyFiles, outputFormat } = storeToRefs(store)
 const FORMATS: { id: OutputFormat; label: string }[] = [
   { id: 'nmea', label: 'NMEA (.nmea)' },
   { id: 'vbo', label: 'VBO (.vbo)' },
+  { id: 'csv', label: 'CSV (.csv)' },
 ]
 
 function onConvert(): void {
@@ -21,7 +22,7 @@ function onConvert(): void {
 }
 
 function downloadAllZip(): void {
-  const zipName = outputFormat.value === 'vbo' ? 'loga-vbo.zip' : 'loga-nmea.zip'
+  const zipName = `loga-${outputFormat.value}.zip`
   downloadZip(zipName, results.value)
 }
 </script>
