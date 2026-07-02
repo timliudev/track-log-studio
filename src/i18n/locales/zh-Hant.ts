@@ -59,6 +59,7 @@ export default {
     distance: '距離',
     pickChannel: '從上方選擇要繪製的通道',
     addChart: '新增圖表',
+    addScatterChart: '新增 XY 散佈圖',
     removeChart: '移除',
     lapCount: '圈數：{n}',
     lapCountExcluded: '圈數：{n}（已排除 {x}）',
@@ -187,10 +188,8 @@ export default {
       cvtSweepAxisRatio: '齒比',
     },
     gg: {
-      title: 'G-G 圖（摩擦圓）',
       xAxis: 'X 軸頻道',
       yAxis: 'Y 軸頻道',
-      noChannels: '找不到力值頻道（如 TC_Xforce / TC_Yforce）。',
       pickBoth: '請選擇 X 與 Y 軸的頻道。',
       session: '整份記錄',
       lapSeries: '第 {n} 圈',

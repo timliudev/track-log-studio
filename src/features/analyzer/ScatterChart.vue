@@ -1,0 +1,178 @@
+<script setup lang="ts">
+import { computed, defineAsyncComponent } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useAnalyzerStore, type ScatterChartConfig } from '@/stores/analyzerStore'
+import type { LogSession } from '@/domain/model/LogSession'
+import type { Lap } from '@/domain/model/Lap'
+import { buildGgPoints } from '@/domain/analysis/ggData'
+import { lapColor } from './lapColors'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import type { GgSeries } from './GgChart.vue'
+
+// A10+A12 — XY scatter chart TYPE: any two channels, managed exactly like
+// timeseries charts (multiple instances, per-chart config, remove button).
+// Force channels (aRacer TC_Xforce/TC_Yforce, milli-g) are just the default
+// pick for the featured friction-circle use — see `looksLikeForce` below.
+// Lazy: pulls in echarts (~480 kB raw) — async import keeps it in its own
+// chunk, split from the main bundle (see AnalyzerView.vue's defineAsyncComponent
+// comment for the sibling boundary this mirrors).
+const GgChart = defineAsyncComponent(() => import('./GgChart.vue'))
+
+const MILLI_G_SCALE = 0.001
+const MAX_POINTS = 5000
+
+const props = defineProps<{
+  chart: ScatterChartConfig
+  session: LogSession | null
+  /** Selected laps in selection order (for per-lap coloring), or empty for
+   *  whole-session single-color plotting. */
+  selectedLaps: Lap[]
+}>()
+
+const { t } = useI18n()
+const analyzer = useAnalyzerStore()
+
+const allChannels = computed(() => {
+  const s = props.session
+  if (!s) return []
+  return s.channels
+    .map((c) => ({ name: c.name, description: c.description }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
+
+const xChannel = computed(() => props.chart.xChannel)
+const yChannel = computed(() => props.chart.yChannel)
+
+function setX(name: string | null): void {
+  analyzer.setChartXY(props.chart.id, 'x', name)
+}
+function setY(name: string | null): void {
+  analyzer.setChartXY(props.chart.id, 'y', name)
+}
+
+// Scale is only meaningful for aRacer's milli-g force channels; any other
+// channel pair plots in its native units (raw scale = 1).
+function looksLikeForce(name: string | null): boolean {
+  return name != null && /force/i.test(name)
+}
+const useMilliG = computed(() => looksLikeForce(xChannel.value) && looksLikeForce(yChannel.value))
+
+const ggSeries = computed<GgSeries[]>(() => {
+  const s = props.session
+  const xName = xChannel.value
+  const yName = yChannel.value
+  if (!s || !xName || !yName) return []
+  const xCh = s.get(xName)
+  const yCh = s.get(yName)
+  if (!xCh || !yCh) return []
+  const scale = useMilliG.value ? MILLI_G_SCALE : 1
+
+  if (props.selectedLaps.length === 0) {
+    const points = buildGgPoints(xCh.data, yCh.data, { scale, maxPoints: MAX_POINTS })
+    return [{ points, color: '#4363d8', name: t('analyzer.gg.session') }]
+  }
+
+  return props.selectedLaps.map((lap, order) => ({
+    points: buildGgPoints(xCh.data, yCh.data, {
+      scale,
+      start: lap.startIdx,
+      end: lap.endIdx,
+      maxPoints: MAX_POINTS,
+    }),
+    color: lapColor(order),
+    name: t('analyzer.gg.lapSeries', { n: lap.index + 1 }),
+  }))
+})
+
+// Adaptive axis rule (documented on GgChart.vue too): symmetric-about-0
+// square axes only make sense when BOTH channels look like signed force data
+// (min<0<max on each axis) — otherwise (e.g. RPM vs speed) a normal
+// auto-ranged axis is used. Computed here from the actual data rather than
+// the channel NAME so it works for any signed bipolar channel, not just
+// TC_*force.
+const axisMode = computed<'square' | 'auto'>(() => {
+  const series = ggSeries.value
+  if (series.length === 0) return 'auto'
+  let xMin = Infinity
+  let xMax = -Infinity
+  let yMin = Infinity
+  let yMax = -Infinity
+  for (const s of series) {
+    for (const [x, y] of s.points) {
+      if (x < xMin) xMin = x
+      if (x > xMax) xMax = x
+      if (y < yMin) yMin = y
+      if (y > yMax) yMax = y
+    }
+  }
+  const xSigned = xMin < 0 && xMax > 0
+  const ySigned = yMin < 0 && yMax > 0
+  return xSigned && ySigned ? 'square' : 'auto'
+})
+</script>
+
+<template>
+  <section class="scatter-chart">
+    <div class="toolbar">
+      <div class="picker">
+        <span class="picker-label">{{ t('analyzer.gg.xAxis') }}</span>
+        <SearchableSelect :model-value="xChannel" :options="allChannels" @update:model-value="setX" />
+      </div>
+      <div class="picker">
+        <span class="picker-label">{{ t('analyzer.gg.yAxis') }}</span>
+        <SearchableSelect :model-value="yChannel" :options="allChannels" @update:model-value="setY" />
+      </div>
+      <button type="button" class="remove" @click="analyzer.removeChart(chart.id)">
+        {{ t('analyzer.removeChart') }}
+      </button>
+    </div>
+
+    <p v-if="!xChannel || !yChannel" class="hint">{{ t('analyzer.gg.pickBoth') }}</p>
+    <GgChart v-else :series="ggSeries" :axis-mode="axisMode" />
+  </section>
+</template>
+
+<style scoped>
+.scatter-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.picker {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.picker-label {
+  font-size: 0.85rem;
+}
+.remove {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font: inherit;
+  cursor: pointer;
+  align-self: flex-end;
+}
+.remove:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+</style>

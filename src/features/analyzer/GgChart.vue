@@ -18,6 +18,15 @@ export interface GgSeries {
 const props = defineProps<{
   series: GgSeries[]
   height?: number
+  /** Adaptive axis rule (A10+A12 — GgChart is now the shared renderer for
+   *  ANY XY scatter, not just friction circles): 'square' draws symmetric
+   *  axes about 0 sized to the max |value| (the friction-circle look) —
+   *  meaningful only when both channels are signed force-like data.
+   *  'auto' (default) lets each axis auto-range independently, matching a
+   *  normal scatter of unrelated channels (e.g. RPM vs speed). The caller
+   *  decides the mode from the actual data range (min<0<max on both axes),
+   *  not the channel name — see ScatterChart.vue's `axisMode`. */
+  axisMode?: 'square' | 'auto'
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -49,7 +58,16 @@ function computeMaxAbs(series: GgSeries[]): number {
 function buildOption(): echarts.EChartsCoreOption {
   const axisStroke = themeColor('--color-text-muted', '#888')
   const gridStroke = themeColor('--color-border', '#ccc')
-  const bound = computeMaxAbs(props.series)
+  const square = (props.axisMode ?? 'auto') === 'square'
+  const bound = square ? computeMaxAbs(props.series) : undefined
+
+  const sharedAxis = {
+    type: 'value' as const,
+    ...(square ? { min: -bound!, max: bound! } : {}),
+    axisLine: { lineStyle: { color: axisStroke } },
+    axisLabel: { color: axisStroke },
+    splitLine: { lineStyle: { color: gridStroke } },
+  }
 
   return {
     animation: false,
@@ -58,25 +76,12 @@ function buildOption(): echarts.EChartsCoreOption {
       trigger: 'item',
       formatter: (p: { seriesName?: string; value?: number[] }) => {
         const v = p.value ?? [0, 0]
-        return `${p.seriesName ?? ''}<br/>X: ${v[0].toFixed(2)} g<br/>Y: ${v[1].toFixed(2)} g`
+        const unit = square ? ' g' : ''
+        return `${p.seriesName ?? ''}<br/>X: ${v[0].toFixed(2)}${unit}<br/>Y: ${v[1].toFixed(2)}${unit}`
       },
     },
-    xAxis: {
-      type: 'value',
-      min: -bound,
-      max: bound,
-      axisLine: { lineStyle: { color: axisStroke } },
-      axisLabel: { color: axisStroke },
-      splitLine: { lineStyle: { color: gridStroke } },
-    },
-    yAxis: {
-      type: 'value',
-      min: -bound,
-      max: bound,
-      axisLine: { lineStyle: { color: axisStroke } },
-      axisLabel: { color: axisStroke },
-      splitLine: { lineStyle: { color: gridStroke } },
-    },
+    xAxis: sharedAxis,
+    yAxis: sharedAxis,
     series: props.series.map((s) => ({
       name: s.name,
       type: 'scatter',

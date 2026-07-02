@@ -59,6 +59,7 @@ export default {
     distance: 'Distance',
     pickChannel: 'Pick channels to plot from above',
     addChart: 'Add chart',
+    addScatterChart: 'Add XY scatter chart',
     removeChart: 'Remove',
     lapCount: 'Laps: {n}',
     lapCountExcluded: 'Laps: {n} ({x} excluded)',
@@ -190,10 +191,8 @@ export default {
       cvtSweepAxisRatio: 'Ratio',
     },
     gg: {
-      title: 'G-G diagram (friction circle)',
       xAxis: 'X-axis channel',
       yAxis: 'Y-axis channel',
-      noChannels: 'No force channels found (e.g. TC_Xforce / TC_Yforce).',
       pickBoth: 'Pick a channel for both X and Y.',
       session: 'Whole session',
       lapSeries: 'Lap {n}',
