@@ -12,7 +12,7 @@
 | T2 | G-G echarts bundle 拆分(dynamic import) | ⬜ 排隊 | — | 479kB chunk 延遲載入 |
 | T3 | RS3 CSV 註解行容錯驗證 | ⏳ 進行中 | — | 補測試確認 |
 | T4 | 傳動比設定持久化(idb circuit setup) | ⬜ 排隊 | — | 0702 遺留 |
-| T5 | A2/A3 雲端賽道機制設計文件 | ⏳ 進行中 | — | 只寫文件,不實作 |
+| T5 | A2/A3 雲端賽道機制設計文件 | ✅ 完成 | `docs/cloud-track-design` → `1219390` | 只寫文件,待你拍板 |
 | T6 | Phase 5 合併 UI | ⬜ 排隊 | — | align/merge 核心已在 develop |
 | T7 | 彎道偵測接上 UI | ⬜ 排隊 | — | spike 已合併,接 gate 直接載入流程 |
 | T8 | B6 彈性面板佈局 | ⬜ 排隊 | — | ⚠️ 需你視覺驗收 |
@@ -28,7 +28,18 @@
 
 ## 各任務詳細記錄
 
-(隨任務完成陸續補上)
+### T5 — A2/A3 雲端賽道機制設計文件 ✅(develop `1219390`)
+
+產出 [docs/CLOUD-TRACK-DESIGN.md](CLOUD-TRACK-DESIGN.md)(581 行,繁中)。**純設計、零程式碼變更**,早上請優先看它的 §8「開放問題」— 有 8 個要你拍板的決策。主要建議(都可推翻):
+
+1. **Schema**:`TrackDefinitionV1`(共享:geo/名稱/起終點線/gates/授權)與 `PersonalTrackOverlayV1`(個人:欄位配置/offsets/傳動比/顏色)明確分離,線/gate 直接沿用現有 `LapLine` 形狀。
+2. **Repo**:獨立 `track-log-studio-tracks` repo(授權、CI、貢獻門檻考量)。
+3. **發佈**:混合式 — 打包時內建一份快照(離線可用),執行期經 **jsDelivr** 背景更新。
+4. **比對**:沿用現有 `circuitKey`/`circuitKeysMatch`;優先序 個人 overlay > 共享庫 > 自動偵測,多 layout 有選擇器 + detach。
+5. **個人雲端備份**:Google Drive `drive.appdata`(比 GitHub Gist 門檻低),列為第 4 期。
+6. **賽道資料授權**:建議 CC0-1.0。
+
+分期:①現有本地持久化對齊 schema → ②唯讀消費共享庫 → ③開放社群 PR → ④個人雲端。
 
 ## 驗收清單(早上請你看)
 
