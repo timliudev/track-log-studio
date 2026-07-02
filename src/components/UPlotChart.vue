@@ -24,8 +24,27 @@ const host = ref<HTMLDivElement | null>(null)
 let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
-// Guard so programmatic setScale (from a synced xRange) doesn't echo back out.
+// Guard so programmatic setScale (from a synced xRange, or uPlot's own
+// auto-ranging on (re)create) doesn't echo back out as a user xZoom.
+//
+// uPlot's setScale() doesn't fire its hooks synchronously — it stashes the
+// requested range and fires via a queued MICROTASK (see uPlot's commit()),
+// coalescing every setScale() call made in the same synchronous tick into
+// ONE later hook fire carrying only the FINAL range. So a guard that flips
+// back to false synchronously (right after the setScale() call returns) is
+// already false by the time the hook actually fires — it never guards
+// anything. The fix: clear the guard in a queued microtask of our own,
+// scheduled AFTER uPlot's — since microtasks run FIFO, uPlot's own commit()
+// (queued earlier in the same synchronous block, by new uPlot()'s internal
+// autoScaleX() and/or our own setScale() call) always runs first, so by the
+// time our reset runs the hook has already fired (or not fired at all, if
+// nothing changed) — either way it's now safe to un-guard.
 let applyingRange = false
+function clearApplyingRangeSoon(): void {
+  queueMicrotask(() => {
+    applyingRange = false
+  })
+}
 let applyingCursor = false
 
 function themeColor(name: string, fallback: string): string {
@@ -71,19 +90,39 @@ function buildOptions(width: number): uPlot.Options {
   }
 }
 
-function applyXRange(): void {
+// `standalone` is true when applyXRange is the sole guarded call in this tick
+// (the fast-data-update path, or the xRange-prop watcher) — it must own the
+// guard's set AND deferred clear itself. When called from inside create()
+// (below), create() already holds the guard open across its OWN setScale
+// (uPlot's auto-range on construction) and schedules the one shared clear
+// afterward, so applyXRange must NOT set/clear it a second time — that would
+// only be redundant here, but would be actively wrong if a future caller ever
+// needed the guard to stay open past applyXRange's return.
+function applyXRange(standalone = true): void {
   if (!plot || !props.xRange) return
   applyingRange = true
   plot.setScale('x', { min: props.xRange.min, max: props.xRange.max })
-  applyingRange = false
+  if (standalone) clearApplyingRangeSoon()
 }
 
 function create(): void {
   if (!host.value) return
   destroy()
   const width = host.value.clientWidth || 600
+  // uPlot auto-ranges the x scale while laying out the freshly-constructed
+  // chart (via its own internal setScale) — that's not a user zoom action, so
+  // guard it the same way applyXRange guards its own programmatic setScale,
+  // or it would leak out as a spurious xZoom (e.g. on every chart-mode
+  // toggle, since that changes the series shape and forces a recreate) and
+  // cascade into clearing the lap selection upstream. The guard stays open
+  // across BOTH setScale calls (construction's auto-range + applyXRange's
+  // sync below) so they coalesce into a single, fully-suppressed hook fire —
+  // see clearApplyingRangeSoon's comment for why a synchronous reset can't
+  // guard an async hook fire.
+  applyingRange = true
   plot = new uPlot(buildOptions(width), props.data, host.value)
-  applyXRange() // adopt the shared zoom on (re)create, e.g. a newly added chart
+  applyXRange(false) // adopt the shared zoom on (re)create, e.g. a newly added chart
+  clearApplyingRangeSoon()
 }
 
 function destroy(): void {
