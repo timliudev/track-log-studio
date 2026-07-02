@@ -98,16 +98,13 @@ const focusRange = computed(() =>
   highlightLaps.value.length > 0 ? null : xRangeToFocusIndices(xRange.value, xValues.value),
 )
 
-// Sector gates for the track map: confirmed gates (solid) plus any pending
-// auto-detected suggestions awaiting accept/reject (dashed) — see SectorPanel.
-const mapGates = computed(() => [
-  ...sectorStore.gates.map((line) => ({ line, confirmed: true })),
-  ...sectorStore.suggestions.map((s) => ({ line: s.line, confirmed: false })),
-])
+// Sector gates for the track map: every gate is a real, working gate now (A1+A15
+// redesign removed the accept/reject suggestion layer) — all drawn solid/numbered.
+const mapGates = computed(() => sectorStore.gates.map((line) => ({ line, confirmed: true })))
 
-// TrackMap emits (index, line) when a confirmed gate's handle is dragged;
-// sectorStore.gates is the single owner of gate geometry, so forward straight
-// into its action rather than mutating anything locally.
+// TrackMap emits (index, line) when a gate's handle is dragged; sectorStore.gates
+// is the single owner of gate geometry, so forward straight into its action
+// rather than mutating anything locally.
 function onUpdateGate(index: number, line: LapLine): void {
   sectorStore.setGate(index, line)
 }
@@ -429,6 +426,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           :invalid-count="sectorInvalidCount"
           :track="track"
           :time-ms="timeMs"
+          :cursor-idx="cursorIdx"
         />
         <CornerSpeedPanel :apexes="cornerApexes" :speed-available="speedAvailable" />
         <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />

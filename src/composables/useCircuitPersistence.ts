@@ -21,8 +21,8 @@ const SAVE_DEBOUNCE_MS = 800
  * which is fine (unlike a watcher writing into another Pinia store's state,
  * the #9-desync anti-pattern this codebase avoids elsewhere). The restore
  * side never mutates refs directly: it goes through the SAME store actions
- * (`setLine`/`addGate`/`addColumn`) that any other caller uses, so a restore
- * is indistinguishable from the user recreating that setup by hand.
+ * (`setLine`/`loadDetected`/`addColumn`) that any other caller uses, so a
+ * restore is indistinguishable from the user recreating that setup by hand.
  */
 export function useCircuitPersistence(): void {
   const { track } = useActiveSession()
@@ -62,8 +62,11 @@ export function useCircuitPersistence(): void {
     if (activeKey !== key) return
     if (saved) {
       if (saved.line) lapStore.setLine(saved.line)
-      sectorStore.clearGates()
-      for (const gate of saved.gates) sectorStore.addGate(gate)
+      // Restoring from idb is not a manual edit — go through `loadDetected`
+      // (not `addGate` per gate) so `sectorStore.edited` stays false and a
+      // later auto-re-detect doesn't prompt to confirm overwriting a restore
+      // the user hasn't touched yet.
+      sectorStore.loadDetected(saved.gates)
       if (saved.columns.length > 0) {
         for (const col of [...lapStore.columns]) lapStore.removeColumn(col.id)
         for (const col of saved.columns) lapStore.addColumn(col.metric)
