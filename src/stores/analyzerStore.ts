@@ -44,15 +44,21 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // across them — but it's meaningless to timeline charts / the track map, which
   // live in session-index space, hence a distinct ref instead of reusing cursorIdx.
   const overlayCursorIdx = ref<number | null>(null)
-  // Track heatmap (#10/#11): colour the track polyline by this channel's value
-  // (null = plain track) using the chosen colormap. Transient analyzer state
-  // like charts/cursor — not persisted (persistence is queue item D).
-  const trackColorChannel = ref<string | null>(null)
+  // A9 — unified track-channel control (梁道上色 + 極值標記 merged into one
+  // channel-driven control): pick ONE channel, then independently choose to
+  // colour the track by it (heatmap, ex-trackColorChannel/#10/#11) and/or mark
+  // its local minima/maxima on the map (ex-showCornerSpeed, generalised from
+  // speed-only apexes to any channel — see cornerSpeed.ts's
+  // detectChannelExtrema). Transient analyzer state like charts/cursor — not
+  // persisted (persistence is queue item D). One owner (this group); the
+  // heatmap norm and extrema themselves are DERIVED in AnalyzerView, not
+  // stored here (same "one owner, derive via computed" rule as cornerApexes
+  // used to follow).
+  const trackChannel = ref<string | null>(null)
   const trackColormap = ref<ColormapId>(COLORMAP_IDS[0])
-  // Corner-speed apex markers (RaceChrono-style min-speed labels): transient,
-  // like trackColorChannel — off by default, and only meaningful for the
-  // single currently-selected lap (see AnalyzerView's cornerApexes computed).
-  const showCornerSpeed = ref(false)
+  const trackColorEnabled = ref(false)
+  const markMinima = ref(false)
+  const markMaxima = ref(false)
   // Phase 7 — acceleration/drag test (加速測試): the panel's condition config.
   // Transient like the other analyzer toggles above (not persisted); the
   // RESULT itself is not stored here — it's derived in AnalyzerView from this
@@ -77,16 +83,28 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     overlayCursorIdx.value = i
   }
 
-  function setTrackColorChannel(name: string | null): void {
-    trackColorChannel.value = name
+  /** Picking a new channel doesn't implicitly change the enabled toggles —
+   *  switching from "speed, min-marked" to "RPM" keeps min-marking on, now
+   *  for RPM. Matches the task's "pick a channel once, then independently
+   *  choose" framing: the channel and the three toggles are orthogonal. */
+  function setTrackChannel(name: string | null): void {
+    trackChannel.value = name
   }
 
   function setTrackColormap(id: ColormapId): void {
     trackColormap.value = id
   }
 
-  function setShowCornerSpeed(on: boolean): void {
-    showCornerSpeed.value = on
+  function setTrackColorEnabled(on: boolean): void {
+    trackColorEnabled.value = on
+  }
+
+  function setMarkMinima(on: boolean): void {
+    markMinima.value = on
+  }
+
+  function setMarkMaxima(on: boolean): void {
+    markMaxima.value = on
   }
 
   function setAccelCondition(condition: AccelCondition): void {
@@ -118,16 +136,20 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     xRange,
     cursorIdx,
     overlayCursorIdx,
-    trackColorChannel,
+    trackChannel,
     trackColormap,
-    showCornerSpeed,
+    trackColorEnabled,
+    markMinima,
+    markMaxima,
     accelCondition,
     setXRange,
     setCursor,
     setOverlayCursor,
-    setTrackColorChannel,
+    setTrackChannel,
     setTrackColormap,
-    setShowCornerSpeed,
+    setTrackColorEnabled,
+    setMarkMinima,
+    setMarkMaxima,
     setAccelCondition,
     addChart,
     removeChart,
