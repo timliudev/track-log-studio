@@ -77,8 +77,25 @@
   連續加速會碎裂 — 已記載於手冊）。GearPanel + drivetrainStore（暫態；規格持久化列
   follow-up）。**待視覺驗收**：面板版面。
 
-### 🔄 進行中
-- `fix/chart-mode-selection`（A13 + B1 驗證）｜`feature/marker-color-merge`（A9 整合）
+### ✅ A13 模式切換掉選取 + B1 結論（develop `4a1b086`，496 tests）
+- `fix/chart-mode-selection` @ `c326ce4`。**A13 root cause**：uPlot 的 setScale hook 經
+  queued microtask 非同步觸發，`applyingRange` 守衛卻同步重設 → 從未生效；模式切換
+  重建圖表的 auto-range 回音 → xZoom → clearSelection。修：queueMicrotask 延後重設，
+  以「真 uplot 套件」寫時序回歸測試（uplotChartGuard.test.ts）。
+- **B1 結論：非 bug** — 門檻低於最速段進入速度＝正確 no-op。補測試 + 欄位下顯示目前
+  最速段進入速度（zh/en），行為不再沉默。
 
-### ⏳ 接續
-- A10+A12 G-G 圖表化（等 A9）→ B7 架構審查 → 手冊總校 → 報告完稿
+### ✅ A9 軌跡上色與極值標記整合（develop `8af8f41`，505 tests，build 綠）
+- `feature/marker-color-merge` @ `e6c490d`。analyzerStore 改 `trackChannel` +
+  `trackColorEnabled`/`markMinima`/`markMaxima` 正交開關；`detectChannelExtrema`
+  雙模式（prominence 預設=通道值域 8% 相對值，跨尺度通用，17 新測試）；TrackMap
+  min=圓、max=菱形、各自編號；CornerSpeedPanel 刪除 → TrackChannelPanel 單一控制；
+  AnalyzerView 重複 heatmap 選擇器移除（legend 共用單一 computed）。手冊 §4.2/§4.6 重寫。
+- 合併衝突僅手冊面板順序句，手動整併為最終順序。
+
+### 🔄 進行中
+- `feature/gg-chart-type`（A10+A12：XY 散佈成為「＋新增圖表」圖表類型、任意通道、多實例、
+  echarts lazy chunk 保留）
+
+### ⏳ 收尾
+- B7 架構審查（/simplify 式）→ 手冊總校 → 報告完稿
