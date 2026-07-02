@@ -391,7 +391,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
    中 XY、右上 G-G、右中避震/FFT、右下 laps）、手機分頁；非線性轉場動畫（最後做）。
 8. **D 本機持久化**：起終點線/sector/欄位設定存 localStorage/IndexedDB，以地理位置為 key 的賽道設定；
    JSON 匯出入。**雲端同步延後**（牴觸純前端,Phase 6+ 選用）。
-9. **E 圈次分析**：手動 sector → 理論最佳圈(optimal) → delta time（皆為 `LapMetric` 新 variant）。
+9. ~~**E 圈次分析**：手動 sector → 理論最佳圈(optimal) → delta time。~~ **DONE**：
+   `sectorTiming.ts` 的 `computeSectorTimes`（逐圈 sector 時間）+ `computeOptimalLap`
+   （逐 sector 取最小值組出理論最佳圈）；`gateOrder.ts` 的 `sortGatesByPosition` 讓手動加/拖曳的
+   gate 依實際圈上位置排序。
 10. **F 行動裝置驗收**：真機 + production build 查 Android 載入後偶發重整（疑記憶體壓力,桌面無法重現）。
     **診斷工具已備（`src/debug/diagnostics.ts`，feature/mobile-diagnostics）**：手機無 DevTools、
     重整又清 console，故 `?debug=1` 開啟一個純 DOM 自我診斷面板，把 `document.wasDiscarded`
@@ -409,9 +412,11 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   例：ARK 完整圈 46~53s → 區間外自動排除。歸入 #1 Lap 管理 / `LapMetric` 有效性旗標 + UI 區間輸入。~~
   **DONE**（feature/lap-timeband-filter）：`lapValidity` 計算有效性 + `lapStore` 以**聯集**排除
   （手動排除 ∪ 時間帶區間外），UI 提供有效圈速**區間輸入**。
-- **Sector 完整性判定有效圈**：每個彎/sector 都有經過才算有效圈（例：ARK 12 彎 → 12 sector 全通過），
-  濾掉「切西瓜到空地等待」的假圈。**開放問題（待討論）**：如何判斷彎真的有跑過——彎速？逐 sector
-  通過閘門的幾何判定？TBD。與 #9 E 手動 sector 同源，但新增「有效性」準則。
+- ~~**Sector 完整性判定有效圈**：每個彎/sector 都有經過才算有效圈（例：ARK 12 彎 → 12 sector 全通過），
+  濾掉「切西瓜到空地等待」的假圈。~~ **DONE**：`domain/analysis/sectorValidity.ts` 的
+  `invalidSectorLapIndices` 用逐 sector 通過閘門的幾何判定（依序走訪 gate、缺一或跳序即判無效），
+  與 `sectorTiming.ts`／`gateOrder.ts` 共用同一套 gate-crossing 幾何（`laps.ts` 的
+  `planarGate`/`walkLapGates`）。`lapStore.sectorInvalid` 消費其結果，UI 見 `SectorPanel.vue`。
 - **Track 獨立匯入檔 + 雲端同步（分流儲存）**：track 可獨立匯入、**自動推導 sector 與起終點線**
   （目前為手動，見 §6.2 / #8 D）；並雲端同步。**儲存分流**：普世性賽道 → **GitHub** 共享庫；
   個人設定 / 個人圈速紀錄 → 綁**個人 Google Drive**。把 #8 D「雲端同步延後」往前推並具體化。
