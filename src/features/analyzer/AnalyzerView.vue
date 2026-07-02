@@ -7,6 +7,7 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
+import { useTrackExtrema } from '@/composables/useTrackExtrema'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
@@ -14,7 +15,7 @@ import { lapColor } from './lapColors'
 import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { colormapSwatches } from '@/domain/analysis/colormap'
-import { detectChannelExtrema, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import TrackMap from './TrackMap.vue'
@@ -115,7 +116,7 @@ const speedChannelName = computed(() => (session.value ? resolveSpeedChannel(ses
 const speedAvailable = computed(() => speedChannelName.value != null)
 
 // --- A9: unified track-channel extrema (generalised from the old speed-only
-// corner apexes to ANY channel, min AND/OR max). ---
+// corner apexes to ANY channel, min AND/OR max) — see useTrackExtrema.ts. ---
 
 // Multi-lap rule (unchanged from the old corner-apex feature): extrema are
 // only meaningful for ONE lap at a time (a numbered marker set doesn't
@@ -125,54 +126,14 @@ const speedAvailable = computed(() => speedChannelName.value != null)
 // exactly one lap" hints.
 const focusedLap = computed(() => (selectedLaps.value.length === 1 ? selectedLaps.value[0] : null))
 
-// Resolved channel DATA for the chosen trackChannel (shared by heatmap norm
-// and extrema below) — single lookup, single owner of "is this channel usable".
-const trackChannelData = computed(() => {
-  const name = trackChannel.value
-  if (!name) return null
-  return session.value?.get(name) ?? null
-})
-
-const trackExtrema = computed(() => {
-  if (!markMinima.value && !markMaxima.value) return null
-  const lap = focusedLap.value
-  const tk = track.value
-  const ch = trackChannelData.value
-  if (!lap || !tk || !ch) return null
-  const mins = markMinima.value
-    ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'min' })
-    : []
-  const maxs = markMaxima.value
-    ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'max' })
-    : []
-  return [...mins, ...maxs].sort((a, b) => a.lapDistanceM - b.lapDistanceM)
-})
-
-// Map markers need a per-lap-normalised valueFrac (0..1) so the green/red
-// gradient is meaningful regardless of the channel's absolute range —
-// normalised across THIS lap's own extrema set, not the whole session.
-const mapExtremaMarkers = computed(() => {
-  const extrema = trackExtrema.value
-  if (!extrema || extrema.length === 0) return []
-  let min = Infinity
-  let max = -Infinity
-  for (const e of extrema) {
-    if (e.value < min) min = e.value
-    if (e.value > max) max = e.value
-  }
-  const span = max - min
-  return extrema.map((e) => ({
-    lat: e.lat,
-    lon: e.lon,
-    value: e.value,
-    valueFrac: span > 1e-6 ? (e.value - min) / span : 1,
-    kind: e.kind,
-  }))
-})
-
-// Whether a channel is picked at all — distinguishes TrackChannelPanel's "pick
-// a channel first" hint from its "select exactly one lap" hint.
-const trackChannelChosen = computed(() => trackChannelData.value != null)
+const { trackExtrema, mapExtremaMarkers, trackChannelChosen } = useTrackExtrema(
+  session,
+  track,
+  trackChannel,
+  focusedLap,
+  markMinima,
+  markMaxima,
+)
 
 // --- Acceleration/drag test (Phase 7, 加速測試): whole-SESSION search, not
 // a per-lap metric — see accelTest.ts's module doc for why. Speed channel
@@ -219,6 +180,14 @@ const channelOptions = computed(() =>
     .map((c) => ({ name: c.name, description: c.description }))
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
+
+// Resolved channel DATA for the chosen trackChannel — own lookup (useTrackExtrema
+// now has its own copy of this same lookup internally).
+const trackChannelData = computed(() => {
+  const name = trackChannel.value
+  if (!name) return null
+  return session.value?.get(name) ?? null
+})
 
 // Normalise the chosen channel over the track (null when colouring is off,
 // no channel chosen, or the channel/track is absent).
