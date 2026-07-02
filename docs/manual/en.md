@@ -23,6 +23,8 @@ Two main features:
 
 Just open the site in your browser — no sign-up or login needed. Recent versions of Chrome / Edge / Safari are recommended (phone, tablet, or desktop; the layout adapts automatically to screen size and can also be adjusted manually).
 
+**Mobile navigation:** on narrow (roughly phone-sized, below 768px) screens, the Converter / Analyzer / Settings tabs move to an iOS-style bottom tab bar (padded for the iPhone home-indicator safe area) instead of the desktop top nav; tablet and desktop widths keep the top nav. Switching tabs plays a subtle slide + fade transition, which automatically simplifies to a plain fade if your system has "reduce motion" (prefers-reduced-motion) enabled.
+
 ### 2.2 Installing as an app (PWA)
 
 This site is a **PWA (Progressive Web App)** and can be "installed" to your phone or desktop home screen, working like a native app:
