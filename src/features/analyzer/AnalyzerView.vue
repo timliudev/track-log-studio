@@ -7,14 +7,14 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
+import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
+import { useTrackExtrema } from '@/composables/useTrackExtrema'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
-import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
-import { colormapSwatches } from '@/domain/analysis/colormap'
-import { detectChannelExtrema, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import TrackMap from './TrackMap.vue'
@@ -115,7 +115,7 @@ const speedChannelName = computed(() => (session.value ? resolveSpeedChannel(ses
 const speedAvailable = computed(() => speedChannelName.value != null)
 
 // --- A9: unified track-channel extrema (generalised from the old speed-only
-// corner apexes to ANY channel, min AND/OR max). ---
+// corner apexes to ANY channel, min AND/OR max) — see useTrackExtrema.ts. ---
 
 // Multi-lap rule (unchanged from the old corner-apex feature): extrema are
 // only meaningful for ONE lap at a time (a numbered marker set doesn't
@@ -125,54 +125,14 @@ const speedAvailable = computed(() => speedChannelName.value != null)
 // exactly one lap" hints.
 const focusedLap = computed(() => (selectedLaps.value.length === 1 ? selectedLaps.value[0] : null))
 
-// Resolved channel DATA for the chosen trackChannel (shared by heatmap norm
-// and extrema below) — single lookup, single owner of "is this channel usable".
-const trackChannelData = computed(() => {
-  const name = trackChannel.value
-  if (!name) return null
-  return session.value?.get(name) ?? null
-})
-
-const trackExtrema = computed(() => {
-  if (!markMinima.value && !markMaxima.value) return null
-  const lap = focusedLap.value
-  const tk = track.value
-  const ch = trackChannelData.value
-  if (!lap || !tk || !ch) return null
-  const mins = markMinima.value
-    ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'min' })
-    : []
-  const maxs = markMaxima.value
-    ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'max' })
-    : []
-  return [...mins, ...maxs].sort((a, b) => a.lapDistanceM - b.lapDistanceM)
-})
-
-// Map markers need a per-lap-normalised valueFrac (0..1) so the green/red
-// gradient is meaningful regardless of the channel's absolute range —
-// normalised across THIS lap's own extrema set, not the whole session.
-const mapExtremaMarkers = computed(() => {
-  const extrema = trackExtrema.value
-  if (!extrema || extrema.length === 0) return []
-  let min = Infinity
-  let max = -Infinity
-  for (const e of extrema) {
-    if (e.value < min) min = e.value
-    if (e.value > max) max = e.value
-  }
-  const span = max - min
-  return extrema.map((e) => ({
-    lat: e.lat,
-    lon: e.lon,
-    value: e.value,
-    valueFrac: span > 1e-6 ? (e.value - min) / span : 1,
-    kind: e.kind,
-  }))
-})
-
-// Whether a channel is picked at all — distinguishes TrackChannelPanel's "pick
-// a channel first" hint from its "select exactly one lap" hint.
-const trackChannelChosen = computed(() => trackChannelData.value != null)
+const { trackExtrema, mapExtremaMarkers, trackChannelChosen } = useTrackExtrema(
+  session,
+  track,
+  trackChannel,
+  focusedLap,
+  markMinima,
+  markMaxima,
+)
 
 // --- Acceleration/drag test (Phase 7, 加速測試): whole-SESSION search, not
 // a per-lap metric — see accelTest.ts's module doc for why. Speed channel
@@ -210,8 +170,6 @@ function onAccelFocus(segment: AccelSegment): void {
   analyzer.setXRange({ min: xs[segment.startIdx], max: xs[segment.endIdx] })
 }
 
-// --- Track heatmap (#10/#11, now A9-unified): colour the track by the
-// SINGLE chosen trackChannel's value, when trackColorEnabled. ---
 // Channels offered for the picker (all of them, sorted) — this is now the
 // ONLY channel picker on the page; TrackChannelPanel owns rendering it.
 const channelOptions = computed(() =>
@@ -220,26 +178,16 @@ const channelOptions = computed(() =>
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 
-// Normalise the chosen channel over the track (null when colouring is off,
-// no channel chosen, or the channel/track is absent).
-const heatNorm = computed(() => {
-  const tk = track.value
-  const ch = trackChannelData.value
-  if (!trackColorEnabled.value || !tk || !ch) return null
-  return normalizeChannel(ch.data, tk.valid)
-})
-const colorValues = computed(() => heatNorm.value?.norm ?? null)
-
-// Legend: a CSS gradient of the active colormap + the channel's min/max.
-const legendGradient = computed(
-  () => `linear-gradient(to right, ${colormapSwatches(trackColormap.value, 16).join(',')})`,
+// --- Track heatmap (#10/#11, now A9-unified): colour the track by the
+// SINGLE chosen trackChannel's value, when trackColorEnabled — see
+// useTrackHeatmap.ts. ---
+const { heatNorm, colorValues, legendGradient, fmtVal } = useTrackHeatmap(
+  session,
+  track,
+  trackChannel,
+  trackColormap,
+  trackColorEnabled,
 )
-// Compact value label for the legend ends — fewer decimals as magnitude grows.
-function fmtVal(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  const a = Math.abs(v)
-  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
-}
 
 // Lap selection from the table is routed here so this component (which owns the
 // select↔zoom coupling) stays the single place that decides zoom side-effects.
