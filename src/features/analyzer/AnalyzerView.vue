@@ -13,8 +13,8 @@ import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
-import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
-import { detectCornerApexes, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { colormapSwatches } from '@/domain/analysis/colormap'
+import { detectChannelExtrema, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import TrackMap from './TrackMap.vue'
@@ -23,21 +23,20 @@ import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
 import SectorPanel from './SectorPanel.vue'
-import CornerSpeedPanel from './CornerSpeedPanel.vue'
+import TrackChannelPanel from './TrackChannelPanel.vue'
 import AccelTestPanel from './AccelTestPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
 // Lazy: GgPanel pulls in echarts (~480 kB raw / ~164 kB gzip) — async import
 // splits it (and echarts) into its own chunk so the main bundle stays lean and
 // non-analyzer users never download it.
 const GgPanel = defineAsyncComponent(() => import('./GgPanel.vue'))
-import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
 const sectorStore = useSectorStore()
-const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap, showCornerSpeed } =
+const { charts, xAxis, xRange, cursorIdx, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
   storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
@@ -109,50 +108,70 @@ function onUpdateGate(index: number, line: LapLine): void {
   sectorStore.setGate(index, line)
 }
 
-// --- Corner speed apexes (彎道速度): RaceChrono-style per-corner min speed. ---
 // Speed channel resolution mirrors useLaps.ts's default lap-table column seed
-// (GPS_Speed -> Vehicle_Speed -> unavailable).
+// (GPS_Speed -> Vehicle_Speed -> unavailable) — still needed by AccelTestPanel.
 const speedChannelName = computed(() => (session.value ? resolveSpeedChannel(session.value) : null))
 const speedAvailable = computed(() => speedChannelName.value != null)
 
-// Multi-lap rule: corner apexes are only meaningful for ONE lap at a time (a
-// numbered marker per corner doesn't generalise to overlaying several laps'
-// apex sets on the same points), so this is populated only when exactly one
-// lap is selected. With zero or 2+ laps selected, apexes is null and the map/
-// panel show their respective "select exactly one lap" hints.
+// --- A9: unified track-channel extrema (generalised from the old speed-only
+// corner apexes to ANY channel, min AND/OR max). ---
+
+// Multi-lap rule (unchanged from the old corner-apex feature): extrema are
+// only meaningful for ONE lap at a time (a numbered marker set doesn't
+// generalise to overlaying several laps' extrema on the same points), so this
+// is populated only when exactly one lap is selected. With zero or 2+ laps
+// selected, extrema is null and the map/panel show their respective "select
+// exactly one lap" hints.
 const focusedLap = computed(() => (selectedLaps.value.length === 1 ? selectedLaps.value[0] : null))
 
-const cornerApexes = computed(() => {
-  if (!showCornerSpeed.value) return null
-  const lap = focusedLap.value
-  const tk = track.value
-  const chName = speedChannelName.value
-  if (!lap || !tk || !chName) return null
-  const ch = session.value?.get(chName)
-  if (!ch) return null
-  return detectCornerApexes(tk, ch.data, lap.startIdx, lap.endIdx)
+// Resolved channel DATA for the chosen trackChannel (shared by heatmap norm
+// and extrema below) — single lookup, single owner of "is this channel usable".
+const trackChannelData = computed(() => {
+  const name = trackChannel.value
+  if (!name) return null
+  return session.value?.get(name) ?? null
 })
 
-// Map markers need a per-lap-normalised speedFrac (0..1, fast=1) so the
-// green/red gradient is meaningful regardless of the channel's absolute
-// range — normalised across THIS lap's own apexes, not the whole session.
-const mapCornerApexes = computed(() => {
-  const apexes = cornerApexes.value
-  if (!apexes || apexes.length === 0) return []
+const trackExtrema = computed(() => {
+  if (!markMinima.value && !markMaxima.value) return null
+  const lap = focusedLap.value
+  const tk = track.value
+  const ch = trackChannelData.value
+  if (!lap || !tk || !ch) return null
+  const mins = markMinima.value
+    ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'min' })
+    : []
+  const maxs = markMaxima.value
+    ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'max' })
+    : []
+  return [...mins, ...maxs].sort((a, b) => a.lapDistanceM - b.lapDistanceM)
+})
+
+// Map markers need a per-lap-normalised valueFrac (0..1) so the green/red
+// gradient is meaningful regardless of the channel's absolute range —
+// normalised across THIS lap's own extrema set, not the whole session.
+const mapExtremaMarkers = computed(() => {
+  const extrema = trackExtrema.value
+  if (!extrema || extrema.length === 0) return []
   let min = Infinity
   let max = -Infinity
-  for (const a of apexes) {
-    if (a.speedKmh < min) min = a.speedKmh
-    if (a.speedKmh > max) max = a.speedKmh
+  for (const e of extrema) {
+    if (e.value < min) min = e.value
+    if (e.value > max) max = e.value
   }
   const span = max - min
-  return apexes.map((a) => ({
-    lat: a.lat,
-    lon: a.lon,
-    speedKmh: a.speedKmh,
-    speedFrac: span > 1e-6 ? (a.speedKmh - min) / span : 1,
+  return extrema.map((e) => ({
+    lat: e.lat,
+    lon: e.lon,
+    value: e.value,
+    valueFrac: span > 1e-6 ? (e.value - min) / span : 1,
+    kind: e.kind,
   }))
 })
+
+// Whether a channel is picked at all — distinguishes TrackChannelPanel's "pick
+// a channel first" hint from its "select exactly one lap" hint.
+const trackChannelChosen = computed(() => trackChannelData.value != null)
 
 // --- Acceleration/drag test (Phase 7, 加速測試): whole-SESSION search, not
 // a per-lap metric — see accelTest.ts's module doc for why. Speed channel
@@ -190,21 +209,22 @@ function onAccelFocus(segment: AccelSegment): void {
   analyzer.setXRange({ min: xs[segment.startIdx], max: xs[segment.endIdx] })
 }
 
-// --- Track heatmap (#10/#11): colour the track by a channel's value. ---
-// Channels offered for colouring (all of them, sorted), for the picker.
+// --- Track heatmap (#10/#11, now A9-unified): colour the track by the
+// SINGLE chosen trackChannel's value, when trackColorEnabled. ---
+// Channels offered for the picker (all of them, sorted) — this is now the
+// ONLY channel picker on the page; TrackChannelPanel owns rendering it.
 const channelOptions = computed(() =>
   (session.value?.channels ?? [])
     .map((c) => ({ name: c.name, description: c.description }))
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 
-// Normalise the chosen channel over the track (null when none chosen / absent).
+// Normalise the chosen channel over the track (null when colouring is off,
+// no channel chosen, or the channel/track is absent).
 const heatNorm = computed(() => {
-  const name = trackColorChannel.value
   const tk = track.value
-  if (!name || !tk) return null
-  const ch = session.value?.get(name)
-  if (!ch) return null
+  const ch = trackChannelData.value
+  if (!trackColorEnabled.value || !tk || !ch) return null
   return normalizeChannel(ch.data, tk.valid)
 })
 const colorValues = computed(() => heatNorm.value?.norm ?? null)
@@ -213,9 +233,6 @@ const colorValues = computed(() => heatNorm.value?.norm ?? null)
 const legendGradient = computed(
   () => `linear-gradient(to right, ${colormapSwatches(trackColormap.value, 16).join(',')})`,
 )
-function colormapPreview(id: ColormapId): string {
-  return `linear-gradient(to right, ${colormapSwatches(id, 8).join(',')})`
-}
 // Compact value label for the legend ends — fewer decimals as magnitude grows.
 function fmtVal(v: number): string {
   if (!Number.isFinite(v)) return '—'
@@ -340,38 +357,16 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           :color-values="colorValues"
           :colormap="trackColormap"
           :gates="mapGates"
-          :corner-apexes="mapCornerApexes"
+          :extrema-markers="mapExtremaMarkers"
           @cursor="analyzer.setCursor"
           @update:line="lapStore.setLine($event)"
           @update:gate="onUpdateGate"
         />
-        <div class="track-color">
-          <label class="tc-channel">
-            <span>{{ t('analyzer.trackColor') }}</span>
-            <SearchableSelect
-              :model-value="trackColorChannel"
-              :options="channelOptions"
-              @update:model-value="analyzer.setTrackColorChannel($event)"
-            />
-          </label>
-          <div v-if="heatNorm" class="tc-maps" role="group" :aria-label="t('analyzer.colormap')">
-            <button
-              v-for="id in COLORMAP_IDS"
-              :key="id"
-              type="button"
-              class="tc-swatch"
-              :class="{ active: trackColormap === id }"
-              :style="{ background: colormapPreview(id) }"
-              :title="id"
-              @click="analyzer.setTrackColormap(id)"
-            />
-          </div>
-        </div>
         <div v-if="heatNorm" class="tc-legend">
           <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
           <span class="tc-bar" :style="{ background: legendGradient }" />
           <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
-          <span class="tc-name">{{ trackColorChannel }}</span>
+          <span class="tc-name">{{ trackChannel }}</span>
         </div>
         <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
         <div class="laps">
@@ -428,7 +423,7 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           :time-ms="timeMs"
           :cursor-idx="cursorIdx"
         />
-        <CornerSpeedPanel :apexes="cornerApexes" :speed-available="speedAvailable" />
+        <TrackChannelPanel :options="channelOptions" :extrema="trackExtrema" :channel-chosen="trackChannelChosen" />
         <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
         <TrackFilePanel :track="track" />
         <LapTable
@@ -528,41 +523,6 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   padding: calc(var(--space) * 1.5);
-}
-.track-color {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-top: var(--space);
-}
-.tc-channel {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.9rem;
-  color: var(--color-text-muted);
-  flex: 1 1 220px;
-  min-width: 200px;
-}
-.tc-channel :deep(.ss) {
-  flex: 1;
-}
-.tc-maps {
-  display: inline-flex;
-  gap: 6px;
-}
-.tc-swatch {
-  width: 40px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  cursor: pointer;
-}
-.tc-swatch.active {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
 }
 .tc-legend {
   display: flex;
