@@ -8,15 +8,15 @@
 
 | # | 任務 | 狀態 | 分支 / 合併 commit | 備註 |
 |---|------|------|--------------------|------|
-| T1 | AnalyzerView composables 抽取(B7 建議) | ⏳ 進行中 | — | 最先做,其他 UI 任務排後避免衝突 |
-| T2 | G-G echarts bundle 拆分(dynamic import) | ⬜ 排隊 | — | 479kB chunk 延遲載入 |
-| T3 | RS3 CSV 註解行容錯驗證 | ⏳ 進行中 | — | 補測試確認 |
-| T4 | 傳動比設定持久化(idb circuit setup) | ⬜ 排隊 | — | 0702 遺留 |
+| T1 | AnalyzerView composables 抽取(B7 建議) | ✅ 完成 | `refactor/analyzer-composables` → `5efc59b` | 509→528 tests |
+| T2 | G-G echarts bundle 拆分(dynamic import) | ⏳ 進行中 | — | 08:00 重啟,08:20 合併截止 |
+| T3 | RS3 CSV 註解行容錯驗證 | ⏳ 進行中 | — | 08:00 重啟,08:20 合併截止 |
+| T4 | 傳動比設定持久化 | ⏳ 進行中 | — | 08:00 重啟,08:20 合併截止 |
 | T5 | A2/A3 雲端賽道機制設計文件 | ✅ 完成 | `docs/cloud-track-design` → `1219390` | 只寫文件,待你拍板 |
-| T6 | Phase 5 合併 UI | ⬜ 排隊 | — | align/merge 核心已在 develop |
-| T7 | 彎道偵測接上 UI | ⬜ 排隊 | — | spike 已合併,接 gate 直接載入流程 |
-| T8 | B6 彈性面板佈局 | ⬜ 排隊 | — | ⚠️ 需你視覺驗收 |
-| T9 | 使用手冊補新功能(zh+en) | ⬜ 排隊 | — | 最後做 |
+| T6 | Phase 5 合併 UI | ❌ 未執行 | — | 額度中斷吃掉整夜,見事件記錄 |
+| T7 | 彎道偵測接上 UI | ❌ 未執行 | — | 同上,留待下次 |
+| T8 | B6 彈性面板佈局 | ❌ 未執行 | — | 同上,留待下次 |
+| T9 | 使用手冊補新功能(zh+en) | ❌ 未執行 | — | 同上,留待下次 |
 
 ## 執行順序與理由
 
@@ -27,6 +27,15 @@
 5. **T9 最後** — 等功能都定案才寫手冊。
 
 ## 各任務詳細記錄
+
+### T1 — AnalyzerView composables 抽取 ✅(develop `5efc59b`)
+
+依 [docs/ARCH-AUDIT-2026-07-02.md](ARCH-AUDIT-2026-07-02.md) 的建議,從 AnalyzerView 抽出兩個 composables(名稱/簽名照審計文件):
+
+- `src/composables/useTrackExtrema.ts`(94 行)— A9 每圈通道極值(map 標記 + TrackChannelPanel 清單共用)。
+- `src/composables/useTrackHeatmap.ts`(57 行)— 軌跡熱力上色(heatNorm/colorValues/legend)。
+
+AnalyzerView.vue 655→603 行;新增 19 個 composable 單元測試(509→528);tests/typecheck/build 全綠。**審計文件明確說不要抽的部分照辦沒動**:lap-select↔zoom 耦合(onLapSelect/onXZoom)留在 AnalyzerView 作為唯一決策點;TrackMap/UPlotChart 手勢機不合併。純重構,行為零變更,模板幾乎未動——理論上不需要視覺驗收,但你操作時若發現軌跡上色/極值標記異常,先懷疑這個。
 
 ### T5 — A2/A3 雲端賽道機制設計文件 ✅(develop `1219390`)
 
@@ -49,6 +58,8 @@
 
 - **02:1x 電腦當機重啟** — 第一波 5 個 sub-agent 全滅。災情盤點:4 個 worktree 的分支都還停在 `ca572d3` 零 commit(只有 npm install 殘留),無工作損失;已清除殘骸 worktree + 空分支,02:2x 全部重新啟動。
 - **T1 首次啟動時 agent 遞迴委派**(自己又開背景 agent 然後直接結束,沒做事)— 重啟後所有 agent 提示都加上「禁止再委派、必須親自做」。
+- **~03:00 撞到 session 用量上限**(重置時間 05:50)— 第二波 T1–T4 四個 agent 全部中途斷線。有搶救到部分未 commit 成果(各自以 `wip:` commit 保進分支)。這次中斷吃掉了整夜的工作時間,是 T6–T9 沒做的主因。
+- **07:5x 恢復執行** — T1 從 WIP 接手完成並合併(WIP 經驗證後沿用、重切成兩個乾淨 commit);08:00 平行重啟 T2/T3/T4,合併截止設 08:20,確保 08:30 前推完、之後不再動 git。
 
 ## 決策記錄
 
