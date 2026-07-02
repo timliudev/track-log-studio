@@ -93,9 +93,49 @@
   AnalyzerView 重複 heatmap 選擇器移除（legend 共用單一 computed）。手冊 §4.2/§4.6 重寫。
 - 合併衝突僅手冊面板順序句，手動整併為最終順序。
 
-### 🔄 進行中
-- `feature/gg-chart-type`（A10+A12：XY 散佈成為「＋新增圖表」圖表類型、任意通道、多實例、
-  echarts lazy chunk 保留）
+### ✅ A10+A12 XY 散佈成為圖表類型（develop `717c265`，509 tests）
+- `feature/gg-chart-type` @ `f7de2e8`。ChartConfig 判別聯集（timeseries | scatter）；
+  「＋新增圖表」/「＋新增 XY 散佈圖」兩鈕；任意通道（force 過濾移除）、多實例、獨立移除；
+  **自適應軸**：雙軸皆跨 0（有號力值）才用 0 置中方形對稱＝摩擦圓畫法，否則普通 auto
+  （agent 真瀏覽器實測兩種模式）；echarts lazy 邊界移入 ScatterChart，分塊保持
+  （main 431kB / echarts 479kB）。GgPanel 刪除。手冊 §4.4 新增散佈圖小節。
 
-### ⏳ 收尾
-- B7 架構審查（/simplify 式）→ 手冊總校 → 報告完稿
+### ✅ B7 架構審計（develop `c3e7fa5`，509 tests，typecheck/build 綠）
+- `chore/arch-audit` @ `bf9367a`。**結論：B+（良好）**。
+- 全域掃描結果：**無**死碼、**無**孤兒 i18n key、**無**懸空 import、**無** state-writing
+  cross-store watcher、**無**雙擁有者。
+- 已套用（3 個行為不變的機械重構，每步測試綠）：
+  1. `laps.ts` 抽出 `planarGate()`/`walkLapGates()` 共用原語 — sectorValidity/sectorTiming/
+     gateOrder 的 gate 走訪幾何三重複消除（34 專屬測試）。
+  2. `useLaps.ts` 速度通道解析統一走 `resolveSpeedChannel`（原有一份 inline 重複）。
+  3. 修正 ARCHITECTURE-FORMATS §6（parseBinary 已實作非 planned）與 DESIGN §11b
+     兩處過時敘述。
+- 建議未套用（判斷性，詳 `docs/ARCH-AUDIT-2026-07-02.md`）：AnalyzerView（655 行、
+  10 職責）建議抽 `useTrackHeatmap`/`useTrackExtrema` composables；TrackMap/UPlotChart
+  雙手勢機**評估為不值得抽**（形狀像但共用數學近零）。
+
+## 🏁 本晚總結（develop `c3e7fa5`，509 tests、typecheck/build 綠、全推送）
+
+白天回饋 **10/10 可執行項全數落地** + 架構審計：A16 wasm、A13 模式切換、B1 結論+提示、
+UX 五項（A4/A7/A8/B3/B4）、A1+A15 gate 流程重設計、B2 CSV 輸出、A11 齒比計算器、
+B5 底部導航、A9 標記整合、A10+A12 散佈圖表化、B7 審計（B+，三項重複已清）。
+手冊隨每個功能同步更新（zh+en）。main 未動（prod 仍為 `5289406`+README 修正，
+待你驗收後 release）。
+
+### 給你的驗收清單（下次測試）
+1. **Sector**：自動偵測→直接出現閘門（無確認步驟）；＋新增閘門（游標處）；✕移除；
+   拖曳後順序自動重排；手動編輯後再按偵測會出現覆蓋確認。
+2. **圈次表**：自動排除圈與手動排除同樣式，⦸ hover 顯示排除原因；圈速區間自動帶入建議值。
+3. **rcnx**：`142.rcnx` 載入應正常（多 session 選擇器 + lap 自動匯入）。
+4. **圖表**：時間軸↔疊圈來回切換不再掉選取；「＋新增 XY 散佈圖」任意兩通道
+   （force→方形摩擦圓、RPM vs 速度→一般軸）、可多張。
+5. **軌跡通道**：單一面板選通道 → 勾「上色」「標最小(圓)」「標最大(菱形)」任意組合。
+6. **齒比**：GearPanel 輸入規格算對照表；載入含 RPM 的記錄可反推檔位（記得給檔數提示）。
+7. **加速測試**：起始最低速度欄下方新增「目前最速段進入速度」提示。
+8. **手機**：<768px 出現底部導航（safe-area、切換動畫）；主題/語言已搬到設定分頁。
+9. **轉檔**：輸出格式多了 CSV；載入按鈕提示改 tooltip。
+
+### 未做/待議（下次）
+- A2/A3 雲端賽道圖（方向已定：載入自動套用、個人歸個人雲端、公共走 git PR — 機制待議）
+- AnalyzerView composable 化（審計建議）、齒比規格持久化、RS3 CSV 註解行相容性驗證
+- Phase 5 UI 接線、4e 自由布局（B6）
