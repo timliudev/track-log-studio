@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { storeToRefs } from 'pinia'
-import { useSettingsStore } from '@/stores/settingsStore'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import ConverterView from '@/features/converter/ConverterView.vue'
@@ -11,9 +9,9 @@ import SettingsView from '@/features/settings/SettingsView.vue'
 import FileBar from '@/components/FileBar.vue'
 
 const { t } = useI18n()
-const { themePref, localePref } = storeToRefs(useSettingsStore())
 
-// Apply appearance + language side effects from persisted preferences.
+// Apply appearance + language side effects from persisted preferences (the
+// selectors themselves now live in the Settings tab — B4).
 useTheme()
 useLocale()
 
@@ -31,24 +29,6 @@ const buildDate = __BUILD_DATE__
       <div class="brand">
         <h1 class="brand-title">{{ t('app.title') }}</h1>
         <span class="brand-subtitle">{{ t('app.subtitle') }}</span>
-      </div>
-      <div class="controls">
-        <label class="control">
-          <span>{{ t('theme.label') }}</span>
-          <select v-model="themePref" name="theme">
-            <option value="auto">{{ t('theme.auto') }}</option>
-            <option value="light">{{ t('theme.light') }}</option>
-            <option value="dark">{{ t('theme.dark') }}</option>
-          </select>
-        </label>
-        <label class="control">
-          <span>{{ t('language.label') }}</span>
-          <select v-model="localePref" name="locale">
-            <option value="auto">{{ t('language.auto') }}</option>
-            <option value="zh-Hant">繁體中文</option>
-            <option value="en">English</option>
-          </select>
-        </label>
       </div>
     </header>
 
@@ -136,26 +116,6 @@ const buildDate = __BUILD_DATE__
 .brand-subtitle {
   font-size: 0.78rem;
   color: var(--color-text-muted);
-}
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: calc(var(--space) * 1.5);
-}
-.control {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--space) / 2);
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
-}
-.control select {
-  background: var(--color-bg);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 4px 8px;
-  font: inherit;
 }
 .tabs {
   display: flex;
