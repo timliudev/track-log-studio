@@ -6,6 +6,14 @@ import { useLogImport } from '@/composables/useLogImport'
 import { sniff, detectImporter, allImportExtensions } from '@/domain/import/registry'
 import { extractLogFiles } from '@/domain/import/zip'
 import { listRcnxSessions, type RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
+// Vite-resolved URL of the sql.js wasm binary (same asset the parse worker
+// uses — see src/workers/parse.worker.ts). listRcnxSessions runs on the main
+// thread (to show the multi-session picker before a File is handed to the
+// worker), so it needs its own copy of this URL: sql.js's default
+// self-location guess (no `locateFile`) resolves to a root path that doesn't
+// exist, and the dev server's SPA fallback then serves index.html instead of
+// a 404 — sql.js then fails to compile HTML bytes as wasm.
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 
 const { t, tm, rt } = useI18n()
 const fileStore = useFileStore()
@@ -65,7 +73,7 @@ async function importOne(file: File): Promise<void> {
       return
     }
     if (imp.id === 'rcnx') {
-      const sessions = await listRcnxSessions(new Uint8Array(await file.arrayBuffer()))
+      const sessions = await listRcnxSessions(new Uint8Array(await file.arrayBuffer()), sqlWasmUrl)
       if (sessions.length > 1) {
         pendingRcnx.value = { id, file, sessions }
         return
