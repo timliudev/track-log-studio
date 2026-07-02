@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
-import { useAnalyzerStore, type ChartConfig, type ChartMode } from '@/stores/analyzerStore'
+import { useAnalyzerStore, type TimeSeriesChartConfig, type ChartMode } from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -16,7 +16,7 @@ import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const props = defineProps<{
-  chart: ChartConfig
+  chart: TimeSeriesChartConfig
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null

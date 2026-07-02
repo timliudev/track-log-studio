@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useFileStore } from '@/stores/fileStore'
@@ -27,10 +27,7 @@ import TrackChannelPanel from './TrackChannelPanel.vue'
 import AccelTestPanel from './AccelTestPanel.vue'
 import GearPanel from './GearPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
-// Lazy: GgPanel pulls in echarts (~480 kB raw / ~164 kB gzip) — async import
-// splits it (and echarts) into its own chunk so the main bundle stays lean and
-// non-analyzer users never download it.
-const GgPanel = defineAsyncComponent(() => import('./GgPanel.vue'))
+import ScatterChart from './ScatterChart.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
@@ -62,7 +59,9 @@ const selectedLaps = computed(() =>
 // The alignment panel only makes sense when laps are being overlaid: at least
 // one chart in overlay mode and ≥2 laps selected to compare/align.
 const showAlign = computed(
-  () => selectedLaps.value.length >= 2 && charts.value.some((c) => c.mode === 'overlay'),
+  () =>
+    selectedLaps.value.length >= 2 &&
+    charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay'),
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
@@ -296,6 +295,22 @@ function onSelect(e: Event): void {
   analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
 }
 
+// A10+A12 — add-chart is now a two-option affordance (時序圖 / XY 散佈圖).
+function onAddTimeseries(): void {
+  analyzer.addChart('timeseries')
+}
+
+// New scatter charts default to TC_Xforce/TC_Yforce when present (the
+// friction-circle convenience, ex-GgPanel), else both pickers start empty and
+// ScatterChart shows the "pick both" hint.
+function onAddScatter(): void {
+  const s = session.value
+  analyzer.addChart('scatter', {
+    xChannel: s?.has('TC_Xforce') ? 'TC_Xforce' : null,
+    yChannel: s?.has('TC_Yforce') ? 'TC_Yforce' : null,
+  })
+}
+
 // --- Valid lap-time band (時間帶過濾): laps whose time is outside [min, max]
 // seconds are auto-excluded via the lapStore. Each input is independent; an
 // empty field leaves that side open, and clearing both removes the band. ---
@@ -446,13 +461,9 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
         <LapAlignPanel :selected-laps="selectedLaps" />
       </div>
 
-      <div v-if="session" class="card">
-        <GgPanel :session="session" :selected-laps="selectedLaps" />
-      </div>
-
       <div v-for="c in charts" :key="c.id" class="card">
         <TimeSeriesChart
-          v-if="session && xValues"
+          v-if="c.kind === 'timeseries' && session && xValues"
           :chart="c"
           :session="session"
           :x-values="xValues"
@@ -462,11 +473,22 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           @cursor="analyzer.setCursor"
           @x-zoom="onXZoom"
         />
+        <ScatterChart
+          v-else-if="c.kind === 'scatter'"
+          :chart="c"
+          :session="session"
+          :selected-laps="selectedLaps"
+        />
       </div>
 
-      <button type="button" class="add" @click="analyzer.addChart()">
-        ＋ {{ t('analyzer.addChart') }}
-      </button>
+      <div class="add-menu">
+        <button type="button" class="add" @click="onAddTimeseries">
+          ＋ {{ t('analyzer.addChart') }}
+        </button>
+        <button type="button" class="add" @click="onAddScatter">
+          ＋ {{ t('analyzer.addScatterChart') }}
+        </button>
+      </div>
     </template>
   </div>
 </template>
@@ -609,6 +631,11 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
 }
 .band-count {
   color: var(--color-text-muted);
+}
+.add-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .add {
   align-self: flex-start;
