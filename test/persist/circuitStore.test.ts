@@ -127,3 +127,31 @@ describe('exportCircuitSetupJson / importCircuitSetupJson', () => {
     expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
   })
 })
+
+describe('toPlainSetup (DataCloneError regression, 2026-07-02)', () => {
+  it('strips Vue reactive proxies at every depth so IndexedDB structured clone accepts the value', async () => {
+    const { reactive } = await import('vue')
+    const { toPlainSetup } = await import('@/domain/persist/circuitStore')
+    // Mirror the live failure: auto-save hands putCircuitSetup LIVE Pinia
+    // state — reactive Proxies — which structuredClone (what IDB uses) rejects.
+    const setup = {
+      key: 'k',
+      line: reactive({ a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } }),
+      gates: reactive([{ a: { lat: 5, lon: 6 }, b: { lat: 7, lon: 8 } }]),
+      columns: reactive([{ id: 'c1', metric: { kind: 'lapTime' as const } }]),
+      updatedAt: 123,
+    }
+    // Precondition: the raw reactive value really is un-cloneable (Proxy).
+    expect(() => structuredClone(setup)).toThrow()
+    const plain = toPlainSetup(setup as never)
+    // The plain clone must be cloneable and value-identical.
+    expect(() => structuredClone(plain)).not.toThrow()
+    expect(plain).toEqual({
+      key: 'k',
+      line: { a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } },
+      gates: [{ a: { lat: 5, lon: 6 }, b: { lat: 7, lon: 8 } }],
+      columns: [{ id: 'c1', metric: { kind: 'lapTime' } }],
+      updatedAt: 123,
+    })
+  })
+})
