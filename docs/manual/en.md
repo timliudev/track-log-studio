@@ -165,16 +165,26 @@ Set a min/max "Valid lap-time band (s)"; any lap outside that range is automatic
 
 ### 4.4 Charts
 
-- **Add chart**: click "Add chart" to create a new time-series chart card; each chart independently picks which channel(s) to plot.
+- **Add chart**: click "Add chart" to create a new time-series chart card; each chart independently picks which channel(s) to plot. Click "Add XY scatter chart" instead to create a scatter chart card (see "XY scatter chart" below). Both chart types can coexist as multiple independent cards, each with its own settings and its own "Remove" button.
 - **X-axis mode**: switch the horizontal axis between "Time" and "Distance."
 - **View mode**:
   - **Timeline**: shows the raw time series for the whole session.
   - **Overlay**: select laps to compare in the lap table below, and the chart overlays them on one graph (colour = lap, line style = channel, X axis aligned from 0), making it easy to compare braking points, corner-exit speed, etc. across laps.
-- **Cursor sync**: the cursor is linked across multiple charts and the track map, so you can see the same moment in time reflected on both the map and every chart.
+- **Cursor sync**: the cursor is linked across multiple time-series charts and the track map, so you can see the same moment in time reflected on both the map and every chart. (An XY scatter chart's X/Y axes are two freely chosen channels with no time/distance meaning, so it does not participate in this shared cursor or in shared chart-zoom syncing.)
 - **Touch gestures**: pinch-to-zoom and drag-to-pan are supported for the chart's X-axis range (uPlot's built-in mouse drag-zoom is mouse-only, so touch devices get an equivalent gesture-based implementation).
 - **Overlay alignment**: when comparing laps in overlay mode, if a slight time offset between laps causes corners/braking points to not line up, use "Shift earlier (left)" / "Shift later (right)" to nudge each lap's start offset individually so the features align — this does not affect actual lap times or track data. "Reset this lap" or "Reset all" undoes the nudges.
 - **Map alignment**: if GNSS drift causes a lap's racing line to appear offset on the map relative to other laps, use "North / South / East / West" to nudge that lap's position on the map to realign it — again, this does not affect lap times or the underlying data. Each lap can be reset individually.
 - **Chart box-zoom → map focus**: when you box-select (drag-zoom, or pinch on touch) a sub-range on a Timeline chart while **no laps are checked** in the lap table, the track map highlights the corresponding stretch of track and auto-fits/zooms to it. If laps are checked, the overlay-selection highlight on the map takes precedence and the box-zoom focus is not shown.
+
+#### XY scatter chart
+
+The XY scatter chart is its own chart type: the X and Y axes can be **any two channels** you like (not limited to force channels), so besides the "G-G diagram / friction circle" featured below, it's equally useful for e.g. plotting "RPM vs. speed" or any other channel pair.
+
+- **Add**: click "Add XY scatter chart" to create a scatter chart card; you can add multiple, each with independently chosen X/Y channels.
+- **Channel pickers**: X and Y are each picked from the full channel list (searchable); the chart only renders once both are chosen.
+- **Adaptive axis rule**: when **both** the X and Y channels are signed, force-like data (values spanning both positive and negative, e.g. `TC_Xforce`/`TC_Yforce`), the chart uses square, zero-centred symmetric axes — the classic G-G diagram / friction-circle look, which makes it easy to compare grip symmetry between left/right or braking/acceleration. Any other channel pairing (e.g. RPM vs. speed) uses normal auto-ranged axes instead, with no forced centring or square aspect.
+- **G-G diagram / friction circle (featured example)**: when adding a new scatter chart, if the session has `TC_Xforce`/`TC_Yforce` (aRacer Race Module IMU lateral/longitudinal G, stored in milli-g), those two channels are pre-selected and automatically converted to g units — this is the classic "G-G diagram," plotting the lateral G (cornering) and longitudinal G (braking/accelerating) the car experienced around the track. A shape closer to a full circle indicates more balanced tyre grip usage. If laps are checked in the lap table, each lap is coloured separately for comparison; otherwise the whole session's distribution is shown.
+- If the session doesn't have `TC_Xforce`/`TC_Yforce`, the X/Y pickers start empty and you choose whichever two channels you want to compare.
 
 ### 4.5 Sector gates (corner validation)
 
@@ -323,6 +333,8 @@ The footer at the bottom of the page shows "build \<sha\> · \<date\>." Include 
 | 差距 | Delta | A lap's time difference from the current fastest lap; positive means slower |
 | 極值標記 | Extremum marker | A map marker showing a channel's local minimum/maximum point (circle = minimum, diamond = maximum) |
 | 直線加速測試 | Acceleration test | Searches the whole session for the best segment matching a distance or speed-range condition |
+| XY 散佈圖 | XY scatter chart | A chart type that plots any two freely chosen channels against each other; does not participate in the shared cursor/zoom syncing between charts |
+| G-G 圖／摩擦圓 | G-G diagram / friction circle | The featured use of the XY scatter chart: lateral G vs. longitudinal G, showing how evenly tyre grip is used |
 | 軌跡檔 | Track file | An exported/imported JSON track setup (start/finish line + sector gates + lap-table columns) |
 | RCNX 多 session | RCNX multi-session | A single `.rcnx` file containing multiple recordings; you pick one on load |
 
