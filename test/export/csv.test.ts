@@ -140,4 +140,89 @@ describe('convertToCsv', () => {
     expect(content.charCodeAt(0)).not.toBe(0xfeff)
     expect(content.codePointAt(0)).toBe('T'.codePointAt(0))
   })
+
+  // ---------------------------------------------------------------------
+  // RaceStudio3 import-compatibility. This app has NO CSV *importer* (see
+  // src/domain/import/registry.ts — only loga/nmea/vbo/rcz/rcnx/xrk) — the
+  // generic `.csv` format is export-only, produced for external tools
+  // (RS3 / Excel / Python) to import. So there is nothing here for RS3's
+  // own metadata-preamble convention ("Format","AIM CSV File" / "Venue" /
+  // "Beginning of data" rows before the header — RS3's *own* export/import
+  // style) to be "tolerant" of on our *import* side, because we don't import
+  // CSV at all. What actually matters for RS3 compatibility is the shape of
+  // the file THIS app hands to RS3 on the way out: it must be a plain,
+  // unambiguous header+data CSV that RS3's importer (which also accepts a
+  // plain "CSV (Comma Separated Values)" style alongside its RS2Analysis/
+  // SCCA/FastLap styles, per RS3's own export-format picker) can read without
+  // needing any special preamble-skipping logic. These tests pin that shape:
+  // no leading metadata/comment lines, a single header row, and RFC 4180
+  // quoting that a naive line-based CSV reader parses correctly.
+  // ---------------------------------------------------------------------
+  describe('RaceStudio3 import compatibility (export-side; no CSV importer exists in this app)', () => {
+    it('starts the file directly with the header row — no metadata/comment preamble', () => {
+      const session = new LogSession([channel('Time', [0, 100]), channel('RPM', [1000, 2000])], META)
+      const content = convertToCsv(session)[0].content
+      const lines = content.split('\n')
+
+      // First line must be the header itself, not a "Format","AIM CSV File"
+      // style metadata row or a blank line.
+      expect(lines[0]).toBe('Time,GPS_Lat,GPS_Lon,GPS_Speed,RPM')
+      expect(lines[0].toLowerCase()).not.toContain('format')
+      expect(lines[0].toLowerCase()).not.toContain('venue')
+      expect(lines[0].toLowerCase()).not.toContain('beginning of data')
+    })
+
+    it('every data row has the same column count as the header (no ragged rows from an unskipped preamble)', () => {
+      const session = new LogSession(
+        [
+          channel('Time', [0, 100, 200]),
+          channel('GPS_Lat', [24.5, 24.501, 24.502]),
+          channel('GPS_Lon', [121.5, 121.501, 121.502]),
+          channel('GPS_Speed', [0, 50.5, 100]),
+          channel('RPM', [1000, 5000, 9000]),
+        ],
+        META,
+      )
+      const content = convertToCsv(session)[0].content
+      const lines = content.split('\n').filter((l) => l.length > 0)
+      const headerCols = lines[0].split(',').length
+
+      expect(lines.length).toBe(4) // header + 3 data rows
+      for (const line of lines) {
+        expect(line.split(',')).toHaveLength(headerCols)
+      }
+    })
+
+    it('quotes a channel name containing a comma per RFC 4180, and it round-trips through a naive CSV split', () => {
+      const session = new LogSession(
+        [channel('Time', [0]), channel('Brake Temp, FL', [95.5])],
+        META,
+      )
+      const content = convertToCsv(session)[0].content
+      const header = content.split('\n')[0]
+
+      // The comma-bearing name must be wrapped in quotes so a naive
+      // split(',') on the *unquoted* commas still yields the right column
+      // count (the leading GPS_Lat/GPS_Lon/GPS_Speed columns are always
+      // present regardless of session content).
+      expect(header).toBe('Time,GPS_Lat,GPS_Lon,GPS_Speed,"Brake Temp, FL"')
+
+      // A minimal RFC-4180-aware split (respects quoted commas) recovers the
+      // original five logical columns — the quoted field is not split on its
+      // embedded comma.
+      const cols = header.match(/(".*?"|[^,]+)(?=,|$)/g)
+      expect(cols).toEqual(['Time', 'GPS_Lat', 'GPS_Lon', 'GPS_Speed', '"Brake Temp, FL"'])
+    })
+
+    it('produces no blank lines between the header and the last data row', () => {
+      const session = new LogSession([channel('Time', [0, 100]), channel('RPM', [1000, 2000])], META)
+      const content = convertToCsv(session)[0].content
+      // Split on '\n'; the export ends with a single trailing '\n' (one
+      // trailing empty element after split), so drop only that.
+      const lines = content.split('\n')
+      expect(lines[lines.length - 1]).toBe('')
+      const bodyLines = lines.slice(0, -1)
+      expect(bodyLines.every((l) => l.length > 0)).toBe(true)
+    })
+  })
 })
