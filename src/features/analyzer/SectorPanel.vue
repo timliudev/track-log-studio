@@ -92,6 +92,7 @@ const hasOptimalData = computed(
       </div>
       <ul class="sug-list">
         <li v-for="(s, i) in suggestions" :key="i">
+          <span class="sug-index">{{ i + 1 }}</span>
           <span class="sug-dist">{{ (s.lapDistanceM / 1000).toFixed(2) }} km</span>
           <span class="sug-buttons">
             <button type="button" class="accept" @click="sectorStore.acceptSuggestion(i)">
@@ -229,8 +230,22 @@ const hasOptimalData = computed(
   background: var(--color-bg);
   font-size: 0.85rem;
 }
+.sug-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-accent);
+  color: var(--color-text);
+  font-size: 0.75rem;
+  line-height: 1;
+}
 .sug-dist {
   color: var(--color-text);
+  margin-left: 6px;
 }
 .sug-buttons {
   display: flex;

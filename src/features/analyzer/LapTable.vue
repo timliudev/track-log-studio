@@ -89,6 +89,26 @@ function swatchColor(index: number): string {
   return order === -1 ? '' : lapColor(order)
 }
 
+/**
+ * Localized tooltip/label for lap `index`'s ⦸ toggle: explains WHY an
+ * auto-excluded lap can't be un-excluded by hand, or the plain include/exclude
+ * label otherwise. One source of truth so the `title` and `aria-label` never
+ * drift apart.
+ */
+function excludeLabel(index: number): string {
+  const reason = lapStore.exclusionReason(index)
+  if (reason === 'band') return t('analyzer.excludedByBand')
+  if (reason === 'sector') return t('analyzer.excludedBySector')
+  return reason === 'manual' ? t('analyzer.includeLap') : t('analyzer.excludeLap')
+}
+
+/** Whether lap `index`'s ⦸ toggle should be disabled: auto-excluded (band or
+ *  sector) laps can't be un-excluded by hand while the rule still applies. */
+function excludeDisabled(index: number): boolean {
+  const reason = lapStore.exclusionReason(index)
+  return reason === 'band' || reason === 'sector'
+}
+
 // The fastest lap among the non-excluded laps; gets a marker in the table so
 // excluding a "cut" lap visibly promotes the next-best one. null when none.
 const bestLapIndex = computed<number | null>(() =>
@@ -303,11 +323,12 @@ const rows = computed<Row[]>(() => {
               <button
                 type="button"
                 class="exclude"
-                :class="{ on: lapStore.isManuallyExcluded(r.index) }"
-                :title="lapStore.isManuallyExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-                :aria-label="lapStore.isManuallyExcluded(r.index) ? t('analyzer.includeLap') : t('analyzer.excludeLap')"
-                :aria-pressed="lapStore.isManuallyExcluded(r.index)"
-                @click.stop="lapStore.toggleExcluded(r.index)"
+                :class="{ on: lapStore.isExcluded(r.index), 'auto-disabled': excludeDisabled(r.index) }"
+                :title="excludeLabel(r.index)"
+                :aria-label="excludeLabel(r.index)"
+                :aria-pressed="lapStore.isExcluded(r.index)"
+                :aria-disabled="excludeDisabled(r.index)"
+                @click.stop="!excludeDisabled(r.index) && lapStore.toggleExcluded(r.index)"
               >
                 ⦸
               </button>
@@ -536,6 +557,17 @@ tbody tr.excluded.selected td {
   border-color: var(--color-accent);
   color: var(--color-accent);
   background: var(--color-bg);
+}
+/* Auto-excluded (band/sector rule) laps show the same "on" look so the ⦸
+   state reads consistently, but muted + non-interactive cursor since the
+   user can't toggle it off by hand while the rule still applies. */
+.exclude.auto-disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.exclude.auto-disabled:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .mark {
   /* not decorative-only: the title attr conveys fastest/slowest to AT */

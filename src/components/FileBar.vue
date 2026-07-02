@@ -16,6 +16,16 @@ const acceptExtensions = computed(() =>
   [...allImportExtensions().map((e) => `.${e}`), '.zip'].join(','),
 )
 
+/**
+ * Human-readable extension list for the load button's `title` tooltip —
+ * SAME registry-derived source as `acceptExtensions`, so the two can never
+ * drift apart (B3: the old label hardcoded ".loga / .nmea / .zip" and went
+ * stale as more importers were added).
+ */
+const loadTitle = computed(() =>
+  t('fileBar.loadTitle', { exts: [...allImportExtensions().map((e) => `.${e}`), '.zip'].join(', ') }),
+)
+
 /** Pending .rcnx multi-session choice, shown as a small inline picker. */
 const pendingRcnx = ref<{ id: number; file: File; sessions: RcnxSessionInfo[] } | null>(null)
 
@@ -129,7 +139,7 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
 
 <template>
   <div class="filebar">
-    <label class="load-btn" :title="t('fileBar.loadTitle')">
+    <label class="load-btn" :title="loadTitle">
       <input
         type="file"
         name="logfile"

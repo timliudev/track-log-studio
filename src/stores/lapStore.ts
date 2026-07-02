@@ -158,6 +158,19 @@ export const useLapStore = defineStore('lap', () => {
     manualExcluded.value = []
   }
 
+  /**
+   * Why lap `i` is excluded, for UI that needs to explain (not just show) the
+   * exclusion — e.g. the ⦸ toggle's tooltip. `null` when the lap isn't
+   * excluded at all. When a lap is BOTH manually and auto-excluded, 'manual'
+   * wins (it's the one thing the user can still directly undo).
+   */
+  function exclusionReason(i: number): 'manual' | 'band' | 'sector' | null {
+    if (manualExcluded.value.includes(i)) return 'manual'
+    if (bandExcluded.value.includes(i)) return 'band'
+    if (sectorInvalid.value.includes(i)) return 'sector'
+    return null
+  }
+
   /** Replace the detected-laps the store derives band exclusions from. */
   function setLaps(next: Lap[]): void {
     laps.value = next
@@ -281,6 +294,7 @@ export const useLapStore = defineStore('lap', () => {
     toggleExcluded,
     isManuallyExcluded,
     isExcluded,
+    exclusionReason,
     clearExcluded,
     setLaps,
     setTrack,
