@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, defineAsyncComponent, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useFileStore } from '@/stores/fileStore'
@@ -26,7 +26,10 @@ import SectorPanel from './SectorPanel.vue'
 import CornerSpeedPanel from './CornerSpeedPanel.vue'
 import AccelTestPanel from './AccelTestPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
-import GgPanel from './GgPanel.vue'
+// Lazy: GgPanel pulls in echarts (~480 kB raw / ~164 kB gzip) — async import
+// splits it (and echarts) into its own chunk so the main bundle stays lean and
+// non-analyzer users never download it.
+const GgPanel = defineAsyncComponent(() => import('./GgPanel.vue'))
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const { t } = useI18n()
