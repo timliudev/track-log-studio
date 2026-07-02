@@ -78,6 +78,95 @@ export function segmentsIntersect(
 }
 
 /**
+ * A gate line pre-projected into its own local planar frame (centred on the
+ * gate's own midpoint) — the precompute every gate-walking consumer
+ * (sector validity, sector timing, gate ordering) needs once per gate before
+ * walking a lap's fixes against it.
+ */
+export interface PlanarGate {
+  lat0: number
+  lon0: number
+  cosLat0: number
+  a: PlanarPoint
+  b: PlanarPoint
+}
+
+/**
+ * Project a gate line into its own local planar frame. Exported so every
+ * module that walks a lap testing sequential gate crossings (sector validity,
+ * sector timing, gate ordering) precomputes gates identically instead of each
+ * re-deriving the same per-gate midpoint frame.
+ */
+export function planarGate(g: LapLine): PlanarGate {
+  const lat0 = (g.a.lat + g.b.lat) / 2
+  const lon0 = (g.a.lon + g.b.lon) / 2
+  const cosLat0 = Math.cos(toRadians(lat0))
+  return {
+    lat0,
+    lon0,
+    cosLat0,
+    a: project(g.a.lat, g.a.lon, lat0, lon0, cosLat0),
+    b: project(g.b.lat, g.b.lon, lat0, lon0, cosLat0),
+  }
+}
+
+/** A single segment straddling the CURRENTLY-expected gate, passed to {@link walkLapGates}'s callback. */
+export interface GateCrossing {
+  /** Index into `gates` (and the pointer position) of the gate just crossed. */
+  gateIdx: number
+  /** Planar projection of the track segment's start point (sample `prevIdx`). */
+  p1: PlanarPoint
+  /** Planar projection of the track segment's end point (sample `idx`). */
+  p2: PlanarPoint
+  /** Sample index of the segment's start point. */
+  prevIdx: number
+  /** Sample index of the segment's end point (the boundary sample). */
+  idx: number
+}
+
+/**
+ * Walk a lap's consecutive valid GPS fixes once, testing each track segment
+ * against a single sequential pointer into `gates` (starting at gate 0):
+ * a segment crossing the CURRENTLY-expected gate advances the pointer and
+ * invokes `onCrossing`; crossings of any other gate are ignored. This is the
+ * shared "walk lap, find gate crossing" primitive behind sector validity,
+ * sector timing, and gate ordering — same algorithm each callsite needs, only
+ * what they DO with a crossing (mark invalid, interpolate a time, interpolate
+ * a distance) differs.
+ *
+ * Returns the number of gates actually crossed (== `gates.length` iff every
+ * gate was crossed in order before the lap's last sample).
+ */
+export function walkLapGates(
+  track: GpsTrack,
+  lap: Pick<Lap, 'startIdx' | 'endIdx'>,
+  gates: readonly PlanarGate[],
+  onCrossing: (crossing: GateCrossing) => void,
+): number {
+  const { lat, lon, valid } = track
+  const start = Math.max(0, lap.startIdx)
+  const end = Math.min(track.valid.length - 1, lap.endIdx)
+
+  let gatePtr = 0
+  let prev = -1
+  for (let i = start; i <= end && gatePtr < gates.length; i++) {
+    if (!valid[i]) continue
+    if (prev >= 0) {
+      const g = gates[gatePtr]
+      const p1 = project(lat[prev], lon[prev], g.lat0, g.lon0, g.cosLat0)
+      const p2 = project(lat[i], lon[i], g.lat0, g.lon0, g.cosLat0)
+      if (segmentsIntersect(p1, p2, g.a, g.b)) {
+        onCrossing({ gateIdx: gatePtr, p1, p2, prevIdx: prev, idx: i })
+        gatePtr++
+      }
+    }
+    prev = i
+  }
+
+  return gatePtr
+}
+
+/**
  * Build laps between consecutive crossings. N crossings -> N-1 laps. The span
  * is [crossing[i].idx, crossing[i+1].idx); the out-lap before the first
  * crossing and the in-lap after the last are not laps.

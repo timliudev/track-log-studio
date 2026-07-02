@@ -1,8 +1,7 @@
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LapLine } from '@/domain/analysis/laps'
-import { project, segmentsIntersect } from '@/domain/analysis/laps'
-import { toRadians } from '@/domain/export/rc3Nmea/geo'
+import { planarGate, walkLapGates } from '@/domain/analysis/laps'
 
 /**
  * Given a set of confirmed sector gates (in sector order), decide which laps
@@ -37,48 +36,20 @@ export function invalidSectorLapIndices(
   // Precompute each gate's planar endpoints once, centred on ITS OWN midpoint
   // (matching detectLapsByLine's per-line local frame — fine at track scale
   // since every test below is sign-based, not absolute-distance-based).
-  const planarGates = gates.map((g) => {
-    const lat0 = (g.a.lat + g.b.lat) / 2
-    const lon0 = (g.a.lon + g.b.lon) / 2
-    const cosLat0 = Math.cos(toRadians(lat0))
-    return {
-      lat0,
-      lon0,
-      cosLat0,
-      a: project(g.a.lat, g.a.lon, lat0, lon0, cosLat0),
-      b: project(g.b.lat, g.b.lon, lat0, lon0, cosLat0),
-    }
-  })
+  const planarGates = gates.map(planarGate)
 
-  const { lat, lon, valid } = track
   const invalid: number[] = []
 
   for (const lap of laps) {
-    const start = Math.max(0, lap.startIdx)
-    // Inclusive of `endIdx`: a lap spans samples [startIdx, endIdx] (endIdx is
-    // the boundary sample where the NEXT crossing occurs — see lapsFromCrossings
-    // in laps.ts), and the final segment (endIdx-1, endIdx) is the one whose
+    // A lap spans samples [startIdx, endIdx] inclusive (endIdx is the boundary
+    // sample where the NEXT crossing occurs — see lapsFromCrossings in
+    // laps.ts), and the final segment (endIdx-1, endIdx) is the one whose
     // crossing closes this lap. A gate crossed right at the line (e.g. the last
     // sector gate coinciding with, or sitting just before, the finish) must
-    // still count towards THIS lap, so that segment has to be tested too.
-    const end = Math.min(track.valid.length - 1, lap.endIdx)
-
-    let gatePtr = 0
-    let prev = -1
-    for (let i = start; i <= end && gatePtr < planarGates.length; i++) {
-      if (!valid[i]) continue
-      if (prev >= 0) {
-        const g = planarGates[gatePtr]
-        const p1 = project(lat[prev], lon[prev], g.lat0, g.lon0, g.cosLat0)
-        const p2 = project(lat[i], lon[i], g.lat0, g.lon0, g.cosLat0)
-        if (segmentsIntersect(p1, p2, g.a, g.b)) {
-          gatePtr++
-        }
-      }
-      prev = i
-    }
-
-    if (gatePtr < planarGates.length) invalid.push(lap.index)
+    // still count towards THIS lap, so that segment has to be tested too —
+    // walkLapGates already includes `endIdx` in its walk.
+    const crossed = walkLapGates(track, lap, planarGates, () => {})
+    if (crossed < planarGates.length) invalid.push(lap.index)
   }
 
   return invalid
