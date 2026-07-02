@@ -19,8 +19,8 @@ export default {
     timezoneAuto: '自動（瀏覽器）',
   },
   fileBar: {
-    load: '載入記錄 (.loga / .nmea / .zip)',
-    loadTitle: '.zip = aRacer x Tune App 透過分享功能輸出的 log（會自動解壓）',
+    load: '載入記錄',
+    loadTitle: '支援格式：{exts}',
     rows: '{n} 列',
     error: '解析失敗',
     unsupported: '不支援的檔案格式：{name}',
