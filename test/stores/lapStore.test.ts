@@ -311,7 +311,7 @@ describe('lapStore', () => {
     const s = useLapStore()
     s.setLaps([lap(0, 48), lap(1, 60)])
     s.setLapTimeBand({ minSec: 46, maxSec: 53 })
-    expect(s.exclusionReason(1)).toBe('band')
+    expect(s.exclusionReason(1)).toBe('timeBand')
     expect(s.exclusionReason(0)).toBeNull()
   })
 

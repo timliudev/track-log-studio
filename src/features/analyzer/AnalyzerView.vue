@@ -285,6 +285,46 @@ function onBandInput(which: 'min' | 'max', e: Event): void {
 // readout so the user can see the filter is doing something.
 const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
 
+// --- Valid lap-DISTANCE band (距離帶過濾): mirrors the time band above exactly,
+// except the store's unit is METRES while this panel (like LapTable) displays
+// km — so get/set convert at the boundary, keeping the store's unit consistent
+// with the rest of the app (cumulativeDistanceM / the `distance` lap metric). ---
+const M_PER_KM = 1000
+const distBandMin = computed<number | null>({
+  get: () => {
+    const m = lapStore.lapDistanceBand?.minM
+    return m != null ? m / M_PER_KM : null
+  },
+  set: (km) =>
+    lapStore.setLapDistanceBand({
+      minM: km != null ? km * M_PER_KM : null,
+      maxM: lapStore.lapDistanceBand?.maxM ?? null,
+    }),
+})
+const distBandMax = computed<number | null>({
+  get: () => {
+    const m = lapStore.lapDistanceBand?.maxM
+    return m != null ? m / M_PER_KM : null
+  },
+  set: (km) =>
+    lapStore.setLapDistanceBand({
+      minM: lapStore.lapDistanceBand?.minM ?? null,
+      maxM: km != null ? km * M_PER_KM : null,
+    }),
+})
+
+/** Parse a distance-band <input>'s value (km), or null when blank/non-numeric. */
+function onDistBandInput(which: 'min' | 'max', e: Event): void {
+  const raw = (e.target as HTMLInputElement).value.trim()
+  const v = raw === '' ? null : Number(raw)
+  const km = v != null && Number.isFinite(v) ? v : null
+  if (which === 'min') distBandMin.value = km
+  else distBandMax.value = km
+}
+
+// How many laps the distance band currently excludes (0 when no band).
+const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.length)
+
 // How many laps fail the sector-gate-crossing check (0 when no gates are
 // confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
 const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
@@ -379,6 +419,43 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
           </button>
           <span v-if="bandExcludedCount > 0" class="band-count">
             {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
+          </span>
+        </div>
+        <div class="band" role="group" :aria-label="t('analyzer.lapDistanceBand')">
+          <span class="band-label">{{ t('analyzer.lapDistanceBand') }}</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.001"
+            class="band-input"
+            :value="distBandMin ?? ''"
+            :placeholder="t('analyzer.lapDistanceBandMin')"
+            :aria-label="t('analyzer.lapDistanceBandMin')"
+            @input="onDistBandInput('min', $event)"
+          />
+          <span class="band-sep">–</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="0.001"
+            class="band-input"
+            :value="distBandMax ?? ''"
+            :placeholder="t('analyzer.lapDistanceBandMax')"
+            :aria-label="t('analyzer.lapDistanceBandMax')"
+            @input="onDistBandInput('max', $event)"
+          />
+          <button
+            v-if="lapStore.lapDistanceBand"
+            type="button"
+            class="band-clear"
+            @click="lapStore.clearLapDistanceBand()"
+          >
+            {{ t('analyzer.lapDistanceBandClear') }}
+          </button>
+          <span v-if="distBandExcludedCount > 0" class="band-count">
+            {{ t('analyzer.lapDistanceBandExcluded', { x: distBandExcludedCount }) }}
           </span>
         </div>
         <SectorPanel

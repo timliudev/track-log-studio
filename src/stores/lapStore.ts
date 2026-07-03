@@ -3,7 +3,12 @@ import { computed, ref } from 'vue'
 import type { LapLine } from '@/domain/analysis/laps'
 import type { Aggregation } from '@/domain/analysis/lapAggregate'
 import type { LapMetric } from '@/domain/analysis/lapMetrics'
-import { outOfBandLapIndices, type LapTimeBand } from '@/domain/analysis/lapValidity'
+import {
+  outOfBandLapIndices,
+  outOfBandDistanceLapIndices,
+  type LapTimeBand,
+  type LapDistanceBand,
+} from '@/domain/analysis/lapValidity'
 import { invalidSectorLapIndices } from '@/domain/analysis/sectorValidity'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
@@ -67,6 +72,11 @@ export const useLapStore = defineStore('lap', () => {
   // Optional valid-lap-time band (seconds, inclusive bounds, either side null to
   // leave it open). When null/empty the included set is identical to manual-only.
   const lapTimeBand = ref<LapTimeBand | null>(null)
+  // Optional valid-lap-DISTANCE band (metres, same inclusive/open-side rules as
+  // the time band). An INDEPENDENT signal from the time band — a cut-course lap
+  // can wait inside the track long enough to match the time band, but its
+  // distance is clearly short, and a wrong-line/extra-loop lap is clearly long.
+  const lapDistanceBand = ref<LapDistanceBand | null>(null)
 
   // Cross-store read: confirmed sector gates live in sectorStore (drawn/accepted
   // via SectorPanel). Read here, at store setup, same pattern as
@@ -78,6 +88,14 @@ export const useLapStore = defineStore('lap', () => {
   // one — the sector-completeness rule below unions in the very same way.
   const bandExcluded = computed<number[]>(() => outOfBandLapIndices(laps.value, lapTimeBand.value))
 
+  // Lap indices excluded because their travelled DISTANCE falls outside the
+  // distance band; empty when no distance band is set. Independent of, and
+  // combined (unioned) with, the time-band exclusion below — a lap must pass
+  // BOTH bands to be included.
+  const distanceBandExcluded = computed<number[]>(() =>
+    outOfBandDistanceLapIndices(laps.value, track.value, lapDistanceBand.value),
+  )
+
   // Lap indices excluded because they fail to cross every confirmed sector gate,
   // in order (missed gate, or an infield cut / 切西瓜 that crosses them out of
   // sequence). Empty whenever there is no track yet or no gates are confirmed —
@@ -88,11 +106,17 @@ export const useLapStore = defineStore('lap', () => {
   )
 
   // The effective exclusion set feeding best-lap / delta / overlays: a lap is
-  // excluded iff it is MANUALLY excluded OR out-of-band OR sector-invalid. With
-  // no band and no confirmed gates this equals `manualExcluded` exactly (no
-  // regression). De-duplicated so a lap excluded for multiple reasons appears once.
+  // excluded iff it is MANUALLY excluded OR out-of-time-band OR
+  // out-of-distance-band OR sector-invalid. With no bands and no confirmed
+  // gates this equals `manualExcluded` exactly (no regression). De-duplicated
+  // so a lap excluded for multiple reasons appears once.
   const excluded = computed<number[]>(() => [
-    ...new Set([...manualExcluded.value, ...bandExcluded.value, ...sectorInvalid.value]),
+    ...new Set([
+      ...manualExcluded.value,
+      ...bandExcluded.value,
+      ...distanceBandExcluded.value,
+      ...sectorInvalid.value,
+    ]),
   ])
   // User-configured statistics columns for the lap table.
   const columns = ref<LapMetricColumn[]>([])
@@ -161,12 +185,14 @@ export const useLapStore = defineStore('lap', () => {
   /**
    * Why lap `i` is excluded, for UI that needs to explain (not just show) the
    * exclusion — e.g. the ⦸ toggle's tooltip. `null` when the lap isn't
-   * excluded at all. When a lap is BOTH manually and auto-excluded, 'manual'
-   * wins (it's the one thing the user can still directly undo).
+   * excluded at all. When a lap is excluded for multiple reasons, 'manual'
+   * wins (it's the one thing the user can still directly undo), then
+   * 'timeBand', then 'distBand', then 'sector'.
    */
-  function exclusionReason(i: number): 'manual' | 'band' | 'sector' | null {
+  function exclusionReason(i: number): 'manual' | 'timeBand' | 'distBand' | 'sector' | null {
     if (manualExcluded.value.includes(i)) return 'manual'
-    if (bandExcluded.value.includes(i)) return 'band'
+    if (bandExcluded.value.includes(i)) return 'timeBand'
+    if (distanceBandExcluded.value.includes(i)) return 'distBand'
     if (sectorInvalid.value.includes(i)) return 'sector'
     return null
   }
@@ -194,6 +220,20 @@ export const useLapStore = defineStore('lap', () => {
   /** Clear the valid lap-time band (manual exclusions are untouched). */
   function clearLapTimeBand(): void {
     lapTimeBand.value = null
+  }
+
+  /**
+   * Set the valid lap-distance band (metres, inclusive). Either bound may be
+   * null to leave that side open; an all-null band clears the constraint.
+   * Out-of-band laps are then folded into the excluded set automatically.
+   */
+  function setLapDistanceBand(band: LapDistanceBand | null): void {
+    lapDistanceBand.value = band && (band.minM != null || band.maxM != null) ? band : null
+  }
+
+  /** Clear the valid lap-distance band (manual exclusions/time band are untouched). */
+  function clearLapDistanceBand(): void {
+    lapDistanceBand.value = null
   }
 
   /** This lap's CHART shift for `axis` (0 when none set). */
@@ -281,8 +321,10 @@ export const useLapStore = defineStore('lap', () => {
     excluded,
     manualExcluded,
     bandExcluded,
+    distanceBandExcluded,
     sectorInvalid,
     lapTimeBand,
+    lapDistanceBand,
     columns,
     offsets,
     setLine,
@@ -300,6 +342,8 @@ export const useLapStore = defineStore('lap', () => {
     setTrack,
     setLapTimeBand,
     clearLapTimeBand,
+    setLapDistanceBand,
+    clearLapDistanceBand,
     offsetOf,
     mapOffsetOf,
     nudgeOffset,
