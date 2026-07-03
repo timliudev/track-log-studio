@@ -254,6 +254,10 @@ export default {
       cardLapAlign: '疊圈對位微調',
       cardChart: '圖表 {n}',
       cardScatterChart: 'XY 散佈圖 {n}',
+      collapse: '收合',
+      expand: '展開',
+      pin: '釘選（手機版固定於頂部）',
+      unpin: '取消釘選',
     },
   },
   suspension: {
