@@ -97,16 +97,18 @@ function swatchColor(index: number): string {
  */
 function excludeLabel(index: number): string {
   const reason = lapStore.exclusionReason(index)
-  if (reason === 'band') return t('analyzer.excludedByBand')
+  if (reason === 'timeBand') return t('analyzer.excludedByBand')
+  if (reason === 'distBand') return t('analyzer.excludedByDistanceBand')
   if (reason === 'sector') return t('analyzer.excludedBySector')
   return reason === 'manual' ? t('analyzer.includeLap') : t('analyzer.excludeLap')
 }
 
-/** Whether lap `index`'s ⦸ toggle should be disabled: auto-excluded (band or
- *  sector) laps can't be un-excluded by hand while the rule still applies. */
+/** Whether lap `index`'s ⦸ toggle should be disabled: auto-excluded (time band,
+ *  distance band, or sector) laps can't be un-excluded by hand while the rule
+ *  still applies. */
 function excludeDisabled(index: number): boolean {
   const reason = lapStore.exclusionReason(index)
-  return reason === 'band' || reason === 'sector'
+  return reason === 'timeBand' || reason === 'distBand' || reason === 'sector'
 }
 
 // The fastest lap among the non-excluded laps; gets a marker in the table so
