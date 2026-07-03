@@ -32,11 +32,18 @@ export type PresetId = 'default' | 'custom' | `user${number}`
 
 /**
  * Output format the converter writes: RaceChrono .nmea, Racelogic VBOX .vbo,
- * or a generic .csv. Kept as a literal union (rather than `ExportFormat['id']`)
- * so persisted values are still checked against the known set; new formats
- * must be added here as well as to the export registry.
+ * a generic .csv, or `loga` (in-place patch of the original .loga text with
+ * calibrated suspension channels — see `LogaWriter.patchLogaText`). Kept as a
+ * literal union (rather than `ExportFormat['id']`) so persisted values are
+ * still checked against the known set; new formats must be added here as
+ * well as to the export registry. `loga` is deliberately NOT in the export
+ * registry (`domain/export/registry.ts`) — it patches the original source
+ * text rather than exporting a normalized session, and only applies when the
+ * source itself is a .loga (see `fileStore.savableEntries`), so the UI
+ * special-cases it instead of forcing it into the any-source→any-format
+ * registry contract.
  */
-export type OutputFormat = 'nmea' | 'vbo' | 'csv'
+export type OutputFormat = 'nmea' | 'vbo' | 'csv' | 'loga'
 
 const STORAGE_KEY = 'aracer-loga.converter.v1'
 const USER_PRESET_COUNT = 5
