@@ -188,5 +188,12 @@ watch(
 <style scoped>
 .gg-chart-host {
   width: 100%;
+  /* #16: as a flex item (ScatterChart.vue's column flex root) this would
+   * otherwise floor its shrink at the echarts canvas's pixel width (a flex
+   * item's cross-axis min-width defaults to `auto`, i.e. its content's
+   * min-content size, not 0) — causing overflow instead of shrinking when
+   * the window/panel narrows. See ScatterChart.vue's `.scatter-chart` for
+   * the matching fix one level up. */
+  min-width: 0;
 }
 </style>
