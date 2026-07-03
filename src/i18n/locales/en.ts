@@ -196,6 +196,7 @@ export default {
       pickBoth: 'Pick a channel for both X and Y.',
       session: 'Whole session',
       lapSeries: 'Lap {n}',
+      loading: 'Loading chart component…',
     },
     trackFile: {
       export: 'Export track setup',
