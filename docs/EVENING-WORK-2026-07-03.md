@@ -23,7 +23,7 @@
 | 1 | #14 有效圈距離區間 | ✅ `6be56f3` | 距離帶與時間帶並存(兩者都要過),預設=合理圈中位數±20%,km 三位小數,+26 tests |
 | 2 | #6 避震校正+另存loga搬轉換頁 | ✅ `9b6a7b0` | 避震=轉換頁收合區塊;另存loga=輸出格式第4鈕(僅loga來源可用,特殊case不進registry);手冊已同步。⚠️ 待視覺驗收 |
 | 3 | #8 PC 拖曳網格布局 | ⏳ | `feature/dashboard-grid` |
-| 2 | #11–13 變速比計算機重做 | ⏳ | `feature/drivetrain-rework` |
+| 2 | #11–13 變速比計算機重做 | ✅ `5e94035` | #11 根因:舊 MT 分支根本沒圖表。MT=齒比/齒數/終傳/輪胎規格→各檔理論線疊實測散佈+檔位判別;CVT=實測曲線+起步比/最終比/接合轉速+調校筆記欄;store 換 v2 key 防舊資料崩潰;+32 tests。⚠️ 待視覺驗收(真檔 pipeline 已驗:raceAmp 6 檔全偵測) |
 | 2 | #18 A2/A3 Phase 1 | ✅ `3aca9eb` | schema v1(TrackDefinitionV1 預留/PersonalTrackOverlayV1 實裝)+舊 idb/檔案透明遷移+自動套用改走 resolveGeometryToApply,+25 tests |
 | 3 | #8 PC 拖曳網格布局(grid-layout-plus) | ⬜ | — |
 | 3 | #9 手機布局(收闔+鎖定) | ⬜ | — |
