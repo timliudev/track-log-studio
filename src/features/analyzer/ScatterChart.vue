@@ -139,7 +139,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
     </div>
 
     <p v-if="!xChannel || !yChannel" class="hint">{{ t('analyzer.gg.pickBoth') }}</p>
-    <GgChart v-else :series="ggSeries" :axis-mode="axisMode" />
+    <GgChart v-else :series="ggSeries" :axis-mode="axisMode" :x-name="xChannel" :y-name="yChannel" />
   </section>
 </template>
 
@@ -148,6 +148,14 @@ const axisMode = computed<'square' | 'auto'>(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* #16: this is itself a flex item (of AnalyzerView's `.card`/`.analyzer`
+   * column layout upstream); a flex item's cross-axis min-width defaults to
+   * `auto`, i.e. its content's min-content size, not 0. GgChart's host below
+   * renders a canvas at an explicit pixel width (echarts sizes it from
+   * clientWidth at creation), which otherwise floors this container's
+   * shrink and makes the chart overflow instead of shrinking when the
+   * window/panel narrows. */
+  min-width: 0;
 }
 .toolbar {
   display: flex;
