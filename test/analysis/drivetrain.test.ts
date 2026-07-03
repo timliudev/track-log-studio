@@ -1,15 +1,23 @@
 import { describe, it, expect } from 'vitest'
 import {
   finalDriveRatio,
+  toothCountRatio,
+  resolveGearRatio,
+  resolveFinalDrive,
+  tireSpecToCircumferenceMm,
   wheelRpmToSpeedKmh,
   speedKmhToWheelRpm,
   computeMtGearTable,
+  mtGearSpeedFn,
+  mtGearSpeedLine,
   rpmSpeedTable,
   shiftRpmDrop,
-  computeCvtSpeedRange,
   computeRatioSeries,
   detectGearPlateaus,
   buildCvtRatioSweep,
+  buildCvtRatioTimeSeries,
+  cvtRatioSummary,
+  estimateClutchEngagementRpm,
   type MtDrivetrainSpec,
 } from '@/domain/analysis/drivetrain'
 
@@ -18,9 +26,8 @@ import {
 // sprockets, 1870mm wheel circumference, 10000 RPM redline.
 const REF_SPEC: MtDrivetrainSpec = {
   primaryReduction: 2.833,
-  gearRatios: [2.615, 1.812, 1.409, 1.16, 1.0, 0.885],
-  frontSprocketTeeth: 15,
-  rearSprocketTeeth: 45,
+  gearRatios: [2.615, 1.812, 1.409, 1.16, 1.0, 0.885].map((ratio) => ({ ratio })),
+  finalDrive: { frontTeeth: 15, rearTeeth: 45 },
   wheelCircumferenceMm: 1870,
   redlineRpm: 10000,
 }
@@ -39,20 +46,59 @@ describe('finalDriveRatio', () => {
   })
 })
 
-describe('wheelRpmToSpeedKmh / speedKmhToWheelRpm', () => {
-  it('round-trips', () => {
-    const rpm = 500
-    const circ = 1870
-    const speed = wheelRpmToSpeedKmh(rpm, circ)
-    expect(speedKmhToWheelRpm(speed, circ)).toBeCloseTo(rpm, 6)
+describe('toothCountRatio', () => {
+  it('computes driven/drive teeth', () => {
+    expect(toothCountRatio(45, 15)).toBeCloseTo(3, 6)
   })
-  it('matches a hand-computed value: 500 rpm, 1870mm circumference', () => {
-    // 500 rev/min * 1870 mm/rev * 60 min/h / 1e6 mm/km = 56.1 km/h
-    expect(wheelRpmToSpeedKmh(500, 1870)).toBeCloseTo(56.1, 6)
+  it('returns NaN for non-positive teeth', () => {
+    expect(toothCountRatio(0, 15)).toBeNaN()
+    expect(toothCountRatio(45, 0)).toBeNaN()
   })
-  it('returns NaN for non-positive circumference', () => {
-    expect(wheelRpmToSpeedKmh(500, 0)).toBeNaN()
-    expect(speedKmhToWheelRpm(50, -1)).toBeNaN()
+})
+
+describe('resolveGearRatio', () => {
+  it('prefers an explicit ratio', () => {
+    expect(resolveGearRatio({ ratio: 2.5, drivenTeeth: 45, driveTeeth: 15 })).toBeCloseTo(2.5, 6)
+  })
+  it('derives from tooth counts when ratio is absent', () => {
+    expect(resolveGearRatio({ drivenTeeth: 30, driveTeeth: 12 })).toBeCloseTo(2.5, 6)
+  })
+  it('returns NaN when neither form is valid', () => {
+    expect(resolveGearRatio({})).toBeNaN()
+    expect(resolveGearRatio({ drivenTeeth: 30 })).toBeNaN()
+  })
+})
+
+describe('resolveFinalDrive', () => {
+  it('prefers an explicit ratio', () => {
+    expect(resolveFinalDrive({ ratio: 3.5, frontTeeth: 15, rearTeeth: 45 })).toBeCloseTo(3.5, 6)
+  })
+  it('derives from front/rear teeth when ratio is absent', () => {
+    expect(resolveFinalDrive({ frontTeeth: 13, rearTeeth: 41 })).toBeCloseTo(41 / 13, 6)
+  })
+  it('returns NaN when neither form is valid', () => {
+    expect(resolveFinalDrive({})).toBeNaN()
+  })
+})
+
+describe('tireSpecToCircumferenceMm', () => {
+  it('parses a standard metric spec (120/70-17)', () => {
+    // rim 17*25.4=431.8mm + 2*(120*0.70)=168mm sidewall = 599.8mm diameter
+    // circumference = pi * 599.8 ~= 1884.33mm
+    expect(tireSpecToCircumferenceMm('120/70-17')).toBeCloseTo(1884.33, 1)
+  })
+  it('accepts a little formatting slack (x separator, R prefix, spaces)', () => {
+    const base = tireSpecToCircumferenceMm('120/70-17')
+    expect(tireSpecToCircumferenceMm('120/70x17')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('120/70 R17')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm(' 120 / 70 - 17 ')).toBeCloseTo(base, 6)
+  })
+  it('returns NaN for an unparsable string', () => {
+    expect(tireSpecToCircumferenceMm('not a tire size')).toBeNaN()
+    expect(tireSpecToCircumferenceMm('')).toBeNaN()
+  })
+  it('returns NaN for non-positive components', () => {
+    expect(tireSpecToCircumferenceMm('0/70-17')).toBeNaN()
   })
 })
 
@@ -74,18 +120,88 @@ describe('computeMtGearTable', () => {
     }
   })
 
-  it('returns [] for an invalid spec (zero sprocket teeth)', () => {
-    expect(computeMtGearTable({ ...REF_SPEC, frontSprocketTeeth: 0 })).toEqual([])
+  it('accepts tooth-count gear ratios equivalently to direct ratios', () => {
+    // Gear 1 ratio 2.615 == 2.615:1, expressed as e.g. 47/18 teeth (~2.611).
+    const spec: MtDrivetrainSpec = {
+      ...REF_SPEC,
+      gearRatios: [{ drivenTeeth: 47, driveTeeth: 18 }],
+    }
+    const results = computeMtGearTable(spec)
+    expect(results).toHaveLength(1)
+    expect(results[0].totalReduction).toBeCloseTo(2.833 * (47 / 18) * 3, 3)
+  })
+
+  it('resolves final drive from a direct ratio as well as from teeth', () => {
+    const spec: MtDrivetrainSpec = { ...REF_SPEC, finalDrive: { ratio: 3 } }
+    const results = computeMtGearTable(spec)
+    expect(results.map((r) => r.totalReduction)).toEqual(computeMtGearTable(REF_SPEC).map((r) => r.totalReduction))
+  })
+
+  it('defaults primaryReduction to 1 when omitted (direct-drive)', () => {
+    const spec: MtDrivetrainSpec = { ...REF_SPEC, primaryReduction: undefined }
+    const results = computeMtGearTable(spec)
+    expect(results[0].totalReduction).toBeCloseTo(2.615 * 3, 6)
+  })
+
+  it('returns [] for an invalid spec (unresolvable final drive)', () => {
+    expect(computeMtGearTable({ ...REF_SPEC, finalDrive: { frontTeeth: 0, rearTeeth: 45 } })).toEqual([])
   })
 
   it('returns [] for an invalid spec (zero wheel circumference)', () => {
     expect(computeMtGearTable({ ...REF_SPEC, wheelCircumferenceMm: 0 })).toEqual([])
   })
 
-  it('skips non-positive individual gear ratios but keeps the rest', () => {
-    const spec = { ...REF_SPEC, gearRatios: [2.615, 0, 1.409] }
+  it('skips non-positive/unresolvable individual gear ratios but keeps the rest', () => {
+    const spec: MtDrivetrainSpec = { ...REF_SPEC, gearRatios: [{ ratio: 2.615 }, { ratio: 0 }, { ratio: 1.409 }] }
     const results = computeMtGearTable(spec)
     expect(results.map((r) => r.gear)).toEqual([1, 3])
+  })
+})
+
+describe('mtGearSpeedFn / mtGearSpeedLine', () => {
+  it('produces the same speed-at-redline as computeMtGearTable', () => {
+    const results = computeMtGearTable(REF_SPEC)
+    const fn = mtGearSpeedFn(results[0].totalReduction, REF_SPEC.wheelCircumferenceMm)
+    expect(fn(10000)).toBeCloseTo(REF_SPEEDS_KMH[0], 2)
+  })
+
+  it('returns NaN for invalid inputs', () => {
+    const fn = mtGearSpeedFn(0, 1870)
+    expect(fn(5000)).toBeNaN()
+  })
+
+  it('samples an evenly-spaced line from 0 to maxRpm', () => {
+    const results = computeMtGearTable(REF_SPEC)
+    const line = mtGearSpeedLine(results[0].totalReduction, REF_SPEC.wheelCircumferenceMm, 10000, 10)
+    expect(line.rpm).toHaveLength(11) // 0..10 inclusive
+    expect(line.speedKmh).toHaveLength(11)
+    expect(line.rpm[0]).toBe(0)
+    expect(line.speedKmh[0]).toBe(0)
+    expect(line.rpm[10]).toBeCloseTo(10000, 6)
+    expect(line.speedKmh[10]).toBeCloseTo(REF_SPEEDS_KMH[0], 2)
+  })
+
+  it('returns empty arrays for invalid inputs', () => {
+    expect(mtGearSpeedLine(0, 1870, 10000)).toEqual({ rpm: [], speedKmh: [] })
+    expect(mtGearSpeedLine(10, 0, 10000)).toEqual({ rpm: [], speedKmh: [] })
+    expect(mtGearSpeedLine(10, 1870, 0)).toEqual({ rpm: [], speedKmh: [] })
+  })
+})
+
+describe('wheelRpmToSpeedKmh / speedKmhToWheelRpm', () => {
+  it('round-trips', () => {
+    const rpm = 500
+    const circ = 1870
+    const speed = wheelRpmToSpeedKmh(rpm, circ)
+    expect(speedKmhToWheelRpm(speed, circ)).toBeCloseTo(rpm, 6)
+  })
+  it('matches a hand-computed value: 500 rpm, 1870mm circumference', () => {
+    // 500 rev/min * 1870 mm/rev * 60 min/h / 1e6 mm/km = 56.1 km/h
+    expect(wheelRpmToSpeedKmh(500, 1870)).toBeCloseTo(56.1, 6)
+  })
+  it('returns NaN for non-positive circumference', () => {
+    expect(wheelRpmToSpeedKmh(500, 0)).toBeNaN()
+    expect(speedKmhToWheelRpm(50, -1)).toBeNaN()
   })
 })
 
@@ -122,36 +238,6 @@ describe('shiftRpmDrop', () => {
   it('returns NaN for a gear not present in results', () => {
     const results = computeMtGearTable(REF_SPEC)
     expect(shiftRpmDrop(results, 99, 10000)).toBeNaN()
-  })
-})
-
-describe('computeCvtSpeedRange', () => {
-  it('computes low/high speeds at max RPM (hand-checked)', () => {
-    // ratioLow=2.4 (launch), ratioHigh=0.9 (top), final=8, wheel 1400mm, 8000 RPM.
-    const range = computeCvtSpeedRange({
-      ratioLow: 2.4,
-      ratioHigh: 0.9,
-      finalReduction: 8,
-      wheelCircumferenceMm: 1400,
-      maxRpm: 8000,
-    })
-    // wheelRpmLow = 8000 / (2.4*8) = 416.667 -> speed = 416.667*1400*60/1e6 = 35.0
-    expect(range.speedAtLowKmh).toBeCloseTo(35.0, 1)
-    // wheelRpmHigh = 8000 / (0.9*8) = 1111.11 -> speed = 1111.11*1400*60/1e6 = 93.33
-    expect(range.speedAtHighKmh).toBeCloseTo(93.33, 1)
-    expect(range.speedAtHighKmh).toBeGreaterThan(range.speedAtLowKmh)
-  })
-
-  it('returns NaN speeds for an invalid spec', () => {
-    const range = computeCvtSpeedRange({
-      ratioLow: 0,
-      ratioHigh: 0.9,
-      finalReduction: 8,
-      wheelCircumferenceMm: 1400,
-      maxRpm: 8000,
-    })
-    expect(range.speedAtLowKmh).toBeNaN()
-    expect(range.speedAtHighKmh).toBeNaN()
   })
 })
 
@@ -299,5 +385,69 @@ describe('buildCvtRatioSweep', () => {
     const ratio = new Float64Array([NaN, 0, -1])
     const speed = new Float64Array([10, 20, 30])
     expect(buildCvtRatioSweep(ratio, speed)).toEqual([])
+  })
+})
+
+describe('buildCvtRatioTimeSeries', () => {
+  it('pairs ratio with time, filters NaN/non-positive, preserves time order', () => {
+    const ratio = new Float64Array([5, NaN, 3, -1, 2])
+    const time = new Float64Array([0, 1, 2, 3, 4])
+    const points = buildCvtRatioTimeSeries(ratio, time)
+    expect(points).toEqual([
+      { timeS: 0, ratio: 5 },
+      { timeS: 2, ratio: 3 },
+      { timeS: 4, ratio: 2 },
+    ])
+  })
+
+  it('returns [] when arrays share no valid samples', () => {
+    const ratio = new Float64Array([NaN, 0, -1])
+    const time = new Float64Array([0, 1, 2])
+    expect(buildCvtRatioTimeSeries(ratio, time)).toEqual([])
+  })
+})
+
+describe('cvtRatioSummary', () => {
+  it('reports max ratio as launchRatio and min as topRatio', () => {
+    const ratio = new Float64Array([2.4, 1.8, 1.2, 0.9, NaN, -1, 0])
+    const summary = cvtRatioSummary(ratio)
+    expect(summary.launchRatio).toBeCloseTo(2.4, 6)
+    expect(summary.topRatio).toBeCloseTo(0.9, 6)
+  })
+
+  it('returns NaN fields when there are no finite positive samples', () => {
+    const summary = cvtRatioSummary(new Float64Array([NaN, 0, -1]))
+    expect(summary.launchRatio).toBeNaN()
+    expect(summary.topRatio).toBeNaN()
+  })
+})
+
+describe('estimateClutchEngagementRpm', () => {
+  it('reports the RPM at standstill just before a sustained speed rise', () => {
+    // Standstill (speed 0) at RPM 1800 for a few samples, then speed rises
+    // and stays above the rising threshold.
+    const rpm = new Float64Array([1800, 1800, 1800, 3000, 3200, 3400, 3600, 3800])
+    const speed = new Float64Array([0, 0, 0, 4, 6, 8, 10, 12])
+    expect(estimateClutchEngagementRpm(rpm, speed)).toBeCloseTo(1800, 6)
+  })
+
+  it('ignores a momentary speed blip that does not sustain', () => {
+    const rpm = new Float64Array([1800, 1800, 1800, 1800, 1800, 1800, 1800])
+    const speed = new Float64Array([0, 0, 5, 0, 0, 0, 0]) // blip, not sustained
+    expect(estimateClutchEngagementRpm(rpm, speed, { sustainSamples: 3 })).toBeNaN()
+  })
+
+  it('returns NaN when there is no standstill in the trace', () => {
+    const rpm = new Float64Array([3000, 3200, 3400])
+    const speed = new Float64Array([20, 25, 30])
+    expect(estimateClutchEngagementRpm(rpm, speed)).toBeNaN()
+  })
+
+  it('respects custom standstill/rising/sustain thresholds', () => {
+    const rpm = new Float64Array([1500, 1500, 2000, 2100, 2200, 2300])
+    const speed = new Float64Array([0.5, 0.5, 2, 2, 2, 2])
+    expect(
+      estimateClutchEngagementRpm(rpm, speed, { standstillSpeedKmh: 1, risingSpeedKmh: 1.5, sustainSamples: 3 }),
+    ).toBeCloseTo(1500, 6)
   })
 })
