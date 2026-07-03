@@ -266,11 +266,13 @@ export default {
     auto: 'Auto',
   },
   converter: {
+    suspensionToggle: 'Suspension calibration (click to expand)',
     notes: {
       racechrono: 'The converted .nmea is for importing into a RaceChrono DIY device.',
       importGuide: 'Import guide',
       vbo: 'The .vbo files are for Racelogic Circuit Tools 3 (and RaceChrono). Every ECU channel is exported; see the _channels.csv map for what each one is.',
       csv: 'The .csv is a generic, one-row-per-sample export (Time, GPS_Lat, GPS_Lon, GPS_Speed, then every other channel) for Race Studio 3, Excel, or any spreadsheet/analysis tool. Every ECU channel is exported automatically under its own name.',
+      loga: 'Writes the calibrated suspension travel (and other derived channels) into a new .loga (original untouched; columns are replaced if present, otherwise appended). Expand "Suspension calibration" below to adjust the parameters.',
       raceModule:
         'An aRacer Race Module is required for GPS positioning on the map; without GPS you can still convert sensor data (RC3), with the timestamp synthesized from the conversion time.',
     },
@@ -316,10 +318,13 @@ export default {
     },
     format: {
       label: 'Output format',
+      loga: 'Save modified (.loga)',
+      logaDisabledHint: 'Only available when the original source is a .loga (writes calibrated suspension travel and other derived channels back into it).',
       hint: {
         nmea: 'RaceChrono DIY .nmea — GPS + RC3 sensor slots (mapped below).',
         vbo: 'Racelogic VBOX .vbo for Circuit Tools 3 — every channel exported automatically. Produces _ct.vbo, _rc.vbo and a _channels.csv map per log.',
         csv: 'Generic .csv (Race Studio 3 / Excel / Python) — every channel exported automatically, one row per sample.',
+        loga: 'Writes calibrated suspension travel and other derived channels into a new .loga (original left untouched). Only available when the source is itself a .loga.',
       },
       vboPanelNote:
         'VBO exports every channel automatically, so there is no field mapping to set. Each .loga produces _ct.vbo (Circuit Tools, original ECU names), _rc.vbo (RaceChrono identifiers) and a _channels.csv cross-reference.',

@@ -263,11 +263,13 @@ export default {
     auto: '自動',
   },
   converter: {
+    suspensionToggle: '避震校正（點擊展開）',
     notes: {
       racechrono: '轉換後的 .nmea 檔供 RaceChrono DIY 裝置匯入使用。',
       importGuide: '匯入說明',
       vbo: '.vbo 檔供 Racelogic Circuit Tools 3（與 RaceChrono）使用。會輸出所有 ECU 通道；各通道對應請見 _channels.csv 對照表。',
       csv: '.csv 為通用格式（每筆取樣一列：Time、GPS_Lat、GPS_Lon、GPS_Speed，之後接每個其他通道），可供 Race Studio 3、Excel 或任何試算表/分析工具匯入。會自動輸出所有 ECU 通道，各自使用自己的通道名稱。',
+      loga: '把校正後的避震行程等衍生通道寫進一份新的 .loga（不覆寫原始檔案；欄位有就替換、沒有就新增）。可於下方展開「避震校正」調整參數。',
       raceModule:
         '需安裝 aRacer Race Module 才有 GPS 數據可於底圖對位；若無 GPS，仍可轉出感測器數據（RC3），此時時間戳以轉檔當下時間合成。',
     },
@@ -313,10 +315,13 @@ export default {
     },
     format: {
       label: '輸出格式',
+      loga: '另存修改 (.loga)',
+      logaDisabledHint: '僅原始來源為 .loga 時可用（把校正後的避震行程等衍生通道寫回原始 .loga）。',
       hint: {
         nmea: 'RaceChrono DIY .nmea — GPS + RC3 感測器槽位（於下方對應）。',
         vbo: 'Racelogic VBOX .vbo，給 Circuit Tools 3 用 — 自動輸出所有通道。每個 log 會產生 _ct.vbo、_rc.vbo 與 _channels.csv 對照表。',
         csv: '通用 .csv（給 Race Studio 3 / Excel / Python 用）— 自動輸出所有通道，每筆取樣一列。',
+        loga: '把校正後的避震行程等衍生通道寫回一份新的 .loga（不覆寫原始檔案）。僅原始來源為 .loga 時可用。',
       },
       vboPanelNote:
         'VBO 會自動輸出所有通道，無需設定欄位對應。每個 .loga 會產生 _ct.vbo（Circuit Tools，原始 ECU 名稱）、_rc.vbo（RaceChrono 識別符）與 _channels.csv 對照表。',
