@@ -9,14 +9,14 @@
 | # | 任務 | 狀態 | 分支 / 合併 commit | 備註 |
 |---|------|------|--------------------|------|
 | T1 | AnalyzerView composables 抽取(B7 建議) | ✅ 完成 | `refactor/analyzer-composables` → `5efc59b` | 509→528 tests |
-| T2 | G-G echarts bundle 拆分(dynamic import) | ⏳ 進行中 | — | 08:00 重啟,08:20 合併截止 |
-| T3 | RS3 CSV 註解行容錯驗證 | ⏳ 進行中 | — | 08:00 重啟,08:20 合併截止 |
-| T4 | 傳動比設定持久化 | ⏳ 進行中 | — | 08:00 重啟,08:20 合併截止 |
+| T2 | G-G echarts bundle 拆分(dynamic import) | ✅ 完成 | `perf/gg-echarts-split` → `90d0e7b` | 首屏不再載 479kB chunk |
+| T3 | RS3 CSV 註解行容錯驗證 | ✅ 完成 | `test/rs3-csv-tolerance` → `4480def` | 結論:CSV 只有匯出,容錯 N/A |
+| T4 | 傳動比設定持久化 | ✅ 完成 | `feature/drivetrain-persistence` → `1dc598c` | localStorage 全域,+5 tests |
 | T5 | A2/A3 雲端賽道機制設計文件 | ✅ 完成 | `docs/cloud-track-design` → `1219390` | 只寫文件,待你拍板 |
 | T6 | Phase 5 合併 UI | ❌ 未執行 | — | 額度中斷吃掉整夜,見事件記錄 |
 | T7 | 彎道偵測接上 UI | ❌ 未執行 | — | 同上,留待下次 |
 | T8 | B6 彈性面板佈局 | ❌ 未執行 | — | 同上,留待下次 |
-| T9 | 使用手冊補新功能(zh+en) | ❌ 未執行 | — | 同上,留待下次 |
+| T9 | 使用手冊補新功能(zh+en) | ⏳ 進行中 | — | 08:05 啟動,純文件,08:20 截止 |
 
 ## 執行順序與理由
 
@@ -37,6 +37,20 @@
 
 AnalyzerView.vue 655→603 行;新增 19 個 composable 單元測試(509→528);tests/typecheck/build 全綠。**審計文件明確說不要抽的部分照辦沒動**:lap-select↔zoom 耦合(onLapSelect/onXZoom)留在 AnalyzerView 作為唯一決策點;TrackMap/UPlotChart 手勢機不合併。純重構,行為零變更,模板幾乎未動——理論上不需要視覺驗收,但你操作時若發現軌跡上色/極值標記異常,先懷疑這個。
 
+### T2 — G-G echarts bundle 拆分 ✅(develop `90d0e7b`)
+
+`ScatterChart.vue` 改用 `defineAsyncComponent`(200ms delay 的載入提示,i18n zh+en)引用 `GgChart.vue`,echarts 相關 import 全在 GgChart 內,因此 **479kB 的 echarts chunk 只在真正掛載散佈圖/G-G 圖時才下載**。驗證:`dist/index.html` 與 entry chunk(431.84kB)已無 GgChart 的 preload/靜態引用,只剩 dynamic `import()`。532 tests/typecheck/build 全綠。
+驗收方式:開 DevTools Network,載入 analyzer 首頁不應出現 `GgChart-*.js`;新增散佈圖時才載入。
+
+### T3 — RS3 CSV 容錯驗證 ✅(develop `4480def`)
+
+**結論:是虛驚。** 目前 codebase 只有 CSV「匯出」(import registry 裡沒有 CSV importer),所以「RS3 註解行容錯」對匯入端不適用(N/A)。改為驗證匯出端與 RS3 匯入相容:無前導 metadata、header 在第一行、欄數一致、RFC 4180 引號規則、無空行 — 全部通過,零修改,新增 5 個相容性測試(共 532)。若未來要做 CSV 匯入(RaceStudio3 格式),再依 backlog 排。
+
+### T4 — 傳動比設定持久化 ✅(develop `1dc598c`)
+
+齒比計算器的設定(MT/CVT、齒比、齒盤齒數、輪周長、紅線轉速等)現在會自動保存並在重新載入後還原。**範圍選擇:全域**(車輛屬性,不跟賽道走),存 `localStorage`(key `aracer-loga.drivetrain.v1`),完全沿用 settingsStore/suspensionStore 的既有模式(init 時 loadPersisted + deep watch 自動存,try/catch 防隱私模式)。小 JSON 不需要 idb,也就沒有 reactive-Proxy/structured-clone 風險。只動 `drivetrainStore.ts` + 新增 5 個測試(共 537)。
+驗收方式:齒比計算器填一組設定 → F5 重新整理 → 設定應還在。
+
 ### T5 — A2/A3 雲端賽道機制設計文件 ✅(develop `1219390`)
 
 產出 [docs/CLOUD-TRACK-DESIGN.md](CLOUD-TRACK-DESIGN.md)(581 行,繁中)。**純設計、零程式碼變更**,早上請優先看它的 §8「開放問題」— 有 8 個要你拍板的決策。主要建議(都可推翻):
@@ -52,7 +66,18 @@ AnalyzerView.vue 655→603 行;新增 19 個 composable 單元測試(509→528);
 
 ## 驗收清單(早上請你看)
 
-(收尾時整理)
+1. **[最重要] 讀 [CLOUD-TRACK-DESIGN.md](CLOUD-TRACK-DESIGN.md) §8 的 8 個開放問題並拍板** — A2/A3 實作等你的決定。
+2. **T1 回歸檢查**(純重構,理論零變化):軌跡熱力上色、通道極值標記(min 圓/max 菱形)行為應與昨天完全相同。
+3. **T2 驗證**:DevTools Network 分頁 → 載入 analyzer 不應出現 `GgChart-*.js`;「＋ 新增圖表」加散佈圖時才載入(會有短暫載入提示)。
+4. **T4 驗證**:齒比計算器填設定 → F5 → 設定應還原。
+5. T3 無 UI 變化(純測試),不用驗。
+
+## 下次待辦(T6–T8 因額度中斷未執行)
+
+- **T6 Phase 5 合併 UI**(sessionAlign/sessionMerge 核心已在 develop,缺 UI)
+- **T7 彎道偵測接上 UI**(spike 已合併,接 A1/A15 的 gate 直接載入流程)
+- **T8 B6 彈性面板佈局**(需視覺驗收)
+- A2/A3 實作(等你對設計文件拍板)
 
 ## 事件記錄
 
