@@ -1,51 +1,161 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
+import { tireSpecToCircumferenceMm, type GearRatioInput, type FinalDriveInput, type MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
 
 export type DrivetrainKind = 'mt' | 'cvt'
 
-/** Manually-entered MT (chain-drive) spec inputs — mirrors {@link MtDrivetrainSpec}
- *  in `drivetrain.ts`, but kept as a separate UI-facing type so per-field
- *  inputs (e.g. a gear ratio being typed) don't have to be fully valid
- *  numbers at every keystroke (see GearPanel's parsing of blank/partial
- *  fields). `gearRatios` length is the "gear count" — trimmed/extended by
- *  the panel's gear-count control. */
+/** How a single gear ratio (or the final drive) is being entered — either
+ *  form is always kept around in state (so switching the toggle doesn't
+ *  discard what the user already typed into the other field), `mode` just
+ *  picks which one is authoritative for the calculation (see
+ *  `resolveGearRatio`/`resolveFinalDrive` in `drivetrain.ts`, which prefer
+ *  `ratio` when set — so `toMtDrivetrainSpec` below only forwards the active
+ *  mode's field(s) to avoid a stale ratio silently overriding fresh teeth). */
+export type RatioInputMode = 'ratio' | 'teeth'
+
+/** One gear's ratio input UI state — mirrors {@link GearRatioInput} in
+ *  `drivetrain.ts` but keeps both the ratio and tooth-count fields (not just
+ *  whichever is active) so toggling `mode` back and forth doesn't lose data. */
+export interface MtGearFormInput {
+  mode: RatioInputMode
+  ratio: number
+  drivenTeeth: number
+  driveTeeth: number
+}
+
+/** Final drive input UI state — mirrors {@link MtGearFormInput}'s shape. */
+export interface FinalDriveFormInput {
+  mode: RatioInputMode
+  ratio: number
+  frontTeeth: number
+  rearTeeth: number
+}
+
+/** How the rear wheel circumference is being entered: from a tire size
+ *  spec string (e.g. `120/70-17`) or a direct millimetre override. */
+export type CircumferenceInputMode = 'tire' | 'direct'
+
+/** Manually-entered MT (chain-drive) spec inputs — mirrors {@link
+ *  MtDrivetrainSpec} in `drivetrain.ts`, but kept as a separate UI-facing
+ *  type so per-field inputs (e.g. a gear ratio being typed) don't have to be
+ *  fully valid numbers at every keystroke. `gearRatios` length is the "gear
+ *  count" — trimmed/extended by the panel's gear-count control. */
 export interface MtFormState {
+  /** Primary reduction ratio; 0/blank means "not set" (treated as 1:1 by the
+   *  domain layer — see `computeMtGearTable`'s optional `primaryReduction`). */
   primaryReduction: number
-  gearRatios: number[]
-  frontSprocketTeeth: number
-  rearSprocketTeeth: number
+  gearRatios: MtGearFormInput[]
+  finalDrive: FinalDriveFormInput
+  circumferenceMode: CircumferenceInputMode
+  tireSpec: string
   wheelCircumferenceMm: number
   redlineRpm: number
 }
 
+/** One free-form note field: a label the user assigns (defaults cover the
+ *  common CVT tuning params) and a value they fill in by hand. Neither side
+ *  is computed — see `drivetrain.ts`'s header comment for why CVT tuning
+ *  isn't modelled as a geometry calculator. */
+export interface CvtNoteField {
+  label: string
+  value: string
+}
+
 export interface CvtFormState {
-  ratioLow: number
-  ratioHigh: number
-  finalReduction: number
+  /** Wheel circumference used for the CVT's own log-inversion view (kept
+   *  separate from MT's so switching kind doesn't clobber either). */
   wheelCircumferenceMm: number
-  maxRpm: number
+  /** Free-form tuning notes, e.g. 前普利尺寸/珠重/彈簧硬度/開閉盤規格/終傳比. */
+  notes: CvtNoteField[]
+}
+
+function defaultMtGear(ratio: number): MtGearFormInput {
+  return { mode: 'ratio', ratio, drivenTeeth: 0, driveTeeth: 0 }
 }
 
 const DEFAULT_MT: MtFormState = {
   primaryReduction: 2.833,
-  gearRatios: [2.615, 1.812, 1.409, 1.16, 1.0, 0.885],
-  frontSprocketTeeth: 15,
-  rearSprocketTeeth: 45,
+  gearRatios: [2.615, 1.812, 1.409, 1.16, 1.0, 0.885].map(defaultMtGear),
+  finalDrive: { mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 },
+  circumferenceMode: 'direct',
+  tireSpec: '120/70-17',
   wheelCircumferenceMm: 1870,
   redlineRpm: 10000,
 }
 
+/** Defaults for the CVT free-form note fields — labels are pre-filled from
+ *  the user's own domain vocabulary; values start blank for the user to fill
+ *  in per recorded run. */
+function defaultCvtNotes(): CvtNoteField[] {
+  return [
+    { label: '前普利尺寸', value: '' },
+    { label: '起始檔位位置', value: '' },
+    { label: '最終檔位位置', value: '' },
+    { label: '套管長度', value: '' },
+    { label: '珠重', value: '' },
+    { label: '珠溝形狀', value: '' },
+    { label: '彈簧硬度', value: '' },
+    { label: '開閉盤規格', value: '' },
+    { label: '終傳比（三軸減速，如 13*41T）', value: '' },
+    { label: '輪胎規格', value: '' },
+  ]
+}
+
 const DEFAULT_CVT: CvtFormState = {
-  ratioLow: 2.4,
-  ratioHigh: 0.9,
-  finalReduction: 8,
   wheelCircumferenceMm: 1400,
-  maxRpm: 8000,
+  notes: defaultCvtNotes(),
+}
+
+/** Turn one gear's UI form input into the domain layer's {@link GearRatioInput}
+ *  — only the ACTIVE mode's field(s) are forwarded (not both), so a stale
+ *  ratio left over from before the user switched to teeth-entry (or vice
+ *  versa) can't silently win over `resolveGearRatio`'s "ratio wins if both
+ *  are set" precedence. */
+function toGearRatioInput(g: MtGearFormInput): GearRatioInput {
+  return g.mode === 'teeth' ? { drivenTeeth: g.drivenTeeth, driveTeeth: g.driveTeeth } : { ratio: g.ratio }
+}
+
+/** Turn the final-drive UI form input into the domain layer's {@link
+ *  FinalDriveInput} — same active-mode-only forwarding as {@link
+ *  toGearRatioInput}. */
+function toFinalDriveInput(f: FinalDriveFormInput): FinalDriveInput {
+  return f.mode === 'teeth' ? { frontTeeth: f.frontTeeth, rearTeeth: f.rearTeeth } : { ratio: f.ratio }
+}
+
+/**
+ * Turn the store's UI-facing {@link MtFormState} into the domain layer's
+ * {@link MtDrivetrainSpec}, ready for `computeMtGearTable`/`mtGearSpeedLine`.
+ * Resolves the wheel circumference from whichever mode is active (tire spec
+ * string, parsed via `tireSpecToCircumferenceMm`, or the direct mm override)
+ * — an invalid/unparsable tire spec resolves to NaN circumference, which
+ * `computeMtGearTable` already treats as "invalid spec" (returns `[]`), so
+ * the panel's existing precondition-hint path covers it without extra
+ * plumbing here.
+ */
+export function toMtDrivetrainSpec(mt: MtFormState): MtDrivetrainSpec {
+  const wheelCircumferenceMm =
+    mt.circumferenceMode === 'tire' ? tireSpecToCircumferenceMm(mt.tireSpec) : mt.wheelCircumferenceMm
+  return {
+    primaryReduction: mt.primaryReduction > 0 ? mt.primaryReduction : undefined,
+    gearRatios: mt.gearRatios.map(toGearRatioInput),
+    finalDrive: toFinalDriveInput(mt.finalDrive),
+    wheelCircumferenceMm,
+    redlineRpm: mt.redlineRpm,
+  }
 }
 
 const MAX_GEARS = 6
 
-const STORAGE_KEY = 'aracer-loga.drivetrain.v1'
+// v1 -> v2: MT's gearRatios/finalDrive/circumference shape changed from
+// plain numbers to either/or ratio-or-teeth objects (decisions #12/#13), and
+// CVT dropped its geometry-calculator fields entirely in favour of free-form
+// notes. Old (v1) data doesn't structurally match the new shape (e.g. v1's
+// `mt.gearRatios` is `number[]`, v2's is `MtGearFormInput[]`), so rather than
+// attempt a field-by-field migration that could silently misinterpret old
+// numbers under new field names, v2 simply starts fresh from defaults when
+// the persisted payload doesn't look like v2 shape — the old v1 key is left
+// alone (not deleted) rather than overwritten, in case that's useful later.
+const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
 
 interface PersistedDrivetrain {
   kind: DrivetrainKind
@@ -54,10 +164,45 @@ interface PersistedDrivetrain {
   inversionWheelCircumferenceMm: number
 }
 
+/** True when `v` has at least the v2 shape's distinguishing fields (as
+ *  opposed to v1's flat-number shape, or garbage). Deliberately loose — this
+ *  is a "does this look sane enough to spread over defaults" check, not a
+ *  full schema validation; any missing/extra fields are handled by the
+ *  `{ ...DEFAULT, ...persisted }` merge in `loadPersisted`'s caller. */
+function looksLikeV2Mt(v: unknown): v is Partial<MtFormState> {
+  if (v == null || typeof v !== 'object') return false
+  const m = v as Record<string, unknown>
+  if (m.gearRatios != null && !Array.isArray(m.gearRatios)) return false
+  if (Array.isArray(m.gearRatios) && m.gearRatios.length > 0) {
+    const g0 = m.gearRatios[0]
+    if (typeof g0 !== 'object' || g0 == null || Array.isArray(g0)) return false
+  }
+  if (m.finalDrive != null && (typeof m.finalDrive !== 'object' || Array.isArray(m.finalDrive))) return false
+  return true
+}
+
+function looksLikeV2Cvt(v: unknown): v is Partial<CvtFormState> {
+  if (v == null || typeof v !== 'object') return false
+  const c = v as Record<string, unknown>
+  if (c.notes != null && !Array.isArray(c.notes)) return false
+  // v1 had numeric ratioLow/ratioHigh/finalReduction/maxRpm fields — if any of
+  // those are present it's a v1 payload, not v2 (v2 has no such fields).
+  if ('ratioLow' in c || 'ratioHigh' in c || 'finalReduction' in c || 'maxRpm' in c) return false
+  return true
+}
+
 function loadPersisted(): Partial<PersistedDrivetrain> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as Partial<PersistedDrivetrain>) : {}
+    if (!raw) return {}
+    const data = JSON.parse(raw) as Partial<PersistedDrivetrain>
+    return {
+      kind: data.kind === 'mt' || data.kind === 'cvt' ? data.kind : undefined,
+      mt: looksLikeV2Mt(data.mt) ? data.mt : undefined,
+      cvt: looksLikeV2Cvt(data.cvt) ? data.cvt : undefined,
+      inversionWheelCircumferenceMm:
+        typeof data.inversionWheelCircumferenceMm === 'number' ? data.inversionWheelCircumferenceMm : undefined,
+    }
   } catch {
     return {}
   }
@@ -76,9 +221,14 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
   const mt = ref<MtFormState>({
     ...DEFAULT_MT,
     ...persisted.mt,
-    gearRatios: persisted.mt?.gearRatios ? [...persisted.mt.gearRatios] : [...DEFAULT_MT.gearRatios],
+    gearRatios: persisted.mt?.gearRatios ? persisted.mt.gearRatios.map((g) => ({ ...g })) : DEFAULT_MT.gearRatios.map((g) => ({ ...g })),
+    finalDrive: { ...DEFAULT_MT.finalDrive, ...persisted.mt?.finalDrive },
   })
-  const cvt = ref<CvtFormState>({ ...DEFAULT_CVT, ...persisted.cvt })
+  const cvt = ref<CvtFormState>({
+    ...DEFAULT_CVT,
+    ...persisted.cvt,
+    notes: persisted.cvt?.notes ? persisted.cvt.notes.map((n) => ({ ...n })) : defaultCvtNotes(),
+  })
   // Wheel circumference used for LOG INVERSION (Layer 2) — separate from the
   // calculator spec's circumference above since a user may want to invert a
   // log without having filled in a full calculator spec (or vice versa).
@@ -106,21 +256,39 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     kind.value = k
   }
 
-  function setMt(patch: Partial<MtFormState>): void {
+  function setMt(patch: Partial<Omit<MtFormState, 'gearRatios' | 'finalDrive'>>): void {
     mt.value = { ...mt.value, ...patch }
   }
 
-  function setCvt(patch: Partial<CvtFormState>): void {
-    cvt.value = { ...cvt.value, ...patch }
+  function setFinalDrive(patch: Partial<FinalDriveFormInput>): void {
+    mt.value = { ...mt.value, finalDrive: { ...mt.value.finalDrive, ...patch } }
   }
 
-  /** Set a single gear's ratio by 1-based gear number (extends the array with
-   *  zeros if needed, clamped to MAX_GEARS). */
-  function setGearRatio(gear: number, value: number): void {
+  function setCvtWheelCircumferenceMm(mm: number): void {
+    cvt.value = { ...cvt.value, wheelCircumferenceMm: mm }
+  }
+
+  function setCvtNote(index: number, patch: Partial<CvtNoteField>): void {
+    if (index < 0 || index >= cvt.value.notes.length) return
+    const next = [...cvt.value.notes]
+    next[index] = { ...next[index], ...patch }
+    cvt.value = { ...cvt.value, notes: next }
+  }
+
+  function addCvtNote(): void {
+    cvt.value = { ...cvt.value, notes: [...cvt.value.notes, { label: '', value: '' }] }
+  }
+
+  function removeCvtNote(index: number): void {
+    cvt.value = { ...cvt.value, notes: cvt.value.notes.filter((_, i) => i !== index) }
+  }
+
+  /** Patch a single gear's ratio-input fields by 1-based gear number. */
+  function setGearRatio(gear: number, patch: Partial<MtGearFormInput>): void {
     if (gear < 1 || gear > MAX_GEARS) return
     const next = [...mt.value.gearRatios]
-    while (next.length < gear) next.push(0)
-    next[gear - 1] = value
+    while (next.length < gear) next.push(defaultMtGear(0))
+    next[gear - 1] = { ...next[gear - 1], ...patch }
     mt.value = { ...mt.value, gearRatios: next }
   }
 
@@ -128,7 +296,7 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
   function setGearCount(count: number): void {
     const n = Math.max(1, Math.min(MAX_GEARS, Math.round(count)))
     const next = mt.value.gearRatios.slice(0, n)
-    while (next.length < n) next.push(0)
+    while (next.length < n) next.push(defaultMtGear(0))
     mt.value = { ...mt.value, gearRatios: next }
   }
 
@@ -143,7 +311,11 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     inversionWheelCircumferenceMm,
     setKind,
     setMt,
-    setCvt,
+    setFinalDrive,
+    setCvtWheelCircumferenceMm,
+    setCvtNote,
+    addCvtNote,
+    removeCvtNote,
     setGearRatio,
     setGearCount,
     setInversionWheelCircumferenceMm,
