@@ -212,6 +212,143 @@ describe('lapStore', () => {
     expect(s.excluded).toEqual([1])
   })
 
+  describe('lap-distance band', () => {
+    // A straight track along longitude: 1 degree of lon ~= 111194.9 m at lat 0,
+    // so distances are easy to reason about ("1 index unit" per lat/lon sample).
+    const M_PER_DEG_LON = 111194.92664455874
+
+    /** A lap spanning `steps` degrees of longitude from a shared straight track. */
+    function distLap(index: number, steps: number): Lap {
+      return { index, startIdx: 0, endIdx: steps, lapTimeMs: 50000 }
+    }
+
+    function straightTrack(lengthIdx: number): GpsTrack {
+      return makeTrack(
+        Array.from({ length: lengthIdx }, () => 0),
+        Array.from({ length: lengthIdx }, (_, i) => i),
+      )
+    }
+
+    it('starts with no lap-distance band and no distance-band exclusions', () => {
+      const s = useLapStore()
+      expect(s.lapDistanceBand).toBeNull()
+      expect(s.distanceBandExcluded).toEqual([])
+    })
+
+    it('setting a distance band folds out-of-band-distance laps into the excluded set', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      // Laps of 5 / 10 / 15 index-degrees -> ~555974 / 1111949 / 1667924 m.
+      s.setLaps([
+        { index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 50000 },
+        { index: 1, startIdx: 0, endIdx: 10, lapTimeMs: 50000 },
+        { index: 2, startIdx: 0, endIdx: 15, lapTimeMs: 50000 },
+      ])
+      s.setLapDistanceBand({ minM: 8 * M_PER_DEG_LON, maxM: 12 * M_PER_DEG_LON })
+      // Lap 0 (5 deg, too short) and lap 2 (15 deg, too long) are out of band.
+      expect([...s.distanceBandExcluded].sort()).toEqual([0, 2])
+      expect([...s.excluded].sort()).toEqual([0, 2])
+      expect(s.isExcluded(0)).toBe(true)
+      expect(s.isExcluded(1)).toBe(false)
+      // Distance-band exclusion is NOT a manual exclusion.
+      expect(s.isManuallyExcluded(0)).toBe(false)
+    })
+
+    it('clearing the distance band restores the previous (manual-only) excluded set', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      s.setLaps([distLap(0, 5), distLap(1, 10)])
+      s.toggleExcluded(0)
+      s.setLapDistanceBand({ minM: 8 * M_PER_DEG_LON, maxM: 12 * M_PER_DEG_LON })
+      expect([...s.excluded].sort()).toEqual([0])
+      s.clearLapDistanceBand()
+      expect(s.lapDistanceBand).toBeNull()
+      expect(s.excluded).toEqual([0])
+    })
+
+    it('an all-null distance band is normalised to no constraint', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      s.setLaps([distLap(0, 5)])
+      s.setLapDistanceBand({ minM: null, maxM: null })
+      expect(s.lapDistanceBand).toBeNull()
+      expect(s.excluded).toEqual([])
+    })
+
+    it('an only-max distance band excludes only the long laps', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      s.setLaps([distLap(0, 5), distLap(1, 10), distLap(2, 15)])
+      s.setLapDistanceBand({ minM: null, maxM: 12 * M_PER_DEG_LON })
+      expect(s.excluded).toEqual([2])
+    })
+
+    it('exclusionReason identifies distance-band exclusion distinctly from time-band', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      s.setLaps([distLap(0, 5), distLap(1, 10)])
+      s.setLapDistanceBand({ minM: 8 * M_PER_DEG_LON, maxM: 12 * M_PER_DEG_LON })
+      expect(s.exclusionReason(0)).toBe('distBand')
+      expect(s.exclusionReason(1)).toBeNull()
+    })
+
+    it('time band and distance band combine: a lap must pass BOTH to be included', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      // Lap 0: in time band (48s) but too short in distance (5 deg).
+      // Lap 1: in both bands (50s, 10 deg).
+      // Lap 2: out of time band (60s) but in distance band (10 deg).
+      s.setLaps([
+        { index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 48000 },
+        { index: 1, startIdx: 0, endIdx: 10, lapTimeMs: 50000 },
+        { index: 2, startIdx: 0, endIdx: 10, lapTimeMs: 60000 },
+      ])
+      s.setLapTimeBand({ minSec: 46, maxSec: 53 })
+      s.setLapDistanceBand({ minM: 8 * M_PER_DEG_LON, maxM: 12 * M_PER_DEG_LON })
+      // Lap 0 fails distance; lap 2 fails time; only lap 1 passes both.
+      expect([...s.excluded].sort()).toEqual([0, 2])
+      expect(s.isExcluded(1)).toBe(false)
+      expect(s.exclusionReason(0)).toBe('distBand')
+      expect(s.exclusionReason(2)).toBe('timeBand')
+    })
+
+    it('distance band composes with a manual exclusion and the time band (union, de-duplicated)', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      s.setLaps([
+        { index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 48000 }, // manual
+        { index: 1, startIdx: 0, endIdx: 5, lapTimeMs: 60000 }, // out-of-time-band AND out-of-distance-band
+        { index: 2, startIdx: 0, endIdx: 10, lapTimeMs: 50000 }, // passes both
+      ])
+      s.toggleExcluded(0) // manual
+      s.setLapTimeBand({ minSec: 46, maxSec: 53 }) // out-of-band: lap 1 (60s)
+      s.setLapDistanceBand({ minM: 8 * M_PER_DEG_LON, maxM: 12 * M_PER_DEG_LON }) // out-of-band: laps 0, 1 (5 deg)
+      expect([...s.excluded].sort()).toEqual([0, 1])
+      // Lap 1 is excluded for two reasons but appears once.
+      expect(s.excluded.filter((x) => x === 1)).toHaveLength(1)
+    })
+
+    it('clearExcluded clears manual exclusions but leaves distance-band exclusions', () => {
+      const s = useLapStore()
+      s.setTrack(straightTrack(20))
+      s.setLaps([distLap(0, 5), distLap(1, 10)])
+      s.toggleExcluded(1)
+      s.setLapDistanceBand({ minM: 8 * M_PER_DEG_LON, maxM: 12 * M_PER_DEG_LON })
+      s.clearExcluded()
+      expect(s.manualExcluded).toEqual([])
+      // The distance band's out-of-band lap (index 0) survives clearExcluded.
+      expect(s.excluded).toEqual([0])
+    })
+
+    it('setting a distance band with no track yet excludes nothing (never crashes)', () => {
+      const s = useLapStore()
+      s.setLaps([distLap(0, 5)])
+      s.setLapDistanceBand({ minM: 1, maxM: 2 })
+      expect(s.distanceBandExcluded).toEqual([])
+      expect(s.excluded).toEqual([])
+    })
+  })
+
   it('starts with an empty sector-invalid set (no track, no gates)', () => {
     const s = useLapStore()
     expect(s.sectorInvalid).toEqual([])
@@ -311,7 +448,7 @@ describe('lapStore', () => {
     const s = useLapStore()
     s.setLaps([lap(0, 48), lap(1, 60)])
     s.setLapTimeBand({ minSec: 46, maxSec: 53 })
-    expect(s.exclusionReason(1)).toBe('band')
+    expect(s.exclusionReason(1)).toBe('timeBand')
     expect(s.exclusionReason(0)).toBeNull()
   })
 
