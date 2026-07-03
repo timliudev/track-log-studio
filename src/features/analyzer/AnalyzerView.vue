@@ -2,6 +2,7 @@
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
+import { GridLayout, GridItem } from 'grid-layout-plus'
 import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
@@ -9,6 +10,7 @@ import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
 import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
+import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
@@ -17,6 +19,8 @@ import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
+import { STATIC_CARD_IDS, chartItemId } from '@/domain/layout/dashboardLayout'
+import DashboardCard from '@/components/DashboardCard.vue'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
@@ -328,6 +332,61 @@ const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.lengt
 // How many laps fail the sector-gate-crossing check (0 when no gates are
 // confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
 const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
+
+// --- #8: draggable/resizable dashboard grid (grid-layout-plus) ---
+const chartIds = computed(() => charts.value.map((c) => c.id))
+const { layout, cols, breakpoints, isMobile, isDraggable, isResizable, resetLayout } =
+  useDashboardLayout(chartIds)
+
+// The align panels (mapalign/lapalign) only render when their "≥2 laps
+// selected" condition holds (showMapAlign/showAlign, unchanged rules from
+// before the grid) — an empty GridItem for a hidden card would otherwise
+// leave a draggable blank box on the dashboard. `visibleLayout` filters them
+// out of what's actually PASSED to GridLayout while `layout` itself (the
+// persisted array) keeps their saved position so it's there again the next
+// time laps get selected. GridLayout's `update:layout` (drag/resize/compact)
+// fires with the full array of items IT knows about (i.e. already only the
+// visible ones), so writing straight back into `layout` here would drop the
+// hidden entries — instead we merge: keep every hidden item from `layout`
+// unchanged, and take every visible item's new position from the emitted
+// array.
+//
+// The setter ignores writes while on the MOBILE breakpoint: grid-layout-plus's
+// own `responsive` engine reflows the single-column mobile arrangement through
+// this same `update:layout` event, and merging THAT back into `layout` would
+// leave the desktop arrangement corrupted with 1-column positions the next
+// time the viewport widens back out (without a page reload to re-seed from
+// localStorage) — see useDashboardLayout's doc for the same rule applied to
+// persistence.
+const visibleLayout = computed<typeof layout.value>({
+  get: () =>
+    layout.value.filter((it) => {
+      if (it.i === STATIC_CARD_IDS.mapAlign) return showMapAlign.value
+      if (it.i === STATIC_CARD_IDS.lapAlign) return showAlign.value
+      return true
+    }),
+  set: (next) => {
+    if (isMobile.value) return
+    const nextById = new Map(next.map((it) => [it.i, it]))
+    layout.value = layout.value.map((it) => nextById.get(it.i) ?? it)
+  },
+})
+
+function onResetLayout(): void {
+  if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
+}
+
+/** Per-chart card title: numbered by POSITION among same-kind charts (1-based,
+ *  in `charts` array order) so titles stay short and stable-looking even
+ *  though the underlying grid-item id is keyed by the chart's store id (see
+ *  chartItemId) — the two numbering schemes are deliberately independent. */
+function chartTitle(chart: (typeof charts.value)[number]): string {
+  const sameKind = charts.value.filter((c) => c.kind === chart.kind)
+  const n = sameKind.indexOf(chart) + 1
+  return chart.kind === 'scatter'
+    ? t('analyzer.layout.cardScatterChart', { n })
+    : t('analyzer.layout.cardChart', { n })
+}
 </script>
 
 <template>
@@ -350,162 +409,235 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
             {{ t('analyzer.distance') }}
           </button>
         </div>
-      </div>
-
-      <div class="card">
-        <TrackMap
-          :track="track"
-          :cursor-idx="cursorIdx"
-          :line="lapStore.line"
-          :highlight-laps="highlightLaps"
-          :focus-range="focusRange"
-          :color-values="colorValues"
-          :colormap="trackColormap"
-          :gates="mapGates"
-          :extrema-markers="mapExtremaMarkers"
-          @cursor="analyzer.setCursor"
-          @update:line="lapStore.setLine($event)"
-          @update:gate="onUpdateGate"
-        />
-        <div v-if="heatNorm" class="tc-legend">
-          <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
-          <span class="tc-bar" :style="{ background: legendGradient }" />
-          <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
-          <span class="tc-name">{{ trackChannel }}</span>
-        </div>
-        <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
-        <div class="laps">
-          <span class="lap-count">{{
-            lapStore.excluded.length > 0
-              ? t('analyzer.lapCountExcluded', { n: laps.length, x: lapStore.excluded.length })
-              : t('analyzer.lapCount', { n: laps.length })
-          }}</span>
-          <button type="button" class="reset" @click="resetLine">
-            {{ t('analyzer.resetLine') }}
+        <div class="layout-tools">
+          <span v-if="!isMobile" class="drag-hint">{{ t('analyzer.layout.dragHint') }}</span>
+          <button type="button" class="reset-layout" @click="onResetLayout">
+            {{ t('analyzer.layout.resetLayout') }}
           </button>
         </div>
-        <div class="band" role="group" :aria-label="t('analyzer.lapBand')">
-          <span class="band-label">{{ t('analyzer.lapBand') }}</span>
-          <input
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.1"
-            class="band-input"
-            :value="bandMin ?? ''"
-            :placeholder="t('analyzer.lapBandMin')"
-            :aria-label="t('analyzer.lapBandMin')"
-            @input="onBandInput('min', $event)"
-          />
-          <span class="band-sep">–</span>
-          <input
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.1"
-            class="band-input"
-            :value="bandMax ?? ''"
-            :placeholder="t('analyzer.lapBandMax')"
-            :aria-label="t('analyzer.lapBandMax')"
-            @input="onBandInput('max', $event)"
-          />
-          <button
-            v-if="lapStore.lapTimeBand"
-            type="button"
-            class="band-clear"
-            @click="lapStore.clearLapTimeBand()"
+      </div>
+
+      <!-- #8: draggable/resizable dashboard grid (grid-layout-plus). Drag is
+           restricted to each card's own `.drag-handle` header (DashboardCard's
+           title bar) via `dragAllowFrom`, so content interactions (canvas
+           pan/zoom, table row clicks, form inputs) never start a drag.
+           `responsive` + `cols` collapse to a single column below the mobile
+           breakpoint (useDashboardLayout's isMobile), where drag/resize are
+           also disabled (isDraggable/isResizable) — see that composable's doc
+           for why the mobile reflow is never persisted. -->
+      <GridLayout
+        v-model:layout="visibleLayout"
+        :col-num="cols.lg"
+        :cols="cols"
+        :breakpoints="breakpoints"
+        :responsive="true"
+        :is-draggable="isDraggable"
+        :is-resizable="isResizable"
+        :row-height="24"
+        :margin="[12, 12]"
+        :vertical-compact="true"
+        :use-css-transforms="true"
+      >
+        <template #item="{ item }">
+          <GridItem
+            :i="item.i"
+            :x="item.x"
+            :y="item.y"
+            :w="item.w"
+            :h="item.h"
+            :is-draggable="isDraggable"
+            :is-resizable="isResizable"
+            drag-allow-from=".drag-handle"
           >
-            {{ t('analyzer.lapBandClear') }}
-          </button>
-          <span v-if="bandExcludedCount > 0" class="band-count">
-            {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
-          </span>
-        </div>
-        <div class="band" role="group" :aria-label="t('analyzer.lapDistanceBand')">
-          <span class="band-label">{{ t('analyzer.lapDistanceBand') }}</span>
-          <input
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.001"
-            class="band-input"
-            :value="distBandMin ?? ''"
-            :placeholder="t('analyzer.lapDistanceBandMin')"
-            :aria-label="t('analyzer.lapDistanceBandMin')"
-            @input="onDistBandInput('min', $event)"
-          />
-          <span class="band-sep">–</span>
-          <input
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.001"
-            class="band-input"
-            :value="distBandMax ?? ''"
-            :placeholder="t('analyzer.lapDistanceBandMax')"
-            :aria-label="t('analyzer.lapDistanceBandMax')"
-            @input="onDistBandInput('max', $event)"
-          />
-          <button
-            v-if="lapStore.lapDistanceBand"
-            type="button"
-            class="band-clear"
-            @click="lapStore.clearLapDistanceBand()"
-          >
-            {{ t('analyzer.lapDistanceBandClear') }}
-          </button>
-          <span v-if="distBandExcludedCount > 0" class="band-count">
-            {{ t('analyzer.lapDistanceBandExcluded', { x: distBandExcludedCount }) }}
-          </span>
-        </div>
-        <SectorPanel
-          :laps="laps"
-          :invalid-count="sectorInvalidCount"
-          :track="track"
-          :time-ms="timeMs"
-          :cursor-idx="cursorIdx"
-        />
-        <TrackChannelPanel :options="channelOptions" :extrema="trackExtrema" :channel-chosen="trackChannelChosen" />
-        <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
-        <GearPanel :session="session" />
-        <TrackFilePanel :track="track" />
-        <LapTable
-          :laps="laps"
-          :track="track"
-          :time-ms="timeMs"
-          :session="session"
-          :has-ecu-laps="hasEcuLaps"
-          @select="onLapSelect"
-        />
-      </div>
+            <DashboardCard v-if="item.i === 'map'" :title="t('analyzer.layout.cardMap')">
+              <TrackMap
+                fill-height
+                :track="track"
+                :cursor-idx="cursorIdx"
+                :line="lapStore.line"
+                :highlight-laps="highlightLaps"
+                :focus-range="focusRange"
+                :color-values="colorValues"
+                :colormap="trackColormap"
+                :gates="mapGates"
+                :extrema-markers="mapExtremaMarkers"
+                @cursor="analyzer.setCursor"
+                @update:line="lapStore.setLine($event)"
+                @update:gate="onUpdateGate"
+              />
+              <div v-if="heatNorm" class="tc-legend">
+                <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
+                <span class="tc-bar" :style="{ background: legendGradient }" />
+                <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
+                <span class="tc-name">{{ trackChannel }}</span>
+              </div>
+              <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
+              <div class="laps">
+                <span class="lap-count">{{
+                  lapStore.excluded.length > 0
+                    ? t('analyzer.lapCountExcluded', { n: laps.length, x: lapStore.excluded.length })
+                    : t('analyzer.lapCount', { n: laps.length })
+                }}</span>
+                <button type="button" class="reset" @click="resetLine">
+                  {{ t('analyzer.resetLine') }}
+                </button>
+              </div>
+              <div class="band" role="group" :aria-label="t('analyzer.lapBand')">
+                <span class="band-label">{{ t('analyzer.lapBand') }}</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.1"
+                  class="band-input"
+                  :value="bandMin ?? ''"
+                  :placeholder="t('analyzer.lapBandMin')"
+                  :aria-label="t('analyzer.lapBandMin')"
+                  @input="onBandInput('min', $event)"
+                />
+                <span class="band-sep">–</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.1"
+                  class="band-input"
+                  :value="bandMax ?? ''"
+                  :placeholder="t('analyzer.lapBandMax')"
+                  :aria-label="t('analyzer.lapBandMax')"
+                  @input="onBandInput('max', $event)"
+                />
+                <button
+                  v-if="lapStore.lapTimeBand"
+                  type="button"
+                  class="band-clear"
+                  @click="lapStore.clearLapTimeBand()"
+                >
+                  {{ t('analyzer.lapBandClear') }}
+                </button>
+                <span v-if="bandExcludedCount > 0" class="band-count">
+                  {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
+                </span>
+              </div>
+              <div class="band" role="group" :aria-label="t('analyzer.lapDistanceBand')">
+                <span class="band-label">{{ t('analyzer.lapDistanceBand') }}</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.001"
+                  class="band-input"
+                  :value="distBandMin ?? ''"
+                  :placeholder="t('analyzer.lapDistanceBandMin')"
+                  :aria-label="t('analyzer.lapDistanceBandMin')"
+                  @input="onDistBandInput('min', $event)"
+                />
+                <span class="band-sep">–</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.001"
+                  class="band-input"
+                  :value="distBandMax ?? ''"
+                  :placeholder="t('analyzer.lapDistanceBandMax')"
+                  :aria-label="t('analyzer.lapDistanceBandMax')"
+                  @input="onDistBandInput('max', $event)"
+                />
+                <button
+                  v-if="lapStore.lapDistanceBand"
+                  type="button"
+                  class="band-clear"
+                  @click="lapStore.clearLapDistanceBand()"
+                >
+                  {{ t('analyzer.lapDistanceBandClear') }}
+                </button>
+                <span v-if="distBandExcludedCount > 0" class="band-count">
+                  {{ t('analyzer.lapDistanceBandExcluded', { x: distBandExcludedCount }) }}
+                </span>
+              </div>
+            </DashboardCard>
 
-      <div v-if="showMapAlign" class="card">
-        <MapAlignPanel :selected-laps="selectedLaps" />
-      </div>
+            <DashboardCard v-else-if="item.i === 'laptable'" :title="t('analyzer.layout.cardLapTable')">
+              <LapTable
+                :laps="laps"
+                :track="track"
+                :time-ms="timeMs"
+                :session="session"
+                :has-ecu-laps="hasEcuLaps"
+                @select="onLapSelect"
+              />
+            </DashboardCard>
 
-      <div v-if="showAlign" class="card">
-        <LapAlignPanel :selected-laps="selectedLaps" />
-      </div>
+            <DashboardCard v-else-if="item.i === 'sectors'" :title="t('analyzer.layout.cardSectors')">
+              <SectorPanel
+                :laps="laps"
+                :invalid-count="sectorInvalidCount"
+                :track="track"
+                :time-ms="timeMs"
+                :cursor-idx="cursorIdx"
+              />
+            </DashboardCard>
 
-      <div v-for="c in charts" :key="c.id" class="card">
-        <TimeSeriesChart
-          v-if="c.kind === 'timeseries' && session && xValues"
-          :chart="c"
-          :session="session"
-          :x-values="xValues"
-          :x-range="xRange"
-          :external-cursor="cursorIdx"
-          :selected-laps="selectedLaps"
-          @cursor="analyzer.setCursor"
-          @x-zoom="onXZoom"
-        />
-        <ScatterChart
-          v-else-if="c.kind === 'scatter'"
-          :chart="c"
-          :session="session"
-          :selected-laps="selectedLaps"
-        />
-      </div>
+            <DashboardCard v-else-if="item.i === 'trackchannel'" :title="t('analyzer.layout.cardTrackChannel')">
+              <TrackChannelPanel
+                :options="channelOptions"
+                :extrema="trackExtrema"
+                :channel-chosen="trackChannelChosen"
+              />
+            </DashboardCard>
+
+            <DashboardCard v-else-if="item.i === 'acceltest'" :title="t('analyzer.layout.cardAccelTest')">
+              <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
+            </DashboardCard>
+
+            <DashboardCard v-else-if="item.i === 'gear'" :title="t('analyzer.layout.cardGear')">
+              <GearPanel :session="session" />
+            </DashboardCard>
+
+            <DashboardCard v-else-if="item.i === 'trackfile'" :title="t('analyzer.layout.cardTrackFile')">
+              <TrackFilePanel :track="track" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'mapalign' && showMapAlign"
+              :title="t('analyzer.layout.cardMapAlign')"
+            >
+              <MapAlignPanel :selected-laps="selectedLaps" />
+            </DashboardCard>
+
+            <DashboardCard v-else-if="item.i === 'lapalign' && showAlign" :title="t('analyzer.layout.cardLapAlign')">
+              <LapAlignPanel :selected-laps="selectedLaps" />
+            </DashboardCard>
+
+            <template v-else>
+              <template v-for="c in charts" :key="c.id">
+                <DashboardCard v-if="item.i === chartItemId(c.id)" :title="chartTitle(c)">
+                  <TimeSeriesChart
+                    v-if="c.kind === 'timeseries' && session && xValues"
+                    fill-height
+                    :chart="c"
+                    :session="session"
+                    :x-values="xValues"
+                    :x-range="xRange"
+                    :external-cursor="cursorIdx"
+                    :selected-laps="selectedLaps"
+                    @cursor="analyzer.setCursor"
+                    @x-zoom="onXZoom"
+                  />
+                  <ScatterChart
+                    v-else-if="c.kind === 'scatter'"
+                    fill-height
+                    :chart="c"
+                    :session="session"
+                    :selected-laps="selectedLaps"
+                  />
+                </DashboardCard>
+              </template>
+            </template>
+          </GridItem>
+        </template>
+      </GridLayout>
 
       <div class="add-menu">
         <button type="button" class="add" @click="onAddTimeseries">
@@ -568,11 +700,27 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
   background: var(--color-accent);
   color: var(--color-accent-text);
 }
-.card {
-  background: var(--color-surface);
+.layout-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.drag-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.reset-layout {
+  background: var(--color-bg);
+  color: var(--color-text);
   border: 1px solid var(--color-border);
-  border-radius: calc(var(--radius) * 1.5);
-  padding: calc(var(--space) * 1.5);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.reset-layout:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .tc-legend {
   display: flex;
