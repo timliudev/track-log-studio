@@ -13,10 +13,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const items: { id: NavTab; labelKey: string; icon: string }[] = [
-  { id: 'converter', labelKey: 'nav.converter', icon: '⇄' },
-  { id: 'analyzer', labelKey: 'nav.analyzer', icon: '📈' },
-  { id: 'settings', labelKey: 'nav.settings', icon: '⚙' },
+// Inline SVGs (not emoji/Unicode glyphs) so all three tabs share the exact
+// same icon family — same viewBox, stroke width and line-cap style, and
+// they inherit `color` via currentColor so the active/inactive tint applies
+// uniformly. Before this, analyzer used the 📈 emoji, which renders as a
+// fixed-color multi-tone glyph and visibly clashed with the other two
+// monoline symbol icons (#20).
+const items: { id: NavTab; labelKey: string }[] = [
+  { id: 'converter', labelKey: 'nav.converter' },
+  { id: 'analyzer', labelKey: 'nav.analyzer' },
+  { id: 'settings', labelKey: 'nav.settings' },
 ]
 </script>
 
@@ -31,7 +37,53 @@ const items: { id: NavTab; labelKey: string; icon: string }[] = [
       :aria-current="tab === item.id ? 'page' : undefined"
       @click="emit('update:tab', item.id)"
     >
-      <span class="bottom-nav__icon" aria-hidden="true">{{ item.icon }}</span>
+      <svg
+        v-if="item.id === 'converter'"
+        class="bottom-nav__icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M7 4 3 8l4 4" />
+        <path d="M3 8h13" />
+        <path d="M17 12l4 4-4 4" />
+        <path d="M21 16H8" />
+      </svg>
+      <svg
+        v-else-if="item.id === 'analyzer'"
+        class="bottom-nav__icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M4 19V5" />
+        <path d="M4 19h16" />
+        <path d="M7 16l4-5 3 3 5-7" />
+      </svg>
+      <svg
+        v-else
+        class="bottom-nav__icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <path
+          d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+        />
+      </svg>
       <span class="bottom-nav__label">{{ t(item.labelKey) }}</span>
     </button>
   </nav>
@@ -98,8 +150,8 @@ const items: { id: NavTab; labelKey: string; icon: string }[] = [
 }
 
 .bottom-nav__icon {
-  font-size: 1.25rem;
-  line-height: 1;
+  width: 22px;
+  height: 22px;
 }
 
 .bottom-nav__label {
