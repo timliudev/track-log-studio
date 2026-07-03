@@ -40,3 +40,14 @@ export function detectImporter(candidate: ImportCandidate): Importer | undefined
 export function allImportExtensions(): string[] {
   return IMPORTERS.flatMap((imp) => [...imp.extensions])
 }
+
+/**
+ * Extensions (without dots) registered for a single importer id, e.g.
+ * `extensionsForImporter('loga')` -> `['loga']`. Lets UI copy that groups
+ * formats by category (e.g. "ECU logs" vs "GPS logger formats") stay in sync
+ * with the registry instead of hardcoding the extension string.
+ */
+export function extensionsForImporter(id: string): string[] {
+  const imp = IMPORTERS.find((i) => i.id === id)
+  return imp ? [...imp.extensions] : []
+}
