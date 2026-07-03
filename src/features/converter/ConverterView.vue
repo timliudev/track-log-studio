@@ -44,6 +44,12 @@ const { outputFormat } = storeToRefs(useConverterStore())
   grid-template-columns: 1fr 1fr;
   gap: calc(var(--space) * 2);
   align-items: start;
+  /* Grid tracks default to min-width:auto (sized to content's min-content),
+     so a wide child (e.g. VboChannelMap's table) would stretch the whole
+     grid past the viewport instead of letting its own overflow-x:auto
+     container do the scrolling. min-width:0 lets tracks shrink to the
+     available width, same fix as .content in App.vue. */
+  min-width: 0;
 }
 .col {
   display: flex;
@@ -53,6 +59,7 @@ const { outputFormat } = storeToRefs(useConverterStore())
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   padding: calc(var(--space) * 2);
+  min-width: 0;
 }
 @media (max-width: 880px) {
   .grid {
