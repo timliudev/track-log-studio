@@ -68,9 +68,9 @@ A single `.rcnx` file can contain multiple sessions (separate recordings). If mo
 ### 2.5 Supported export formats
 
 - RaceChrono DIY `.nmea` (NMEA 0183 `$GPRMC` + `$RC3`)
-- A calibrated `.loga` (derived channels such as suspension travel written back into a new `.loga`)
 - Racelogic `.vbo` (`_ct.vbo` + `_rc.vbo` + a `_channels.csv` map)
 - A generic `.csv` (for Race Studio 3 / Excel / Python and similar tools; `Time`/`GPS_Lat`/`GPS_Lon`/`GPS_Speed` plus every other channel, one row per sample)
+- A modified `.loga` (derived channels such as suspension travel written back into a new `.loga`; only selectable when the original source is itself a `.loga`)
 
 ---
 
@@ -95,6 +95,7 @@ Under "Output format," choose:
   - `_rc.vbo` (for RaceChrono, channels named with RaceChrono identifiers)
   - `_channels.csv` (a channel cross-reference: ECU channel / description / RaceChrono id / unit / type)
 - **CSV**: automatically exports **every** channel (including derived suspension channels) — no field mapping needed, and no target-app naming constraints beyond Race Studio 3. Each `.loga` produces one `.csv`: columns are `Time`, `GPS_Lat`, `GPS_Lon`, `GPS_Speed`, followed by every other channel (named with its original aRacer channel name), one row per sample. Rows with no GPS fix leave the lat/lon cells empty; samples with no value are left empty too (never `0`). Line endings are `\n` (LF only), UTF-8 without a BOM.
+- **Save modified (.loga)**: writes calibrated suspension travel (and other derived channels) back into a new `.loga` (the original file is left untouched). **Only selectable when the currently loaded source is itself a `.loga`** — if the source is another format (`.nmea`/`.vbo`/`.rcz`/`.xrk`/`.rcnx`), this option is shown disabled with a hint. See section 3.6.
 
 ### 3.3 RC3 field mapping (NMEA mode only)
 
@@ -116,16 +117,29 @@ So you don't have to redo the mapping every time, field mappings can be saved as
 
 ### 3.4 Suspension calibration
 
-If a log contains a `SuspensionAD` voltage channel, you can convert that voltage into travel (mm) under the Settings page's "Suspension calibration," producing a derived channel usable for both conversion and analysis (see section 5.3).
+If a log contains a `SuspensionAD` voltage channel, you can convert that voltage into travel (mm) using the collapsible "Suspension calibration" section below the converter's main controls, producing a derived channel usable for both conversion and analysis (see section 3.4.1). Suspension settings are shared app-wide (the Analyzer reads the same configuration) — only the controls live on the Converter tab.
+
+#### 3.4.1 Suspension calibration parameters
+
+Converts `SuspensionAD` voltage into travel (mm) as a derived channel, usable for both conversion and analysis:
+
+- For each of "Front" and "Rear" independently:
+  - **Enable**: whether calibration is applied to that axis.
+  - **AD source**: which loga voltage channel it maps to.
+  - **Min voltage / Max voltage (mv)**, **Zero voltage (mv)**: voltage endpoints and zero point.
+  - **Min travel / Max travel (mm)**: the corresponding physical travel endpoints.
+  - **Preview**: shows the resulting travel curve/values live, to sanity-check the calibration.
+  - **Output channel**: shows the name of the channel that calibration will produce.
+- **Recover from loaded log**: if the loaded log has both a `SuspensionAD` voltage channel and known ECU travel data, this feature can back-calculate the calibration parameters (r² is the goodness-of-fit; since the 5 parameters can't be uniquely recovered from the data, the result is shown under an assumed 0–5000mv voltage range). If there isn't enough data, nothing is configured, or travel is constant, it reports that recovery isn't possible.
 
 ### 3.5 Batch convert and download
 
 1. After setting up the output format (and the RC3 mapping, if applicable), click "Convert."
 2. Once done, the "Results" section lists every output file — download each individually, or use "Download all (ZIP)" to get everything at once.
 
-### 3.6 Saving a calibrated .loga
+### 3.6 Saving a modified .loga
 
-If you've enabled suspension calibration in Settings, and the loaded log contains the matching `SuspensionAD` channel, you can go to "Settings → Save calibrated .loga" to write the calibrated travel data into a **new** `.loga` (the original file is left untouched; existing matching columns are replaced, otherwise new ones are appended). Save a single file, or "Save all (ZIP)" to batch-export.
+If the currently loaded source is itself a `.loga`, choose "Save modified (.loga)" under "Output format"; if you've also enabled suspension calibration (section 3.4) and the log contains the matching `SuspensionAD` channel, this writes the calibrated travel data into a **new** `.loga` (the original file is left untouched; existing matching columns are replaced, otherwise new ones are appended). Save a single file, or "Save all (ZIP)" to batch-export. If the original source isn't a `.loga` (e.g. `.nmea`/`.vbo`/`.rcz`/`.xrk`/`.rcnx`), this format option is disabled.
 
 ---
 
@@ -272,18 +286,7 @@ This panel sits after Sector / Track channel markers / Acceleration test / Gear 
 
 Times shown in the Analyzer and Converter are converted according to the time zone set here: choose "Auto (browser)," or pick a whole-hour zone manually from UTC-12 to UTC+14.
 
-### 5.3 Suspension calibration
-
-Converts `SuspensionAD` voltage into travel (mm) as a derived channel, usable for both conversion and analysis:
-
-- For "Front" and "Rear" independently:
-  - **Enable**: whether calibration is applied to that axis.
-  - **AD source**: which loga voltage channel it maps from.
-  - **Min voltage / Max voltage (mv)**, **Zero voltage (mv)**: the voltage endpoints and zero point.
-  - **Min travel / Max travel (mm)**: the corresponding real-world travel endpoints.
-  - **Preview**: shows the resulting travel curve/values live, to sanity-check the calibration.
-  - **Output channel**: shows the name of the channel that calibration will produce.
-- **Recover from loaded log**: if the loaded log has both a `SuspensionAD` voltage channel and known ECU travel data, this feature can back-calculate the calibration parameters (r² is the goodness-of-fit; since the 5 parameters can't be uniquely recovered from the data, the result is shown under an assumed 0–5000mv voltage range). If there isn't enough data, nothing is configured, or travel is constant, it reports that recovery isn't possible.
+> Suspension calibration and saving a modified `.loga` have moved to the Converter tab (see sections 3.4 and 3.6) — Settings now only holds general app settings such as theme, language, and time zone.
 
 ---
 
