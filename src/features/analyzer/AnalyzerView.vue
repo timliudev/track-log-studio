@@ -11,6 +11,7 @@ import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
 import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
+import { usePanelState } from '@/composables/usePanelState'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
@@ -338,6 +339,9 @@ const chartIds = computed(() => charts.value.map((c) => c.id))
 const { layout, cols, breakpoints, isMobile, isDraggable, isResizable, resetLayout } =
   useDashboardLayout(chartIds)
 
+// --- #9: per-card collapse (all breakpoints) + single mobile pin ---
+const { isCollapsed, isPinned, toggleCollapsed, togglePinned } = usePanelState(chartIds)
+
 // The align panels (mapalign/lapalign) only render when their "≥2 laps
 // selected" condition holds (showMapAlign/showAlign, unchanged rules from
 // before the grid) — an empty GridItem for a hidden card would otherwise
@@ -449,7 +453,15 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
             :is-resizable="isResizable"
             drag-allow-from=".drag-handle"
           >
-            <DashboardCard v-if="item.i === 'map'" :title="t('analyzer.layout.cardMap')">
+            <DashboardCard
+              v-if="item.i === 'map'"
+              :title="t('analyzer.layout.cardMap')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <TrackMap
                 fill-height
                 :track="track"
@@ -558,7 +570,15 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               </div>
             </DashboardCard>
 
-            <DashboardCard v-else-if="item.i === 'laptable'" :title="t('analyzer.layout.cardLapTable')">
+            <DashboardCard
+              v-else-if="item.i === 'laptable'"
+              :title="t('analyzer.layout.cardLapTable')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <LapTable
                 :laps="laps"
                 :track="track"
@@ -569,7 +589,15 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               />
             </DashboardCard>
 
-            <DashboardCard v-else-if="item.i === 'sectors'" :title="t('analyzer.layout.cardSectors')">
+            <DashboardCard
+              v-else-if="item.i === 'sectors'"
+              :title="t('analyzer.layout.cardSectors')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <SectorPanel
                 :laps="laps"
                 :invalid-count="sectorInvalidCount"
@@ -579,7 +607,15 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               />
             </DashboardCard>
 
-            <DashboardCard v-else-if="item.i === 'trackchannel'" :title="t('analyzer.layout.cardTrackChannel')">
+            <DashboardCard
+              v-else-if="item.i === 'trackchannel'"
+              :title="t('analyzer.layout.cardTrackChannel')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <TrackChannelPanel
                 :options="channelOptions"
                 :extrema="trackExtrema"
@@ -587,32 +623,77 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               />
             </DashboardCard>
 
-            <DashboardCard v-else-if="item.i === 'acceltest'" :title="t('analyzer.layout.cardAccelTest')">
+            <DashboardCard
+              v-else-if="item.i === 'acceltest'"
+              :title="t('analyzer.layout.cardAccelTest')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
             </DashboardCard>
 
-            <DashboardCard v-else-if="item.i === 'gear'" :title="t('analyzer.layout.cardGear')">
+            <DashboardCard
+              v-else-if="item.i === 'gear'"
+              :title="t('analyzer.layout.cardGear')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <GearPanel :session="session" />
             </DashboardCard>
 
-            <DashboardCard v-else-if="item.i === 'trackfile'" :title="t('analyzer.layout.cardTrackFile')">
+            <DashboardCard
+              v-else-if="item.i === 'trackfile'"
+              :title="t('analyzer.layout.cardTrackFile')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <TrackFilePanel :track="track" />
             </DashboardCard>
 
             <DashboardCard
               v-else-if="item.i === 'mapalign' && showMapAlign"
               :title="t('analyzer.layout.cardMapAlign')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
             >
               <MapAlignPanel :selected-laps="selectedLaps" />
             </DashboardCard>
 
-            <DashboardCard v-else-if="item.i === 'lapalign' && showAlign" :title="t('analyzer.layout.cardLapAlign')">
+            <DashboardCard
+              v-else-if="item.i === 'lapalign' && showAlign"
+              :title="t('analyzer.layout.cardLapAlign')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
               <LapAlignPanel :selected-laps="selectedLaps" />
             </DashboardCard>
 
             <template v-else>
               <template v-for="c in charts" :key="c.id">
-                <DashboardCard v-if="item.i === chartItemId(c.id)" :title="chartTitle(c)">
+                <DashboardCard
+                  v-if="item.i === chartItemId(c.id)"
+                  :title="chartTitle(c)"
+                  :collapsed="isCollapsed(item.i)"
+                  :pinned="isPinned(item.i)"
+                  :show-pin="isMobile"
+                  @update:collapsed="toggleCollapsed(item.i)"
+                  @update:pinned="togglePinned(item.i)"
+                >
                   <TimeSeriesChart
                     v-if="c.kind === 'timeseries' && session && xValues"
                     fill-height
