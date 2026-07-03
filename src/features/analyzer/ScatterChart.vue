@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent } from 'vue'
+import { computed, defineAsyncComponent, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAnalyzerStore, type ScatterChartConfig } from '@/stores/analyzerStore'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -15,8 +15,19 @@ import type { GgSeries } from './GgChart.vue'
 // pick for the featured friction-circle use — see `looksLikeForce` below.
 // Lazy: pulls in echarts (~480 kB raw) — async import keeps it in its own
 // chunk, split from the main bundle (see AnalyzerView.vue's defineAsyncComponent
-// comment for the sibling boundary this mirrors).
-const GgChart = defineAsyncComponent(() => import('./GgChart.vue'))
+// comment for the sibling boundary this mirrors). A small delay + loading
+// slot avoids a layout flash on fast connections while still showing
+// feedback once the chunk fetch takes a moment (slow network / cold cache).
+const GgChart = defineAsyncComponent({
+  loader: () => import('./GgChart.vue'),
+  loadingComponent: {
+    setup() {
+      const { t } = useI18n()
+      return () => h('p', { class: 'hint' }, t('analyzer.gg.loading'))
+    },
+  },
+  delay: 200,
+})
 
 const MILLI_G_SCALE = 0.001
 const MAX_POINTS = 5000
