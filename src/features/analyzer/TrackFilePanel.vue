@@ -35,10 +35,14 @@ function setStatus(msg: string, isError: boolean): void {
 function exportCurrent(): void {
   const key = activeKey.value
   if (!key) return
+  // Phase 1 (docs/CLOUD-TRACK-DESIGN.md §7 第一階段): no SHARED library yet,
+  // so the exported file is always a "local override" overlay — trackId null,
+  // geometry in localOverride. See schema.ts / useCircuitPersistence.ts.
   const setup: CircuitSetup = {
+    schemaVersion: 1,
     key,
-    line: lapStore.line,
-    gates: sectorStore.gates,
+    trackId: null,
+    localOverride: { line: lapStore.line, gates: sectorStore.gates },
     columns: lapStore.columns,
     updatedAt: Date.now(),
   }
@@ -52,16 +56,20 @@ async function importFile(e: Event): Promise<void> {
   if (!file) return
   try {
     const text = await file.text()
+    // Tolerant import: accepts both the current versioned shape and a file
+    // exported before this upgrade (no schemaVersion) — see
+    // parsePersonalTrackOverlay's migration path in domain/tracks/schema.ts.
     const setup = importCircuitSetupJson(text)
     await putCircuitSetup(setup)
     // If the imported file is for the circuit currently active, apply it
     // immediately via the store actions (same restore path as auto-restore).
     if (activeKey.value && setup.key === activeKey.value) {
-      if (setup.line) lapStore.setLine(setup.line)
+      const override = setup.localOverride
+      if (override?.line) lapStore.setLine(override.line)
       // Importing a track file is not a manual edit — use `loadDetected` (not
       // `addGate` per gate) so `sectorStore.edited` stays false, same
       // reasoning as the auto-restore path in useCircuitPersistence.ts.
-      sectorStore.loadDetected(setup.gates)
+      if (override) sectorStore.loadDetected(override.gates)
       for (const col of [...lapStore.columns]) lapStore.removeColumn(col.id)
       for (const col of setup.columns) lapStore.addColumn(col.metric)
     }
