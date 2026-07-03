@@ -52,7 +52,16 @@ const props = defineProps<{
    * be shown together without reading as the same marker type. Caller
    * (AnalyzerView) decides when this is populated (single-lap rule).
    */
-  extremaMarkers?: { lat: number; lon: number; value: number; valueFrac: number; kind: 'min' | 'max' }[]
+  extremaMarkers?: {
+    lat: number
+    lon: number
+    value: number
+    valueFrac: number
+    kind: 'min' | 'max'
+    /** `value` pre-formatted for display next to the marker (RaceChrono-style
+     *  apex-speed label) — see useTrackExtrema's `formatExtremumValue`. */
+    label: string
+  }[]
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
@@ -458,13 +467,24 @@ function draw(): void {
   // at a glance when both are shown together on the same lap. Numbering is
   // independent per kind (each starts at 1) so a "min #2" and "max #2" can
   // coexist without implying an order between the two sets.
+  //
+  // RaceChrono-style value label: the marker's own formatted value (e.g. an
+  // apex speed) drawn as small text just above it, so the number reads
+  // directly off the map instead of only via the side-panel list. Themed
+  // text colour (--color-text) with a stroked halo in the surface colour for
+  // contrast against any track/heatmap colour underneath — same halo
+  // technique used for the numbered marker glyph, just inverted (dark text +
+  // light halo instead of white text + no halo) since this label sits OUTSIDE
+  // the coloured marker, over the track/background rather than over the
+  // marker's own fill.
   const extrema = props.extremaMarkers ?? []
   let minSeen = 0
   let maxSeen = 0
   const MARK_R = 9
+  const LABEL_OFFSET_Y = MARK_R + 11 // clears the marker glyph, sits just above it
   extrema.forEach((m) => {
     const p = proj.toPixel(m.lat, m.lon)
-    const label = m.kind === 'min' ? String(++minSeen) : String(++maxSeen)
+    const numberLabel = m.kind === 'min' ? String(++minSeen) : String(++maxSeen)
     ctx.fillStyle = extremumColor(m.valueFrac)
     ctx.beginPath()
     if (m.kind === 'min') {
@@ -486,7 +506,19 @@ function draw(): void {
     ctx.font = 'bold 10px sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(label, p.x, p.y)
+    ctx.fillText(numberLabel, p.x, p.y)
+
+    // Value label, offset above the marker so it doesn't cover the glyph.
+    const ly = p.y - LABEL_OFFSET_Y
+    ctx.font = '11px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.lineWidth = 3
+    ctx.strokeStyle = cssVar('--color-surface')
+    ctx.lineJoin = 'round'
+    ctx.strokeText(m.label, p.x, ly)
+    ctx.fillStyle = cssVar('--color-text')
+    ctx.fillText(m.label, p.x, ly)
   })
 
   // cursor marker

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ref, computed } from 'vue'
-import { useTrackExtrema } from '@/composables/useTrackExtrema'
+import { useTrackExtrema, formatExtremumValue } from '@/composables/useTrackExtrema'
 import { LogSession } from '@/domain/model/LogSession'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Channel, LogMeta } from '@/domain/model/types'
@@ -210,5 +210,50 @@ describe('useTrackExtrema', () => {
     )
     expect(mapExtremaMarkers.value).toHaveLength(1)
     expect(mapExtremaMarkers.value[0].valueFrac).toBe(1)
+  })
+
+  it('mapExtremaMarkers includes a formatted value label for each marker', () => {
+    const n = 160
+    const dip = withFeature(n, 4000, 40, 20, 1000) // min value ~1000
+    const bump = withFeature(n, 4000, 120, 20, 8000) // max value ~8000
+    const data = dip.map((v, i) => (Math.abs(bump[i] - 4000) > Math.abs(v - 4000) ? bump[i] : v))
+    const s = session([{ name: 'RPM', data: Array.from(data) }])
+    const { mapExtremaMarkers } = useTrackExtrema(
+      computed<LogSession | null>(() => s),
+      ref(straightTrack(n)),
+      ref('RPM'),
+      ref(lap(0, n)),
+      ref(true),
+      ref(true),
+    )
+    expect(mapExtremaMarkers.value).toHaveLength(2)
+    for (const m of mapExtremaMarkers.value) {
+      expect(m.label).toBe(formatExtremumValue(m.value))
+      expect(typeof m.label).toBe('string')
+      expect(m.label.length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('formatExtremumValue', () => {
+  it('formats sub-10 magnitudes with 2 decimals (e.g. G-force)', () => {
+    expect(formatExtremumValue(1.2345)).toBe('1.23')
+    expect(formatExtremumValue(-2)).toBe('-2.00')
+  })
+
+  it('formats 10..100 magnitudes with 1 decimal (e.g. speed km/h)', () => {
+    expect(formatExtremumValue(87.65)).toBe('87.7')
+    expect(formatExtremumValue(-45)).toBe('-45.0')
+  })
+
+  it('formats >=100 magnitudes as whole numbers (e.g. RPM)', () => {
+    expect(formatExtremumValue(8532.7)).toBe('8533')
+    expect(formatExtremumValue(-150.4)).toBe('-150')
+  })
+
+  it('formats non-finite values as an em dash', () => {
+    expect(formatExtremumValue(NaN)).toBe('—')
+    expect(formatExtremumValue(Infinity)).toBe('—')
+    expect(formatExtremumValue(-Infinity)).toBe('—')
   })
 })
