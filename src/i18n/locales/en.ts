@@ -28,7 +28,8 @@ export default {
     remove: 'Remove',
     clearAll: 'Clear all',
     sources: {
-      title: 'Supported log sources',
+      title: 'Supported formats',
+      ecuGroup: 'ECU logs ({ext})',
       tested: 'Tested',
       untested: 'Expected to work, untested',
       testedItems: [
@@ -38,6 +39,16 @@ export default {
         'aRacer Logger 2.5 Module — read out via Logger2 Reader',
       ],
       untestedItems: ['RC super', 'RC superXX', 'RC mini X', 'RC mini XX', 'aRacer Race Module 3'],
+      gpsGroup: 'GPS logger / analysis-app formats',
+      gpsFormat: {
+        nmea: 'previously exported NMEA/RC3 log',
+        vbo: 'Racelogic VBOX (Circuit Tools 3 / RaceChrono)',
+        rcz: 'RaceChrono log file',
+        xrk: 'AiM Solo 2 DL / MyChron5',
+        rcnx: 'Qstarz LT-Q6000 (QRacing)',
+      },
+      zipGroup: 'Archives',
+      zipDesc: 'aRacer X tune App share export or any zip of logs — auto-extracted and detected on upload',
     },
     rcnxPicker: {
       title: 'This .rcnx has {n} sessions — pick one to open',
@@ -53,7 +64,7 @@ export default {
     },
   },
   analyzer: {
-    noFiles: 'No logs loaded — use the file bar above to load a .loga, .nmea or .zip file.',
+    noFiles: 'No logs loaded — use "Load files" above; see the ⓘ next to it for supported formats.',
     record: 'Record',
     time: 'Time',
     distance: 'Distance',
