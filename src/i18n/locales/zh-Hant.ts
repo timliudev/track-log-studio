@@ -7,8 +7,8 @@ export default {
     developedBy: 'Developed by',
   },
   nav: {
-    converter: '轉檔器',
-    analyzer: '分析器',
+    converter: '轉換',
+    analyzer: '分析',
     analyzerSoon: '（Phase 4）',
     settings: '設定',
     mainLabel: '主導覽',
