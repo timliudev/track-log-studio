@@ -18,7 +18,7 @@
 |------|------|------|-------------|
 | 1 | #1/#2/#5 文案:格式清單重寫+空狀態+分頁改名 | ✅ `b119683` | 格式清單改由 import registry 動態產生(ⓘ 揭示面板,轉換/分析都看得到) |
 | 1 | #10/#16 散佈圖軸名+resize | ✅ `7e88dc2` | 軸名=echarts name;溢出根因=flex min-width:auto,+min-width:0 修復 |
-| 1 | #17 疊圈X軸消失 + #7 軌跡極值數值標示 | ⏳ | `fix/overlay-axis-map-labels` |
+| 1 | #17 疊圈X軸消失 + #7 軌跡極值數值標示 | ✅ `93da64b` | #17 根因:axes 帶 space:undefined 鍵蓋掉 uPlot 預設→findIncr 放棄畫刻度;#7 標記旁 11px 主題色數值+光暈。⚠️#7 待視覺驗收 |
 | 1 | #3 拖放匯入 + #19 轉換頁溢出 + #20 導覽icon | ✅ `41d915e` | 拖放走同一 intake(含 zip);#19 根因 grid min-width:auto;#20 統一 currentColor SVG。⚠️#19/#20 待視覺驗收 |
 | 1 | #14 有效圈距離區間 | ✅ `6be56f3` | 距離帶與時間帶並存(兩者都要過),預設=合理圈中位數±20%,km 三位小數,+26 tests |
 | 2 | #6 避震校正+另存loga搬轉換頁 | ⏳ | `feature/converter-consolidation` |
