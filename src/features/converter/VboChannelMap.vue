@@ -82,6 +82,11 @@ h3 {
 .table-wrap {
   max-height: 60vh;
   overflow: auto;
+  /* Without this, a flex/grid ancestor sizes this box to the table's
+     min-content width (long unbroken ecu/rcId strings) instead of the
+     available space, defeating the overflow-x scroll below and pushing the
+     whole Converter layout wider than the viewport on mobile. */
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
