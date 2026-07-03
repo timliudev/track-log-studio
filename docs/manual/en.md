@@ -312,8 +312,8 @@ The footer at the bottom of the page shows "build \<sha\> · \<date\>." Include 
 
 | Traditional Chinese | English | Meaning |
 |---|---|---|
-| 轉檔器 | Converter | The tab that converts `.loga` into `.nmea` / `.vbo` |
-| 分析器 | Analyzer | The tab for the track map, lap splitting, and chart analysis |
+| 轉換 | Converter | The tab that converts `.loga` into `.nmea` / `.vbo` |
+| 分析 | Analyzer | The tab for the track map, lap splitting, and chart analysis |
 | 記錄檔 / 記錄 | Log | The uploaded raw track log file (`.loga`, etc.) |
 | 圈次表 | Lap table | The table listing per-lap stats |
 | 切西瓜 | Cutting the track / invalid lap | An abnormal lap where the driving line deviates from the real track (a shortcut); usually excluded manually or via sector checks |

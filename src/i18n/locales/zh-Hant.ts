@@ -7,8 +7,8 @@ export default {
     developedBy: 'Developed by',
   },
   nav: {
-    converter: '轉檔器',
-    analyzer: '分析器',
+    converter: '轉換',
+    analyzer: '分析',
     analyzerSoon: '（Phase 4）',
     settings: '設定',
     mainLabel: '主導覽',
@@ -28,7 +28,8 @@ export default {
     remove: '移除',
     clearAll: '全部清除',
     sources: {
-      title: '支援的 log 來源',
+      title: '支援格式',
+      ecuGroup: 'ECU 記錄（{ext}）',
       tested: '經測試支援',
       untested: '理論上支援但尚未測試',
       testedItems: [
@@ -38,6 +39,16 @@ export default {
         'aRacer Logger 2.5 Module — 透過 Logger2 Reader 讀出',
       ],
       untestedItems: ['RC super', 'RC superXX', 'RC mini X', 'RC mini XX', 'aRacer Race Module 3'],
+      gpsGroup: 'GPS 記錄器／分析軟體格式',
+      gpsFormat: {
+        nmea: '先前已轉出的 NMEA/RC3 記錄',
+        vbo: 'Racelogic VBOX（Circuit Tools 3 / RaceChrono）',
+        rcz: 'RaceChrono 記錄檔',
+        xrk: 'AiM Solo 2 DL / MyChron5',
+        rcnx: 'Qstarz LT-Q6000（QRacing）',
+      },
+      zipGroup: '壓縮包',
+      zipDesc: 'aRacer X tune App 分享輸出或其他 log 壓縮檔，上傳後自動解壓並辨識內容',
     },
     rcnxPicker: {
       title: '這個 .rcnx 檔含 {n} 個 session，請選擇要開啟的一個',
@@ -53,7 +64,7 @@ export default {
     },
   },
   analyzer: {
-    noFiles: '尚未載入記錄，請點選上方「載入記錄」選取 .loga、.nmea 或 .zip 檔案。',
+    noFiles: '尚未載入記錄，請點選上方「載入記錄」；支援格式見按鈕旁的 ⓘ 說明。',
     record: '記錄',
     time: '時間',
     distance: '距離',

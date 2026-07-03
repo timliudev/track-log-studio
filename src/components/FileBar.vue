@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFileStore } from '@/stores/fileStore'
 import { useLogImport } from '@/composables/useLogImport'
-import { sniff, detectImporter, allImportExtensions } from '@/domain/import/registry'
+import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/registry'
 import { extractLogFiles } from '@/domain/import/zip'
 import { listRcnxSessions, type RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
 // Vite-resolved URL of the sql.js wasm binary (same asset the parse worker
@@ -33,6 +33,29 @@ const acceptExtensions = computed(() =>
 const loadTitle = computed(() =>
   t('fileBar.loadTitle', { exts: [...allImportExtensions().map((e) => `.${e}`), '.zip'].join(', ') }),
 )
+
+/** `.ext` string for one importer id, e.g. `dotExt('loga')` -> `.loga`. */
+function dotExt(id: string): string {
+  return extensionsForImporter(id)
+    .map((e) => `.${e}`)
+    .join(' / ')
+}
+
+/**
+ * Format groups shown in the "支援格式" disclosure, each line built from the
+ * registry so the extension text can't go stale as importers are added. The
+ * grouping itself (which formats count as "ECU" vs "GPS logger / analysis
+ * app") is UI taxonomy the registry doesn't encode, so it stays as a small
+ * static list here — only the `.ext` strings are derived.
+ */
+const ecuExt = computed(() => dotExt('loga'))
+const gpsFormats = computed(() => [
+  { id: 'nmea', ext: dotExt('nmea') },
+  { id: 'vbo', ext: dotExt('vbo') },
+  { id: 'rcz', ext: dotExt('rcz') },
+  { id: 'xrk', ext: dotExt('xrk') },
+  { id: 'rcnx', ext: dotExt('rcnx') },
+])
 
 /** Pending .rcnx multi-session choice, shown as a small inline picker. */
 const pendingRcnx = ref<{ id: number; file: File; sessions: RcnxSessionInfo[] } | null>(null)
@@ -163,13 +186,27 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
       <summary class="info-btn" :title="t('fileBar.sources.title')" :aria-label="t('fileBar.sources.title')">ⓘ</summary>
       <div class="sources-panel">
         <p class="src-title">{{ t('fileBar.sources.title') }}</p>
-        <p class="src-label">{{ t('fileBar.sources.tested') }}</p>
-        <ol class="src-list">
+
+        <p class="src-label">{{ t('fileBar.sources.ecuGroup', { ext: ecuExt }) }}</p>
+        <p class="src-label indent">{{ t('fileBar.sources.tested') }}</p>
+        <ol class="src-list indent">
           <li v-for="(item, i) in tm('fileBar.sources.testedItems')" :key="`t${i}`">{{ rt(item) }}</li>
         </ol>
-        <p class="src-label muted">{{ t('fileBar.sources.untested') }}</p>
-        <ol class="src-list muted">
+        <p class="src-label muted indent">{{ t('fileBar.sources.untested') }}</p>
+        <ol class="src-list muted indent">
           <li v-for="(item, i) in tm('fileBar.sources.untestedItems')" :key="`u${i}`">{{ rt(item) }}</li>
+        </ol>
+
+        <p class="src-label">{{ t('fileBar.sources.gpsGroup') }}</p>
+        <ol class="src-list indent">
+          <li v-for="f in gpsFormats" :key="f.id">
+            {{ f.ext }} — {{ t(`fileBar.sources.gpsFormat.${f.id}`) }}
+          </li>
+        </ol>
+
+        <p class="src-label">{{ t('fileBar.sources.zipGroup') }}</p>
+        <ol class="src-list indent">
+          <li>.zip — {{ t('fileBar.sources.zipDesc') }}</li>
         </ol>
       </div>
     </details>
@@ -283,7 +320,9 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
   top: calc(100% + 6px);
   left: 0;
   z-index: 30;
-  width: min(340px, 86vw);
+  width: min(380px, 86vw);
+  max-height: 70vh;
+  overflow-y: auto;
   padding: 10px 14px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -304,6 +343,9 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
   color: var(--color-text-muted);
   font-weight: 400;
 }
+.src-label.indent {
+  margin-left: 0.6em;
+}
 .src-list {
   margin: 0;
   padding-left: 1.4em;
@@ -311,6 +353,9 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
 }
 .src-list.muted {
   color: var(--color-text-muted);
+}
+.src-list.indent {
+  padding-left: 2em;
 }
 .pills {
   display: flex;
