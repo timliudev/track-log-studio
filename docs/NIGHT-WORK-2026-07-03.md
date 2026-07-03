@@ -1,5 +1,8 @@
 # 夜間自動作業報告 — 2026-07-03(02:00 → 08:30)
 
+> **最終狀態(08:1x 收尾):develop `fa2b7b1` = origin,537 tests 全綠,typecheck/build 綠,working tree clean。**
+> 完成 T1–T5 + T9(6/9);T6–T8 因 03:00–05:50 額度中斷未執行,已列入下次待辦。main 未動。
+>
 > 給早上的你:這是今晚全自動作業的完整記錄。基準點 develop `b91c664`(509 tests)。
 > 所有變更都只進 develop(main 未動,等你驗收)。每個任務由獨立 Sonnet 5 sub-agent
 > 在隔離 worktree 完成,feature → develop `--no-ff` 合併,小步 commit。
@@ -16,7 +19,7 @@
 | T6 | Phase 5 合併 UI | ❌ 未執行 | — | 額度中斷吃掉整夜,見事件記錄 |
 | T7 | 彎道偵測接上 UI | ❌ 未執行 | — | 同上,留待下次 |
 | T8 | B6 彈性面板佈局 | ❌ 未執行 | — | 同上,留待下次 |
-| T9 | 使用手冊補新功能(zh+en) | ⏳ 進行中 | — | 08:05 啟動,純文件,08:20 截止 |
+| T9 | 使用手冊補新功能(zh+en) | ✅ 完成 | `docs/manual-update-0703` → `fa2b7b1` | 手冊原已同步,補 2 處 |
 
 ## 執行順序與理由
 
@@ -50,6 +53,10 @@ AnalyzerView.vue 655→603 行;新增 19 個 composable 單元測試(509→528);
 
 齒比計算器的設定(MT/CVT、齒比、齒盤齒數、輪周長、紅線轉速等)現在會自動保存並在重新載入後還原。**範圍選擇:全域**(車輛屬性,不跟賽道走),存 `localStorage`(key `aracer-loga.drivetrain.v1`),完全沿用 settingsStore/suspensionStore 的既有模式(init 時 loadPersisted + deep watch 自動存,try/catch 防隱私模式)。小 JSON 不需要 idb,也就沒有 reactive-Proxy/structured-clone 風險。只動 `drivetrainStore.ts` + 新增 5 個測試(共 537)。
 驗收方式:齒比計算器填一組設定 → F5 重新整理 → 設定應還在。
+
+### T9 — 使用手冊更新 ✅(develop `fa2b7b1`)
+
+盤點後發現手冊在 0702 傍晚就已隨功能同步,只補兩處:§4.4 散佈圖加 echarts 延遲載入的「首次開啟會有載入提示」說明;§4.9 修正「齒比設定不會保存」的過時描述(T4 之後會自動保存)。zh+en 同步。
 
 ### T5 — A2/A3 雲端賽道機制設計文件 ✅(develop `1219390`)
 
