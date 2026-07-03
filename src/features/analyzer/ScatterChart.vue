@@ -139,7 +139,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
     </div>
 
     <p v-if="!xChannel || !yChannel" class="hint">{{ t('analyzer.gg.pickBoth') }}</p>
-    <GgChart v-else :series="ggSeries" :axis-mode="axisMode" />
+    <GgChart v-else :series="ggSeries" :axis-mode="axisMode" :x-name="xChannel" :y-name="yChannel" />
   </section>
 </template>
 
