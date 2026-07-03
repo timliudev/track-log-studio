@@ -22,8 +22,9 @@ export interface TrackExtremaMarker {
  * Magnitude-adaptive decimals so both tiny (e.g. G-force ~1.2) and large (e.g.
  * RPM ~8500) channels read sensibly without a fixed, wrong-for-someone
  * precision: < 10 → 2dp, < 100 → 1dp, else whole numbers. Non-finite → em dash.
- * Pure — matches TrackChannelPanel's own `fmtValue` convention so the map
- * label and the side-panel list agree on the same channel's formatting.
+ * Pure — also used (as `fmtValue`) by TrackChannelPanel's extrema list, so
+ * the map label and the side-panel list always agree on the same channel's
+ * formatting.
  */
 export function formatExtremumValue(v: number): string {
   if (!Number.isFinite(v)) return '—'
