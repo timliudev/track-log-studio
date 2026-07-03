@@ -12,6 +12,23 @@ export interface TrackExtremaMarker {
   /** Value normalised within THIS lap's own extrema set (0..1), for the map's green/red gradient. */
   valueFrac: number
   kind: 'min' | 'max'
+  /** `value` pre-formatted for display (e.g. next to the marker on TrackMap) —
+   *  see {@link formatExtremumValue}. */
+  label: string
+}
+
+/**
+ * Format a channel extremum's value for display (map label / list value).
+ * Magnitude-adaptive decimals so both tiny (e.g. G-force ~1.2) and large (e.g.
+ * RPM ~8500) channels read sensibly without a fixed, wrong-for-someone
+ * precision: < 10 → 2dp, < 100 → 1dp, else whole numbers. Non-finite → em dash.
+ * Pure — matches TrackChannelPanel's own `fmtValue` convention so the map
+ * label and the side-panel list agree on the same channel's formatting.
+ */
+export function formatExtremumValue(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  const a = Math.abs(v)
+  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
 }
 
 /**
@@ -83,6 +100,7 @@ export function useTrackExtrema(
       value: e.value,
       valueFrac: span > 1e-6 ? (e.value - min) / span : 1,
       kind: e.kind,
+      label: formatExtremumValue(e.value),
     }))
   })
 
