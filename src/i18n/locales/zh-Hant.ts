@@ -22,6 +22,7 @@ export default {
   fileBar: {
     load: '載入記錄',
     loadTitle: '支援格式：{exts}',
+    dropHint: '放開以載入檔案',
     rows: '{n} 列',
     error: '解析失敗',
     unsupported: '不支援的檔案格式：{name}',

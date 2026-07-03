@@ -22,6 +22,7 @@ export default {
   fileBar: {
     load: 'Load files',
     loadTitle: 'Supported formats: {exts}',
+    dropHint: 'Drop to load files',
     rows: '{n} rows',
     error: 'Parse failed',
     unsupported: 'Unsupported file format: {name}',
