@@ -52,6 +52,10 @@ const props = defineProps<{
   xName?: string | null
   /** Channel name shown beside the Y axis; see `xName`. */
   yName?: string | null
+  /** #8 — when true, fills the container's height (dashboard grid item) via
+   *  CSS instead of the fixed `height` prop — see UPlotChart's `fillHeight`
+   *  for the same pattern; `resize()` reads the host's own clientHeight. */
+  fillHeight?: boolean
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -134,12 +138,22 @@ function render(): void {
   chart.setOption(buildOption(), true)
 }
 
+/** Mirrors UPlotChart's `targetHeight()`: the host's own measured height in
+ *  fillHeight mode (once laid out), else the fixed `height` prop. */
+function targetHeight(): number {
+  if (props.fillHeight && host.value) {
+    const h = host.value.clientHeight
+    if (h > 0) return h
+  }
+  return props.height ?? 360
+}
+
 function create(): void {
   if (!host.value) return
   destroy()
   chart = echarts.init(host.value, undefined, {
     width: host.value.clientWidth || 400,
-    height: props.height ?? 360,
+    height: targetHeight(),
   })
   render()
 }
@@ -182,7 +196,12 @@ watch(
 </script>
 
 <template>
-  <div ref="host" class="gg-chart-host" :style="{ height: `${props.height ?? 360}px` }" />
+  <div
+    ref="host"
+    class="gg-chart-host"
+    :class="{ fill: fillHeight }"
+    :style="fillHeight ? undefined : { height: `${props.height ?? 360}px` }"
+  />
 </template>
 
 <style scoped>
@@ -195,5 +214,11 @@ watch(
    * the window/panel narrows. See ScatterChart.vue's `.scatter-chart` for
    * the matching fix one level up. */
   min-width: 0;
+}
+/* #8 — fillHeight mode: stretch to the parent's available height (a
+   dashboard grid item's card body) — see UPlotChart's `.fill` for the same
+   pattern. */
+.gg-chart-host.fill {
+  height: 100%;
 }
 </style>

@@ -38,6 +38,9 @@ const props = defineProps<{
   /** Selected laps in selection order (for per-lap coloring), or empty for
    *  whole-session single-color plotting. */
   selectedLaps: Lap[]
+  /** #8 — forwarded to GgChart: fill the dashboard grid item's height instead
+   *  of a fixed pixel height. See GgChart's `fillHeight` prop. */
+  fillHeight?: boolean
 }>()
 
 const { t } = useI18n()
@@ -123,7 +126,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
 </script>
 
 <template>
-  <section class="scatter-chart">
+  <section class="scatter-chart" :class="{ fill: fillHeight }">
     <div class="toolbar">
       <div class="picker">
         <span class="picker-label">{{ t('analyzer.gg.xAxis') }}</span>
@@ -139,7 +142,15 @@ const axisMode = computed<'square' | 'auto'>(() => {
     </div>
 
     <p v-if="!xChannel || !yChannel" class="hint">{{ t('analyzer.gg.pickBoth') }}</p>
-    <GgChart v-else :series="ggSeries" :axis-mode="axisMode" :x-name="xChannel" :y-name="yChannel" />
+    <GgChart
+      v-else
+      class="chart-fill"
+      :series="ggSeries"
+      :axis-mode="axisMode"
+      :x-name="xChannel"
+      :y-name="yChannel"
+      :fill-height="fillHeight"
+    />
   </section>
 </template>
 
@@ -156,6 +167,16 @@ const axisMode = computed<'square' | 'auto'>(() => {
    * shrink and makes the chart overflow instead of shrinking when the
    * window/panel narrows. */
   min-width: 0;
+}
+/* #8 — inside a dashboard grid item's card body: stretch to fill it and let
+   GgChart's own .fill (via fillHeight) claim the remaining space below the
+   toolbar/hint. */
+.scatter-chart.fill {
+  height: 100%;
+}
+.scatter-chart.fill .chart-fill {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .toolbar {
   display: flex;
