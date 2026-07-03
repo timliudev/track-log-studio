@@ -185,6 +185,7 @@ The XY scatter chart is its own chart type: the X and Y axes can be **any two ch
 - **Adaptive axis rule**: when **both** the X and Y channels are signed, force-like data (values spanning both positive and negative, e.g. `TC_Xforce`/`TC_Yforce`), the chart uses square, zero-centred symmetric axes — the classic G-G diagram / friction-circle look, which makes it easy to compare grip symmetry between left/right or braking/acceleration. Any other channel pairing (e.g. RPM vs. speed) uses normal auto-ranged axes instead, with no forced centring or square aspect.
 - **G-G diagram / friction circle (featured example)**: when adding a new scatter chart, if the session has `TC_Xforce`/`TC_Yforce` (aRacer Race Module IMU lateral/longitudinal G, stored in milli-g), those two channels are pre-selected and automatically converted to g units — this is the classic "G-G diagram," plotting the lateral G (cornering) and longitudinal G (braking/accelerating) the car experienced around the track. A shape closer to a full circle indicates more balanced tyre grip usage. If laps are checked in the lap table, each lap is coloured separately for comparison; otherwise the whole session's distribution is shown.
 - If the session doesn't have `TC_Xforce`/`TC_Yforce`, the X/Y pickers start empty and you choose whichever two channels you want to compare.
+- **Loading hint**: the scatter-chart plotting library (echarts) is fairly large, so it's now loaded on demand the first time you add a scatter chart, rather than as part of the initial page load. The first "Add XY scatter chart" click briefly shows a loading indicator inside the card; adding further scatter charts in the same browsing session won't wait again.
 
 ### 4.5 Sector gates (corner validation)
 
@@ -256,7 +257,7 @@ This panel sits after Sector / Track channel markers / Acceleration test / Gear 
 - **Saved circuits list**: expand "N saved track setups" to see each saved circuit's name and last-updated time, with a "Delete" button for each.
 - If the current log has no valid GPS coordinates, the circuit can't be identified, so export is disabled and a hint is shown instead.
 
-> The gear ratio calculator's inputs are currently transient (reset on page reload) — not yet part of local persistence; a natural follow-up is folding it into the track setup above or its own storage.
+> The gear ratio calculator's inputs (MT/CVT choice, per-gear ratios, wheel circumference, etc.) are automatically saved in the browser (localStorage) and persist across reloads and closed tabs — no need to re-enter them each time. This is a vehicle-spec setting, stored separately from the track setup above (which uses IndexedDB, keyed by circuit GPS location).
 
 ---
 
