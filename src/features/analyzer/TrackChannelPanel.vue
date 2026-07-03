@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import type { ChannelExtremum } from '@/domain/analysis/cornerSpeed'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { formatExtremumValue } from '@/composables/useTrackExtrema'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 // A9 — unified 軌跡上色 + 極值標記 control: pick ONE channel (any channel, not
@@ -30,11 +31,10 @@ function colormapPreview(id: ColormapId): string {
   return `linear-gradient(to right, ${colormapSwatches(id, 8).join(',')})`
 }
 
-function fmtValue(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  const a = Math.abs(v)
-  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
-}
+// Formatting delegated to useTrackExtrema's formatExtremumValue so this
+// list and TrackMap's map labels always agree on the same channel's display
+// (magnitude-adaptive decimals — see that function's doc comment).
+const fmtValue = formatExtremumValue
 
 const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
 </script>
