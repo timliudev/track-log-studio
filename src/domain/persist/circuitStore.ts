@@ -1,6 +1,9 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
-import type { LapLine } from '@/domain/analysis/laps'
-import type { LapMetricColumn } from '@/stores/lapStore'
+import {
+  parsePersonalTrackOverlay,
+  TrackSchemaError,
+  type PersonalTrackOverlayV1,
+} from '@/domain/tracks/schema'
 
 const DB_NAME = 'track-log-studio'
 const DB_VERSION = 1
@@ -14,18 +17,13 @@ const STORE_NAME = 'circuits'
  * excluded: it's index-keyed into a specific recording and already reset on
  * file change (see `useLaps`), so persisting it here would be meaningless
  * (and wrong) across different recordings of the same circuit.
+ *
+ * The persisted shape is {@link PersonalTrackOverlayV1}
+ * (docs/CLOUD-TRACK-DESIGN.md §1.3) — this module re-exports it as
+ * `CircuitSetup` for source-compat with existing callers; the two names refer
+ * to the exact same type.
  */
-export interface CircuitSetup {
-  /** Primary key: see {@link circuitKey}. */
-  key: string
-  /** Optional user-friendly label (e.g. "Chiayi Speedway"), editable in the UI. */
-  name?: string
-  line: LapLine | null
-  gates: LapLine[]
-  columns: LapMetricColumn[]
-  /** epoch ms of last save, for display/sorting in a "saved circuits" list. */
-  updatedAt: number
-}
+export type CircuitSetup = PersonalTrackOverlayV1
 
 interface CircuitDbSchema extends DBSchema {
   [STORE_NAME]: {
@@ -50,11 +48,23 @@ function getDb(): Promise<IDBPDatabase<CircuitDbSchema>> {
   return dbPromise
 }
 
-/** Fetch the saved setup for `key`, or null if nothing is saved for it. */
+/**
+ * Fetch the saved setup for `key`, or null if nothing is saved for it.
+ * Tolerant of records written by the pre-v1 (un-versioned) code: they're
+ * migrated in-memory via {@link parsePersonalTrackOverlay} on every read, so
+ * existing users' saved setups keep working across the upgrade without a bulk
+ * idb rewrite. A record that fails to parse (corrupted) is treated as absent
+ * rather than throwing, so a single bad entry can't break restore-on-load.
+ */
 export async function getCircuitSetup(key: string): Promise<CircuitSetup | null> {
   const db = await getDb()
   const value = await db.get(STORE_NAME, key)
-  return value ?? null
+  if (value === undefined) return null
+  try {
+    return parsePersonalTrackOverlay(value)
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -77,11 +87,23 @@ export async function putCircuitSetup(setup: CircuitSetup): Promise<void> {
   await db.put(STORE_NAME, toPlainSetup(setup))
 }
 
-/** List every saved circuit, most-recently-updated first. */
+/**
+ * List every saved circuit, most-recently-updated first. Same tolerant
+ * migration as {@link getCircuitSetup}; a single corrupted/unparseable record
+ * is skipped rather than failing the whole list.
+ */
 export async function listCircuitSetups(): Promise<CircuitSetup[]> {
   const db = await getDb()
   const all = await db.getAll(STORE_NAME)
-  return all.sort((a, b) => b.updatedAt - a.updatedAt)
+  const parsed: CircuitSetup[] = []
+  for (const value of all) {
+    try {
+      parsed.push(parsePersonalTrackOverlay(value))
+    } catch {
+      // Skip corrupted entries — see getCircuitSetup's tolerant-read note.
+    }
+  }
+  return parsed.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** Delete the saved setup for `key`, if any. */
@@ -95,47 +117,20 @@ export function exportCircuitSetupJson(setup: CircuitSetup): string {
   return JSON.stringify(setup, null, 2)
 }
 
-/** Structural validation error for {@link importCircuitSetupJson}. */
-export class CircuitSetupImportError extends Error {}
-
-function isLapLine(v: unknown): v is LapLine {
-  if (typeof v !== 'object' || v === null) return false
-  const o = v as Record<string, unknown>
-  return isLatLon(o.a) && isLatLon(o.b)
-}
-
-function isLatLon(v: unknown): v is { lat: number; lon: number } {
-  if (typeof v !== 'object' || v === null) return false
-  const o = v as Record<string, unknown>
-  return typeof o.lat === 'number' && typeof o.lon === 'number'
-}
-
-function isLapMetric(v: unknown): boolean {
-  if (typeof v !== 'object' || v === null) return false
-  const o = v as Record<string, unknown>
-  if (o.kind === 'lapTime' || o.kind === 'distance' || o.kind === 'delta') return true
-  if (o.kind === 'channel') {
-    return typeof o.channel === 'string' && typeof o.agg === 'string'
-  }
-  if (o.kind === 'sectorTime') {
-    return typeof o.sector === 'number'
-  }
-  return false
-}
-
-function isColumn(v: unknown): v is LapMetricColumn {
-  if (typeof v !== 'object' || v === null) return false
-  const o = v as Record<string, unknown>
-  return typeof o.id === 'number' && isLapMetric(o.metric)
-}
+/** Structural validation error for {@link importCircuitSetupJson}. Re-exported
+ *  from the schema module so existing call sites (e.g. TrackFilePanel) that
+ *  catch this specific class keep working unchanged. */
+export const CircuitSetupImportError = TrackSchemaError
 
 /**
  * Parse and structurally validate a JSON string as a {@link CircuitSetup}
- * (e.g. from a user-selected "本機軌跡檔" .json file). Throws
+ * (e.g. from a user-selected "本機軌跡檔" .json file). Tolerant of BOTH the
+ * current versioned `PersonalTrackOverlayV1` shape and the pre-v1 un-versioned
+ * shape (see {@link parsePersonalTrackOverlay}) — so a track file exported
+ * before this upgrade still imports cleanly. Throws
  * {@link CircuitSetupImportError} with a human-readable reason on anything
- * malformed — bad JSON, missing/wrong-typed fields, or a `line`/gate that
- * isn't a well-formed pair of lat/lon endpoints — so the UI can surface a
- * clear message instead of silently importing garbage.
+ * malformed, so the UI can surface a clear message instead of silently
+ * importing garbage.
  */
 export function importCircuitSetupJson(text: string): CircuitSetup {
   let raw: unknown
@@ -144,36 +139,5 @@ export function importCircuitSetupJson(text: string): CircuitSetup {
   } catch {
     throw new CircuitSetupImportError('Invalid JSON')
   }
-  if (typeof raw !== 'object' || raw === null) {
-    throw new CircuitSetupImportError('Not an object')
-  }
-  const o = raw as Record<string, unknown>
-
-  if (typeof o.key !== 'string' || o.key.length === 0) {
-    throw new CircuitSetupImportError('Missing or invalid "key"')
-  }
-  if (o.name !== undefined && typeof o.name !== 'string') {
-    throw new CircuitSetupImportError('Invalid "name"')
-  }
-  if (o.line !== null && !isLapLine(o.line)) {
-    throw new CircuitSetupImportError('Invalid "line"')
-  }
-  if (!Array.isArray(o.gates) || !o.gates.every(isLapLine)) {
-    throw new CircuitSetupImportError('Invalid "gates"')
-  }
-  if (!Array.isArray(o.columns) || !o.columns.every(isColumn)) {
-    throw new CircuitSetupImportError('Invalid "columns"')
-  }
-  if (typeof o.updatedAt !== 'number') {
-    throw new CircuitSetupImportError('Invalid "updatedAt"')
-  }
-
-  return {
-    key: o.key,
-    name: o.name as string | undefined,
-    line: o.line as LapLine | null,
-    gates: o.gates as LapLine[],
-    columns: o.columns as LapMetricColumn[],
-    updatedAt: o.updatedAt,
-  }
+  return parsePersonalTrackOverlay(raw)
 }

@@ -6,12 +6,33 @@ import {
   type CircuitSetup,
 } from '@/domain/persist/circuitStore'
 import type { LapLine } from '@/domain/analysis/laps'
+import type { LegacyCircuitSetup } from '@/domain/tracks/schema'
 
 function line(n: number): LapLine {
   return { a: { lat: n, lon: n + 1 }, b: { lat: n + 2, lon: n + 3 } }
 }
 
 function fullSetup(): CircuitSetup {
+  return {
+    schemaVersion: 1,
+    key: '24.123,121.456',
+    trackId: null,
+    name: 'Chiayi Speedway',
+    localOverride: { line: line(0), gates: [line(1), line(2), line(3)] },
+    columns: [
+      { id: 1, metric: { kind: 'lapTime' } },
+      { id: 2, metric: { kind: 'distance' } },
+      { id: 3, metric: { kind: 'channel', channel: 'GPS_Speed', agg: 'max' } },
+      { id: 4, metric: { kind: 'sectorTime', sector: 1 } },
+      { id: 5, metric: { kind: 'delta' } },
+    ],
+    updatedAt: 1_700_000_000_000,
+  }
+}
+
+/** A pre-v1 (un-versioned) "track-as-file" JSON — what TrackFilePanel exported
+ *  before this schema upgrade. Used to verify tolerant import (§6 migration). */
+function legacyFullSetup(): LegacyCircuitSetup {
   return {
     key: '24.123,121.456',
     name: 'Chiayi Speedway',
@@ -28,8 +49,8 @@ function fullSetup(): CircuitSetup {
   }
 }
 
-describe('exportCircuitSetupJson / importCircuitSetupJson', () => {
-  it('round-trips a full setup (line + gates + columns) byte-for-byte on the fields', () => {
+describe('exportCircuitSetupJson / importCircuitSetupJson (current v1 shape)', () => {
+  it('round-trips a full setup (localOverride + columns) byte-for-byte on the fields', () => {
     const setup = fullSetup()
     const json = exportCircuitSetupJson(setup)
     const parsed = importCircuitSetupJson(json)
@@ -38,9 +59,10 @@ describe('exportCircuitSetupJson / importCircuitSetupJson', () => {
 
   it('round-trips a setup with a null line and empty gates/columns', () => {
     const setup: CircuitSetup = {
+      schemaVersion: 1,
       key: '1.000,2.000',
-      line: null,
-      gates: [],
+      trackId: null,
+      localOverride: { line: null, gates: [] },
       columns: [],
       updatedAt: 0,
     }
@@ -53,6 +75,12 @@ describe('exportCircuitSetupJson / importCircuitSetupJson', () => {
     delete setup.name
     const parsed = importCircuitSetupJson(exportCircuitSetupJson(setup))
     expect(parsed.name).toBeUndefined()
+  })
+
+  it('round-trips a non-null trackId (forward-compat with a future Phase-2 writer)', () => {
+    const setup = { ...fullSetup(), trackId: 'tw-chiayi-speedway' }
+    const parsed = importCircuitSetupJson(exportCircuitSetupJson(setup))
+    expect(parsed.trackId).toBe('tw-chiayi-speedway')
   })
 
   it('rejects invalid JSON', () => {
@@ -74,23 +102,27 @@ describe('exportCircuitSetupJson / importCircuitSetupJson', () => {
     expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
   })
 
-  it('rejects a malformed line (missing endpoint)', () => {
-    const bad = { ...fullSetup(), line: { a: { lat: 1, lon: 2 } } }
+  it('rejects an unsupported schemaVersion', () => {
+    const bad = { ...fullSetup(), schemaVersion: 99 }
     expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
   })
 
-  it('rejects a malformed line (non-numeric lat/lon)', () => {
-    const bad = { ...fullSetup(), line: { a: { lat: '1', lon: 2 }, b: { lat: 3, lon: 4 } } }
+  it('rejects a malformed localOverride (missing gate endpoint)', () => {
+    const bad = {
+      ...fullSetup(),
+      localOverride: { line: { a: { lat: 1, lon: 2 } }, gates: [] },
+    }
     expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
   })
 
-  it('rejects gates that are not an array', () => {
-    const bad = { ...fullSetup(), gates: 'nope' }
-    expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
-  })
-
-  it('rejects a gate entry that is not a valid LapLine', () => {
-    const bad = { ...fullSetup(), gates: [line(0), { a: { lat: 1 } }] }
+  it('rejects a malformed localOverride (non-numeric lat/lon)', () => {
+    const bad = {
+      ...fullSetup(),
+      localOverride: {
+        line: { a: { lat: '1', lon: 2 }, b: { lat: 3, lon: 4 } },
+        gates: [],
+      },
+    }
     expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
   })
 
@@ -128,6 +160,52 @@ describe('exportCircuitSetupJson / importCircuitSetupJson', () => {
   })
 })
 
+describe('importCircuitSetupJson (tolerant of pre-v1 legacy shape, docs/CLOUD-TRACK-DESIGN.md §6/§7)', () => {
+  it('imports a legacy (un-versioned) full setup, migrating line/gates into localOverride', () => {
+    const legacy = legacyFullSetup()
+    const parsed = importCircuitSetupJson(JSON.stringify(legacy))
+    expect(parsed).toEqual({
+      schemaVersion: 1,
+      key: legacy.key,
+      trackId: null,
+      name: legacy.name,
+      localOverride: { line: legacy.line, gates: legacy.gates },
+      columns: legacy.columns,
+      updatedAt: legacy.updatedAt,
+    })
+  })
+
+  it('imports a legacy setup with a null line and empty gates/columns', () => {
+    const legacy: LegacyCircuitSetup = {
+      key: '1.000,2.000',
+      line: null,
+      gates: [],
+      columns: [],
+      updatedAt: 0,
+    }
+    const parsed = importCircuitSetupJson(JSON.stringify(legacy))
+    expect(parsed).toEqual({
+      schemaVersion: 1,
+      key: '1.000,2.000',
+      trackId: null,
+      localOverride: { line: null, gates: [] },
+      columns: [],
+      updatedAt: 0,
+    })
+  })
+
+  it('still rejects a structurally invalid legacy setup (malformed gate)', () => {
+    const bad = { ...legacyFullSetup(), gates: [line(0), { a: { lat: 1 } }] }
+    expect(() => importCircuitSetupJson(JSON.stringify(bad))).toThrow(CircuitSetupImportError)
+  })
+
+  it('still rejects a legacy setup missing "key"', () => {
+    const { key, ...rest } = legacyFullSetup()
+    void key
+    expect(() => importCircuitSetupJson(JSON.stringify(rest))).toThrow(CircuitSetupImportError)
+  })
+})
+
 describe('toPlainSetup (DataCloneError regression, 2026-07-02)', () => {
   it('strips Vue reactive proxies at every depth so IndexedDB structured clone accepts the value', async () => {
     const { reactive } = await import('vue')
@@ -135,10 +213,14 @@ describe('toPlainSetup (DataCloneError regression, 2026-07-02)', () => {
     // Mirror the live failure: auto-save hands putCircuitSetup LIVE Pinia
     // state — reactive Proxies — which structuredClone (what IDB uses) rejects.
     const setup = {
+      schemaVersion: 1 as const,
       key: 'k',
-      line: reactive({ a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } }),
-      gates: reactive([{ a: { lat: 5, lon: 6 }, b: { lat: 7, lon: 8 } }]),
-      columns: reactive([{ id: 'c1', metric: { kind: 'lapTime' as const } }]),
+      trackId: null,
+      localOverride: reactive({
+        line: { a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } },
+        gates: [{ a: { lat: 5, lon: 6 }, b: { lat: 7, lon: 8 } }],
+      }),
+      columns: reactive([{ id: 1, metric: { kind: 'lapTime' as const } }]),
       updatedAt: 123,
     }
     // Precondition: the raw reactive value really is un-cloneable (Proxy).
@@ -147,10 +229,14 @@ describe('toPlainSetup (DataCloneError regression, 2026-07-02)', () => {
     // The plain clone must be cloneable and value-identical.
     expect(() => structuredClone(plain)).not.toThrow()
     expect(plain).toEqual({
+      schemaVersion: 1,
       key: 'k',
-      line: { a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } },
-      gates: [{ a: { lat: 5, lon: 6 }, b: { lat: 7, lon: 8 } }],
-      columns: [{ id: 'c1', metric: { kind: 'lapTime' } }],
+      trackId: null,
+      localOverride: {
+        line: { a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } },
+        gates: [{ a: { lat: 5, lon: 6 }, b: { lat: 7, lon: 8 } }],
+      },
+      columns: [{ id: 1, metric: { kind: 'lapTime' } }],
       updatedAt: 123,
     })
   })
