@@ -264,7 +264,7 @@ Validated against a real .loga recording containing acceleration-test segments: 
 
 The Analyzer identifies "which circuit this is" from GPS location, and automatically saves that circuit's start/finish line, sector gates, and lap-table column setup locally in the browser (IndexedDB). The next time you load a log recorded at the same circuit (same GPS location), these settings are **restored automatically** — no need to redrag the start/finish line or re-detect corners.
 
-This panel sits after Sector / Track channel markers / Acceleration test / Gear ratio calculator and before the lap table, and offers:
+"Track setup" is one of the Analyzer's cards (see §4.10 "Layout" — cards can be freely dragged around, so there's no longer a fixed order), and offers:
 
 - **Export track setup**: bundles the current circuit's start/finish line, sector gates, and lap-table columns into a JSON "track file" you can download for backup or to share with someone else.
 - **Import track setup**: import a previously exported JSON track file; if it matches the circuit currently open, it's applied immediately.
@@ -272,6 +272,17 @@ This panel sits after Sector / Track channel markers / Acceleration test / Gear 
 - If the current log has no valid GPS coordinates, the circuit can't be identified, so export is disabled and a hint is shown instead.
 
 > The gear ratio calculator's inputs (MT/CVT choice, per-gear ratios, wheel circumference, etc.) are automatically saved in the browser (localStorage) and persist across reloads and closed tabs — no need to re-enter them each time. This is a vehicle-spec setting, stored separately from the track setup above (which uses IndexedDB, keyed by circuit GPS location).
+
+### 4.10 Layout (desktop drag/resize grid)
+
+On wider screens (desktop), every Analyzer panel — the track map, lap table, sector gates, track channel markers, acceleration test, gear ratio calculator, track setup, map alignment, lap overlay alignment, and each chart — is its own card that you can **drag to rearrange** and **resize**, so you can put the panels you care about side by side and make good use of a wide screen's space instead of scrolling a single long column.
+
+- **Drag to move**: press and drag a card's **title bar** (the strip at the top with the card's name) to move it; interacting with a card's content (panning/zooming the map, clicking a table row) does not start a drag.
+- **Drag to resize**: hover the card's **bottom-right corner** until the resize cursor appears, then drag to resize; the map and charts redraw immediately to fit the new size without blurring or misalignment.
+- **Auto-saved**: the layout (every card's position and size) is automatically saved in the browser (localStorage) and persists across reloads and closed tabs.
+- **Reset layout**: the "Reset layout" button in the toolbar restores the default arrangement (map and lap table in the left column, charts and tool panels in the right column).
+- **Adding chart cards**: a chart added via "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
+- **Mobile**: below roughly 768px wide, the layout automatically collapses to a single column in the original logical order, and **dragging/resizing are disabled** (deeper mobile optimization is a separate planned task — this only ensures the existing single-column mobile flow isn't regressed).
 
 ---
 
