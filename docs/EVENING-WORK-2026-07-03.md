@@ -21,7 +21,8 @@
 | 1 | #17 疊圈X軸消失 + #7 軌跡極值數值標示 | ✅ `93da64b` | #17 根因:axes 帶 space:undefined 鍵蓋掉 uPlot 預設→findIncr 放棄畫刻度;#7 標記旁 11px 主題色數值+光暈。⚠️#7 待視覺驗收 |
 | 1 | #3 拖放匯入 + #19 轉換頁溢出 + #20 導覽icon | ✅ `41d915e` | 拖放走同一 intake(含 zip);#19 根因 grid min-width:auto;#20 統一 currentColor SVG。⚠️#19/#20 待視覺驗收 |
 | 1 | #14 有效圈距離區間 | ✅ `6be56f3` | 距離帶與時間帶並存(兩者都要過),預設=合理圈中位數±20%,km 三位小數,+26 tests |
-| 2 | #6 避震校正+另存loga搬轉換頁 | ⏳ | `feature/converter-consolidation` |
+| 2 | #6 避震校正+另存loga搬轉換頁 | ✅ `9b6a7b0` | 避震=轉換頁收合區塊;另存loga=輸出格式第4鈕(僅loga來源可用,特殊case不進registry);手冊已同步。⚠️ 待視覺驗收 |
+| 3 | #8 PC 拖曳網格布局 | ⏳ | `feature/dashboard-grid` |
 | 2 | #11–13 變速比計算機重做 | ⏳ | `feature/drivetrain-rework` |
 | 2 | #18 A2/A3 Phase 1 | ✅ `3aca9eb` | schema v1(TrackDefinitionV1 預留/PersonalTrackOverlayV1 實裝)+舊 idb/檔案透明遷移+自動套用改走 resolveGeometryToApply,+25 tests |
 | 3 | #8 PC 拖曳網格布局(grid-layout-plus) | ⬜ | — |
