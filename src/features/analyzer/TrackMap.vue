@@ -62,6 +62,17 @@ const props = defineProps<{
      *  apex-speed label) — see useTrackExtrema's `formatExtremumValue`. */
     label: string
   }[]
+  /**
+   * #8 — TrackMap now lives inside a resizable dashboard grid item; whether
+   * the canvas fills that item's available height (vs. the fixed 320px used
+   * standalone) is entirely a CSS concern (`.track-wrap.fill`/`.track.fill`
+   * below) — draw()'s own ResizeObserver already re-measures `cv.clientWidth`/
+   * `clientHeight` on every container resize regardless of which mode is
+   * active, so no separate JS sizing path is needed here (unlike UPlotChart/
+   * GgChart, which read a fixed `height` PROP rather than the DOM element's
+   * actual layout size).
+   */
+  fillHeight?: boolean
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
@@ -871,10 +882,11 @@ watch(() => props.extremaMarkers, () => draw())
 </script>
 
 <template>
-  <div class="track-wrap">
+  <div class="track-wrap" :class="{ fill: fillHeight }">
     <canvas
       ref="canvas"
       class="track"
+      :class="{ fill: fillHeight }"
       :title="t('analyzer.zoomHint')"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
@@ -894,6 +906,13 @@ watch(() => props.extremaMarkers, () => draw())
 .track-wrap {
   position: relative;
 }
+/* #8 — inside a dashboard grid item's card body, stretch to fill it (the
+   card body is itself flex/min-height:0, so a percentage height resolves
+   against the item's actual resized height — see DashboardCard.vue). */
+.track-wrap.fill {
+  display: flex;
+  height: 100%;
+}
 .track {
   display: block;
   width: 100%;
@@ -903,6 +922,11 @@ watch(() => props.extremaMarkers, () => draw())
   border-radius: var(--radius);
   /* the map owns wheel/drag/pinch gestures (zoom & pan), like an embedded map */
   touch-action: none;
+}
+.track.fill {
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .reset-view {
   position: absolute;
