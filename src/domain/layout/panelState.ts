@@ -36,7 +36,7 @@ export function parsePanelState(raw: string | null): PanelState | null {
   if (!raw) return null
   try {
     const data = JSON.parse(raw)
-    if (!data || typeof data !== 'object') return null
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null
     const collapsed = Array.isArray(data.collapsed)
       ? data.collapsed.filter((x: unknown): x is string => typeof x === 'string')
       : []
