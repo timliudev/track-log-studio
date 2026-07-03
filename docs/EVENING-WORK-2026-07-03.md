@@ -23,7 +23,7 @@
 | 1 | #14 有效圈距離區間 | ✅ `6be56f3` | 距離帶與時間帶並存(兩者都要過),預設=合理圈中位數±20%,km 三位小數,+26 tests |
 | 2 | #6 避震校正+另存loga搬轉換頁 | ⏳ | `feature/converter-consolidation` |
 | 2 | #11–13 變速比計算機重做 | ⏳ | `feature/drivetrain-rework` |
-| 2 | #18 A2/A3 Phase 1 | ⏳ | `feature/track-schema-v1` |
+| 2 | #18 A2/A3 Phase 1 | ✅ `3aca9eb` | schema v1(TrackDefinitionV1 預留/PersonalTrackOverlayV1 實裝)+舊 idb/檔案透明遷移+自動套用改走 resolveGeometryToApply,+25 tests |
 | 3 | #8 PC 拖曳網格布局(grid-layout-plus) | ⬜ | — |
 | 3 | #9 手機布局(收闔+鎖定) | ⬜ | — |
 
