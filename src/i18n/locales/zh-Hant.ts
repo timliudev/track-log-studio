@@ -193,6 +193,7 @@ export default {
       pickBoth: '請選擇 X 與 Y 軸的頻道。',
       session: '整份記錄',
       lapSeries: '第 {n} 圈',
+      loading: '圖表元件載入中…',
     },
     trackFile: {
       export: '匯出賽道設定',
