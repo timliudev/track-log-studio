@@ -282,7 +282,18 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 - **Auto-saved**: the layout (every card's position and size) is automatically saved in the browser (localStorage) and persists across reloads and closed tabs.
 - **Reset layout**: the "Reset layout" button in the toolbar restores the default arrangement (map and lap table in the left column, charts and tool panels in the right column).
 - **Adding chart cards**: a chart added via "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
-- **Mobile**: below roughly 768px wide, the layout automatically collapses to a single column in the original logical order, and **dragging/resizing are disabled** (deeper mobile optimization is a separate planned task — this only ensures the existing single-column mobile flow isn't regressed).
+- **Collapsing a card**: every card's title bar has a collapse/expand button (chevron) on the right — click it to hide the card's content and keep just the title bar, useful for tidying up cards you don't need right now. Works on both desktop and mobile; the collapsed state is saved automatically.
+
+#### Mobile: single column + collapse + pin
+
+Below roughly 768px wide, the layout automatically collapses to a single column, ordered by the logical order derived from the desktop layout, and **dragging/resizing are disabled** (rearranging doesn't apply in a fixed single-column order). Mobile additionally offers:
+
+- **Collapsing a card**: same as desktop — tap a card's chevron to collapse/expand its content, handy for skipping past sections you don't need right now in the single column.
+- **Pinning a card**: on mobile, every card's title bar also has a pin button. Tap it and that card becomes **stuck to the top of the screen** (sticky) while the rest of the cards keep scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table.
+  - Only **one card can be pinned at a time** — pinning a different card automatically unpins the previous one.
+  - A pinned card's height is capped at roughly 45% of the screen (`max-height: 45vh`) so it doesn't take over the whole screen and block scrolling to the rest of the content.
+  - Tap the pin button again to unpin.
+  - Collapse and pin state are each saved in the browser (localStorage) and persist across reloads and closed tabs.
 
 ---
 
