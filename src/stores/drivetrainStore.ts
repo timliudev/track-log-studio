@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 export type DrivetrainKind = 'mt' | 'cvt'
 
@@ -45,22 +45,62 @@ const DEFAULT_CVT: CvtFormState = {
 
 const MAX_GEARS = 6
 
+const STORAGE_KEY = 'aracer-loga.drivetrain.v1'
+
+interface PersistedDrivetrain {
+  kind: DrivetrainKind
+  mt: MtFormState
+  cvt: CvtFormState
+  inversionWheelCircumferenceMm: number
+}
+
+function loadPersisted(): Partial<PersistedDrivetrain> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as Partial<PersistedDrivetrain>) : {}
+  } catch {
+    return {}
+  }
+}
+
 /**
  * A11 — 變速齒比計算器 (gear-ratio tool) UI state: which drivetrain kind is
- * active and the manually-entered spec for each. Transient (in-memory only,
- * like `sectorStore`/`analyzerStore`'s toggles) — no persistence yet; a
- * natural follow-up once `useCircuitPersistence`-style local storage is
- * extended to non-track settings (see AnalyzerView's D "local persistence"
- * queue item in project memory).
+ * active and the manually-entered spec for each. The spec is a VEHICLE
+ * property (not track/circuit-specific), so it's persisted to localStorage
+ * as a single global slot — same pattern as `settingsStore`/`suspensionStore`
+ * — rather than a per-circuit or vehicle-profile system.
  */
 export const useDrivetrainStore = defineStore('drivetrain', () => {
-  const kind = ref<DrivetrainKind>('mt')
-  const mt = ref<MtFormState>({ ...DEFAULT_MT, gearRatios: [...DEFAULT_MT.gearRatios] })
-  const cvt = ref<CvtFormState>({ ...DEFAULT_CVT })
+  const persisted = loadPersisted()
+  const kind = ref<DrivetrainKind>(persisted.kind ?? 'mt')
+  const mt = ref<MtFormState>({
+    ...DEFAULT_MT,
+    ...persisted.mt,
+    gearRatios: persisted.mt?.gearRatios ? [...persisted.mt.gearRatios] : [...DEFAULT_MT.gearRatios],
+  })
+  const cvt = ref<CvtFormState>({ ...DEFAULT_CVT, ...persisted.cvt })
   // Wheel circumference used for LOG INVERSION (Layer 2) — separate from the
   // calculator spec's circumference above since a user may want to invert a
   // log without having filled in a full calculator spec (or vice versa).
-  const inversionWheelCircumferenceMm = ref<number>(1870)
+  const inversionWheelCircumferenceMm = ref<number>(persisted.inversionWheelCircumferenceMm ?? 1870)
+
+  watch(
+    [kind, mt, cvt, inversionWheelCircumferenceMm],
+    () => {
+      const data: PersistedDrivetrain = {
+        kind: kind.value,
+        mt: mt.value,
+        cvt: cvt.value,
+        inversionWheelCircumferenceMm: inversionWheelCircumferenceMm.value,
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+      } catch {
+        // storage unavailable / quota — settings simply won't persist
+      }
+    },
+    { deep: true },
+  )
 
   function setKind(k: DrivetrainKind): void {
     kind.value = k
