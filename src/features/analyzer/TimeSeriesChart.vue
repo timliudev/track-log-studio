@@ -146,15 +146,31 @@ const axes = computed<uPlot.Axis[]>(() => {
   // Clock labels (HH:mm:ss) are ~2.5× wider than the elapsed labels. Widen the
   // tick spacing on BOTH x-axes so they pick the same coarser splits — the two
   // time rows then line up and the clock labels stop colliding.
+  //
+  // IMPORTANT: only set `space` when we actually want to override uPlot's
+  // default (showClock). uPlot merges axis options with `Object.assign`-style
+  // `for...in`, which copies an explicitly-present `space: undefined` key too
+  // (unlike an absent key) — that clobbers uPlot's numeric default (50) with
+  // `undefined`, which after its `fnOrSelf` wrap becomes a function that always
+  // returns `undefined`. Every `foundSpace >= minSpace` tick-increment check
+  // then compares against `undefined` (always false), so uPlot never finds a
+  // fitting increment and gives up on this axis' ticks entirely — rendering it
+  // with no splits/labels (the axis line may still show, but blank). This is
+  // exactly the reported "X axis disappears in overlay mode" bug: overlay mode
+  // always has showClock = false, so the un-conditional `space: xSpace` always
+  // shipped this poisoned `undefined`. Timeline+distance mode hit the same bug
+  // for the same reason, just less noticed. Spreading the key in only when it
+  // has a real value avoids ever handing uPlot an explicit `undefined`.
   const xSpace = showClock ? 80 : undefined
-  const xAxes: uPlot.Axis[] = [{ scale: 'x', space: xSpace, values: xValuesFmt }]
+  const spaceOverride = xSpace != null ? { space: xSpace } : {}
+  const xAxes: uPlot.Axis[] = [{ scale: 'x', ...spaceOverride, values: xValuesFmt }]
   if (showClock) {
     const startMs = anchor.value!.startUtcMs
     const offset = effectiveOffset.value
     xAxes.push({
       scale: 'x',
       side: 2,
-      space: xSpace,
+      ...spaceOverride,
       // The primary x-axis already draws the gridlines; suppress this one's so the
       // chart isn't double-gridded.
       grid: { show: false },
