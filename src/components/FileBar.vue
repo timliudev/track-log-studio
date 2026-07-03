@@ -14,6 +14,7 @@ import { listRcnxSessions, type RcnxSessionInfo } from '@/domain/import/rcnx/par
 // exist, and the dev server's SPA fallback then serves index.html instead of
 // a 404 — sql.js then fails to compile HTML bytes as wasm.
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
+import { filesFromDataTransfer, isFileDrag } from './fileDrop'
 
 const { t, tm, rt } = useI18n()
 const fileStore = useFileStore()
@@ -145,7 +146,12 @@ async function importZip(zip: File): Promise<void> {
   for (const f of inner) await importOne(f)
 }
 
-async function onFiles(list: FileList | null): Promise<void> {
+/**
+ * Shared intake path for both the file input's change event and drag-and-drop
+ * (#3) — accepts anything Array.from() can iterate (FileList or a plain
+ * File[]) so both callers can hand off without extra type gymnastics.
+ */
+async function onFiles(list: FileList | File[] | null): Promise<void> {
   if (!list || list.length === 0) return
   for (const file of Array.from(list)) {
     if (file.name.toLowerCase().endsWith('.zip')) {
@@ -162,6 +168,45 @@ function onChange(e: Event): void {
   input.value = ''
 }
 
+/**
+ * Drag-and-drop import (#3): dropping files anywhere on the FileBar routes
+ * them through the SAME `onFiles` intake path as the file input, so .zip
+ * expansion + extension filtering (via the registry-derived importer
+ * detection in `onFiles`/`importOne`) apply identically either way.
+ */
+const isDragOver = ref(false)
+let dragDepth = 0
+
+function onDragEnter(e: DragEvent): void {
+  if (!isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  dragDepth += 1
+  isDragOver.value = true
+}
+
+function onDragOver(e: DragEvent): void {
+  if (!isFileDrag(e.dataTransfer)) return
+  // Required so the browser fires `drop` instead of navigating to the file.
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragLeave(e: DragEvent): void {
+  if (!isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) isDragOver.value = false
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  if (!isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  dragDepth = 0
+  isDragOver.value = false
+  const files = filesFromDataTransfer(e.dataTransfer)
+  await onFiles(files)
+}
+
 /** Duration in whole minutes for the picker label, or undefined if unknown. */
 function durationMin(s: RcnxSessionInfo): number | undefined {
   return s.durationMs !== undefined ? Math.round(s.durationMs / 60000) : undefined
@@ -169,7 +214,18 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
 </script>
 
 <template>
-  <div class="filebar">
+  <div
+    class="filebar"
+    :class="{ 'drag-over': isDragOver }"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+    <div v-if="isDragOver" class="drop-overlay" aria-hidden="true">
+      <span>{{ t('fileBar.dropHint') }}</span>
+    </div>
+
     <label class="load-btn" :title="loadTitle">
       <input
         type="file"
@@ -271,6 +327,7 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
 
 <style scoped>
 .filebar {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -278,6 +335,30 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
   padding: 8px calc(var(--space) * 2);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+}
+.filebar.drag-over {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+}
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Pointer events must pass through so dragenter/dragleave keep firing on
+     .filebar underneath as the pointer moves — an overlay that captures
+     pointer events itself would cause dragenter/dragleave to fire on ENTER
+     into this element too, which is harmless here since it also listens via
+     bubbling, but this keeps the overlay purely visual and avoids relying on
+     that. */
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-accent);
 }
 .load-btn {
   cursor: pointer;
