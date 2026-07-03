@@ -12,6 +12,17 @@ const props = defineProps<{
   /** Shared X zoom range (null = auto). Applied to this chart; user zoom emits xZoom. */
   xRange?: { min: number; max: number } | null
   height?: number
+  /**
+   * #8 — when true, the chart fills its CONTAINER's height (e.g. a resizable
+   * dashboard grid item) instead of the fixed `height` prop: the host stretches
+   * to 100% via CSS and `resize()`/`create()` read the host's own
+   * `clientHeight` (already re-measured by the existing ResizeObserver on
+   * every container resize — drag-resize included, not just window resize).
+   * `height` is still used as the initial/fallback size before the container
+   * has laid out. Default false keeps every existing (non-grid) caller's
+   * fixed-height behaviour unchanged.
+   */
+  fillHeight?: boolean
   externalCursor?: number | null
 }>()
 
@@ -52,6 +63,17 @@ function themeColor(name: string, fallback: string): string {
   return v || fallback
 }
 
+/** The chart's current target height: the host's own measured height in
+ *  `fillHeight` mode (falling back to the `height` prop before layout has
+ *  happened, e.g. on the very first frame), else the fixed `height` prop. */
+function targetHeight(): number {
+  if (props.fillHeight && host.value) {
+    const h = host.value.clientHeight
+    if (h > 0) return h
+  }
+  return props.height ?? 260
+}
+
 function buildOptions(width: number): uPlot.Options {
   // Read theme colours so axis/grid text follows light/dark (incl. auto).
   const axisStroke = themeColor('--color-text-muted', '#888')
@@ -67,7 +89,7 @@ function buildOptions(width: number): uPlot.Options {
   const axes = (props.axes ?? [{}, {}]).map(themed)
   return {
     width,
-    height: props.height ?? 260,
+    height: targetHeight(),
     series: props.series,
     axes,
     legend: { show: true },
@@ -284,7 +306,7 @@ function seriesKey(): string {
 
 function resize(): void {
   if (plot && host.value) {
-    plot.setSize({ width: host.value.clientWidth, height: props.height ?? 260 })
+    plot.setSize({ width: host.value.clientWidth, height: targetHeight() })
   }
 }
 
@@ -352,6 +374,7 @@ watch(
   <div
     ref="host"
     class="uplot-host"
+    :class="{ fill: fillHeight }"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
@@ -367,6 +390,13 @@ watch(
      available (pan-y) and only claim horizontal drag + pinch for our own
      pan/zoom gesture handling (see onPointerDown/Move/Up above). */
   touch-action: pan-y;
+}
+/* #8 — fillHeight mode: stretch to the parent's available height (a
+   dashboard grid item's card body) instead of sizing to the fixed `height`
+   prop's canvas. The parent must establish a definite height (flex/grid
+   item with min-height: 0) for this to have any effect. */
+.uplot-host.fill {
+  height: 100%;
 }
 /* uPlot's legend is HTML — theme its text (canvas axes are themed via options). */
 .uplot-host :deep(.u-legend) {

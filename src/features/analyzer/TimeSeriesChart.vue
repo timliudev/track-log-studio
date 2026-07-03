@@ -23,6 +23,9 @@ const props = defineProps<{
   externalCursor?: number | null
   /** Selected laps (in colour order) for overlay mode. */
   selectedLaps?: Lap[]
+  /** #8 — forwarded to UPlotChart: fill the dashboard grid item's height
+   *  instead of a fixed pixel height. See UPlotChart's `fillHeight` prop. */
+  fillHeight?: boolean
 }>()
 const emit = defineEmits<{
   cursor: [number | null]
@@ -225,7 +228,7 @@ function removeChannel(name: string): void {
 </script>
 
 <template>
-  <section class="chart">
+  <section class="chart" :class="{ fill: fillHeight }">
     <div class="toolbar">
       <div class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
@@ -258,11 +261,13 @@ function removeChannel(name: string): void {
 
     <UPlotChart
       v-if="canRender"
+      class="chart-fill"
       :data="data"
       :series="series"
       :axes="axes"
       :x-range="mode === 'timeline' ? xRange : null"
       :external-cursor="effectiveCursor"
+      :fill-height="fillHeight"
       @cursor="onCursor"
       @x-zoom="onXZoom"
     />
@@ -277,6 +282,16 @@ function removeChannel(name: string): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* #8 — inside a dashboard grid item's card body: stretch to fill it and let
+   UPlotChart's own .fill (via fillHeight) claim the remaining space below
+   the toolbar/chips. */
+.chart.fill {
+  height: 100%;
+}
+.chart.fill .chart-fill {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .toolbar {
   display: flex;
