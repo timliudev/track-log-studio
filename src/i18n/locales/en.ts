@@ -257,6 +257,10 @@ export default {
       cardLapAlign: 'Lap overlay alignment',
       cardChart: 'Chart {n}',
       cardScatterChart: 'XY scatter {n}',
+      collapse: 'Collapse',
+      expand: 'Expand',
+      pin: 'Pin (stays fixed at top on mobile)',
+      unpin: 'Unpin',
     },
   },
   suspension: {
