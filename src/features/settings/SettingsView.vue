@@ -4,8 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { TzOverride } from '@/stores/settingsStore'
-import SuspensionPanel from '@/features/suspension/SuspensionPanel.vue'
-import SaveCalibratedLoga from '@/features/suspension/SaveCalibratedLoga.vue'
 
 const { t } = useI18n()
 const { tzOverride, themePref, localePref } = storeToRefs(useSettingsStore())
@@ -53,12 +51,6 @@ const tzModel = computed<string>({
           <option v-for="h in tzHours" :key="h" :value="String(h * 60)">{{ tzLabel(h) }}</option>
         </select>
       </label>
-    </div>
-    <div class="card">
-      <SuspensionPanel />
-    </div>
-    <div class="card">
-      <SaveCalibratedLoga />
     </div>
     <p class="future">{{ t('settings.futureNote') }}</p>
   </div>

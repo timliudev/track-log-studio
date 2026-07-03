@@ -1,13 +1,21 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
 import { useConverterStore } from '@/stores/converterStore'
 import ConverterNotes from './ConverterNotes.vue'
 import PresetBar from './PresetBar.vue'
 import SlotMappingPanel from './SlotMappingPanel.vue'
 import VboChannelMap from './VboChannelMap.vue'
 import ConvertResults from './ConvertResults.vue'
+import SuspensionPanel from './SuspensionPanel.vue'
 
+const { t } = useI18n()
 const { outputFormat } = storeToRefs(useConverterStore())
+
+// Collapsed by default — suspension calibration is a secondary, occasional
+// setup step, not part of the main convert flow most users touch every time.
+const suspensionOpen = ref(false)
 </script>
 
 <template>
@@ -30,6 +38,10 @@ const { outputFormat } = storeToRefs(useConverterStore())
         <VboChannelMap v-else-if="outputFormat === 'vbo'" />
       </div>
     </div>
+    <details class="suspension-section" :open="suspensionOpen" @toggle="suspensionOpen = ($event.target as HTMLDetailsElement).open">
+      <summary>{{ t('converter.suspensionToggle') }}</summary>
+      <SuspensionPanel />
+    </details>
   </div>
 </template>
 
@@ -65,5 +77,22 @@ const { outputFormat } = storeToRefs(useConverterStore())
   .grid {
     grid-template-columns: 1fr;
   }
+}
+.suspension-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius) * 1.5);
+  padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
+}
+.suspension-section summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.suspension-section summary::-webkit-details-marker {
+  color: var(--color-text-muted);
+}
+.suspension-section[open] summary {
+  margin-bottom: calc(var(--space) * 1.5);
 }
 </style>
