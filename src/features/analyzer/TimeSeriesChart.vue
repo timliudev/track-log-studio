@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
-import { useAnalyzerStore, type ChartConfig, type ChartMode } from '@/stores/analyzerStore'
+import { useAnalyzerStore, type TimeSeriesChartConfig, type ChartMode } from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -16,13 +16,16 @@ import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const props = defineProps<{
-  chart: ChartConfig
+  chart: TimeSeriesChartConfig
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
   externalCursor?: number | null
   /** Selected laps (in colour order) for overlay mode. */
   selectedLaps?: Lap[]
+  /** #8 — forwarded to UPlotChart: fill the dashboard grid item's height
+   *  instead of a fixed pixel height. See UPlotChart's `fillHeight` prop. */
+  fillHeight?: boolean
 }>()
 const emit = defineEmits<{
   cursor: [number | null]
@@ -146,15 +149,31 @@ const axes = computed<uPlot.Axis[]>(() => {
   // Clock labels (HH:mm:ss) are ~2.5× wider than the elapsed labels. Widen the
   // tick spacing on BOTH x-axes so they pick the same coarser splits — the two
   // time rows then line up and the clock labels stop colliding.
+  //
+  // IMPORTANT: only set `space` when we actually want to override uPlot's
+  // default (showClock). uPlot merges axis options with `Object.assign`-style
+  // `for...in`, which copies an explicitly-present `space: undefined` key too
+  // (unlike an absent key) — that clobbers uPlot's numeric default (50) with
+  // `undefined`, which after its `fnOrSelf` wrap becomes a function that always
+  // returns `undefined`. Every `foundSpace >= minSpace` tick-increment check
+  // then compares against `undefined` (always false), so uPlot never finds a
+  // fitting increment and gives up on this axis' ticks entirely — rendering it
+  // with no splits/labels (the axis line may still show, but blank). This is
+  // exactly the reported "X axis disappears in overlay mode" bug: overlay mode
+  // always has showClock = false, so the un-conditional `space: xSpace` always
+  // shipped this poisoned `undefined`. Timeline+distance mode hit the same bug
+  // for the same reason, just less noticed. Spreading the key in only when it
+  // has a real value avoids ever handing uPlot an explicit `undefined`.
   const xSpace = showClock ? 80 : undefined
-  const xAxes: uPlot.Axis[] = [{ scale: 'x', space: xSpace, values: xValuesFmt }]
+  const spaceOverride = xSpace != null ? { space: xSpace } : {}
+  const xAxes: uPlot.Axis[] = [{ scale: 'x', ...spaceOverride, values: xValuesFmt }]
   if (showClock) {
     const startMs = anchor.value!.startUtcMs
     const offset = effectiveOffset.value
     xAxes.push({
       scale: 'x',
       side: 2,
-      space: xSpace,
+      ...spaceOverride,
       // The primary x-axis already draws the gridlines; suppress this one's so the
       // chart isn't double-gridded.
       grid: { show: false },
@@ -209,7 +228,7 @@ function removeChannel(name: string): void {
 </script>
 
 <template>
-  <section class="chart">
+  <section class="chart" :class="{ fill: fillHeight }">
     <div class="toolbar">
       <div class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
@@ -242,11 +261,13 @@ function removeChannel(name: string): void {
 
     <UPlotChart
       v-if="canRender"
+      class="chart-fill"
       :data="data"
       :series="series"
       :axes="axes"
       :x-range="mode === 'timeline' ? xRange : null"
       :external-cursor="effectiveCursor"
+      :fill-height="fillHeight"
       @cursor="onCursor"
       @x-zoom="onXZoom"
     />
@@ -261,6 +282,16 @@ function removeChannel(name: string): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+/* #8 — inside a dashboard grid item's card body: stretch to fill it and let
+   UPlotChart's own .fill (via fillHeight) claim the remaining space below
+   the toolbar/chips. */
+.chart.fill {
+  height: 100%;
+}
+.chart.fill .chart-fill {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .toolbar {
   display: flex;

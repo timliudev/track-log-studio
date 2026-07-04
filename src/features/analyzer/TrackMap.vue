@@ -33,12 +33,46 @@ const props = defineProps<{
   colorValues?: Float64Array | null
   colormap?: ColormapId
   /**
-   * Sector gates: confirmed (solid, numbered) and pending auto-detected
-   * suggestions (dashed, awaiting user accept/reject) — same line shape as
-   * the start/finish line, drawn smaller and in a distinct colour so they
-   * don't read as another start/finish.
+   * Sector gates (A1+A15: auto-detection loads directly as usable gates, no
+   * separate suggestion/review step, so every gate is always `confirmed:
+   * true` in practice — the flag is kept so a future "just-detected,
+   * unedited" visual distinction is trivial to add) — same line shape as the
+   * start/finish line, drawn smaller and in a distinct colour so they don't
+   * read as another start/finish. Solid + numbered; draggable at either
+   * endpoint.
    */
   gates?: { line: LapLine; confirmed: boolean }[]
+  /**
+   * A9 — unified extrema markers (generalised from the old speed-only corner
+   * apexes): numbered markers at a channel's local minima/maxima,
+   * colour-graded green (fast/low) -> red (slow/high) by `valueFrac` (0..1,
+   * normalised across the SAME lap's own extrema set so the gradient is
+   * meaningful regardless of the channel's absolute range). `kind`
+   * distinguishes minima from maxima visually (round vs diamond) so both can
+   * be shown together without reading as the same marker type. Caller
+   * (AnalyzerView) decides when this is populated (single-lap rule).
+   */
+  extremaMarkers?: {
+    lat: number
+    lon: number
+    value: number
+    valueFrac: number
+    kind: 'min' | 'max'
+    /** `value` pre-formatted for display next to the marker (RaceChrono-style
+     *  apex-speed label) — see useTrackExtrema's `formatExtremumValue`. */
+    label: string
+  }[]
+  /**
+   * #8 — TrackMap now lives inside a resizable dashboard grid item; whether
+   * the canvas fills that item's available height (vs. the fixed 320px used
+   * standalone) is entirely a CSS concern (`.track-wrap.fill`/`.track.fill`
+   * below) — draw()'s own ResizeObserver already re-measures `cv.clientWidth`/
+   * `clientHeight` on every container resize regardless of which mode is
+   * active, so no separate JS sizing path is needed here (unlike UPlotChart/
+   * GgChart, which read a fixed `height` PROP rather than the DOM element's
+   * actual layout size).
+   */
+  fillHeight?: boolean
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
@@ -101,6 +135,17 @@ const HANDLE_HIT = 22
 
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'
+}
+
+/** Simple 2-colour lerp for extrema markers: red (frac=0) -> green (frac=1).
+ *  Deliberately independent of the heatmap colormaps (turbo/viridis/…) so
+ *  markers stay legible over any active heatmap. */
+function extremumColor(frac: number): string {
+  const t = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0
+  const r = Math.round(220 - 160 * t)
+  const g = Math.round(60 + 140 * t)
+  const b = 60
+  return `rgb(${r}, ${g}, ${b})`
 }
 
 function draw(): void {
@@ -395,9 +440,8 @@ function draw(): void {
   }
 
   // Sector gates: a short perpendicular segment + numbered marker at each
-  // gate's midpoint. Confirmed gates are solid; pending suggestions dashed —
-  // deliberately smaller/thinner than the checkered start/finish band so the
-  // two never get confused.
+  // gate's midpoint — deliberately smaller/thinner than the checkered
+  // start/finish band so the two never get confused.
   const gates = props.gates ?? []
   gates.forEach((g, i) => {
     const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
@@ -425,6 +469,67 @@ function draw(): void {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText(String(i + 1), mx, my)
+  })
+
+  // A9 — unified extrema markers: numbered markers colour-graded green->red
+  // by valueFrac. MIN markers are filled circles (round, unlike the square
+  // gate/start-finish handles) — same visual as the old corner-apex markers.
+  // MAX markers are filled diamonds so the two kinds stay visually distinct
+  // at a glance when both are shown together on the same lap. Numbering is
+  // independent per kind (each starts at 1) so a "min #2" and "max #2" can
+  // coexist without implying an order between the two sets.
+  //
+  // RaceChrono-style value label: the marker's own formatted value (e.g. an
+  // apex speed) drawn as small text just above it, so the number reads
+  // directly off the map instead of only via the side-panel list. Themed
+  // text colour (--color-text) with a stroked halo in the surface colour for
+  // contrast against any track/heatmap colour underneath — same halo
+  // technique used for the numbered marker glyph, just inverted (dark text +
+  // light halo instead of white text + no halo) since this label sits OUTSIDE
+  // the coloured marker, over the track/background rather than over the
+  // marker's own fill.
+  const extrema = props.extremaMarkers ?? []
+  let minSeen = 0
+  let maxSeen = 0
+  const MARK_R = 9
+  const LABEL_OFFSET_Y = MARK_R + 11 // clears the marker glyph, sits just above it
+  extrema.forEach((m) => {
+    const p = proj.toPixel(m.lat, m.lon)
+    const numberLabel = m.kind === 'min' ? String(++minSeen) : String(++maxSeen)
+    ctx.fillStyle = extremumColor(m.valueFrac)
+    ctx.beginPath()
+    if (m.kind === 'min') {
+      ctx.arc(p.x, p.y, MARK_R, 0, Math.PI * 2)
+    } else {
+      // Diamond: same bounding radius as the circle so the two kinds read as
+      // the same "size" of marker, just a different silhouette.
+      ctx.moveTo(p.x, p.y - MARK_R)
+      ctx.lineTo(p.x + MARK_R, p.y)
+      ctx.lineTo(p.x, p.y + MARK_R)
+      ctx.lineTo(p.x - MARK_R, p.y)
+      ctx.closePath()
+    }
+    ctx.fill()
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = cssVar('--color-surface')
+    ctx.stroke()
+    ctx.fillStyle = '#fff'
+    ctx.font = 'bold 10px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(numberLabel, p.x, p.y)
+
+    // Value label, offset above the marker so it doesn't cover the glyph.
+    const ly = p.y - LABEL_OFFSET_Y
+    ctx.font = '11px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.lineWidth = 3
+    ctx.strokeStyle = cssVar('--color-surface')
+    ctx.lineJoin = 'round'
+    ctx.strokeText(m.label, p.x, ly)
+    ctx.fillStyle = cssVar('--color-text')
+    ctx.fillText(m.label, p.x, ly)
   })
 
   // cursor marker
@@ -544,11 +649,9 @@ const pointers = new Map<number, { x: number; y: number }>()
 type Mode = 'idle' | 'line' | 'pan' | 'pinch'
 let mode: Mode = 'idle'
 // Which handle is being dragged in 'line' mode, and on what target: the
-// start/finish line, or a confirmed gate (by index into props.gates). Only
-// CONFIRMED gates are draggable — suggestions stay non-interactive (the user
-// must accept them first). Reuses the exact same hit radius, pointer-capture
-// and toGeo conversion as the start/finish line; only the emitted event and
-// its target line differ.
+// start/finish line, or a gate (by index into props.gates). Reuses the exact
+// same hit radius, pointer-capture and toGeo conversion as the start/finish
+// line; only the emitted event and its target line differ.
 type DragTarget = { kind: 'line' } | { kind: 'gate'; index: number }
 let dragging: { target: DragTarget; handle: 'a' | 'b' } | null = null
 let panLast: { x: number; y: number } | null = null
@@ -585,9 +688,8 @@ function nearestHandle(
 
 /**
  * Which handle (if any) is under the pointer, within the hit radius — checked
- * across the start/finish line AND every CONFIRMED gate (suggestions are
- * excluded, matching their non-interactive dashed rendering). When several
- * targets' handles overlap, the closest one wins.
+ * across the start/finish line AND every gate. When several targets' handles
+ * overlap, the closest one wins.
  */
 function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | 'b' } | null {
   if (!projection) return null
@@ -600,7 +702,6 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 
   const gates = props.gates ?? []
   gates.forEach((g, index) => {
-    if (!g.confirmed) return
     const hit = nearestHandle(g.line, mx, my)
     if (hit && (!best || hit.distSq < best.distSq)) {
       best = { target: { kind: 'gate', index }, handle: hit.handle, distSq: hit.distSq }
@@ -777,13 +878,15 @@ watch(
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
 watch(() => props.gates, () => draw())
+watch(() => props.extremaMarkers, () => draw())
 </script>
 
 <template>
-  <div class="track-wrap">
+  <div class="track-wrap" :class="{ fill: fillHeight }">
     <canvas
       ref="canvas"
       class="track"
+      :class="{ fill: fillHeight }"
       :title="t('analyzer.zoomHint')"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
@@ -803,6 +906,13 @@ watch(() => props.gates, () => draw())
 .track-wrap {
   position: relative;
 }
+/* #8 — inside a dashboard grid item's card body, stretch to fill it (the
+   card body is itself flex/min-height:0, so a percentage height resolves
+   against the item's actual resized height — see DashboardCard.vue). */
+.track-wrap.fill {
+  display: flex;
+  height: 100%;
+}
 .track {
   display: block;
   width: 100%;
@@ -812,6 +922,11 @@ watch(() => props.gates, () => draw())
   border-radius: var(--radius);
   /* the map owns wheel/drag/pinch gestures (zoom & pan), like an embedded map */
   touch-action: none;
+}
+.track.fill {
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .reset-view {
   position: absolute;

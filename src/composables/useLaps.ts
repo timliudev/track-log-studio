@@ -3,6 +3,8 @@ import { useActiveSession } from '@/composables/useActiveSession'
 import { useLapStore } from '@/stores/lapStore'
 import { timeSeconds } from '@/domain/analysis/timeAxis'
 import { detectLapsByChannel, detectLapsByLine, type LapLine } from '@/domain/analysis/laps'
+import { suggestLapTimeBand, suggestLapDistanceBand } from '@/domain/analysis/lapValidity'
+import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { toRadians } from '@/domain/export/rc3Nmea/geo'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
@@ -140,11 +142,46 @@ export function useLaps(): {
         lapStore.clearSelection()
         lapStore.clearExcluded()
         lapStore.clearLapTimeBand()
+        lapStore.clearLapDistanceBand()
         lapStore.clearOffsets()
       }
       if (next && lapStore.line == null) {
         const seeded = defaultLine(next)
         if (seeded) lapStore.setLine(seeded)
+      }
+    },
+    { immediate: true },
+  )
+
+  // Auto-suggest the valid lap-time AND lap-distance bands (A8, extended to
+  // distance): once per NEW session/track — never on every `laps` recompute —
+  // and only while EACH band is UNSET, so a user clearing it (or editing it)
+  // is never silently overwritten. `pending` tracks whether the current track
+  // still owes its one suggestion attempt; it's set on every track-identity
+  // change (including to null->something) and cleared as soon as laps are
+  // available to suggest from (or the track goes away), so it fires exactly
+  // once laps first become non-empty. Both bands are independent settings but
+  // share the same "suggest once" trigger and pool (see `plausibleLaps` in the
+  // domain module) for consistency.
+  let pendingBandSuggestion = false
+  watch(track, (next, prev) => {
+    if (next !== prev) pendingBandSuggestion = next != null
+  })
+  watch(
+    laps,
+    (next) => {
+      if (!pendingBandSuggestion) return
+      if (next.length === 0) return
+      const t = track.value
+      if (!t) return
+      pendingBandSuggestion = false
+      if (lapStore.lapTimeBand == null) {
+        const suggestion = suggestLapTimeBand(t, next)
+        if (suggestion) lapStore.setLapTimeBand(suggestion)
+      }
+      if (lapStore.lapDistanceBand == null) {
+        const suggestion = suggestLapDistanceBand(t, next)
+        if (suggestion) lapStore.setLapDistanceBand(suggestion)
       }
     },
     { immediate: true },
@@ -158,11 +195,7 @@ export function useLaps(): {
     session,
     (s) => {
       if (!s || lapStore.columns.length > 0) return
-      const speed = s.has('GPS_Speed')
-        ? 'GPS_Speed'
-        : s.has('Vehicle_Speed')
-          ? 'Vehicle_Speed'
-          : null
+      const speed = resolveSpeedChannel(s)
       if (speed) lapStore.addColumn({ kind: 'channel', channel: speed, agg: 'max' })
     },
     { immediate: true },
