@@ -269,6 +269,11 @@ export default {
       score: 'Correlation score',
       nudgeMinus: '−100ms',
       nudgePlus: '+100ms',
+      overlayTitle: 'Alignment preview (speed curves overlaid after offset)',
+      overlayBase: 'Base recording',
+      overlayGps: 'GPS source',
+      overlaySeconds: 's',
+      overlaySpeedUnit: 'km/h',
       merge: 'Merge and add to recordings',
       merged: 'Merged into a new recording "{name}" — pick it from the record menu above.',
       errors: {
