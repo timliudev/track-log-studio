@@ -11,6 +11,8 @@ import {
   saveLayout,
   reconcileLayout,
   mobileLayout,
+  minSizeFor,
+  clampToMinSize,
 } from '@/domain/layout/dashboardLayout'
 
 /** Node's test environment has no real localStorage (Vitest runs with
@@ -47,6 +49,65 @@ describe('chartItemId / isChartItemId', () => {
     expect(isChartItemId(chartItemId(3))).toBe(true)
     expect(isChartItemId(STATIC_CARD_IDS.map)).toBe(false)
     expect(isChartItemId(STATIC_CARD_IDS.lapTable)).toBe(false)
+  })
+})
+
+describe('minSizeFor (B6 — resize floor per card kind)', () => {
+  it('returns a positive minW/minH for every static card id', () => {
+    for (const id of Object.values(STATIC_CARD_IDS)) {
+      const { minW, minH } = minSizeFor(id)
+      expect(minW).toBeGreaterThan(0)
+      expect(minH).toBeGreaterThan(0)
+    }
+  })
+
+  it('gives chart cards a size floor regardless of chart id', () => {
+    expect(minSizeFor(chartItemId(1))).toEqual(minSizeFor(chartItemId(99)))
+    expect(minSizeFor(chartItemId(1)).minW).toBeGreaterThanOrEqual(3)
+    expect(minSizeFor(chartItemId(1)).minH).toBeGreaterThanOrEqual(3)
+  })
+
+  it('falls back to a sane default for an unrecognised id', () => {
+    const { minW, minH } = minSizeFor('some-future-card-kind')
+    expect(minW).toBeGreaterThan(0)
+    expect(minH).toBeGreaterThan(0)
+  })
+
+  it('every card in defaultLayout already meets its own minimum size', () => {
+    for (const it of defaultLayout()) {
+      const { minW, minH } = minSizeFor(it.i)
+      expect(it.w).toBeGreaterThanOrEqual(minW)
+      expect(it.h).toBeGreaterThanOrEqual(minH)
+    }
+  })
+})
+
+describe('clampToMinSize', () => {
+  it('returns the SAME object (by value) when already at/above minimum', () => {
+    const item = { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 10, h: 10 }
+    expect(clampToMinSize(item)).toEqual(item)
+  })
+
+  it('grows w/h up to the minimum without touching x/y', () => {
+    const tiny = { i: STATIC_CARD_IDS.map, x: 2, y: 3, w: 1, h: 1 }
+    const clamped = clampToMinSize(tiny)
+    const { minW, minH } = minSizeFor(STATIC_CARD_IDS.map)
+    expect(clamped).toEqual({ i: STATIC_CARD_IDS.map, x: 2, y: 3, w: minW, h: minH })
+  })
+
+  it('only grows the dimension that is actually too small', () => {
+    const { minW, minH } = minSizeFor(STATIC_CARD_IDS.gear)
+    const partial = { i: STATIC_CARD_IDS.gear, x: 0, y: 0, w: minW + 5, h: 1 }
+    const clamped = clampToMinSize(partial)
+    expect(clamped.w).toBe(minW + 5)
+    expect(clamped.h).toBe(minH)
+  })
+
+  it('clamps a chart card using the chart minimum', () => {
+    const tiny = { i: chartItemId(7), x: 0, y: 0, w: 1, h: 1 }
+    const clamped = clampToMinSize(tiny)
+    const { minW, minH } = minSizeFor(chartItemId(7))
+    expect(clamped).toEqual({ i: chartItemId(7), x: 0, y: 0, w: minW, h: minH })
   })
 })
 
@@ -131,7 +192,7 @@ describe('loadLayout / saveLayout', () => {
   })
 
   it('saveLayout persists, and loadLayout restores it verbatim', () => {
-    const custom = [{ i: 'map', x: 1, y: 2, w: 3, h: 4 }]
+    const custom = [{ i: 'map', x: 1, y: 2, w: 3, h: 5 }]
     saveLayout(custom)
     expect(loadLayout()).toEqual(custom)
   })
@@ -153,6 +214,21 @@ describe('loadLayout / saveLayout', () => {
       },
     })
     expect(loadLayout()).toEqual(defaultLayout())
+  })
+
+  it('loadLayout clamps a persisted item smaller than its B6 minimum (old/corrupt save)', () => {
+    const tooSmall = [{ i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 1, h: 1 }]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tooSmall))
+    const loaded = loadLayout()
+    const { minW, minH } = minSizeFor(STATIC_CARD_IDS.map)
+    expect(loaded[0].w).toBeGreaterThanOrEqual(minW)
+    expect(loaded[0].h).toBeGreaterThanOrEqual(minH)
+  })
+
+  it('loadLayout leaves an already-valid persisted layout untouched', () => {
+    const custom = [{ i: STATIC_CARD_IDS.map, x: 1, y: 2, w: 6, h: 8 }]
+    saveLayout(custom)
+    expect(loadLayout()).toEqual(custom)
   })
 })
 
