@@ -6,14 +6,36 @@
  * 成為一份新的、可分析/可匯出的記錄。所有邏輯都在 useSessionMerge composable,
  * 這裡只負責畫面與使用者互動的串接。
  */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type uPlot from 'uplot'
 import { useSessionMerge, NUDGE_STEP_MS } from '@/composables/useSessionMerge'
+import UPlotChart from '@/components/UPlotChart.vue'
 
 const { t } = useI18n()
 const merge = useSessionMerge()
 
 const mergedName = ref<string | null>(null)
+
+// Overlay preview chart — base session's own speed vs. the GPS-source speed
+// shifted by the current offset, on a shared decimated time grid (see
+// useSessionMerge's `overlay` / domain/analysis/mergePreview.ts). Colour +
+// legend distinguish the two traces; uPlot redraws on every ±100ms nudge
+// since `overlay` is a reactive computed.
+const overlayData = computed<uPlot.AlignedData | null>(() => {
+  const o = merge.overlay.value
+  if (!o) return null
+  return [o.timeS, o.base, o.gps] as unknown as uPlot.AlignedData
+})
+const overlaySeries = computed<uPlot.Series[]>(() => [
+  { label: t('analyzer.sessionMerge.overlaySeconds') },
+  { label: t('analyzer.sessionMerge.overlayBase'), stroke: '#3b82e2', width: 1.5 },
+  { label: t('analyzer.sessionMerge.overlayGps'), stroke: '#e2a33b', width: 1.5 },
+])
+const overlayAxes = computed<uPlot.Axis[]>(() => [
+  { label: t('analyzer.sessionMerge.overlaySeconds') },
+  { label: t('analyzer.sessionMerge.overlaySpeedUnit') },
+])
 
 // Any change to the picked sessions invalidates a previous alignment/merge
 // result — re-picking is a deliberate "start over" action.
@@ -89,6 +111,17 @@ function fmtOffset(ms: number): string {
         <p v-if="merge.alignment.value" class="score">
           {{ t('analyzer.sessionMerge.score') }}: {{ merge.alignment.value.score.toFixed(3) }}
         </p>
+      </div>
+
+      <div v-if="overlayData" class="overlay-preview">
+        <p class="overlay-title">{{ t('analyzer.sessionMerge.overlayTitle') }}</p>
+        <UPlotChart
+          class="overlay-chart"
+          :data="overlayData"
+          :series="overlaySeries"
+          :axes="overlayAxes"
+          :height="180"
+        />
       </div>
 
       <div class="row actions">
@@ -214,6 +247,20 @@ function fmtOffset(ms: number): string {
   margin: 0;
   font-size: 0.8rem;
   color: var(--color-text-muted);
+}
+.overlay-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.overlay-title {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.overlay-chart {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
 }
 .merged-ok {
   margin: 0;
