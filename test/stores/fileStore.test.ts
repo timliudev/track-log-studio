@@ -73,4 +73,18 @@ describe('fileStore', () => {
     s.clearFiles()
     expect(s.files).toHaveLength(0)
   })
+
+  it('addMergedSession registers an in-app-produced session as ready, fileType merged', () => {
+    const s = useFileStore()
+    const session = parseLoga(loadFixture('super2.loga'))
+    const id = s.addMergedSession('merged-session.loga', session)
+    expect(s.files).toHaveLength(1)
+    expect(s.files[0].status).toBe('ready')
+    expect(s.files[0].fileType).toBe('merged')
+    expect(s.files[0].name).toBe('merged-session.loga')
+    expect(s.getSession(id)).toBe(session)
+    expect(s.readySessions).toContain(session)
+    // No original File was ever supplied, so it can never appear in savableEntries.
+    expect(s.savableEntries.some((e) => e.id === id)).toBe(false)
+  })
 })
