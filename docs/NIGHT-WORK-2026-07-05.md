@@ -92,4 +92,5 @@ Agent 追溯 git log 確認:彎道偵測/sector 功能**早在 95a67c8(A1+A15 re
 - 01:31 A2/A3 與 T7 兩分支合併 develop 均無衝突(ort 自動合併 AnalyzerView/locale),合併後全套測試驗證通過。
 - 01:38 T8 agent 把 checkout 留在 feature branch,首次合併誤成 no-op(自己合自己),發現後切回 develop 重合,無資料損失。
 - 01:41 main 742a97b 推送,Workers Builds a724eaee 排入佇列。
+- 01:47 部署 **success**(npm run build + wrangler deploy),線上 HTTP 200、title 正常。全部任務收工。
 - T7 agent 發現並修正了記憶檔中「corner-detection 未接 UI」的過時記錄(實際早在 95a67c8 完成)。
