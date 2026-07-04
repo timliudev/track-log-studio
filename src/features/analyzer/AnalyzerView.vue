@@ -906,4 +906,20 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+
+/* #8 fix — grid-layout-plus animates each item's `transform: translate3d(…)`
+   over 200ms (its default `.vgl-item` transition). That animation is the
+   source of the "cards offset from their slots / stuck placeholder" glitch:
+   the analyzer mounts INSIDE App.vue's <Transition mode="out-in"> view slide,
+   and the grid's own width-measure → re-layout can land mid-slide; with the
+   200ms transform transition, items are caught frozen part-way between their
+   old (identity) and target positions, so cards, contents and the drag
+   placeholder all appear mutually misaligned until something forces a repaint.
+   Snapping items to position (no transform transition) removes that whole
+   class of race — items are always exactly at their slot. Drag/resize still
+   feel instant (they were never meant to ease). `:deep` because .vgl-item is
+   the library's element, outside this component's scope. */
+.analyzer :deep(.vgl-item) {
+  transition: none;
+}
 </style>
