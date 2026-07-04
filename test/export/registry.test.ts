@@ -4,20 +4,22 @@ import { EXPORT_FORMATS, getExportFormat } from '@/domain/export/registry'
 import { Rc3NmeaExporter } from '@/domain/export/rc3Nmea/Rc3NmeaExporter'
 import { LEGACY_PY_MAPPING } from '@/domain/export/rc3Nmea/mapping'
 import { convertToVbo } from '@/domain/export/vbo/VboExporter'
+import { convertToCsv } from '@/domain/export/csv/CsvExporter'
 import { loadFixture } from '../fixtures'
 
 describe('export registry — listing and lookup', () => {
-  it('lists nmea and vbo formats', () => {
-    expect(EXPORT_FORMATS.map((f) => f.id)).toEqual(['nmea', 'vbo'])
+  it('lists nmea, vbo and csv formats', () => {
+    expect(EXPORT_FORMATS.map((f) => f.id)).toEqual(['nmea', 'vbo', 'csv'])
   })
 
   it('getExportFormat picks a format by id', () => {
     expect(getExportFormat('nmea')?.fileExtension).toBe('nmea')
     expect(getExportFormat('vbo')?.fileExtension).toBe('vbo')
+    expect(getExportFormat('csv')?.fileExtension).toBe('csv')
   })
 
   it('getExportFormat returns undefined for an unknown id', () => {
-    expect(getExportFormat('csv')).toBeUndefined()
+    expect(getExportFormat('xrk')).toBeUndefined()
   })
 })
 
@@ -60,6 +62,18 @@ describe('export registry — dispatch produces the SAME bytes as calling the ex
     for (let i = 0; i < direct.length; i++) {
       expect(artifacts[i].content).toBe(direct[i].content)
     }
+  })
+
+  it('csv: registry dispatch matches convertToCsv() byte-for-byte', () => {
+    const direct = convertToCsv(session)
+
+    const format = getExportFormat('csv')!
+    const artifacts = format.exportSession(session, 'Super2.loga')
+
+    expect(artifacts).toHaveLength(1)
+    expect(artifacts[0].ext).toBe('csv')
+    expect(artifacts[0].suffix).toBe('')
+    expect(artifacts[0].content).toBe(direct[0].content)
   })
 })
 
