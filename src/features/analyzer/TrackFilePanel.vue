@@ -16,6 +16,7 @@ import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import { downloadText } from '@/features/converter/download'
 import type { TrackDefinitionV1 } from '@/domain/tracks/schema'
+import { buildTrackContributionDraft } from '@/domain/tracks/contribute'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -116,6 +117,40 @@ async function refreshSaved(): Promise<void> {
   saved.value = await listCircuitSetups()
 }
 
+// §2.4 contribution flow: "先匯出目前 CircuitSetup → 轉成 TrackDefinitionV1 形狀
+// → 附截圖送 PR". This form collects the metadata a personal setup doesn't
+// carry (id/name/countryCode/license — §1.2's SHARED-only fields) and builds
+// a ready-to-PR JSON via the pure `buildTrackContributionDraft`.
+const contribId = ref('')
+const contribName = ref('')
+const contribCountryCode = ref('')
+const contribLicense = ref('CC0-1.0')
+const contribLocale = computed(() => (locale.value === 'en' ? 'en' : 'zh-TW'))
+
+const contribReady = computed(
+  () => !!activeKey.value && contribId.value.trim() !== '' && contribName.value.trim() !== '' && contribCountryCode.value.trim().length === 2,
+)
+
+function exportContribution(): void {
+  if (!props.track) return
+  const draft = buildTrackContributionDraft(
+    props.track,
+    { line: lapStore.line, gates: sectorStore.gates },
+    {
+      id: contribId.value.trim(),
+      locale: contribLocale.value,
+      name: contribName.value.trim(),
+      countryCode: contribCountryCode.value.trim(),
+      license: contribLicense.value.trim() || 'CC0-1.0',
+    },
+  )
+  if (!draft) {
+    setStatus(t('analyzer.trackFile.contributeMissingLine'), true)
+    return
+  }
+  downloadText(`${draft.id}.json`, JSON.stringify(draft, null, 2))
+}
+
 async function removeSaved(key: string): Promise<void> {
   await deleteCircuitSetup(key)
   await refreshSaved()
@@ -172,6 +207,32 @@ watch(() => props.track, refreshSaved, { immediate: true })
           </button>
         </li>
       </ul>
+    </details>
+
+    <details v-if="activeKey" class="contribute">
+      <summary>{{ t('analyzer.trackFile.contributeTitle') }}</summary>
+      <p class="hint">{{ t('analyzer.trackFile.contributeHint') }}</p>
+      <div class="contribute-form">
+        <label>
+          {{ t('analyzer.trackFile.contributeId') }}
+          <input v-model="contribId" type="text" placeholder="tw-example-track" />
+        </label>
+        <label>
+          {{ t('analyzer.trackFile.contributeName') }}
+          <input v-model="contribName" type="text" />
+        </label>
+        <label>
+          {{ t('analyzer.trackFile.contributeCountryCode') }}
+          <input v-model="contribCountryCode" type="text" maxlength="2" placeholder="TW" />
+        </label>
+        <label>
+          {{ t('analyzer.trackFile.contributeLicense') }}
+          <input v-model="contribLicense" type="text" />
+        </label>
+        <button type="button" class="export" :disabled="!contribReady" @click="exportContribution">
+          {{ t('analyzer.trackFile.contributeExport') }}
+        </button>
+      </div>
     </details>
   </div>
 </template>
@@ -335,5 +396,35 @@ watch(() => props.track, refreshSaved, { immediate: true })
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
+}
+.contribute summary {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.contribute-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.contribute-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+.contribute-form input {
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.contribute-form .export {
+  align-self: flex-start;
 }
 </style>
