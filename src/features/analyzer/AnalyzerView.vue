@@ -2,7 +2,7 @@
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { GridLayout, GridItem } from 'grid-layout-plus'
+import { GridLayout } from 'grid-layout-plus'
 import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
@@ -20,7 +20,12 @@ import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
-import { STATIC_CARD_IDS, chartItemId, mobileLayout } from '@/domain/layout/dashboardLayout'
+import {
+  STATIC_CARD_IDS,
+  chartItemId,
+  mobileLayout,
+  type DashboardLayoutItem,
+} from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
@@ -382,12 +387,36 @@ const mobileVisibleLayout = computed<typeof layout.value>(() =>
   ),
 )
 
+// Per-item props the library's OWN GridItem needs (we no longer render a
+// GridItem ourselves — see the `#item` slot note). grid-layout-plus spreads
+// each layout entry as props onto the GridItem it wraps around the slot, so
+// carrying these on the item is how the drag handle / ignore region / the
+// mobile-pin non-draggable exception reach that internal GridItem.
+interface GridItemDecoration {
+  dragAllowFrom: string
+  dragIgnoreFrom: string
+  isDraggable: boolean
+}
+function decorateForGrid(
+  items: DashboardLayoutItem[],
+): (DashboardLayoutItem & GridItemDecoration)[] {
+  return items.map((it) => ({
+    ...it,
+    dragAllowFrom: '.drag-handle',
+    dragIgnoreFrom: '.actions',
+    isDraggable: itemDraggable(it.i),
+  }))
+}
+
 // The single array bound to GridLayout via v-model: desktop 2-D on wide
-// screens, our 1-column mobileLayout below MOBILE_BREAKPOINT_PX. The setter
-// routes the library's `update:layout` emission to the RIGHT persistence path
-// for the current breakpoint so the other one is never touched.
-const activeLayout = computed<typeof layout.value>({
-  get: () => (isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value),
+// screens, our 1-column mobileLayout below MOBILE_BREAKPOINT_PX. The getter
+// decorates items with the per-GridItem drag props above; the setter reads
+// back only `{ i, x, y, w, h }` (the decorations are ignored) and routes the
+// library's `update:layout` emission to the RIGHT persistence path for the
+// current breakpoint so the other one is never touched.
+const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
+  get: () =>
+    decorateForGrid(isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value),
   set: (next) => {
     if (isMobile.value) {
       // Mobile drag-to-reorder: derive the new top-to-bottom order from the
@@ -490,18 +519,19 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
         :use-css-transforms="true"
       >
         <template #item="{ item }">
-          <GridItem
-            :i="item.i"
-            :x="item.x"
-            :y="item.y"
-            :w="item.w"
-            :h="item.h"
-            :is-draggable="itemDraggable(item.i)"
-            :is-resizable="isResizable"
-            drag-allow-from=".drag-handle"
-            drag-ignore-from=".actions"
-          >
-            <DashboardCard
+          <!-- IMPORTANT: the `#item` slot renders ONLY the card content —
+               grid-layout-plus wraps each layout entry in its OWN internal
+               GridItem (it iterates `layout` and provides `item`). Nesting a
+               second <GridItem> here double-wraps every card in TWO stacked
+               .vgl-item elements, compounding their translate3d transforms so
+               cards land at ~2× their slot offset while the (single) library
+               placeholder stays at the correct slot — the "placeholder wildly
+               offset from the card" bug. Per-item drag config
+               (drag-allow-from/-ignore-from + the mobile-pin isDraggable
+               exception) is carried on each layout item instead (see
+               `activeLayout` getter's decoration), which the library spreads
+               onto the GridItem it creates. -->
+          <DashboardCard
               v-if="item.i === 'map'"
               :title="t('analyzer.layout.cardMap')"
               :collapsed="isCollapsed(item.i)"
@@ -764,7 +794,6 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
                 </DashboardCard>
               </template>
             </template>
-          </GridItem>
         </template>
       </GridLayout>
 
@@ -955,18 +984,22 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   color: var(--color-accent);
 }
 
-/* #8 fix — grid-layout-plus animates each item's `transform: translate3d(…)`
-   over 200ms (its default `.vgl-item` transition). That animation is the
-   source of the "cards offset from their slots / stuck placeholder" glitch:
-   the analyzer mounts INSIDE App.vue's <Transition mode="out-in"> view slide,
-   and the grid's own width-measure → re-layout can land mid-slide; with the
-   200ms transform transition, items are caught frozen part-way between their
-   old (identity) and target positions, so cards, contents and the drag
-   placeholder all appear mutually misaligned until something forces a repaint.
-   Snapping items to position (no transform transition) removes that whole
-   class of race — items are always exactly at their slot. Drag/resize still
-   feel instant (they were never meant to ease). `:deep` because .vgl-item is
-   the library's element, outside this component's scope. */
+/* #8 — snap grid items to position instead of easing the library's default
+   200ms `transform: translate3d(…)` transition on `.vgl-item`.
+
+   NOTE: this is NOT what fixed the "placeholder wildly offset from the card"
+   bug — that was a DOM-structure bug (a redundant <GridItem> nested inside the
+   library's `#item` slot double-wrapped every card, compounding its transform;
+   see the `#item` slot note in the template). The real fix removed the inner
+   GridItem, so item transforms are now single and correct.
+
+   This rule is kept only for its independent cosmetic benefit: the analyzer
+   mounts inside App.vue's <Transition mode="out-in"> view slide, and the grid's
+   mount-time width-measure → re-layout can land mid-slide; with the 200ms
+   transform ease, freshly-mounted items briefly animate from their pre-measure
+   position to their final slot, reading as a small "settle" jitter on tab
+   entry. Snapping removes that flicker. Drag/resize were never meant to ease
+   anyway. `:deep` because .vgl-item is the library's element, out of scope. */
 .analyzer :deep(.vgl-item) {
   transition: none;
 }
