@@ -95,6 +95,61 @@ export function clampToMinSize(item: DashboardLayoutItem): DashboardLayoutItem {
   return { ...item, w: Math.max(item.w, minW), h: Math.max(item.h, minH) }
 }
 
+function rectsOverlap(a: DashboardLayoutItem, b: DashboardLayoutItem): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
+/**
+ * Deterministic collision resolver — B6-review fix: `clampToMinSize` only
+ * grows `w`/`h` and never touches `x`/`y`, so a card that was smaller than
+ * the CURRENT minimum in an older persisted layout (saved before the B6
+ * min-size table existed) can, after clamping, overlap a neighbour that used
+ * to sit right next to/below it. Whether grid-layout-plus's initial mount
+ * silently compacts away an overlapping `layout` prop is unverified (its
+ * `verticalCompact` is only confirmed to fire on drag/resize-stop — see
+ * AnalyzerView.vue's GridLayout comment), so `loadLayout` needs its own
+ * guarantee rather than relying on that.
+ *
+ * Algorithm (semantically the same "resolve top-to-bottom, then left-to-
+ * right" ordering vertical-compaction uses): sort items by `(y, x)` so the
+ * placement order matches the user's visual reading order, then place them
+ * one at a time — an item is pushed straight down (`y` increased, `x`/`w`/`h`
+ * untouched) just far enough to clear every already-placed item it would
+ * otherwise overlap. Pushing only ever increases `y`, so earlier (higher/
+ * left) items are never displaced by later ones, keeping relative order
+ * stable and avoiding any oscillation/infinite-loop risk.
+ *
+ * Pure and a no-op on an already non-overlapping layout (every item keeps
+ * its original `x`/`y`/`w`/`h` — only pushed items get a new `y`).
+ */
+export function resolveOverlaps(layout: DashboardLayoutItem[]): DashboardLayoutItem[] {
+  const order = [...layout].sort((a, b) => a.y - b.y || a.x - b.x)
+  const placed: DashboardLayoutItem[] = []
+  for (const original of order) {
+    let item = original
+    // An item can be pushed down to clear one placed neighbour, which may
+    // then newly overlap a DIFFERENT already-placed neighbour below the
+    // first — re-scan from the top until a `y` is found that clears
+    // everything already placed (guaranteed to terminate: `y` only ever
+    // increases, and is bounded by the sum of all placed items' heights).
+    let movedDown = true
+    while (movedDown) {
+      movedDown = false
+      for (const other of placed) {
+        if (rectsOverlap(item, other)) {
+          item = { ...item, y: other.y + other.h }
+          movedDown = true
+        }
+      }
+    }
+    placed.push(item)
+  }
+  // Restore the original array order (the sort above was only a placement
+  // strategy) so callers see the same item at the same array index.
+  const byId = new Map(placed.map((it) => [it.i, it]))
+  return layout.map((it) => byId.get(it.i)!)
+}
+
 /** The grid item id for a chart, keyed by the chart's OWN store id (stable
  *  across add/remove/reorder) — never its index in `analyzerStore.charts`. */
 export function chartItemId(chartId: number): string {
