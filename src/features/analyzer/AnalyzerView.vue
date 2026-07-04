@@ -48,11 +48,16 @@ const { charts, xAxis, xRange, cursorIdx, trackChannel, trackColormap, trackColo
   storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
-// Local track-setup persistence (§11 D): auto-restores/saves the start/finish
-// line, sector gates and lap-table columns per circuit (GPS-keyed). Registered
-// AFTER useLaps() so its restore (async, via store actions) runs after — and
-// overrides — useLaps()'s synchronous default-line seeding on file change.
-useCircuitPersistence()
+// Local track-setup persistence (§11 D) + SHARED-library auto-apply
+// (docs/CLOUD-TRACK-DESIGN.md §4.2): auto-restores/saves the start/finish
+// line, sector gates and lap-table columns per circuit (GPS-keyed), and
+// auto-applies a matching public track-library entry when there's no local
+// override yet. Registered AFTER useLaps() so its restore (async, via store
+// actions) runs after — and overrides — useLaps()'s synchronous default-line
+// seeding on file change. The returned refs/actions feed TrackFilePanel's
+// §4.3 multi-match picker and §4.4 detach affordance.
+const { ambiguousMatches, chooseTrack, dismissAmbiguous, appliedSharedTrack, detachFromSharedTrack } =
+  useCircuitPersistence()
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
@@ -734,7 +739,14 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
-              <TrackFilePanel :track="track" />
+              <TrackFilePanel
+                :track="track"
+                :ambiguous-matches="ambiguousMatches"
+                :applied-shared-track="appliedSharedTrack"
+                @choose-track="chooseTrack"
+                @dismiss-ambiguous="dismissAmbiguous"
+                @detach="detachFromSharedTrack"
+              />
             </DashboardCard>
 
             <DashboardCard
