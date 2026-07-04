@@ -1,13 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
-import ConverterView from '@/features/converter/ConverterView.vue'
-import AnalyzerView from '@/features/analyzer/AnalyzerView.vue'
-import SettingsView from '@/features/settings/SettingsView.vue'
 import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
+
+// Lazy tab views: async imports keep each top-level view in its own chunk so
+// heavy per-tab dependencies (notably grid-layout-plus + interactjs pulled in
+// by AnalyzerView's #8 dashboard grid) stay out of the main bundle and only
+// load when the tab is opened (mirrors ScatterChart.vue's GgChart boundary).
+// No loadingComponent on purpose: the <Transition mode="out-in"> below waits
+// for an async child to resolve before playing the enter animation, so a
+// loading placeholder would only add a flash mid-transition.
+const ConverterView = defineAsyncComponent(() => import('@/features/converter/ConverterView.vue'))
+const AnalyzerView = defineAsyncComponent(() => import('@/features/analyzer/AnalyzerView.vue'))
+const SettingsView = defineAsyncComponent(() => import('@/features/settings/SettingsView.vue'))
 
 const { t } = useI18n()
 
