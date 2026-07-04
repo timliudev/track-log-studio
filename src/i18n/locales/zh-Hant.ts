@@ -266,6 +266,11 @@ export default {
       score: '相關性分數',
       nudgeMinus: '−100ms',
       nudgePlus: '+100ms',
+      overlayTitle: '對齊預覽（套用偏移後的速度曲線疊圖）',
+      overlayBase: '主要記錄',
+      overlayGps: 'GPS 來源',
+      overlaySeconds: '秒',
+      overlaySpeedUnit: 'km/h',
       merge: '合併並加入記錄',
       merged: '已合併為新記錄「{name}」，可在上方記錄選單選取查看。',
       errors: {
