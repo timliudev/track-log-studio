@@ -1,9 +1,24 @@
 # 雲端賽道機制設計文件（A2 自動套用 + A3 公開賽道庫）
 
-> 狀態：**設計中，尚未實作**。本文件只做設計，供人工審閱、拍板後才動工。
+> 狀態：**第一、二階段已實作**（`feature/cloud-track` 分支，未合併 develop）。
 > 對應 [`docs/NIGHT-WORK-2026-07-03.md`](./NIGHT-WORK-2026-07-03.md) T5、
 > [`docs/DESIGN.md`](./DESIGN.md) §11b「Track 獨立匯入檔 + 雲端同步（分流儲存）」點子的具體化。
-> 最後更新：2026-07-03。
+> 最後更新：2026-07-05。
+>
+> **實作進度**（§7 分期對照，細節見分支上的 commit 訊息）：
+> - ✅ 第一階段：`PersonalTrackOverlayV1` schema + 舊格式遷移（`domain/tracks/schema.ts`）。
+> - ✅ 第二階段（唯讀消費公開庫）：`TrackDefinitionV1` schema 驗證、`domain/tracks/matching.ts`
+>   實作 §4.2 完整流程①→②→③ + §4.3 多配置選單 + §4.4 detach，UI 接在 `TrackFilePanel.vue`。
+>   **種子庫為佔位資料**（`domain/tracks/seedLibrary.ts` 2 筆明確標示為合成範例，非真實賽道座標
+>   ——本機沒有真實賽道 GPS 紀錄可推導正確幾何，見該檔案註解），打通全流程但尚未有可信賽道資料。
+>   §2.4 的「轉換腳本」以 `domain/tracks/contribute.ts` + UI 表單方式做成（非獨立 CLI 腳本）。
+> - ⛔ 尚未做（需要本文件範圍外的外部基礎設施，或待使用者對 §8 開放問題拍板才能繼續）：
+>   - 獨立 `track-log-studio-tracks` repo（§2）與其 CI（§2.3）：需要建立新 GitHub repo，
+>     超出單一 worktree/PR 能完成的範圍，且 §8 問題 1/2/3 尚待使用者決策命名/授權/CDN 策略。
+>   - Runtime CDN 增量更新（§3.2 step 2）：依賴上一點的獨立 repo 存在，暫緩。
+>   - 個人雲端備份 Google Drive / GitHub OAuth（§5）：需要註冊 OAuth 用戶端（Google Cloud
+>     Console / GitHub OAuth App），屬外部服務設定，非程式碼可獨立完成；設計文件本身也將此列
+>     為第四階段（較後期），§8 問題 6 傾向延後。
 
 ---
 
