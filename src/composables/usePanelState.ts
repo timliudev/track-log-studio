@@ -1,9 +1,10 @@
-import { type ComputedRef, ref, watch, type Ref } from 'vue'
+import { type ComputedRef, computed, ref, watch, type Ref } from 'vue'
 import { STATIC_CARD_IDS, chartItemId } from '@/domain/layout/dashboardLayout'
 import {
   loadPanelState,
   reconcilePanelState,
   savePanelState,
+  setMobileOrder as setMobileOrderPure,
   togglePinned as togglePinnedPure,
   toggleCollapsed as toggleCollapsedPure,
   type PanelState,
@@ -25,6 +26,8 @@ export function usePanelState(chartIds: Ref<number[]> | ComputedRef<number[]>): 
   isPinned: (id: string) => boolean
   toggleCollapsed: (id: string) => void
   togglePinned: (id: string) => void
+  mobileOrder: ComputedRef<string[]>
+  setMobileOrder: (order: string[]) => void
 } {
   const state = ref<PanelState>(loadPanelState())
 
@@ -62,11 +65,20 @@ export function usePanelState(chartIds: Ref<number[]> | ComputedRef<number[]>): 
     state.value = togglePinnedPure(state.value, id)
   }
 
+  // The reconciled mobile order (see reconcilePanelState — seeded to the full
+  // static+chart id order on first load, then kept in sync with add/remove).
+  const mobileOrder = computed(() => state.value.mobileOrder)
+  function setMobileOrder(order: string[]): void {
+    state.value = setMobileOrderPure(state.value, order)
+  }
+
   return {
     state,
     isCollapsed,
     isPinned,
     toggleCollapsed,
     togglePinned,
+    mobileOrder,
+    setMobileOrder,
   }
 }
