@@ -1,6 +1,7 @@
 # Phase 5 原型 — GPS 合併 (.loga + .nmea time-align merge)
 
-Status: domain core done + tested; UI not wired (ran out of time budget).
+Status: domain core done + tested; UI wired (T6, branch `feature/phase5-merge-ui`,
+see below — "UI wired" section).
 
 ## Built (this session, branch `feature/phase5-merge`)
 
@@ -42,3 +43,50 @@ Full suite: 430/430 green, `npm run typecheck` clean, no new npm deps.
 6. Consider exposing `maxLagMs`/`stepMs` as tunable (defaults untested end-to-end against real files yet — pick generous
    `maxLagMs` e.g. 60000 for "recorder started at a very different time", `stepMs` e.g. 100 for the initial UI default,
    trading precision for scan speed).
+
+## UI wired (T6, branch `feature/phase5-merge-ui`)
+
+Implements suggested steps #1–#3 and #6 above (not format-gated per #1 — any two
+ready sessions can be picked, not just nmea+loga specifically) and #4 for free
+(merged session goes through the normal fileStore/converter export path, no new
+export code needed):
+
+- `src/composables/useSessionMerge.ts` — orchestrates the two domain functions:
+  lists every ready file as a merge candidate (flagging whether
+  `resolveSpeedChannel` finds a usable speed channel), `autoAlign()` runs
+  `crossCorrelateOffset` with generous defaults (`maxLagMs: 60000`,
+  `stepMs: 100`, suggestion #6), `nudge(deltaMs)` adjusts `offsetMs` without
+  re-aligning (#3), `merge()` calls `mergeSessions` and registers the result via
+  a new `fileStore.addMergedSession(name, session)` action. 8 tests in
+  `test/composables/useSessionMerge.test.ts`.
+- `src/stores/fileStore.ts` — `addMergedSession`: registers an in-app-produced
+  `LogSession` (no original `File`) straight to `ready`; new `fileType: 'merged'`
+  variant naturally excludes it from `savableEntries` (no source .loga text to
+  patch) while it still appears in `readyFiles`/`readySessions` for the analyzer
+  and any export-registry format (#4).
+- `src/features/analyzer/SessionMergePanel.vue` — new dashboard card
+  (`STATIC_CARD_IDS.sessionMerge`, always visible like the track-file/gear
+  panels, not gated on lap selection): base/GPS session pickers, 自動對齊
+  button, offset readout + ±100ms nudge buttons + correlation score, merge
+  button, and a confirmation message naming the new record.
+- i18n: `analyzer.sessionMerge.*` + `analyzer.layout.cardSessionMerge` added to
+  both `zh-Hant.ts` and `en.ts`.
+
+Full suite: 711/711 green (was 430 at end of previous session — includes all
+work landed on develop since, plus this task's 9 new tests), `vue-tsc --noEmit`
+clean, `npm run build` clean, no new npm deps.
+
+Not done / left for a follow-up:
+- Manual browser/visual acceptance of the new panel — the sandboxed preview
+  browser used during this task got stuck mid-`<Transition mode="out-in">`
+  navigating away from the Converter tab (reproduces on an unmodified checkout
+  too, i.e. pre-existing environment quirk, not caused by this change), so the
+  panel's live look/interaction was verified by code review + unit tests only,
+  not by clicking through it in a real browser.
+- No preview/overlay of the merged GPS track before committing (suggestion #3's
+  "e.g. overlay GPS track or speed traces" preview) — only the numeric offset +
+  correlation score are shown; the merge itself is cheap enough to redo if the
+  result looks wrong (just re-merge with a different offset).
+- Speed-channel choice for correlation is exactly `resolveSpeedChannel` (GPS_Speed
+  → Vehicle_Speed) on both sides, unchanged from the original suggestion (#5) —
+  no additional fallback chain was added.

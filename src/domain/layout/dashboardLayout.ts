@@ -40,6 +40,7 @@ export const STATIC_CARD_IDS = {
   trackFile: 'trackfile',
   mapAlign: 'mapalign',
   lapAlign: 'lapalign',
+  sessionMerge: 'sessionmerge',
 } as const
 
 /** Prefix for dynamic chart-card ids — see {@link chartItemId}. */
@@ -76,6 +77,7 @@ export function defaultLayout(): DashboardLayoutItem[] {
     { i: STATIC_CARD_IDS.accelTest, x: 0, y: 29, w: 5, h: 5 },
     { i: STATIC_CARD_IDS.gear, x: 0, y: 34, w: 5, h: 7 },
     { i: STATIC_CARD_IDS.trackFile, x: 0, y: 41, w: 5, h: 5 },
+    { i: STATIC_CARD_IDS.sessionMerge, x: 0, y: 46, w: 5, h: 8 },
     { i: STATIC_CARD_IDS.mapAlign, x: 5, y: 0, w: 7, h: 5 },
     { i: STATIC_CARD_IDS.lapAlign, x: 5, y: 5, w: 7, h: 5 },
     // First chart (the store's initial default chart) starts the right
