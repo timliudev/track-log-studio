@@ -55,8 +55,8 @@
 
 | 項目 | 狀態 | 備註 |
 |------|------|------|
-| 網格卡片完全偏移(粉紅 placeholder 常駐) | ⏳ `fix/dashboard-grid-issues` | 根因:vgl-item transform 過渡;修復已 commit(`ad6a9a5`),Opus 4.8 處理 |
-| 手機無法拖曳重排 | ⏳ 同分支 | 補做:單欄垂直拖曳重排,mobileOrder 獨立持久化不污染桌面布局;兩度撞額度(18:50 重置)三度接手中 |
+| 網格卡片完全偏移(粉紅 placeholder 常駐) | ✅ `4e623f7` | 根因:vgl-item 的 transform transition 被分頁切換動畫卡在中間值(inline style 正確、computed 卡在 translateX:7px);修法=分析頁內停用該過渡。實測:兩欄零重疊、無常駐 placeholder |
+| 手機無法拖曳重排 | ✅ `4e623f7` | <768px 單欄改用自建 mobileOrder(panelState.v1)產生布局,標題列垂直拖曳重排、resize 關閉;桌面/手機布局互不污染(實測 dashboardLayout.v1 byte-identical);釘選中的卡不可拖(先解釘);+14 tests(702 總) |
 
 ## 追蹤事項(本次未做)
 
