@@ -138,6 +138,39 @@ export function saveLayout(layout: DashboardLayoutItem[]): void {
   }
 }
 
+/** Fallback row-height for a mobile card whose id isn't in the desktop layout
+ *  (shouldn't happen after reconciliation, but keeps the builder total). */
+const MOBILE_DEFAULT_H = 8
+
+/**
+ * #9 (revised) — build the MOBILE single-column (cols=1) layout from an
+ * explicit top-to-bottom card ORDER (the user's persisted `mobileOrder`, see
+ * panelState.ts). Every item is full-width (`x:0, w:1`) and stacked by
+ * cumulative height so the column reads top-to-bottom in exactly `order`.
+ * Each card keeps its DESKTOP `h` (looked up from `desktopLayout`) so a tall
+ * card (map/chart) stays tall and a short control panel stays short — the
+ * mobile order is the only thing the user chose, heights are inherited.
+ *
+ * `order` should already be reconciled (visible + existing ids only); any id
+ * not found in `desktopLayout` falls back to a default height. This is what
+ * gets PASSED to GridLayout on mobile (instead of the library's own responsive
+ * reflow) so drag-to-reorder writes back a pure order, never a 2-D arrangement
+ * that could leak into the desktop layout.
+ */
+export function mobileLayout(
+  order: string[],
+  desktopLayout: DashboardLayoutItem[],
+): DashboardLayoutItem[] {
+  const hById = new Map(desktopLayout.map((it) => [it.i, it.h]))
+  let y = 0
+  return order.map((i) => {
+    const h = hById.get(i) ?? MOBILE_DEFAULT_H
+    const item = { i, x: 0, y, w: 1, h }
+    y += h
+    return item
+  })
+}
+
 /**
  * Reconcile a layout against the CURRENT set of chart ids (static card ids
  * never change, so only chart cards need reconciling): appends a default-

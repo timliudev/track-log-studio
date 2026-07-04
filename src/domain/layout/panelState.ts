@@ -21,12 +21,24 @@ export interface PanelState {
   collapsed: string[]
   /** The single pinned (sticky, mobile-only) card id, or null for none. */
   pinnedId: string | null
+  /**
+   * #9 (revised) — the user's chosen MOBILE (single-column) card order, top to
+   * bottom, keyed by the same stable card id. Kept HERE rather than in
+   * dashboardLayout.v1 on purpose: the desktop 2-D arrangement
+   * (`{ i, x, y, w, h }[]`) and the mobile 1-D order are independent user
+   * preferences — reordering on a phone must not clobber the desktop layout,
+   * and vice-versa. Empty `[]` means "no mobile customisation yet" → fall back
+   * to the default (desktop-layout-derived) order. Only visible cards that
+   * actually exist are ever stored (see {@link reconcilePanelState}); unknown
+   * ids are tolerated on load and reconciled away.
+   */
+  mobileOrder: string[]
 }
 
 export const STORAGE_KEY = 'aracer-loga.panelState.v1'
 
 function emptyState(): PanelState {
-  return { collapsed: [], pinnedId: null }
+  return { collapsed: [], pinnedId: null, mobileOrder: [] }
 }
 
 /** Parse persisted JSON into a PanelState, or null if missing/invalid (caller
@@ -41,7 +53,17 @@ export function parsePanelState(raw: string | null): PanelState | null {
       ? data.collapsed.filter((x: unknown): x is string => typeof x === 'string')
       : []
     const pinnedId = typeof data.pinnedId === 'string' ? data.pinnedId : null
-    return { collapsed, pinnedId }
+    // `mobileOrder` is a v1.1 addition — tolerate its absence (older blobs) by
+    // defaulting to []; filter to strings + de-dup so a corrupt/duplicated
+    // entry can't wedge the reorder logic downstream.
+    const mobileOrder: string[] = Array.isArray(data.mobileOrder)
+      ? [
+          ...new Set<string>(
+            data.mobileOrder.filter((x: unknown): x is string => typeof x === 'string'),
+          ),
+        ]
+      : []
+    return { collapsed, pinnedId, mobileOrder }
   } catch {
     return null
   }
@@ -88,6 +110,33 @@ export function togglePinned(state: PanelState, id: string): PanelState {
   return { ...state, pinnedId: state.pinnedId === id ? null : id }
 }
 
+/** Returns a NEW state with the mobile card order replaced — pure, caller
+ *  re-assigns + persists. De-dups defensively (the grid should never emit
+ *  duplicate ids, but a stray double never wedges the order). */
+export function setMobileOrder(state: PanelState, order: string[]): PanelState {
+  return { ...state, mobileOrder: [...new Set(order)] }
+}
+
+/**
+ * Reconcile a persisted mobile order against the CURRENT set of card ids
+ * (static + chart), same spirit as dashboardLayout's reconcileLayout: keep the
+ * user's chosen order for ids that still exist (dropping removed charts), then
+ * append any brand-new card id at the END (so an added chart shows up at the
+ * bottom of the mobile column, matching the desktop "append below" rule).
+ * `orderedIds` is the canonical order to append missing ids in (the default
+ * top-to-bottom card order) so a fresh state with no stored order is
+ * deterministic.
+ */
+export function reconcileMobileOrder(stored: string[], orderedIds: string[]): string[] {
+  const valid = new Set(orderedIds)
+  const kept = stored.filter((id) => valid.has(id))
+  const present = new Set(kept)
+  for (const id of orderedIds) {
+    if (!present.has(id)) kept.push(id)
+  }
+  return kept
+}
+
 /** Drop collapsed/pinned entries for card ids that no longer exist (e.g. a
  *  removed chart) — mirrors dashboardLayout.ts's reconcileLayout so
  *  localStorage doesn't accumulate stale ids forever. `validIds` is the full
@@ -96,6 +145,14 @@ export function reconcilePanelState(state: PanelState, validIds: string[]): Pane
   const valid = new Set(validIds)
   const collapsed = state.collapsed.filter((id) => valid.has(id))
   const pinnedId = state.pinnedId != null && valid.has(state.pinnedId) ? state.pinnedId : null
-  if (collapsed.length === state.collapsed.length && pinnedId === state.pinnedId) return state
-  return { collapsed, pinnedId }
+  // `validIds` doubles as the canonical top-to-bottom order for appending any
+  // not-yet-ordered card (usePanelState passes [...staticIds, ...chartIds]).
+  const mobileOrder = reconcileMobileOrder(state.mobileOrder, validIds)
+  const sameOrder =
+    mobileOrder.length === state.mobileOrder.length &&
+    mobileOrder.every((id, i) => id === state.mobileOrder[i])
+  if (collapsed.length === state.collapsed.length && pinnedId === state.pinnedId && sameOrder) {
+    return state
+  }
+  return { collapsed, pinnedId, mobileOrder }
 }

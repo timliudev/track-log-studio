@@ -10,6 +10,7 @@ import {
   loadLayout,
   saveLayout,
   reconcileLayout,
+  mobileLayout,
 } from '@/domain/layout/dashboardLayout'
 
 /** Node's test environment has no real localStorage (Vitest runs with
@@ -212,5 +213,41 @@ describe('reconcileLayout', () => {
     const next = reconcileLayout(layout, [1])
     const added = next.find((it) => it.i === chartItemId(1))!
     expect(added.y).toBeGreaterThanOrEqual(10)
+  })
+})
+
+describe('mobileLayout (single-column builder from an explicit order)', () => {
+  const desktop = [
+    { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 },
+    { i: STATIC_CARD_IDS.gear, x: 5, y: 0, w: 5, h: 6 },
+    { i: chartItemId(1), x: 0, y: 10, w: 10, h: 8 },
+  ]
+
+  it('builds a full-width (x:0,w:1) column in exactly the given order', () => {
+    const order = [STATIC_CARD_IDS.gear, chartItemId(1), STATIC_CARD_IDS.map]
+    const out = mobileLayout(order, desktop)
+    expect(out.map((it) => it.i)).toEqual(order)
+    expect(out.every((it) => it.x === 0 && it.w === 1)).toBe(true)
+  })
+
+  it('inherits each card DESKTOP height and stacks y cumulatively (no overlap)', () => {
+    const order = [STATIC_CARD_IDS.gear, chartItemId(1), STATIC_CARD_IDS.map]
+    const out = mobileLayout(order, desktop)
+    // gear h=6 → y0; chart-1 h=8 → y6; map h=10 → y14
+    expect(out).toEqual([
+      { i: STATIC_CARD_IDS.gear, x: 0, y: 0, w: 1, h: 6 },
+      { i: chartItemId(1), x: 0, y: 6, w: 1, h: 8 },
+      { i: STATIC_CARD_IDS.map, x: 0, y: 14, w: 1, h: 10 },
+    ])
+  })
+
+  it('falls back to a default height for an id missing from the desktop layout', () => {
+    const out = mobileLayout(['ghost'], desktop)
+    expect(out[0].h).toBeGreaterThan(0)
+    expect(out[0]).toMatchObject({ i: 'ghost', x: 0, y: 0, w: 1 })
+  })
+
+  it('returns an empty array for an empty order', () => {
+    expect(mobileLayout([], desktop)).toEqual([])
   })
 })
