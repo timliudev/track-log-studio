@@ -45,6 +45,134 @@ export interface TrackDefinitionV1 {
   contributors?: string[]
 }
 
+function isGeoPointRange(v: unknown): v is { lat: number; lon: number } {
+  if (!isLatLon(v)) return false
+  return v.lat >= -90 && v.lat <= 90 && v.lon >= -180 && v.lon <= 180
+}
+
+function isGateEndpointPair(v: unknown): v is { a: GeoPoint; b: GeoPoint } {
+  if (typeof v !== 'object' || v === null) return false
+  const o = v as Record<string, unknown>
+  return isGeoPointRange(o.a) && isGeoPointRange(o.b)
+}
+
+/**
+ * Structural + range validation for a {@link TrackDefinitionV1} (design doc
+ * §1.2/§2.3 CI schema check, reused client-side so a malformed SHARED-library
+ * entry — corrupt bundle, bad CDN payload — can't crash matching for every
+ * OTHER track in the library; see {@link parseTrackLibrary}, which uses this
+ * per-entry so one bad record is skipped rather than failing the whole load).
+ * Throws {@link TrackSchemaError} with a human-readable reason on anything
+ * malformed.
+ */
+export function parseTrackDefinition(raw: unknown): TrackDefinitionV1 {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new TrackSchemaError('Not an object')
+  }
+  const o = raw as Record<string, unknown>
+
+  if (o.schemaVersion !== 1) {
+    throw new TrackSchemaError(`Unsupported schemaVersion: ${String(o.schemaVersion)}`)
+  }
+  if (typeof o.id !== 'string' || o.id.length === 0) {
+    throw new TrackSchemaError('Missing or invalid "id"')
+  }
+  if (typeof o.name !== 'object' || o.name === null || Array.isArray(o.name)) {
+    throw new TrackSchemaError('Missing or invalid "name"')
+  }
+  const nameEntries = Object.entries(o.name as Record<string, unknown>)
+  if (nameEntries.length === 0 || !nameEntries.every(([, v]) => typeof v === 'string')) {
+    throw new TrackSchemaError('"name" must have at least one locale with a string value')
+  }
+  if (o.aliases !== undefined && (!Array.isArray(o.aliases) || !o.aliases.every((a) => typeof a === 'string'))) {
+    throw new TrackSchemaError('Invalid "aliases"')
+  }
+  if (!isGeoPointRange(o.geo)) {
+    throw new TrackSchemaError('Missing or invalid "geo"')
+  }
+  if (typeof o.countryCode !== 'string' || !/^[A-Z]{2}$/.test(o.countryCode)) {
+    throw new TrackSchemaError('Invalid "countryCode" (expected ISO 3166-1 alpha-2, uppercase)')
+  }
+  if (!isGateEndpointPair(o.startFinishLine)) {
+    throw new TrackSchemaError('Missing or invalid "startFinishLine"')
+  }
+  if (!Array.isArray(o.gates) || !o.gates.every(isGateEndpointPair)) {
+    throw new TrackSchemaError('Invalid "gates"')
+  }
+  if (o.recommendedLapTimeBandSec !== undefined) {
+    const band = o.recommendedLapTimeBandSec
+    if (typeof band !== 'object' || band === null) {
+      throw new TrackSchemaError('Invalid "recommendedLapTimeBandSec"')
+    }
+    const b = band as Record<string, unknown>
+    if (b.min !== undefined && typeof b.min !== 'number') {
+      throw new TrackSchemaError('Invalid "recommendedLapTimeBandSec.min"')
+    }
+    if (b.max !== undefined && typeof b.max !== 'number') {
+      throw new TrackSchemaError('Invalid "recommendedLapTimeBandSec.max"')
+    }
+  }
+  if (o.direction !== undefined && o.direction !== 'cw' && o.direction !== 'ccw') {
+    throw new TrackSchemaError('Invalid "direction"')
+  }
+  if (typeof o.license !== 'string' || o.license.length === 0) {
+    throw new TrackSchemaError('Missing or invalid "license"')
+  }
+  if (typeof o.updatedAt !== 'string' || o.updatedAt.length === 0) {
+    throw new TrackSchemaError('Missing or invalid "updatedAt"')
+  }
+  if (
+    o.contributors !== undefined &&
+    (!Array.isArray(o.contributors) || !o.contributors.every((c) => typeof c === 'string'))
+  ) {
+    throw new TrackSchemaError('Invalid "contributors"')
+  }
+
+  return {
+    schemaVersion: 1,
+    id: o.id,
+    name: o.name as Record<string, string>,
+    aliases: o.aliases as string[] | undefined,
+    geo: o.geo as GeoPoint,
+    countryCode: o.countryCode,
+    startFinishLine: o.startFinishLine as { a: GeoPoint; b: GeoPoint },
+    gates: o.gates as { a: GeoPoint; b: GeoPoint }[],
+    recommendedLapTimeBandSec: o.recommendedLapTimeBandSec as
+      | { min?: number; max?: number }
+      | undefined,
+    direction: o.direction as 'cw' | 'ccw' | undefined,
+    license: o.license,
+    updatedAt: o.updatedAt,
+    contributors: o.contributors as string[] | undefined,
+  }
+}
+
+/**
+ * Parse a whole SHARED track library (an array of raw entries — e.g. the
+ * bundled seed snapshot, §3.2 step 1). Each entry is validated independently
+ * via {@link parseTrackDefinition}; a single malformed entry is skipped (with
+ * its reason available via the returned `errors` array) rather than failing
+ * the whole library load — same "one bad record can't take down everything
+ * else" principle as {@link listCircuitSetups}'s tolerant read.
+ */
+export function parseTrackLibrary(raw: unknown[]): {
+  tracks: TrackDefinitionV1[]
+  errors: string[]
+} {
+  const tracks: TrackDefinitionV1[] = []
+  const errors: string[] = []
+  for (const entry of raw) {
+    try {
+      tracks.push(parseTrackDefinition(entry))
+    } catch (err) {
+      const reason = err instanceof TrackSchemaError ? err.message : String(err)
+      const id = typeof entry === 'object' && entry !== null && 'id' in entry ? String((entry as Record<string, unknown>).id) : '?'
+      errors.push(`${id}: ${reason}`)
+    }
+  }
+  return { tracks, errors }
+}
+
 /**
  * PERSONAL track overlay (design doc §1.3) — this user's own saved setup for
  * one circuit, keyed by {@link import('@/domain/persist/circuitKey').circuitKey}
