@@ -15,14 +15,43 @@ import {
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import { downloadText } from '@/features/converter/download'
+import type { TrackDefinitionV1 } from '@/domain/tracks/schema'
 
-const props = defineProps<{ track: GpsTrack | null }>()
+const props = defineProps<{
+  track: GpsTrack | null
+  /** §4.3: non-null while the current circuit matches 2+ SHARED library
+   *  entries — render a picker instead of silently applying nothing. */
+  ambiguousMatches?: TrackDefinitionV1[] | null
+  /** §4.4: the SHARED track currently in effect (no local override yet), if
+   *  any — shown as an informational banner with a detach affordance. */
+  appliedSharedTrack?: TrackDefinitionV1 | null
+}>()
 
-const { t } = useI18n()
+const emit = defineEmits<{
+  chooseTrack: [track: TrackDefinitionV1]
+  dismissAmbiguous: []
+  detach: []
+}>()
+
+const { t, locale } = useI18n()
 const lapStore = useLapStore()
 const sectorStore = useSectorStore()
 
 const activeKey = computed(() => (props.track ? circuitKey(props.track) : null))
+
+/** Best-effort display name for a SHARED track: current locale, then any
+ *  locale present, then the bare id — a track library entry only promises
+ *  "at least one locale" (§1.2), not that it covers this user's locale. The
+ *  app's internal locale codes (`zh-Hant`/`en`, see i18n/index.ts) don't
+ *  exactly match the design doc's example locale tags (`zh-TW`/`en`) — try
+ *  both the app code and its common track-data alias before falling back. */
+function trackDisplayName(track: TrackDefinitionV1): string {
+  const aliases: Record<string, string[]> = { 'zh-Hant': ['zh-Hant', 'zh-TW'], en: ['en'] }
+  for (const key of aliases[locale.value] ?? [locale.value]) {
+    if (track.name[key]) return track.name[key]
+  }
+  return Object.values(track.name)[0] ?? track.id
+}
 
 const status = ref<string | null>(null)
 const statusIsError = ref(false)
@@ -97,6 +126,29 @@ watch(() => props.track, refreshSaved, { immediate: true })
 
 <template>
   <div class="track-file-panel">
+    <div v-if="ambiguousMatches && ambiguousMatches.length > 0" class="ambiguous">
+      <p class="ambiguous-title">{{ t('analyzer.trackFile.ambiguousTitle') }}</p>
+      <p class="hint">{{ t('analyzer.trackFile.ambiguousHint') }}</p>
+      <ul class="ambiguous-list">
+        <li v-for="candidate in ambiguousMatches" :key="candidate.id">
+          <span class="ambiguous-name">{{ trackDisplayName(candidate) }}</span>
+          <button type="button" class="choose" @click="emit('chooseTrack', candidate)">
+            {{ t('analyzer.trackFile.ambiguousChoose') }}
+          </button>
+        </li>
+      </ul>
+      <button type="button" class="dismiss" @click="emit('dismissAmbiguous')">
+        {{ t('analyzer.trackFile.ambiguousDismiss') }}
+      </button>
+    </div>
+
+    <div v-else-if="appliedSharedTrack" class="shared-banner">
+      <span>{{ t('analyzer.trackFile.sharedAppliedBanner', { name: trackDisplayName(appliedSharedTrack) }) }}</span>
+      <button type="button" class="detach" @click="emit('detach')">
+        {{ t('analyzer.trackFile.detach') }}
+      </button>
+    </div>
+
     <div class="row">
       <button type="button" class="export" :disabled="!activeKey" @click="exportCurrent">
         {{ t('analyzer.trackFile.export') }}
@@ -177,6 +229,71 @@ watch(() => props.track, refreshSaved, { immediate: true })
 }
 .status.error {
   color: #ff6b6b;
+}
+.shared-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent);
+  font-size: 0.8rem;
+}
+.shared-banner span {
+  flex: 1;
+  min-width: 200px;
+}
+.detach,
+.dismiss,
+.choose {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.detach:hover,
+.dismiss:hover,
+.choose:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.ambiguous {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  border: 1px solid var(--color-accent);
+}
+.ambiguous-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.ambiguous-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ambiguous-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+.ambiguous .dismiss {
+  align-self: flex-start;
 }
 .saved summary {
   font-size: 0.85rem;

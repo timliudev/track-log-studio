@@ -241,6 +241,12 @@ export default {
       importFailed: 'Import failed: {reason}',
       savedCount: '{n} saved track setups',
       delete: 'Delete',
+      sharedAppliedBanner: 'Auto-applied “{name}” from the track library. Adjust below, or detach to stop following library updates.',
+      detach: 'Detach from library',
+      ambiguousTitle: 'Multiple possible track layouts detected',
+      ambiguousHint: 'This location matches more than one entry in the track library — pick the one that matches this session:',
+      ambiguousDismiss: 'None of these (skip)',
+      ambiguousChoose: 'Use this',
     },
     layout: {
       resetLayout: 'Reset layout',

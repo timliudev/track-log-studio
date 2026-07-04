@@ -238,6 +238,12 @@ export default {
       importFailed: '匯入失敗：{reason}',
       savedCount: '已儲存 {n} 個賽道設定',
       delete: '刪除',
+      sharedAppliedBanner: '已自動套用賽道庫的「{name}」設定，可在下方調整，或改回本機設定不再跟隨賽道庫更新。',
+      detach: '改回本機設定',
+      ambiguousTitle: '偵測到多個可能的賽道配置',
+      ambiguousHint: '這個地理位置在賽道庫中對應到不只一筆資料，請選擇符合這次記錄的配置：',
+      ambiguousDismiss: '都不是（略過）',
+      ambiguousChoose: '套用此配置',
     },
     layout: {
       resetLayout: '重設布局',
