@@ -273,12 +273,31 @@ The Analyzer identifies "which circuit this is" from GPS location, and automatic
 
 > The gear ratio calculator's inputs (MT/CVT choice, per-gear ratios, wheel circumference, etc.) are automatically saved in the browser (localStorage) and persist across reloads and closed tabs — no need to re-enter them each time. This is a vehicle-spec setting, stored separately from the track setup above (which uses IndexedDB, keyed by circuit GPS location).
 
+#### Auto-apply from the public track library
+
+Beyond the "remembers it once you've recorded it" local persistence above, the app also ships with a built-in **public track library** (official or community-contributed start/finish lines and sector gates for various circuits). When loading a log, if this is the **first time** you've seen this circuit locally (no local track setup for it yet), the app matches the log's GPS coordinates against the library (roughly 100 m of tolerance):
+
+- **Exactly one match**: the library's start/finish line and sector gates are applied automatically, and a banner appears: `Auto-applied track library setup "<track name>" — adjust it below, or switch back to a local setup that no longer follows library updates.`
+  - If the library entry is later updated (e.g. the community corrects a gate position) and you **haven't** manually adjusted anything, the next time you load a log at that circuit you'll get the updated version.
+  - If you'd rather stop following the library — keep your own manual tweaks, or freeze the version you got — click "Switch to local setup" next to the banner; library updates no longer overwrite it afterwards.
+- **Multiple matches** (same venue, several configurations — e.g. a clockwise/counter-clockwise layout, or different track lengths at the same location): nothing is auto-picked. Instead, a "Multiple possible track configurations detected" list appears with each candidate's name; click "Apply this configuration" to pick the one matching this log, or "None of these (skip)" to apply nothing.
+- **No match at all**: unaffected — the existing "drag the start/finish line yourself / auto-detect corners" flow continues as before. Once that manual setup is remembered locally, the library is no longer consulted for this circuit.
+- Anything you've built, imported, or manually adjusted locally always takes priority — the library only fills in when there's no local record yet.
+
+#### Contributing a track to the public library
+
+Below the "Track setup" card, an expandable "Contribute this track to the public library" section lets you package your calibrated start/finish line and sector gates into a **PR-ready** JSON file:
+
+- Fields required: **Track ID** (e.g. `tw-example-track`), **Display name**, **Country code** (ISO 3166-1 alpha-2, e.g. `TW`), **License** (defaults to `CC0-1.0`, editable).
+- Fill these in and click "Export track library JSON" to download the file; if the current log has no start/finish line drawn yet, you'll see "Draw a start/finish line first — nothing to export yet" and the export won't proceed.
+- This only assembles and downloads the JSON file — it doesn't open a PR for you or upload anything to a server. What you do with the file next is entirely up to you.
+
 ### 4.10 Layout (desktop drag/resize grid)
 
 On wider screens (desktop), every Analyzer panel — the track map, lap table, sector gates, track channel markers, acceleration test, gear ratio calculator, track setup, map alignment, lap overlay alignment, and each chart — is its own card that you can **drag to rearrange** and **resize**, so you can put the panels you care about side by side and make good use of a wide screen's space instead of scrolling a single long column.
 
 - **Drag to move**: press and drag a card's **title bar** (the strip at the top with the card's name) to move it; interacting with a card's content (panning/zooming the map, clicking a table row) does not start a drag.
-- **Drag to resize**: hover the card's **bottom-right corner** until the resize cursor appears, then drag to resize; the map and charts redraw immediately to fit the new size without blurring or misalignment.
+- **Drag to resize**: hover the card's **bottom-right corner** until the resize cursor appears, then drag to resize; the map and charts redraw immediately to fit the new size without blurring or misalignment. Every card has a minimum size, so resizing can't shrink it below a still-readable floor.
 - **Auto-saved**: the layout (every card's position and size) is automatically saved in the browser (localStorage) and persists across reloads and closed tabs.
 - **Reset layout**: the "Reset layout" button in the toolbar restores the default arrangement (map and lap table in the left column, charts and tool panels in the right column).
 - **Adding chart cards**: a chart added via "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
@@ -294,6 +313,22 @@ Below roughly 768px wide, the layout automatically collapses to a single column,
   - A pinned card's height is capped at roughly 45% of the screen (`max-height: 45vh`) so it doesn't take over the whole screen and block scrolling to the rest of the content.
   - Tap the pin button again to unpin.
   - Collapse and pin state are each saved in the browser (localStorage) and persist across reloads and closed tabs.
+
+### 4.11 GPS session merge
+
+Some ECUs (e.g. without a Race Module installed) can't record GPS — only sensor data like RPM and road speed. If you separately recorded a GPS-equipped log for the same ride (a phone, or a RaceChrono device), the "GPS session merge" card can align the two by clock offset and merge them into a single new recording that fills in GPS position, speed, and course channels — so a log that couldn't otherwise be located on a circuit or split into laps can now use the track map, lap table, and the rest of the Analyzer.
+
+This requires **at least two recordings already loaded** in the Analyzer (e.g. a GPS-less `.loga` plus a GPS-equipped `.nmea`). To use it:
+
+1. **Base recording (to receive GPS)**: pick the recording you want to keep as-is — the one missing GPS.
+2. **GPS source recording**: pick the other recording that has clean GPS data.
+   - Both dropdowns list every currently loaded recording; any recording with no usable speed channel is flagged "(no usable speed channel)," since auto-align relies on comparing speed signals.
+3. **Auto-align**: click it and the app cross-correlates both recordings' speed data to find the clock offset between them, then shows:
+   - **Time offset** (ms).
+   - **Correlation score**: a confidence indicator for the alignment result.
+   - If the selected recordings are missing a usable speed or time channel, or there isn't enough overlapping time range/speed signal between them, a matching error message is shown and you can't proceed.
+4. **Fine-tune the offset**: auto-align isn't always perfect — use the "−100ms" / "+100ms" buttons next to the time offset to nudge it by hand in 100ms steps, without re-running auto-align.
+5. **Merge and add to recordings**: once you're happy with the offset, click this to splice the GPS/speed/course channels onto the base recording's own time axis at that offset, producing a new recording (named `<original name>_merged.loga`) and showing `Merged into a new recording "<name>" — pick it from the record menu above.` The merged recording then appears in the record picker above like any other — switch to it, use any Analyzer feature, or export it from the Converter.
 
 ---
 
@@ -363,6 +398,9 @@ The footer at the bottom of the page shows "build \<sha\> · \<date\>." Include 
 | G-G 圖／摩擦圓 | G-G diagram / friction circle | The featured use of the XY scatter chart: lateral G vs. longitudinal G, showing how evenly tyre grip is used |
 | 軌跡檔 | Track file | An exported/imported JSON track setup (start/finish line + sector gates + lap-table columns) |
 | RCNX 多 session | RCNX multi-session | A single `.rcnx` file containing multiple recordings; you pick one on load |
+| 公開賽道庫 | (Public) track library | A built-in library of public track setups; auto-matched to a loaded log's GPS coordinates to apply a start/finish line and sector gates |
+| 改回本機設定 | Detach | Switch a currently-applied track-library setup to a plain local setup, so library updates no longer overwrite it |
+| GPS 場次合併 | (GPS) session merge | Aligns a GPS-less recording with another recording that has GPS by clock offset, merging them into one new recording |
 
 ---
 
