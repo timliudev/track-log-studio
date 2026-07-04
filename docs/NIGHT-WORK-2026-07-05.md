@@ -19,7 +19,7 @@
 | T8 | B6 彈性面板佈局 | ✅ 已合併 develop(ff00967) | feature/flexible-panel-layout | gap 分析後只補真缺口;769 測試綠 |
 | M | 維護包:GG bundle 分割+依賴更新 | ✅ 已合併 develop(ee5d12b) | chore/maintenance-0705 | precache -64%;711 測試綠 |
 | A | A2/A3 雲端賽道機制 | ✅ 第二階段已合併(1bf989e) | feature/cloud-track | 759 測試綠;§8 開放問題待你拍板 |
-| R | develop → main 釋出+部署 | ⬜ 排隊 | — | 綠燈才做 |
+| R | develop → main 釋出+部署 | ✅ main 742a97b 已推送 | — | Workers Builds 部署,狀態見「釋出」章節 |
 
 ## 各任務詳情
 
@@ -62,8 +62,34 @@ Agent 追溯 git log 確認:彎道偵測/sector 功能**早在 95a67c8(A1+A15 re
 
 **待你驗收**:桌面模式把地圖/圖表/圈次表卡片縮到最小,確認擋在合理可讀尺寸,且原有拖曳/resize/collapse/pin 行為不受影響(無新增可見 UI,是靜默限制)。
 
+## 釋出
+
+- develop 最終狀態:**769 測試全綠(64 檔)、build + typecheck 綠、npm audit 0 漏洞**
+- `develop → main` --no-ff 合併(742a97b),在 main 上重跑測試+build 確認後推送
+- Workers Builds 自動部署 track-log-studio(build a724eaee),完成狀態見事件記錄
+- 線上網址:https://track-log-studio.timliudev.workers.dev
+
+## 隔天早上驗收清單
+
+1. **T6 場次合併**:分析頁左欄「GPS 場次合併」卡 — 載入一份 .loga + 一份 .nmea,自動對齊 → 微調 → 合併,確認新記錄可切換/匯出
+2. **T8 縮放下限**:桌面模式把地圖/圖表/圈次表卡縮到最小,確認擋在可讀尺寸,原有拖曳/收闔/釘選不受影響
+3. **A2/A3 賽道庫**:種子庫是合成座標,要試自動套用需暫改 `src/domain/tracks/seedLibrary.ts` 代入真實座標;或先只驗「貢獻賽道」表單匯出 JSON
+4. **M1 precache**:重新整理後 DevTools → Application → Cache Storage,確認 GgChart/sql-wasm 不在 precache,開 G-G 圖後才進 runtime cache
+5. PWA 有依賴與 SW 變更,建議硬重整(Ctrl+Shift+R)後再驗
+
+## 待你拍板的討論項(A2/A3 後續,見 CLOUD-TRACK-DESIGN.md §8)
+
+1. 獨立 tracks repo 要不要開?命名(如 track-log-studio-tracks)
+2. 賽道資料授權:CC0 vs CC-BY
+3. CDN 拉取策略(pin 版本 vs latest)
+4. 個人雲端備份 OAuth(Google Drive / GitHub)要不要做、用哪個
+
 ## 事件記錄
 
 - 01:00 討論定案,開始執行。起點:develop 1af3481(與 origin 同步)。
 - 01:05 使用者追加授權:可並行的任務開 worktree 並行。T6 留主目錄,A2/A3 與維護包各開 worktree。
 - 01:18 `npm install` 遇 EBUSY(miniflare 被鎖):主 repo 有殘留的 vite dev server(昨晚 19:03/19:41 兩個 preview + 今天 00:37 的 `npm run dev --host`,可能是你出門前開的)。已全部收掉才解鎖 — **如果那個 dev server 是你故意留的,抱歉,重開 `npm run dev` 即可**(依賴更新後本來也要重啟)。無關的 MCP server 程序未動。
+- 01:31 A2/A3 與 T7 兩分支合併 develop 均無衝突(ort 自動合併 AnalyzerView/locale),合併後全套測試驗證通過。
+- 01:38 T8 agent 把 checkout 留在 feature branch,首次合併誤成 no-op(自己合自己),發現後切回 develop 重合,無資料損失。
+- 01:41 main 742a97b 推送,Workers Builds a724eaee 排入佇列。
+- T7 agent 發現並修正了記憶檔中「corner-detection 未接 UI」的過時記錄(實際早在 95a67c8 完成)。
