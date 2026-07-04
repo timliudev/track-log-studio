@@ -46,6 +46,55 @@ export const STATIC_CARD_IDS = {
 /** Prefix for dynamic chart-card ids — see {@link chartItemId}. */
 const CHART_PREFIX = 'chart-'
 
+/**
+ * B6 — minimum grid size (in grid units) a card may be resized down to, so
+ * free-form resizing (grid-layout-plus's own resize handle, already wired up
+ * since #8) can't shrink a card into an unreadable sliver: a chart/map with
+ * `w:1,h:1` renders nothing useful, and the lap table would lose its header +
+ * every row. Kept as a small per-KIND table rather than one global minimum
+ * because a control panel (gear/track-file) is legitimately fine much
+ * smaller than a chart or the map. Static ids not listed here (and any
+ * chart-card id, which is NOT in this table — see the `isChartItemId` branch
+ * of {@link minSizeFor}) fall back to `DEFAULT_MIN_SIZE`.
+ */
+const DEFAULT_MIN_SIZE = { minW: 2, minH: 3 } as const
+
+const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> = {
+  [STATIC_CARD_IDS.map]: { minW: 3, minH: 5 },
+  [STATIC_CARD_IDS.lapTable]: { minW: 3, minH: 4 },
+  [STATIC_CARD_IDS.sectors]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.trackChannel]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.accelTest]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.gear]: { minW: 3, minH: 4 },
+  [STATIC_CARD_IDS.trackFile]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.mapAlign]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.sessionMerge]: { minW: 2, minH: 3 },
+}
+
+/** Chart cards (uPlot/echarts) need more room than a small control panel to
+ *  stay legible — same minimum for every chart kind (line or scatter). */
+const CHART_MIN_SIZE = { minW: 3, minH: 5 } as const
+
+/** Minimum `{minW, minH}` (grid units) for a card id — see module doc above.
+ *  Used both to decorate GridItem props (enforced live during drag/resize)
+ *  and to defensively clamp sizes coming from an older persisted layout or a
+ *  freshly-added default item (belt-and-braces; the default/[reconcile
+ *  positions already respect these, so this is normally a no-op). */
+export function minSizeFor(id: string): { minW: number; minH: number } {
+  if (isChartItemId(id)) return CHART_MIN_SIZE
+  return STATIC_MIN_SIZE[id] ?? DEFAULT_MIN_SIZE
+}
+
+/** Returns `item` unchanged if it already meets its minimum size, otherwise a
+ *  NEW object clamped up to the minimum (never shrinks — only grows a
+ *  too-small `w`/`h`). Pure; does not touch `x`/`y`. */
+export function clampToMinSize(item: DashboardLayoutItem): DashboardLayoutItem {
+  const { minW, minH } = minSizeFor(item.i)
+  if (item.w >= minW && item.h >= minH) return item
+  return { ...item, w: Math.max(item.w, minW), h: Math.max(item.h, minH) }
+}
+
 /** The grid item id for a chart, keyed by the chart's OWN store id (stable
  *  across add/remove/reorder) — never its index in `analyzerStore.charts`. */
 export function chartItemId(chartId: number): string {
@@ -126,7 +175,11 @@ export function parseLayout(raw: string | null): DashboardLayoutItem[] | null {
 
 export function loadLayout(): DashboardLayoutItem[] {
   try {
-    return parseLayout(localStorage.getItem(STORAGE_KEY)) ?? defaultLayout()
+    const parsed = parseLayout(localStorage.getItem(STORAGE_KEY))
+    // Clamp on load so a layout saved BEFORE the B6 minimum-size table existed
+    // (or corrupted by a manual localStorage edit) can't hand GridItem a
+    // smaller-than-minW/minH item — see clampToMinSize's doc.
+    return parsed ? parsed.map(clampToMinSize) : defaultLayout()
   } catch {
     return defaultLayout()
   }
