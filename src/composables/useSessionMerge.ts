@@ -4,6 +4,11 @@ import { LogSession } from '@/domain/model/LogSession'
 import { crossCorrelateOffset, type AlignmentResult } from '@/domain/analysis/sessionAlign'
 import { mergeSessions } from '@/domain/analysis/sessionMerge'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { buildMergeOverlay, type MergeOverlayData } from '@/domain/analysis/mergePreview'
+
+/** Point cap for the live alignment-preview chart — see buildMergeOverlay's
+ *  own default rationale (cheap enough to redo on every ±100ms nudge). */
+const PREVIEW_MAX_POINTS = 400
 
 /** Lag search window and scan step passed to {@link crossCorrelateOffset} —
  *  generous defaults per docs/PHASE5-MERGE-STATUS.md's suggestion #6: two
@@ -44,6 +49,7 @@ export function useSessionMerge(): {
   canAlign: ComputedRef<boolean>
   alignment: Ref<AlignmentResult | null>
   offsetMs: Ref<number | null>
+  overlay: ComputedRef<MergeOverlayData | null>
   autoAlign: () => void
   nudge: (deltaMs: number) => void
   canMerge: ComputedRef<boolean>
@@ -124,6 +130,36 @@ export function useSessionMerge(): {
     offsetMs.value = (offsetMs.value ?? 0) + deltaMs
   }
 
+  /**
+   * Live alignment-preview overlay: both sessions' speed curves resampled
+   * onto a shared, decimated time grid with the current `offsetMs` applied to
+   * the GPS side — recomputed reactively so every ±100ms nudge (or a fresh
+   * autoAlign) immediately redraws the preview chart, without re-running the
+   * (more expensive) cross-correlation search. Null until both sessions are
+   * picked, both resolve a speed+time channel, and an offset exists.
+   */
+  const overlay = computed<MergeOverlayData | null>(() => {
+    if (baseId.value == null || gpsId.value == null || offsetMs.value == null) return null
+    const base = fileStore.getSession(baseId.value)
+    const gps = fileStore.getSession(gpsId.value)
+    if (!base || !gps) return null
+
+    const baseSpeedName = resolveSpeedChannel(base)
+    const gpsSpeedName = resolveSpeedChannel(gps)
+    const baseTime = base.timeChannel
+    const gpsTime = gps.timeChannel
+    if (!baseSpeedName || !gpsSpeedName || !baseTime || !gpsTime) return null
+
+    const baseSpeed = base.get(baseSpeedName)
+    const gpsSpeed = gps.get(gpsSpeedName)
+    if (!baseSpeed || !gpsSpeed) return null
+
+    return buildMergeOverlay(baseSpeed.data, baseTime.data, gpsSpeed.data, gpsTime.data, {
+      offsetMs: offsetMs.value,
+      maxPoints: PREVIEW_MAX_POINTS,
+    })
+  })
+
   const canMerge = computed(() => canAlign.value && offsetMs.value != null)
 
   /** Build the merged session and register it into fileStore. Returns the new
@@ -155,6 +191,7 @@ export function useSessionMerge(): {
     canAlign,
     alignment,
     offsetMs,
+    overlay,
     autoAlign,
     nudge,
     canMerge,
