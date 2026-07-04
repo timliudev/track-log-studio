@@ -1,17 +1,38 @@
 import { describe, it, expect } from 'vitest'
 import {
   parsePersonalTrackOverlay,
+  parseTrackDefinition,
+  parseTrackLibrary,
   migrateLegacyCircuitSetup,
   resolveGeometryToApply,
   TrackSchemaError,
   SUPPORTED_TRACK_SCHEMA_VERSIONS,
   type LegacyCircuitSetup,
   type PersonalTrackOverlayV1,
+  type TrackDefinitionV1,
 } from '@/domain/tracks/schema'
 import type { LapLine } from '@/domain/analysis/laps'
 
 function line(n: number): LapLine {
   return { a: { lat: n, lon: n + 1 }, b: { lat: n + 2, lon: n + 3 } }
+}
+
+function trackDefinition(): TrackDefinitionV1 {
+  return {
+    schemaVersion: 1,
+    id: 'tw-example-track',
+    name: { 'zh-TW': '範例賽道', en: 'Example Track' },
+    aliases: ['example'],
+    geo: { lat: 23.5, lon: 120.5 },
+    countryCode: 'TW',
+    startFinishLine: { a: { lat: 23.5001, lon: 120.5 }, b: { lat: 23.4999, lon: 120.5 } },
+    gates: [{ a: { lat: 23.501, lon: 120.502 }, b: { lat: 23.499, lon: 120.502 } }],
+    recommendedLapTimeBandSec: { min: 40, max: 90 },
+    direction: 'cw',
+    license: 'CC0-1.0',
+    updatedAt: '2026-07-05',
+    contributors: ['someone'],
+  }
 }
 
 function v1Overlay(): PersonalTrackOverlayV1 {
@@ -195,5 +216,130 @@ describe('resolveGeometryToApply — §4.2 matching/precedence, Phase-1-scoped',
     const legacy = legacySetup()
     const migrated = migrateLegacyCircuitSetup(legacy)
     expect(resolveGeometryToApply(migrated)).toEqual({ line: legacy.line, gates: legacy.gates })
+  })
+})
+
+describe('parseTrackDefinition (SHARED track, §1.2/§2.3)', () => {
+  it('accepts a fully-populated definition unchanged', () => {
+    const def = trackDefinition()
+    expect(parseTrackDefinition(def)).toEqual(def)
+  })
+
+  it('accepts a minimal definition without optional fields', () => {
+    const def = trackDefinition()
+    delete (def as Partial<TrackDefinitionV1>).aliases
+    delete def.recommendedLapTimeBandSec
+    delete def.direction
+    delete def.contributors
+    const parsed = parseTrackDefinition(def)
+    expect(parsed.aliases).toBeUndefined()
+    expect(parsed.recommendedLapTimeBandSec).toBeUndefined()
+    expect(parsed.direction).toBeUndefined()
+    expect(parsed.contributors).toBeUndefined()
+  })
+
+  it('rejects a non-object', () => {
+    expect(() => parseTrackDefinition(null)).toThrow(TrackSchemaError)
+    expect(() => parseTrackDefinition('nope')).toThrow(TrackSchemaError)
+  })
+
+  it('rejects a non-1 schemaVersion', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), schemaVersion: 2 })).toThrow(TrackSchemaError)
+  })
+
+  it('rejects a missing id', () => {
+    const { id, ...rest } = trackDefinition()
+    void id
+    expect(() => parseTrackDefinition(rest)).toThrow(TrackSchemaError)
+  })
+
+  it('rejects a name with no locales', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), name: {} })).toThrow(TrackSchemaError)
+  })
+
+  it('rejects a name with a non-string value', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), name: { en: 42 } })).toThrow(TrackSchemaError)
+  })
+
+  it('rejects invalid aliases', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), aliases: [42] })).toThrow(TrackSchemaError)
+  })
+
+  it('rejects an out-of-range geo', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), geo: { lat: 999, lon: 0 } })).toThrow(
+      TrackSchemaError,
+    )
+    expect(() => parseTrackDefinition({ ...trackDefinition(), geo: { lat: 0, lon: -200 } })).toThrow(
+      TrackSchemaError,
+    )
+  })
+
+  it('rejects a lowercase or malformed countryCode', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), countryCode: 'tw' })).toThrow(TrackSchemaError)
+    expect(() => parseTrackDefinition({ ...trackDefinition(), countryCode: 'TWN' })).toThrow(TrackSchemaError)
+  })
+
+  it('rejects a malformed startFinishLine', () => {
+    expect(() =>
+      parseTrackDefinition({ ...trackDefinition(), startFinishLine: { a: { lat: 1 } } }),
+    ).toThrow(TrackSchemaError)
+  })
+
+  it('rejects gates that are not an array of endpoint pairs', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), gates: 'nope' })).toThrow(TrackSchemaError)
+    expect(() => parseTrackDefinition({ ...trackDefinition(), gates: [{ a: { lat: 1 } }] })).toThrow(
+      TrackSchemaError,
+    )
+  })
+
+  it('rejects an invalid recommendedLapTimeBandSec', () => {
+    expect(() =>
+      parseTrackDefinition({ ...trackDefinition(), recommendedLapTimeBandSec: { min: 'x' } }),
+    ).toThrow(TrackSchemaError)
+  })
+
+  it('rejects an invalid direction', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), direction: 'sideways' })).toThrow(
+      TrackSchemaError,
+    )
+  })
+
+  it('rejects a missing license', () => {
+    const { license, ...rest } = trackDefinition()
+    void license
+    expect(() => parseTrackDefinition(rest)).toThrow(TrackSchemaError)
+  })
+
+  it('rejects a missing updatedAt', () => {
+    const { updatedAt, ...rest } = trackDefinition()
+    void updatedAt
+    expect(() => parseTrackDefinition(rest)).toThrow(TrackSchemaError)
+  })
+
+  it('rejects invalid contributors', () => {
+    expect(() => parseTrackDefinition({ ...trackDefinition(), contributors: [42] })).toThrow(TrackSchemaError)
+  })
+})
+
+describe('parseTrackLibrary (§2.3 CI-style validation, one-bad-entry-tolerant)', () => {
+  it('parses every entry when all are valid', () => {
+    const { tracks, errors } = parseTrackLibrary([trackDefinition(), { ...trackDefinition(), id: 'tw-two' }])
+    expect(tracks).toHaveLength(2)
+    expect(errors).toHaveLength(0)
+  })
+
+  it('skips a malformed entry and reports it, keeping the valid ones', () => {
+    const bad = { ...trackDefinition(), id: 'tw-bad', license: undefined }
+    const { tracks, errors } = parseTrackLibrary([trackDefinition(), bad])
+    expect(tracks).toHaveLength(1)
+    expect(tracks[0].id).toBe('tw-example-track')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('tw-bad')
+  })
+
+  it('returns an empty result for an empty input', () => {
+    const { tracks, errors } = parseTrackLibrary([])
+    expect(tracks).toEqual([])
+    expect(errors).toEqual([])
   })
 })
