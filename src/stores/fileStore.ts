@@ -10,7 +10,7 @@ export interface ImportedFile {
   formatId: string | null
   rowCount: number
   error: string | null
-  fileType: 'loga' | 'nmea' | 'vbo' | 'rcz' | 'xrk' | 'rcnx'
+  fileType: 'loga' | 'nmea' | 'vbo' | 'rcz' | 'xrk' | 'rcnx' | 'merged'
 }
 
 /**
@@ -113,6 +113,30 @@ export const useFileStore = defineStore('file', () => {
     })
   }
 
+  /**
+   * Register a session that was produced in-app (not parsed from an uploaded
+   * File) — currently only Phase 5's GPS session merge (see
+   * `useSessionMerge.ts`). Goes straight to 'ready' (no parsing phase) and has
+   * no `originalFiles` entry, so it's naturally excluded from `savableEntries`
+   * (no source .loga text to patch) but still shows up in `readyFiles` /
+   * `readySessions` for the analyzer and any export-registry format.
+   */
+  function addMergedSession(name: string, session: LogSession): number {
+    const id = nextId++
+    sessions.set(id, session)
+    files.value.push({
+      id,
+      name,
+      status: 'ready',
+      progress: 1,
+      formatId: session.meta.formatId,
+      rowCount: session.rowCount,
+      error: null,
+      fileType: 'merged',
+    })
+    return id
+  }
+
   function removeFile(id: number): void {
     sessions.delete(id)
     originalFiles.delete(id)
@@ -134,6 +158,7 @@ export const useFileStore = defineStore('file', () => {
     beginImport,
     setProgress,
     completeImport,
+    addMergedSession,
     failImport,
     removeFile,
     clearFiles,
