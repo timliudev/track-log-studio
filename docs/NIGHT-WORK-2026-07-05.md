@@ -84,6 +84,21 @@ Agent 追溯 git log 確認:彎道偵測/sector 功能**早在 95a67c8(A1+A15 re
 3. CDN 拉取策略(pin 版本 vs latest)
 4. 個人雲端備份 OAuth(Google Drive / GitHub)要不要做、用哪個
 
+## 延伸工作(01:55 起,main 凍結,只進 develop)
+
+### 手冊更新 ✅(21b2e0d)
+
+zh-Hant/en 同步補:4.9 賽道庫自動套用+貢獻流程、4.10 縮放下限一句、新增 4.11「GPS 場次合併」、第 7 節名詞對照三筆。內容對照實際 locale 字串。
+
+### 夜間變更程式碼審查 ✅
+
+範圍 1af3481..develop。**乾淨區**:session merge offset 方向自洽、fileStore 'merged' 下游(savableEntries 唯一過濾點已正確排除)、resolveMatch 優先序與 ambiguous 清空、AnalyzerView 三方合併無互踩、locale key 完全對應、PWA regex 實測 build 產物確認生效。
+
+**Findings**:
+1. **中** — `clampToMinSize` 只放大 w/h 不動 x/y,T8 上線前存的舊 layout 若有低於下限的卡片,重載後理論上可能與鄰卡重疊(grid-layout-plus 初次掛載是否觸發 compact 未證實)→ 已修,見下
+2. **低** — precache globIgnores 漏了 `GgChart-*.css`(105 bytes,影響極小)→ 已修
+3. **低** — 經度容差未做 cos(lat) 校正(circuitKey.ts 既有邏輯,高緯度賽道比對會偏保守而非誤判;台灣無感)→ **記錄為後續精修,本次不動**(與 circuitKeysMatch 行為一致性優先)
+
 ## 事件記錄
 
 - 01:00 討論定案,開始執行。起點:develop 1af3481(與 origin 同步)。
