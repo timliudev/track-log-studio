@@ -55,7 +55,7 @@
 
 | 項目 | 狀態 | 備註 |
 |------|------|------|
-| 網格卡片完全偏移(粉紅 placeholder 常駐) | ✅ `4e623f7` | 根因:vgl-item 的 transform transition 被分頁切換動畫卡在中間值(inline style 正確、computed 卡在 translateX:7px);修法=分析頁內停用該過渡。實測:兩欄零重疊、無常駐 placeholder |
+| 網格卡片完全偏移(拖曳 placeholder 與格子落差大) | ✅ `ddf2b8c` | **真根因(第二輪才抓到):#item slot 內多包一層 GridItem → 每卡兩層 .vgl-item transform 疊加、位置翻倍**(修前 8 卡 16 個 vgl-item),placeholder 只有一層所以「看起來」偏移。修=移除內層 GridItem+decorateForGrid 傳拖曳設定。真實拖曳實測 placeholder 偏移 0,0。第一輪的 transition 停用(`4e623f7`)只是化妝品級修正,保留但註解已更正 |
 | 手機無法拖曳重排 | ✅ `4e623f7` | <768px 單欄改用自建 mobileOrder(panelState.v1)產生布局,標題列垂直拖曳重排、resize 關閉;桌面/手機布局互不污染(實測 dashboardLayout.v1 byte-identical);釘選中的卡不可拖(先解釘);+14 tests(702 總) |
 
 ## 追蹤事項(本次未做)
