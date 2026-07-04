@@ -24,6 +24,7 @@ import {
   STATIC_CARD_IDS,
   chartItemId,
   mobileLayout,
+  minSizeFor,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -402,7 +403,16 @@ interface GridItemDecoration {
   dragAllowFrom: string
   dragIgnoreFrom: string
   isDraggable: boolean
+  minW: number
+  minH: number
 }
+// B6 — per-card minimum size (see dashboardLayout.ts's minSizeFor) is carried
+// on the layout item the same way drag config is, so grid-layout-plus's OWN
+// resize handle refuses to shrink a card past the point a chart/map/table
+// stops being usable. Only applied on DESKTOP (isResizable is already false
+// on mobile — see useDashboardLayout — so minW/minH there is inert, but
+// passing it unconditionally keeps this function breakpoint-agnostic like the
+// rest of the decoration).
 function decorateForGrid(
   items: DashboardLayoutItem[],
 ): (DashboardLayoutItem & GridItemDecoration)[] {
@@ -411,6 +421,7 @@ function decorateForGrid(
     dragAllowFrom: '.drag-handle',
     dragIgnoreFrom: '.actions',
     isDraggable: itemDraggable(it.i),
+    ...minSizeFor(it.i),
   }))
 }
 
