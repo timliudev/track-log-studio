@@ -16,7 +16,7 @@
 |---|------|------|------|------|
 | T6 | Phase 5 場次合併 UI | ✅ 已合併 develop(06442f7) | feature/phase5-merge-ui | 711 測試綠、build 綠 |
 | T7 | 彎道偵測接上 UI | ✅ 查證後補測試(1bf989e) | feature/corner-detection-ui | 功能其實早已完成,詳見下方 |
-| T8 | B6 彈性面板佈局 | ⏳ 進行中 | feature/flexible-panel-layout | |
+| T8 | B6 彈性面板佈局 | ✅ 已合併 develop(ff00967) | feature/flexible-panel-layout | gap 分析後只補真缺口;769 測試綠 |
 | M | 維護包:GG bundle 分割+依賴更新 | ✅ 已合併 develop(ee5d12b) | chore/maintenance-0705 | precache -64%;711 測試綠 |
 | A | A2/A3 雲端賽道機制 | ✅ 第二階段已合併(1bf989e) | feature/cloud-track | 759 測試綠;§8 開放問題待你拍板 |
 | R | develop → main 釋出+部署 | ⬜ 排隊 | — | 綠燈才做 |
@@ -55,6 +55,12 @@ Agent 追溯 git log 確認:彎道偵測/sector 功能**早在 95a67c8(A1+A15 re
 - TrackFilePanel UI:「已自動套用賽道庫設定」banner + detach、多配置選單、「貢獻賽道到公開庫」匯出 PR-ready JSON 表單
 
 **未做(需你拍板,見 CLOUD-TRACK-DESIGN.md §8)**:獨立 tracks repo 命名與授權(CC0 vs CC-BY)、CDN pin 策略、Google Drive/GitHub OAuth 個人備份(需註冊外部 OAuth client)。
+
+### T8 B6 彈性面板佈局 ✅(gap 分析後只補真缺口)
+
+追溯確認 B6 = 「#8 桌面拖曳網格 + #9 手機收闔/釘選/重排」,絕大部分已由先前 grid-layout-plus 工作涵蓋。本次補的唯一真缺口:**卡片縮放下限** — 先前卡片可被縮到 1×1 無法閱讀,現在依卡片種類設 minW/minH(地圖/圈次表/齒比計算器較大、控制面板較寬鬆、圖表統一下限),並在 `loadLayout` 對舊 localStorage 資料做防禦性 clamp。新增 14 個測試。
+
+**待你驗收**:桌面模式把地圖/圖表/圈次表卡片縮到最小,確認擋在合理可讀尺寸,且原有拖曳/resize/collapse/pin 行為不受影響(無新增可見 UI,是靜默限制)。
 
 ## 事件記錄
 
