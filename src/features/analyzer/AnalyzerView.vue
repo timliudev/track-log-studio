@@ -37,6 +37,7 @@ import TrackChannelPanel from './TrackChannelPanel.vue'
 import AccelTestPanel from './AccelTestPanel.vue'
 import GearPanel from './GearPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
+import SessionMergePanel from './SessionMergePanel.vue'
 import ScatterChart from './ScatterChart.vue'
 
 const { t } = useI18n()
@@ -735,6 +736,18 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               @update:pinned="togglePinned(item.i)"
             >
               <TrackFilePanel :track="track" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'sessionmerge'"
+              :title="t('analyzer.layout.cardSessionMerge')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <SessionMergePanel />
             </DashboardCard>
 
             <DashboardCard
