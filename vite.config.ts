@@ -49,6 +49,31 @@ export default defineConfig(({ mode }) => {
         // runtime and never cached.
         workbox: {
           globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,wasm}'],
+          // These two chunks are intentionally dynamic-import()ed (see
+          // ScatterChart.vue's GgChart loader and parseRcnx.ts's sql.js
+          // loader) so they never block the initial page render — but
+          // GenerateSW's default globPatterns precaches EVERY built asset
+          // regardless of how it's loaded at runtime, which silently
+          // re-eagerfies them: the service worker would fetch both
+          // (~480 kB echarts + ~700 kB sql.js/wasm, combined over 1 MB)
+          // during install, on every visitor, even those who never open
+          // the G-G chart or import an RCNX file. Excluding them here and
+          // letting the runtimeCaching rule below cache-on-first-actual-use
+          // keeps the precache (and PWA install/update payload) to just the
+          // app shell, matching the code-splitting intent.
+          globIgnores: ['**/GgChart-*.js', '**/sql-wasm-*.js', '**/sql-wasm-*.wasm'],
+          runtimeCaching: [
+            {
+              // Content-hashed filenames (immutable per build) — safe to
+              // cache indefinitely once actually requested.
+              urlPattern: /\/assets\/(GgChart|sql-wasm)-.*\.(js|wasm)$/,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'lazy-chunks',
+                expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              },
+            },
+          ],
         },
         manifest: {
           name: 'Track Log Studio',
