@@ -1,18 +1,27 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useConverterStore } from '@/stores/converterStore'
 import type { OutputFormat } from '@/stores/converterStore'
 import { downloadText, downloadZip } from './download'
+import SaveCalibratedLoga from './SaveCalibratedLoga.vue'
 
 const { t } = useI18n()
 const store = useConverterStore()
-const { results, isConverting, readyFiles, outputFormat } = storeToRefs(store)
+const { results, isConverting, readyFiles, outputFormat, savableEntries } = storeToRefs(store)
 
 const FORMATS: { id: OutputFormat; label: string }[] = [
   { id: 'nmea', label: 'NMEA (.nmea)' },
   { id: 'vbo', label: 'VBO (.vbo)' },
+  { id: 'csv', label: 'CSV (.csv)' },
 ]
+
+// 'loga' (save-modified) only makes sense when the loaded source is itself a
+// .loga — it patches the ORIGINAL text (LogaWriter.patchLogaText), not a
+// registry export from a normalized session. Disabled (not hidden) so users
+// with a non-loga source understand the option exists but doesn't apply.
+const logaAvailable = computed(() => savableEntries.value.length > 0)
 
 function onConvert(): void {
   const out = store.convertAll()
@@ -21,7 +30,7 @@ function onConvert(): void {
 }
 
 function downloadAllZip(): void {
-  const zipName = outputFormat.value === 'vbo' ? 'loga-vbo.zip' : 'loga-nmea.zip'
+  const zipName = `loga-${outputFormat.value}.zip`
   downloadZip(zipName, results.value)
 }
 </script>
@@ -43,43 +52,60 @@ function downloadAllZip(): void {
         >
           {{ f.label }}
         </button>
+        <button
+          type="button"
+          role="radio"
+          :aria-checked="outputFormat === 'loga'"
+          :disabled="!logaAvailable"
+          class="seg-btn"
+          :class="{ active: outputFormat === 'loga' }"
+          :title="!logaAvailable ? t('converter.format.logaDisabledHint') : undefined"
+          @click="store.setOutputFormat('loga')"
+        >
+          {{ t('converter.format.loga') }}
+        </button>
       </div>
     </div>
     <p class="format-hint muted">{{ t(`converter.format.hint.${outputFormat}`) }}</p>
 
-    <button
-      type="button"
-      class="btn-primary"
-      :disabled="readyFiles.length === 0 || isConverting"
-      @click="onConvert"
-    >
-      {{ isConverting ? t('converter.convert.converting') : t('converter.convert.button') }}
-    </button>
-    <span v-if="readyFiles.length === 0" class="muted">
-      {{ t('converter.convert.noReady') }}
-    </span>
+    <template v-if="outputFormat === 'loga'">
+      <SaveCalibratedLoga />
+    </template>
+    <template v-else>
+      <button
+        type="button"
+        class="btn-primary"
+        :disabled="readyFiles.length === 0 || isConverting"
+        @click="onConvert"
+      >
+        {{ isConverting ? t('converter.convert.converting') : t('converter.convert.button') }}
+      </button>
+      <span v-if="readyFiles.length === 0" class="muted">
+        {{ t('converter.convert.noReady') }}
+      </span>
 
-    <div v-if="results.length" class="result-block">
-      <header class="row">
-        <h3>{{ t('converter.convert.resultsHeading') }}</h3>
-        <button
-          v-if="results.length > 1"
-          type="button"
-          class="btn-secondary"
-          @click="downloadAllZip"
-        >
-          {{ t('converter.convert.downloadAll') }}
-        </button>
-      </header>
-      <ul class="items">
-        <li v-for="r in results" :key="r.name" class="item">
-          <span class="name">{{ r.name }}</span>
-          <button type="button" class="link" @click="downloadText(r.name, r.content)">
-            {{ t('converter.convert.download') }}
+      <div v-if="results.length" class="result-block">
+        <header class="row">
+          <h3>{{ t('converter.convert.resultsHeading') }}</h3>
+          <button
+            v-if="results.length > 1"
+            type="button"
+            class="btn-secondary"
+            @click="downloadAllZip"
+          >
+            {{ t('converter.convert.downloadAll') }}
           </button>
-        </li>
-      </ul>
-    </div>
+        </header>
+        <ul class="items">
+          <li v-for="r in results" :key="r.name" class="item">
+            <span class="name">{{ r.name }}</span>
+            <button type="button" class="link" @click="downloadText(r.name, r.content)">
+              {{ t('converter.convert.download') }}
+            </button>
+          </li>
+        </ul>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -146,6 +172,10 @@ function downloadAllZip(): void {
 .seg-btn.active {
   background: var(--color-accent);
   color: var(--color-accent-text);
+}
+.seg-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .format-hint {
   margin: 0;

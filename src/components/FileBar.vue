@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFileStore } from '@/stores/fileStore'
 import { useLogImport } from '@/composables/useLogImport'
-import { sniff, detectImporter, allImportExtensions } from '@/domain/import/registry'
+import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/registry'
 import { extractLogFiles } from '@/domain/import/zip'
+import { listRcnxSessions, type RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
+// Vite-resolved URL of the sql.js wasm binary (same asset the parse worker
+// uses — see src/workers/parse.worker.ts). listRcnxSessions runs on the main
+// thread (to show the multi-session picker before a File is handed to the
+// worker), so it needs its own copy of this URL: sql.js's default
+// self-location guess (no `locateFile`) resolves to a root path that doesn't
+// exist, and the dev server's SPA fallback then serves index.html instead of
+// a 404 — sql.js then fails to compile HTML bytes as wasm.
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
+import { filesFromDataTransfer, isFileDrag } from './fileDrop'
 
 const { t, tm, rt } = useI18n()
 const fileStore = useFileStore()
@@ -16,9 +26,67 @@ const acceptExtensions = computed(() =>
 )
 
 /**
+ * Human-readable extension list for the load button's `title` tooltip —
+ * SAME registry-derived source as `acceptExtensions`, so the two can never
+ * drift apart (B3: the old label hardcoded ".loga / .nmea / .zip" and went
+ * stale as more importers were added).
+ */
+const loadTitle = computed(() =>
+  t('fileBar.loadTitle', { exts: [...allImportExtensions().map((e) => `.${e}`), '.zip'].join(', ') }),
+)
+
+/** `.ext` string for one importer id, e.g. `dotExt('loga')` -> `.loga`. */
+function dotExt(id: string): string {
+  return extensionsForImporter(id)
+    .map((e) => `.${e}`)
+    .join(' / ')
+}
+
+/**
+ * Format groups shown in the "支援格式" disclosure, each line built from the
+ * registry so the extension text can't go stale as importers are added. The
+ * grouping itself (which formats count as "ECU" vs "GPS logger / analysis
+ * app") is UI taxonomy the registry doesn't encode, so it stays as a small
+ * static list here — only the `.ext` strings are derived.
+ */
+const ecuExt = computed(() => dotExt('loga'))
+const gpsFormats = computed(() => [
+  { id: 'nmea', ext: dotExt('nmea') },
+  { id: 'vbo', ext: dotExt('vbo') },
+  { id: 'rcz', ext: dotExt('rcz') },
+  { id: 'xrk', ext: dotExt('xrk') },
+  { id: 'rcnx', ext: dotExt('rcnx') },
+])
+
+/** Pending .rcnx multi-session choice, shown as a small inline picker. */
+const pendingRcnx = ref<{ id: number; file: File; sessions: RcnxSessionInfo[] } | null>(null)
+
+/** The session with the most WayPoints — same default as parseRcnx itself. */
+function largestSession(sessions: RcnxSessionInfo[]): RcnxSessionInfo {
+  return sessions.reduce((best, s) => (s.waypointCount > best.waypointCount ? s : best))
+}
+
+async function finishRcnxImport(id: number, file: File, sessionIndex: number): Promise<void> {
+  try {
+    const imp = detectImporter(await sniff(file))
+    const importerId = imp?.id ?? 'rcnx'
+    const session = await parseFile(
+      file,
+      importerId,
+      (f) => fileStore.setProgress(id, f),
+      sessionIndex,
+    )
+    fileStore.completeImport(id, session)
+  } catch (e) {
+    fileStore.failImport(id, e instanceof Error ? e.message : String(e))
+  }
+}
+
+/**
  * Import one log file. The importer is chosen by the registry (extension + a
  * content sniff), then all formats parse in the shared worker, selected there
- * by the importer id.
+ * by the importer id. `.rcnx` files with more than one session pause here and
+ * show a picker instead of parsing immediately.
  */
 async function importOne(file: File): Promise<void> {
   const id = fileStore.beginImport(file)
@@ -28,11 +96,34 @@ async function importOne(file: File): Promise<void> {
       fileStore.failImport(id, t('fileBar.unsupported', { name: file.name }))
       return
     }
+    if (imp.id === 'rcnx') {
+      const sessions = await listRcnxSessions(new Uint8Array(await file.arrayBuffer()), sqlWasmUrl)
+      if (sessions.length > 1) {
+        pendingRcnx.value = { id, file, sessions }
+        return
+      }
+      await finishRcnxImport(id, file, sessions[0]?.n ?? 0)
+      return
+    }
     const session = await parseFile(file, imp.id, (f) => fileStore.setProgress(id, f))
     fileStore.completeImport(id, session)
   } catch (e) {
     fileStore.failImport(id, e instanceof Error ? e.message : String(e))
   }
+}
+
+async function choosePendingSession(n: number): Promise<void> {
+  const pending = pendingRcnx.value
+  if (!pending) return
+  pendingRcnx.value = null
+  await finishRcnxImport(pending.id, pending.file, n)
+}
+
+function cancelPendingRcnx(): void {
+  const pending = pendingRcnx.value
+  if (!pending) return
+  pendingRcnx.value = null
+  fileStore.removeFile(pending.id)
 }
 
 /** Expand a .zip into its .loga / .nmea entries as Files ready to import. */
@@ -55,7 +146,12 @@ async function importZip(zip: File): Promise<void> {
   for (const f of inner) await importOne(f)
 }
 
-async function onFiles(list: FileList | null): Promise<void> {
+/**
+ * Shared intake path for both the file input's change event and drag-and-drop
+ * (#3) — accepts anything Array.from() can iterate (FileList or a plain
+ * File[]) so both callers can hand off without extra type gymnastics.
+ */
+async function onFiles(list: FileList | File[] | null): Promise<void> {
   if (!list || list.length === 0) return
   for (const file of Array.from(list)) {
     if (file.name.toLowerCase().endsWith('.zip')) {
@@ -71,11 +167,66 @@ function onChange(e: Event): void {
   onFiles(input.files)
   input.value = ''
 }
+
+/**
+ * Drag-and-drop import (#3): dropping files anywhere on the FileBar routes
+ * them through the SAME `onFiles` intake path as the file input, so .zip
+ * expansion + extension filtering (via the registry-derived importer
+ * detection in `onFiles`/`importOne`) apply identically either way.
+ */
+const isDragOver = ref(false)
+let dragDepth = 0
+
+function onDragEnter(e: DragEvent): void {
+  if (!isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  dragDepth += 1
+  isDragOver.value = true
+}
+
+function onDragOver(e: DragEvent): void {
+  if (!isFileDrag(e.dataTransfer)) return
+  // Required so the browser fires `drop` instead of navigating to the file.
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragLeave(e: DragEvent): void {
+  if (!isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) isDragOver.value = false
+}
+
+async function onDrop(e: DragEvent): Promise<void> {
+  if (!isFileDrag(e.dataTransfer)) return
+  e.preventDefault()
+  dragDepth = 0
+  isDragOver.value = false
+  const files = filesFromDataTransfer(e.dataTransfer)
+  await onFiles(files)
+}
+
+/** Duration in whole minutes for the picker label, or undefined if unknown. */
+function durationMin(s: RcnxSessionInfo): number | undefined {
+  return s.durationMs !== undefined ? Math.round(s.durationMs / 60000) : undefined
+}
 </script>
 
 <template>
-  <div class="filebar">
-    <label class="load-btn" :title="t('fileBar.loadTitle')">
+  <div
+    class="filebar"
+    :class="{ 'drag-over': isDragOver }"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
+    <div v-if="isDragOver" class="drop-overlay" aria-hidden="true">
+      <span>{{ t('fileBar.dropHint') }}</span>
+    </div>
+
+    <label class="load-btn" :title="loadTitle">
       <input
         type="file"
         name="logfile"
@@ -91,13 +242,27 @@ function onChange(e: Event): void {
       <summary class="info-btn" :title="t('fileBar.sources.title')" :aria-label="t('fileBar.sources.title')">ⓘ</summary>
       <div class="sources-panel">
         <p class="src-title">{{ t('fileBar.sources.title') }}</p>
-        <p class="src-label">{{ t('fileBar.sources.tested') }}</p>
-        <ol class="src-list">
+
+        <p class="src-label">{{ t('fileBar.sources.ecuGroup', { ext: ecuExt }) }}</p>
+        <p class="src-label indent">{{ t('fileBar.sources.tested') }}</p>
+        <ol class="src-list indent">
           <li v-for="(item, i) in tm('fileBar.sources.testedItems')" :key="`t${i}`">{{ rt(item) }}</li>
         </ol>
-        <p class="src-label muted">{{ t('fileBar.sources.untested') }}</p>
-        <ol class="src-list muted">
+        <p class="src-label muted indent">{{ t('fileBar.sources.untested') }}</p>
+        <ol class="src-list muted indent">
           <li v-for="(item, i) in tm('fileBar.sources.untestedItems')" :key="`u${i}`">{{ rt(item) }}</li>
+        </ol>
+
+        <p class="src-label">{{ t('fileBar.sources.gpsGroup') }}</p>
+        <ol class="src-list indent">
+          <li v-for="f in gpsFormats" :key="f.id">
+            {{ f.ext }} — {{ t(`fileBar.sources.gpsFormat.${f.id}`) }}
+          </li>
+        </ol>
+
+        <p class="src-label">{{ t('fileBar.sources.zipGroup') }}</p>
+        <ol class="src-list indent">
+          <li>.zip — {{ t('fileBar.sources.zipDesc') }}</li>
         </ol>
       </div>
     </details>
@@ -127,11 +292,42 @@ function onChange(e: Event): void {
     >
       {{ t('fileBar.clearAll') }}
     </button>
+
+    <div v-if="pendingRcnx" class="rcnx-picker-backdrop" @click.self="cancelPendingRcnx">
+      <div class="rcnx-picker" role="dialog" aria-modal="true">
+        <p class="rcnx-picker-title">{{ t('fileBar.rcnxPicker.title', { n: pendingRcnx.sessions.length }) }}</p>
+        <p class="rcnx-picker-file">{{ t('fileBar.rcnxPicker.fileLabel') }}: {{ pendingRcnx.file.name }}</p>
+        <ul class="rcnx-picker-list">
+          <li v-for="s in pendingRcnx.sessions" :key="s.n">
+            <button type="button" class="rcnx-session-btn" @click="choosePendingSession(s.n)">
+              <span class="rcnx-session-name">
+                {{ s.trackName || t('fileBar.rcnxPicker.session', { n: s.n }) }}
+                <span v-if="s.n === largestSession(pendingRcnx.sessions).n" class="rcnx-recommended">
+                  {{ t('fileBar.rcnxPicker.recommended') }}
+                </span>
+              </span>
+              <span class="rcnx-session-meta">
+                {{ t('fileBar.rcnxPicker.waypoints', { n: s.waypointCount }) }}
+                <template v-if="durationMin(s) !== undefined">
+                  · {{ t('fileBar.rcnxPicker.duration', { m: durationMin(s) }) }}
+                </template>
+                ·
+                {{ s.hasLapData ? t('fileBar.rcnxPicker.hasLaps') : t('fileBar.rcnxPicker.noLaps') }}
+              </span>
+            </button>
+          </li>
+        </ul>
+        <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcnx">
+          {{ t('fileBar.rcnxPicker.cancel') }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .filebar {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -139,6 +335,30 @@ function onChange(e: Event): void {
   padding: 8px calc(var(--space) * 2);
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+}
+.filebar.drag-over {
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface));
+}
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Pointer events must pass through so dragenter/dragleave keep firing on
+     .filebar underneath as the pointer moves — an overlay that captures
+     pointer events itself would cause dragenter/dragleave to fire on ENTER
+     into this element too, which is harmless here since it also listens via
+     bubbling, but this keeps the overlay purely visual and avoids relying on
+     that. */
+  pointer-events: none;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-accent);
 }
 .load-btn {
   cursor: pointer;
@@ -181,7 +401,9 @@ function onChange(e: Event): void {
   top: calc(100% + 6px);
   left: 0;
   z-index: 30;
-  width: min(340px, 86vw);
+  width: min(380px, 86vw);
+  max-height: 70vh;
+  overflow-y: auto;
   padding: 10px 14px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
@@ -202,6 +424,9 @@ function onChange(e: Event): void {
   color: var(--color-text-muted);
   font-weight: 400;
 }
+.src-label.indent {
+  margin-left: 0.6em;
+}
 .src-list {
   margin: 0;
   padding-left: 1.4em;
@@ -209,6 +434,9 @@ function onChange(e: Event): void {
 }
 .src-list.muted {
   color: var(--color-text-muted);
+}
+.src-list.indent {
+  padding-left: 2em;
 }
 .pills {
   display: flex;
@@ -268,6 +496,84 @@ function onChange(e: Event): void {
   padding: 0;
 }
 .clear-btn:hover {
+  color: var(--color-text);
+}
+.rcnx-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+.rcnx-picker {
+  width: min(420px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 16px 18px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.rcnx-picker-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+.rcnx-picker-file {
+  margin: 0 0 10px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+.rcnx-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rcnx-session-btn {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.rcnx-session-btn:hover {
+  border-color: var(--color-accent);
+}
+.rcnx-session-name {
+  font-weight: 500;
+}
+.rcnx-recommended {
+  color: var(--color-accent);
+  font-weight: 400;
+  font-size: 0.8rem;
+}
+.rcnx-session-meta {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+.rcnx-picker-cancel {
+  margin-top: 12px;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0;
+}
+.rcnx-picker-cancel:hover {
   color: var(--color-text);
 }
 </style>

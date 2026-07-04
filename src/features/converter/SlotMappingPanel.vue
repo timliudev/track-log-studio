@@ -84,7 +84,7 @@ h4 {
 }
 .slot-row {
   display: grid;
-  grid-template-columns: 48px 1fr;
+  grid-template-columns: 48px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
