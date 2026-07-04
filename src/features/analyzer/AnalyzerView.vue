@@ -20,7 +20,7 @@ import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
-import { STATIC_CARD_IDS, chartItemId } from '@/domain/layout/dashboardLayout'
+import { STATIC_CARD_IDS, chartItemId, mobileLayout } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
@@ -336,45 +336,90 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
 
 // --- #8: draggable/resizable dashboard grid (grid-layout-plus) ---
 const chartIds = computed(() => charts.value.map((c) => c.id))
-const { layout, cols, breakpoints, isMobile, isDraggable, isResizable, resetLayout } =
+const { layout, colNum, isMobile, isDraggable, isResizable, resetLayout } =
   useDashboardLayout(chartIds)
 
-// --- #9: per-card collapse (all breakpoints) + single mobile pin ---
-const { isCollapsed, isPinned, toggleCollapsed, togglePinned } = usePanelState(chartIds)
+// --- #9: per-card collapse (all breakpoints) + single mobile pin + mobile
+// drag-to-reorder order ---
+const { isCollapsed, isPinned, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
+  usePanelState(chartIds)
 
 // The align panels (mapalign/lapalign) only render when their "≥2 laps
 // selected" condition holds (showMapAlign/showAlign, unchanged rules from
 // before the grid) — an empty GridItem for a hidden card would otherwise
-// leave a draggable blank box on the dashboard. `visibleLayout` filters them
-// out of what's actually PASSED to GridLayout while `layout` itself (the
-// persisted array) keeps their saved position so it's there again the next
-// time laps get selected. GridLayout's `update:layout` (drag/resize/compact)
-// fires with the full array of items IT knows about (i.e. already only the
-// visible ones), so writing straight back into `layout` here would drop the
-// hidden entries — instead we merge: keep every hidden item from `layout`
-// unchanged, and take every visible item's new position from the emitted
-// array.
-//
-// The setter ignores writes while on the MOBILE breakpoint: grid-layout-plus's
-// own `responsive` engine reflows the single-column mobile arrangement through
-// this same `update:layout` event, and merging THAT back into `layout` would
-// leave the desktop arrangement corrupted with 1-column positions the next
-// time the viewport widens back out (without a page reload to re-seed from
-// localStorage) — see useDashboardLayout's doc for the same rule applied to
-// persistence.
-const visibleLayout = computed<typeof layout.value>({
-  get: () =>
-    layout.value.filter((it) => {
-      if (it.i === STATIC_CARD_IDS.mapAlign) return showMapAlign.value
-      if (it.i === STATIC_CARD_IDS.lapAlign) return showAlign.value
-      return true
-    }),
+// leave a draggable blank box on the dashboard. `isVisibleId` is the single
+// visibility predicate shared by both the desktop and mobile layout builders.
+function isVisibleId(id: string): boolean {
+  if (id === STATIC_CARD_IDS.mapAlign) return showMapAlign.value
+  if (id === STATIC_CARD_IDS.lapAlign) return showAlign.value
+  return true
+}
+
+// --- Desktop layout (2-D, persisted to dashboardLayout.v1) ---
+// `desktopVisibleLayout` filters the hidden align cards out of what's PASSED
+// to GridLayout while `layout` itself (the persisted array) keeps their saved
+// position so it's there again the next time laps get selected. GridLayout's
+// `update:layout` (drag/resize/compact) fires with the full array of items IT
+// knows about (i.e. already only the visible ones), so writing straight back
+// into `layout` would drop the hidden entries — instead we merge: keep every
+// hidden item from `layout` unchanged, and take every visible item's new
+// position from the emitted array.
+const desktopVisibleLayout = computed<typeof layout.value>(() =>
+  layout.value.filter((it) => isVisibleId(it.i)),
+)
+
+// --- Mobile layout (1-D order, persisted to panelState.v1's mobileOrder) ---
+// The mobile single-column layout is built by US (not the library's responsive
+// reflow) from the persisted `mobileOrder`, filtered to the visible cards and
+// with each card's DESKTOP height inherited (see mobileLayout). Because the
+// mobile path only ever writes back into `mobileOrder` (never `layout`),
+// reordering on a phone can NEVER corrupt the desktop dashboardLayout.v1 — the
+// two arrangements are fully independent.
+const mobileVisibleLayout = computed<typeof layout.value>(() =>
+  mobileLayout(
+    mobileOrder.value.filter(isVisibleId),
+    layout.value,
+  ),
+)
+
+// The single array bound to GridLayout via v-model: desktop 2-D on wide
+// screens, our 1-column mobileLayout below MOBILE_BREAKPOINT_PX. The setter
+// routes the library's `update:layout` emission to the RIGHT persistence path
+// for the current breakpoint so the other one is never touched.
+const activeLayout = computed<typeof layout.value>({
+  get: () => (isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value),
   set: (next) => {
-    if (isMobile.value) return
+    if (isMobile.value) {
+      // Mobile drag-to-reorder: derive the new top-to-bottom order from the
+      // emitted items (sorted by y, then x for determinism) and persist ONLY
+      // that order. Hidden align cards keep their stored slot in mobileOrder
+      // (they're not in `next`), appended in their existing relative order so
+      // toggling laps back on restores them where the user last had them.
+      const orderedVisible = [...next]
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+        .map((it) => it.i)
+      const visibleSet = new Set(orderedVisible)
+      const hidden = mobileOrder.value.filter((id) => !visibleSet.has(id))
+      setMobileOrder([...orderedVisible, ...hidden])
+      return
+    }
+    // Desktop: merge visible items' new positions back into the full layout,
+    // preserving hidden items untouched.
     const nextById = new Map(next.map((it) => [it.i, it]))
     layout.value = layout.value.map((it) => nextById.get(it.i) ?? it)
   },
 })
+
+// Pin/drag interplay (mobile): a PINNED card is NOT draggable while pinned —
+// dragging a sticky card makes no sense, and it keeps the pinned card anchored
+// at the top of the column. The user unpins first (its own header button),
+// then it becomes draggable again. Documented here + on the per-item
+// `:is-draggable` binding in the template.
+function itemDraggable(id: string | number): boolean {
+  if (!isDraggable.value) return false
+  if (isMobile.value && isPinned(String(id))) return false
+  return true
+}
 
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
@@ -421,22 +466,24 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
         </div>
       </div>
 
-      <!-- #8: draggable/resizable dashboard grid (grid-layout-plus). Drag is
-           restricted to each card's own `.drag-handle` header (DashboardCard's
-           title bar) via `dragAllowFrom`, so content interactions (canvas
-           pan/zoom, table row clicks, form inputs) never start a drag.
-           `responsive` + `cols` collapse to a single column below the mobile
-           breakpoint (useDashboardLayout's isMobile), where drag/resize are
-           also disabled (isDraggable/isResizable) — see that composable's doc
-           for why the mobile reflow is never persisted. -->
+      <!-- #8/#9: draggable dashboard grid (grid-layout-plus). Drag is restricted
+           to each card's own `.drag-handle` header (DashboardCard's title bar)
+           via `dragAllowFrom`, and the header's own buttons (pin/collapse, in
+           `.actions`) are excluded via `dragIgnoreFrom` so tapping them toggles
+           state instead of starting a drag. `colNum` is driven explicitly by
+           breakpoint (GRID_COLS on desktop, 1 on mobile) — we build BOTH the
+           desktop 2-D layout and the mobile 1-column layout ourselves (see
+           activeLayout), so the library's own `responsive` reflow is off and
+           can never write a 1-column arrangement back into dashboardLayout.v1.
+           Desktop: free 2-D drag + resize. Mobile: vertical drag-to-REORDER
+           only (resize off — a full-width card has nothing to resize), a
+           pinned card excepted (itemDraggable). -->
       <GridLayout
-        v-model:layout="visibleLayout"
-        :col-num="cols.lg"
-        :cols="cols"
-        :breakpoints="breakpoints"
-        :responsive="true"
+        v-model:layout="activeLayout"
+        :col-num="colNum"
         :is-draggable="isDraggable"
         :is-resizable="isResizable"
+        :responsive="false"
         :row-height="24"
         :margin="[12, 12]"
         :vertical-compact="true"
@@ -449,9 +496,10 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
             :y="item.y"
             :w="item.w"
             :h="item.h"
-            :is-draggable="isDraggable"
+            :is-draggable="itemDraggable(item.i)"
             :is-resizable="isResizable"
             drag-allow-from=".drag-handle"
+            drag-ignore-from=".actions"
           >
             <DashboardCard
               v-if="item.i === 'map'"
@@ -905,5 +953,21 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
 .add:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+
+/* #8 fix — grid-layout-plus animates each item's `transform: translate3d(…)`
+   over 200ms (its default `.vgl-item` transition). That animation is the
+   source of the "cards offset from their slots / stuck placeholder" glitch:
+   the analyzer mounts INSIDE App.vue's <Transition mode="out-in"> view slide,
+   and the grid's own width-measure → re-layout can land mid-slide; with the
+   200ms transform transition, items are caught frozen part-way between their
+   old (identity) and target positions, so cards, contents and the drag
+   placeholder all appear mutually misaligned until something forces a repaint.
+   Snapping items to position (no transform transition) removes that whole
+   class of race — items are always exactly at their slot. Drag/resize still
+   feel instant (they were never meant to ease). `:deep` because .vgl-item is
+   the library's element, outside this component's scope. */
+.analyzer :deep(.vgl-item) {
+  transition: none;
 }
 </style>
