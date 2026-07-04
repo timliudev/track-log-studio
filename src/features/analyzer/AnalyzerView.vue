@@ -2,33 +2,45 @@
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
+import { GridLayout, GridItem } from 'grid-layout-plus'
 import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
+import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
+import { useTrackExtrema } from '@/composables/useTrackExtrema'
+import { useDashboardLayout } from '@/composables/useDashboardLayout'
+import { usePanelState } from '@/composables/usePanelState'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
-import { normalizeChannel } from '@/domain/analysis/trackHeatmap'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
-import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
+import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
+import { cumulativeDistanceM } from '@/domain/analysis/distance'
+import { STATIC_CARD_IDS, chartItemId } from '@/domain/layout/dashboardLayout'
+import DashboardCard from '@/components/DashboardCard.vue'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
 import SectorPanel from './SectorPanel.vue'
+import TrackChannelPanel from './TrackChannelPanel.vue'
+import AccelTestPanel from './AccelTestPanel.vue'
+import GearPanel from './GearPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
-import SearchableSelect from '@/components/SearchableSelect.vue'
+import ScatterChart from './ScatterChart.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
 const sectorStore = useSectorStore()
-const { charts, xAxis, xRange, cursorIdx, trackColorChannel, trackColormap } = storeToRefs(analyzer)
+const { charts, xAxis, xRange, cursorIdx, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
+  storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
 // Local track-setup persistence (§11 D): auto-restores/saves the start/finish
@@ -52,7 +64,9 @@ const selectedLaps = computed(() =>
 // The alignment panel only makes sense when laps are being overlaid: at least
 // one chart in overlay mode and ≥2 laps selected to compare/align.
 const showAlign = computed(
-  () => selectedLaps.value.length >= 2 && charts.value.some((c) => c.mode === 'overlay'),
+  () =>
+    selectedLaps.value.length >= 2 &&
+    charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay'),
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
@@ -88,52 +102,97 @@ const focusRange = computed(() =>
   highlightLaps.value.length > 0 ? null : xRangeToFocusIndices(xRange.value, xValues.value),
 )
 
-// Sector gates for the track map: confirmed gates (solid) plus any pending
-// auto-detected suggestions awaiting accept/reject (dashed) — see SectorPanel.
-const mapGates = computed(() => [
-  ...sectorStore.gates.map((line) => ({ line, confirmed: true })),
-  ...sectorStore.suggestions.map((s) => ({ line: s.line, confirmed: false })),
-])
+// Sector gates for the track map: every gate is a real, working gate now (A1+A15
+// redesign removed the accept/reject suggestion layer) — all drawn solid/numbered.
+const mapGates = computed(() => sectorStore.gates.map((line) => ({ line, confirmed: true })))
 
-// TrackMap emits (index, line) when a confirmed gate's handle is dragged;
-// sectorStore.gates is the single owner of gate geometry, so forward straight
-// into its action rather than mutating anything locally.
+// TrackMap emits (index, line) when a gate's handle is dragged; sectorStore.gates
+// is the single owner of gate geometry, so forward straight into its action
+// rather than mutating anything locally.
 function onUpdateGate(index: number, line: LapLine): void {
   sectorStore.setGate(index, line)
 }
 
-// --- Track heatmap (#10/#11): colour the track by a channel's value. ---
-// Channels offered for colouring (all of them, sorted), for the picker.
+// Same resolveSpeedChannel useLaps.ts uses to seed the default lap-table
+// column (GPS_Speed -> Vehicle_Speed -> unavailable) — still needed here by
+// AccelTestPanel.
+const speedChannelName = computed(() => (session.value ? resolveSpeedChannel(session.value) : null))
+const speedAvailable = computed(() => speedChannelName.value != null)
+
+// --- A9: unified track-channel extrema (generalised from the old speed-only
+// corner apexes to ANY channel, min AND/OR max) — see useTrackExtrema.ts. ---
+
+// Multi-lap rule (unchanged from the old corner-apex feature): extrema are
+// only meaningful for ONE lap at a time (a numbered marker set doesn't
+// generalise to overlaying several laps' extrema on the same points), so this
+// is populated only when exactly one lap is selected. With zero or 2+ laps
+// selected, extrema is null and the map/panel show their respective "select
+// exactly one lap" hints.
+const focusedLap = computed(() => (selectedLaps.value.length === 1 ? selectedLaps.value[0] : null))
+
+const { trackExtrema, mapExtremaMarkers, trackChannelChosen } = useTrackExtrema(
+  session,
+  track,
+  trackChannel,
+  focusedLap,
+  markMinima,
+  markMaxima,
+)
+
+// --- Acceleration/drag test (Phase 7, 加速測試): whole-SESSION search, not
+// a per-lap metric — see accelTest.ts's module doc for why. Speed channel
+// resolution reuses the same speedChannelName as corner-speed above. Distance
+// is always needed (both search kinds interpolate/report distanceM), so this
+// is unavailable without a GPS track even for the speed-threshold condition.
+const accelResult = computed<AccelSegment | null>(() => {
+  const chName = speedChannelName.value
+  const s = session.value
+  const tk = track.value
+  const tMs = timeMs.value
+  if (!chName || !s || !tk || !tMs) return null
+  const ch = s.get(chName)
+  if (!ch) return null
+  const cumDist = cumulativeDistanceM(tk.lat, tk.lon, tk.valid)
+  const cond = analyzer.accelCondition
+  if (cond.kind === 'distance') {
+    if (!(cond.distanceM > 0)) return null
+    return fastestDistanceSegment(cumDist, tMs, ch.data, {
+      distanceM: cond.distanceM,
+      minEntrySpeedKmh: cond.minEntrySpeedKmh ?? undefined,
+    })
+  }
+  return fastestSpeedSegment(tMs, ch.data, cumDist, { fromKmh: cond.fromKmh, toKmh: cond.toKmh })
+})
+
+// Focus the found segment: zoom the shared xRange to its span (same
+// select->zoom coupling as onLapSelect) and clear any lap selection so the
+// zoomed range isn't immediately overridden by the lap-selection focus
+// precedence in `focusRange` above.
+function onAccelFocus(segment: AccelSegment): void {
+  const xs = xValues.value
+  if (!xs || segment.startIdx >= xs.length || segment.endIdx >= xs.length) return
+  lapStore.clearSelection()
+  analyzer.setXRange({ min: xs[segment.startIdx], max: xs[segment.endIdx] })
+}
+
+// Channels offered for the picker (all of them, sorted) — this is now the
+// ONLY channel picker on the page; TrackChannelPanel owns rendering it.
 const channelOptions = computed(() =>
   (session.value?.channels ?? [])
     .map((c) => ({ name: c.name, description: c.description }))
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 
-// Normalise the chosen channel over the track (null when none chosen / absent).
-const heatNorm = computed(() => {
-  const name = trackColorChannel.value
-  const tk = track.value
-  if (!name || !tk) return null
-  const ch = session.value?.get(name)
-  if (!ch) return null
-  return normalizeChannel(ch.data, tk.valid)
-})
-const colorValues = computed(() => heatNorm.value?.norm ?? null)
-
-// Legend: a CSS gradient of the active colormap + the channel's min/max.
-const legendGradient = computed(
-  () => `linear-gradient(to right, ${colormapSwatches(trackColormap.value, 16).join(',')})`,
+// --- Track heatmap (#10/#11, now A9-unified): colour the track by the
+// SINGLE chosen trackChannel's value, when trackColorEnabled — see
+// useTrackHeatmap.ts. ---
+const { heatNorm, colorValues, legendGradient, fmtVal } = useTrackHeatmap(
+  session,
+  track,
+  trackChannel,
+  trackColormap,
+  trackColorEnabled,
 )
-function colormapPreview(id: ColormapId): string {
-  return `linear-gradient(to right, ${colormapSwatches(id, 8).join(',')})`
-}
-// Compact value label for the legend ends — fewer decimals as magnitude grows.
-function fmtVal(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  const a = Math.abs(v)
-  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
-}
 
 // Lap selection from the table is routed here so this component (which owns the
 // select↔zoom coupling) stays the single place that decides zoom side-effects.
@@ -190,6 +249,22 @@ function onSelect(e: Event): void {
   analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
 }
 
+// A10+A12 — add-chart is now a two-option affordance (時序圖 / XY 散佈圖).
+function onAddTimeseries(): void {
+  analyzer.addChart('timeseries')
+}
+
+// New scatter charts default to TC_Xforce/TC_Yforce when present (the
+// friction-circle convenience, ex-GgPanel), else both pickers start empty and
+// ScatterChart shows the "pick both" hint.
+function onAddScatter(): void {
+  const s = session.value
+  analyzer.addChart('scatter', {
+    xChannel: s?.has('TC_Xforce') ? 'TC_Xforce' : null,
+    yChannel: s?.has('TC_Yforce') ? 'TC_Yforce' : null,
+  })
+}
+
 // --- Valid lap-time band (時間帶過濾): laps whose time is outside [min, max]
 // seconds are auto-excluded via the lapStore. Each input is independent; an
 // empty field leaves that side open, and clearing both removes the band. ---
@@ -215,9 +290,107 @@ function onBandInput(which: 'min' | 'max', e: Event): void {
 // readout so the user can see the filter is doing something.
 const bandExcludedCount = computed(() => lapStore.bandExcluded.length)
 
+// --- Valid lap-DISTANCE band (距離帶過濾): mirrors the time band above exactly,
+// except the store's unit is METRES while this panel (like LapTable) displays
+// km — so get/set convert at the boundary, keeping the store's unit consistent
+// with the rest of the app (cumulativeDistanceM / the `distance` lap metric). ---
+const M_PER_KM = 1000
+const distBandMin = computed<number | null>({
+  get: () => {
+    const m = lapStore.lapDistanceBand?.minM
+    return m != null ? m / M_PER_KM : null
+  },
+  set: (km) =>
+    lapStore.setLapDistanceBand({
+      minM: km != null ? km * M_PER_KM : null,
+      maxM: lapStore.lapDistanceBand?.maxM ?? null,
+    }),
+})
+const distBandMax = computed<number | null>({
+  get: () => {
+    const m = lapStore.lapDistanceBand?.maxM
+    return m != null ? m / M_PER_KM : null
+  },
+  set: (km) =>
+    lapStore.setLapDistanceBand({
+      minM: lapStore.lapDistanceBand?.minM ?? null,
+      maxM: km != null ? km * M_PER_KM : null,
+    }),
+})
+
+/** Parse a distance-band <input>'s value (km), or null when blank/non-numeric. */
+function onDistBandInput(which: 'min' | 'max', e: Event): void {
+  const raw = (e.target as HTMLInputElement).value.trim()
+  const v = raw === '' ? null : Number(raw)
+  const km = v != null && Number.isFinite(v) ? v : null
+  if (which === 'min') distBandMin.value = km
+  else distBandMax.value = km
+}
+
+// How many laps the distance band currently excludes (0 when no band).
+const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.length)
+
 // How many laps fail the sector-gate-crossing check (0 when no gates are
 // confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
 const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
+
+// --- #8: draggable/resizable dashboard grid (grid-layout-plus) ---
+const chartIds = computed(() => charts.value.map((c) => c.id))
+const { layout, cols, breakpoints, isMobile, isDraggable, isResizable, resetLayout } =
+  useDashboardLayout(chartIds)
+
+// --- #9: per-card collapse (all breakpoints) + single mobile pin ---
+const { isCollapsed, isPinned, toggleCollapsed, togglePinned } = usePanelState(chartIds)
+
+// The align panels (mapalign/lapalign) only render when their "≥2 laps
+// selected" condition holds (showMapAlign/showAlign, unchanged rules from
+// before the grid) — an empty GridItem for a hidden card would otherwise
+// leave a draggable blank box on the dashboard. `visibleLayout` filters them
+// out of what's actually PASSED to GridLayout while `layout` itself (the
+// persisted array) keeps their saved position so it's there again the next
+// time laps get selected. GridLayout's `update:layout` (drag/resize/compact)
+// fires with the full array of items IT knows about (i.e. already only the
+// visible ones), so writing straight back into `layout` here would drop the
+// hidden entries — instead we merge: keep every hidden item from `layout`
+// unchanged, and take every visible item's new position from the emitted
+// array.
+//
+// The setter ignores writes while on the MOBILE breakpoint: grid-layout-plus's
+// own `responsive` engine reflows the single-column mobile arrangement through
+// this same `update:layout` event, and merging THAT back into `layout` would
+// leave the desktop arrangement corrupted with 1-column positions the next
+// time the viewport widens back out (without a page reload to re-seed from
+// localStorage) — see useDashboardLayout's doc for the same rule applied to
+// persistence.
+const visibleLayout = computed<typeof layout.value>({
+  get: () =>
+    layout.value.filter((it) => {
+      if (it.i === STATIC_CARD_IDS.mapAlign) return showMapAlign.value
+      if (it.i === STATIC_CARD_IDS.lapAlign) return showAlign.value
+      return true
+    }),
+  set: (next) => {
+    if (isMobile.value) return
+    const nextById = new Map(next.map((it) => [it.i, it]))
+    layout.value = layout.value.map((it) => nextById.get(it.i) ?? it)
+  },
+})
+
+function onResetLayout(): void {
+  if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
+}
+
+/** Per-chart card title: numbered by POSITION among same-kind charts (1-based,
+ *  in `charts` array order) so titles stay short and stable-looking even
+ *  though the underlying grid-item id is keyed by the chart's store id (see
+ *  chartItemId) — the two numbering schemes are deliberately independent. */
+function chartTitle(chart: (typeof charts.value)[number]): string {
+  const sameKind = charts.value.filter((c) => c.kind === chart.kind)
+  const n = sameKind.indexOf(chart) + 1
+  return chart.kind === 'scatter'
+    ? t('analyzer.layout.cardScatterChart', { n })
+    : t('analyzer.layout.cardChart', { n })
+}
 </script>
 
 <template>
@@ -240,140 +413,321 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
             {{ t('analyzer.distance') }}
           </button>
         </div>
-      </div>
-
-      <div class="card">
-        <TrackMap
-          :track="track"
-          :cursor-idx="cursorIdx"
-          :line="lapStore.line"
-          :highlight-laps="highlightLaps"
-          :focus-range="focusRange"
-          :color-values="colorValues"
-          :colormap="trackColormap"
-          :gates="mapGates"
-          @cursor="analyzer.setCursor"
-          @update:line="lapStore.setLine($event)"
-          @update:gate="onUpdateGate"
-        />
-        <div class="track-color">
-          <label class="tc-channel">
-            <span>{{ t('analyzer.trackColor') }}</span>
-            <SearchableSelect
-              :model-value="trackColorChannel"
-              :options="channelOptions"
-              @update:model-value="analyzer.setTrackColorChannel($event)"
-            />
-          </label>
-          <div v-if="heatNorm" class="tc-maps" role="group" :aria-label="t('analyzer.colormap')">
-            <button
-              v-for="id in COLORMAP_IDS"
-              :key="id"
-              type="button"
-              class="tc-swatch"
-              :class="{ active: trackColormap === id }"
-              :style="{ background: colormapPreview(id) }"
-              :title="id"
-              @click="analyzer.setTrackColormap(id)"
-            />
-          </div>
-        </div>
-        <div v-if="heatNorm" class="tc-legend">
-          <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
-          <span class="tc-bar" :style="{ background: legendGradient }" />
-          <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
-          <span class="tc-name">{{ trackColorChannel }}</span>
-        </div>
-        <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
-        <div class="laps">
-          <span class="lap-count">{{
-            lapStore.excluded.length > 0
-              ? t('analyzer.lapCountExcluded', { n: laps.length, x: lapStore.excluded.length })
-              : t('analyzer.lapCount', { n: laps.length })
-          }}</span>
-          <button type="button" class="reset" @click="resetLine">
-            {{ t('analyzer.resetLine') }}
+        <div class="layout-tools">
+          <span v-if="!isMobile" class="drag-hint">{{ t('analyzer.layout.dragHint') }}</span>
+          <button type="button" class="reset-layout" @click="onResetLayout">
+            {{ t('analyzer.layout.resetLayout') }}
           </button>
         </div>
-        <div class="band" role="group" :aria-label="t('analyzer.lapBand')">
-          <span class="band-label">{{ t('analyzer.lapBand') }}</span>
-          <input
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.1"
-            class="band-input"
-            :value="bandMin ?? ''"
-            :placeholder="t('analyzer.lapBandMin')"
-            :aria-label="t('analyzer.lapBandMin')"
-            @input="onBandInput('min', $event)"
-          />
-          <span class="band-sep">–</span>
-          <input
-            type="number"
-            inputmode="decimal"
-            min="0"
-            step="0.1"
-            class="band-input"
-            :value="bandMax ?? ''"
-            :placeholder="t('analyzer.lapBandMax')"
-            :aria-label="t('analyzer.lapBandMax')"
-            @input="onBandInput('max', $event)"
-          />
-          <button
-            v-if="lapStore.lapTimeBand"
-            type="button"
-            class="band-clear"
-            @click="lapStore.clearLapTimeBand()"
+      </div>
+
+      <!-- #8: draggable/resizable dashboard grid (grid-layout-plus). Drag is
+           restricted to each card's own `.drag-handle` header (DashboardCard's
+           title bar) via `dragAllowFrom`, so content interactions (canvas
+           pan/zoom, table row clicks, form inputs) never start a drag.
+           `responsive` + `cols` collapse to a single column below the mobile
+           breakpoint (useDashboardLayout's isMobile), where drag/resize are
+           also disabled (isDraggable/isResizable) — see that composable's doc
+           for why the mobile reflow is never persisted. -->
+      <GridLayout
+        v-model:layout="visibleLayout"
+        :col-num="cols.lg"
+        :cols="cols"
+        :breakpoints="breakpoints"
+        :responsive="true"
+        :is-draggable="isDraggable"
+        :is-resizable="isResizable"
+        :row-height="24"
+        :margin="[12, 12]"
+        :vertical-compact="true"
+        :use-css-transforms="true"
+      >
+        <template #item="{ item }">
+          <GridItem
+            :i="item.i"
+            :x="item.x"
+            :y="item.y"
+            :w="item.w"
+            :h="item.h"
+            :is-draggable="isDraggable"
+            :is-resizable="isResizable"
+            drag-allow-from=".drag-handle"
           >
-            {{ t('analyzer.lapBandClear') }}
-          </button>
-          <span v-if="bandExcludedCount > 0" class="band-count">
-            {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
-          </span>
-        </div>
-        <SectorPanel
-          :laps="laps"
-          :invalid-count="sectorInvalidCount"
-          :track="track"
-          :time-ms="timeMs"
-        />
-        <TrackFilePanel :track="track" />
-        <LapTable
-          :laps="laps"
-          :track="track"
-          :time-ms="timeMs"
-          :session="session"
-          :has-ecu-laps="hasEcuLaps"
-          @select="onLapSelect"
-        />
-      </div>
+            <DashboardCard
+              v-if="item.i === 'map'"
+              :title="t('analyzer.layout.cardMap')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <TrackMap
+                fill-height
+                :track="track"
+                :cursor-idx="cursorIdx"
+                :line="lapStore.line"
+                :highlight-laps="highlightLaps"
+                :focus-range="focusRange"
+                :color-values="colorValues"
+                :colormap="trackColormap"
+                :gates="mapGates"
+                :extrema-markers="mapExtremaMarkers"
+                @cursor="analyzer.setCursor"
+                @update:line="lapStore.setLine($event)"
+                @update:gate="onUpdateGate"
+              />
+              <div v-if="heatNorm" class="tc-legend">
+                <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
+                <span class="tc-bar" :style="{ background: legendGradient }" />
+                <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
+                <span class="tc-name">{{ trackChannel }}</span>
+              </div>
+              <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
+              <div class="laps">
+                <span class="lap-count">{{
+                  lapStore.excluded.length > 0
+                    ? t('analyzer.lapCountExcluded', { n: laps.length, x: lapStore.excluded.length })
+                    : t('analyzer.lapCount', { n: laps.length })
+                }}</span>
+                <button type="button" class="reset" @click="resetLine">
+                  {{ t('analyzer.resetLine') }}
+                </button>
+              </div>
+              <div class="band" role="group" :aria-label="t('analyzer.lapBand')">
+                <span class="band-label">{{ t('analyzer.lapBand') }}</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.1"
+                  class="band-input"
+                  :value="bandMin ?? ''"
+                  :placeholder="t('analyzer.lapBandMin')"
+                  :aria-label="t('analyzer.lapBandMin')"
+                  @input="onBandInput('min', $event)"
+                />
+                <span class="band-sep">–</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.1"
+                  class="band-input"
+                  :value="bandMax ?? ''"
+                  :placeholder="t('analyzer.lapBandMax')"
+                  :aria-label="t('analyzer.lapBandMax')"
+                  @input="onBandInput('max', $event)"
+                />
+                <button
+                  v-if="lapStore.lapTimeBand"
+                  type="button"
+                  class="band-clear"
+                  @click="lapStore.clearLapTimeBand()"
+                >
+                  {{ t('analyzer.lapBandClear') }}
+                </button>
+                <span v-if="bandExcludedCount > 0" class="band-count">
+                  {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
+                </span>
+              </div>
+              <div class="band" role="group" :aria-label="t('analyzer.lapDistanceBand')">
+                <span class="band-label">{{ t('analyzer.lapDistanceBand') }}</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.001"
+                  class="band-input"
+                  :value="distBandMin ?? ''"
+                  :placeholder="t('analyzer.lapDistanceBandMin')"
+                  :aria-label="t('analyzer.lapDistanceBandMin')"
+                  @input="onDistBandInput('min', $event)"
+                />
+                <span class="band-sep">–</span>
+                <input
+                  type="number"
+                  inputmode="decimal"
+                  min="0"
+                  step="0.001"
+                  class="band-input"
+                  :value="distBandMax ?? ''"
+                  :placeholder="t('analyzer.lapDistanceBandMax')"
+                  :aria-label="t('analyzer.lapDistanceBandMax')"
+                  @input="onDistBandInput('max', $event)"
+                />
+                <button
+                  v-if="lapStore.lapDistanceBand"
+                  type="button"
+                  class="band-clear"
+                  @click="lapStore.clearLapDistanceBand()"
+                >
+                  {{ t('analyzer.lapDistanceBandClear') }}
+                </button>
+                <span v-if="distBandExcludedCount > 0" class="band-count">
+                  {{ t('analyzer.lapDistanceBandExcluded', { x: distBandExcludedCount }) }}
+                </span>
+              </div>
+            </DashboardCard>
 
-      <div v-if="showMapAlign" class="card">
-        <MapAlignPanel :selected-laps="selectedLaps" />
-      </div>
+            <DashboardCard
+              v-else-if="item.i === 'laptable'"
+              :title="t('analyzer.layout.cardLapTable')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <LapTable
+                :laps="laps"
+                :track="track"
+                :time-ms="timeMs"
+                :session="session"
+                :has-ecu-laps="hasEcuLaps"
+                @select="onLapSelect"
+              />
+            </DashboardCard>
 
-      <div v-if="showAlign" class="card">
-        <LapAlignPanel :selected-laps="selectedLaps" />
-      </div>
+            <DashboardCard
+              v-else-if="item.i === 'sectors'"
+              :title="t('analyzer.layout.cardSectors')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <SectorPanel
+                :laps="laps"
+                :invalid-count="sectorInvalidCount"
+                :track="track"
+                :time-ms="timeMs"
+                :cursor-idx="cursorIdx"
+              />
+            </DashboardCard>
 
-      <div v-for="c in charts" :key="c.id" class="card">
-        <TimeSeriesChart
-          v-if="session && xValues"
-          :chart="c"
-          :session="session"
-          :x-values="xValues"
-          :x-range="xRange"
-          :external-cursor="cursorIdx"
-          :selected-laps="selectedLaps"
-          @cursor="analyzer.setCursor"
-          @x-zoom="onXZoom"
-        />
-      </div>
+            <DashboardCard
+              v-else-if="item.i === 'trackchannel'"
+              :title="t('analyzer.layout.cardTrackChannel')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <TrackChannelPanel
+                :options="channelOptions"
+                :extrema="trackExtrema"
+                :channel-chosen="trackChannelChosen"
+              />
+            </DashboardCard>
 
-      <button type="button" class="add" @click="analyzer.addChart()">
-        ＋ {{ t('analyzer.addChart') }}
-      </button>
+            <DashboardCard
+              v-else-if="item.i === 'acceltest'"
+              :title="t('analyzer.layout.cardAccelTest')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'gear'"
+              :title="t('analyzer.layout.cardGear')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <GearPanel :session="session" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'trackfile'"
+              :title="t('analyzer.layout.cardTrackFile')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <TrackFilePanel :track="track" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'mapalign' && showMapAlign"
+              :title="t('analyzer.layout.cardMapAlign')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <MapAlignPanel :selected-laps="selectedLaps" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'lapalign' && showAlign"
+              :title="t('analyzer.layout.cardLapAlign')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <LapAlignPanel :selected-laps="selectedLaps" />
+            </DashboardCard>
+
+            <template v-else>
+              <template v-for="c in charts" :key="c.id">
+                <DashboardCard
+                  v-if="item.i === chartItemId(c.id)"
+                  :title="chartTitle(c)"
+                  :collapsed="isCollapsed(item.i)"
+                  :pinned="isPinned(item.i)"
+                  :show-pin="isMobile"
+                  @update:collapsed="toggleCollapsed(item.i)"
+                  @update:pinned="togglePinned(item.i)"
+                >
+                  <TimeSeriesChart
+                    v-if="c.kind === 'timeseries' && session && xValues"
+                    fill-height
+                    :chart="c"
+                    :session="session"
+                    :x-values="xValues"
+                    :x-range="xRange"
+                    :external-cursor="cursorIdx"
+                    :selected-laps="selectedLaps"
+                    @cursor="analyzer.setCursor"
+                    @x-zoom="onXZoom"
+                  />
+                  <ScatterChart
+                    v-else-if="c.kind === 'scatter'"
+                    fill-height
+                    :chart="c"
+                    :session="session"
+                    :selected-laps="selectedLaps"
+                  />
+                </DashboardCard>
+              </template>
+            </template>
+          </GridItem>
+        </template>
+      </GridLayout>
+
+      <div class="add-menu">
+        <button type="button" class="add" @click="onAddTimeseries">
+          ＋ {{ t('analyzer.addChart') }}
+        </button>
+        <button type="button" class="add" @click="onAddScatter">
+          ＋ {{ t('analyzer.addScatterChart') }}
+        </button>
+      </div>
     </template>
   </div>
 </template>
@@ -427,46 +781,27 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
   background: var(--color-accent);
   color: var(--color-accent-text);
 }
-.card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: calc(var(--radius) * 1.5);
-  padding: calc(var(--space) * 1.5);
-}
-.track-color {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin-top: var(--space);
-}
-.tc-channel {
+.layout-tools {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.9rem;
+  gap: 10px;
+}
+.drag-hint {
+  font-size: 0.8rem;
   color: var(--color-text-muted);
-  flex: 1 1 220px;
-  min-width: 200px;
 }
-.tc-channel :deep(.ss) {
-  flex: 1;
-}
-.tc-maps {
-  display: inline-flex;
-  gap: 6px;
-}
-.tc-swatch {
-  width: 40px;
-  height: 22px;
-  padding: 0;
+.reset-layout {
+  background: var(--color-bg);
+  color: var(--color-text);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
   cursor: pointer;
 }
-.tc-swatch.active {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
+.reset-layout:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .tc-legend {
   display: flex;
@@ -551,6 +886,11 @@ const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
 }
 .band-count {
   color: var(--color-text-muted);
+}
+.add-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .add {
   align-self: flex-start;

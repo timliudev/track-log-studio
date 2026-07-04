@@ -2,6 +2,7 @@ import type { LogSession } from '@/domain/model/LogSession'
 import { Rc3NmeaExporter } from './rc3Nmea/Rc3NmeaExporter'
 import { LEGACY_PY_MAPPING, type Rc3Mapping } from './rc3Nmea/mapping'
 import { convertToVbo } from './vbo/VboExporter'
+import { convertToCsv } from './csv/CsvExporter'
 
 /** One output file produced by an ExportFormat. */
 export interface ExportArtifact {
@@ -64,8 +65,20 @@ const vboFormat: ExportFormat = {
   },
 }
 
+const csvFormat: ExportFormat = {
+  id: 'csv',
+  fileExtension: 'csv',
+  exportSession(session) {
+    return convertToCsv(session).map((a) => ({
+      suffix: a.suffix,
+      ext: a.ext,
+      content: a.content,
+    }))
+  },
+}
+
 /** Registry of known export formats. */
-export const EXPORT_FORMATS: readonly ExportFormat[] = [nmeaFormat, vboFormat]
+export const EXPORT_FORMATS: readonly ExportFormat[] = [nmeaFormat, vboFormat, csvFormat]
 
 /** Look up a registered export format by id, or undefined if unknown. */
 export function getExportFormat(id: string): ExportFormat | undefined {

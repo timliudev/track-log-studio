@@ -4,6 +4,7 @@ import {
   curvatureSignal,
   cornerGateLine,
   pickReferenceLap,
+  CURVATURE_DEFAULTS,
 } from '@/domain/analysis/cornerDetection'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
@@ -117,6 +118,46 @@ describe('curvatureSignal + detectCornersByCurvature (feasibility spike)', () =>
     for (let i = 1; i < sig.distanceM.length; i++) {
       expect(sig.distanceM[i]).toBeGreaterThanOrEqual(sig.distanceM[i - 1])
     }
+  })
+
+  // Real-data motivated (see CURVATURE_DEFAULTS comment): GPS noise can
+  // fragment one physical corner into 2-3 adjacent peaks, each individually
+  // clearing the prominence bar, a few metres apart — well inside
+  // minSpacingM=15. suppressNearby (exercised here via the real DEFAULTS, not
+  // LENIENT) must collapse them to a single apex.
+  it('merges GPS-noise-fragmented near-duplicate peaks (a few metres apart) into one apex under the real minSpacingM default', () => {
+    // Two small sub-peaks riding on one broad corner ramp, ~6m apart
+    // (stepM=2, 3-sample dip between them) — well under minSpacingM=15 —
+    // each individually clearing CURVATURE_DEFAULTS' prominence/value floor.
+    const turnRates = [
+      ...new Array(20).fill(0),
+      4, 8, 11, 8.5, 9, 12, 8, 4, // one broad ramp, double-humped by jitter
+      ...new Array(20).fill(0),
+    ]
+    const track = walkTrack(turnRates, 2)
+    const corners = detectCornersByCurvature(track, 0, track.valid.length, CURVATURE_DEFAULTS)
+    expect(corners).toHaveLength(1)
+  })
+
+  it('keeps two corners distinct once their apexes are spaced beyond minSpacingM, even at the same jitter amplitude', () => {
+    // Same two sub-peaks as above, but pulled apart by a real flat straight
+    // long enough to clear minSpacingM=15 — should NOT merge. The straight
+    // must also clearly out-span the detector's smoothing blur (smoothed
+    // headings + boxSmooth halfWidth=2): at stepM=2 a ~20m gap leaves the
+    // inter-peak valley too shallow for the second peak to clear
+    // minProminence at all (a findPeaks effect, not NMS), so use ~50m —
+    // still the same "beyond minSpacingM ⇒ distinct" contract.
+    const bump = [4, 8, 11, 8, 4]
+    const turnRates = [
+      ...new Array(20).fill(0),
+      ...bump,
+      ...new Array(25).fill(0), // ~50m of straight (stepM=2) between apexes
+      ...bump,
+      ...new Array(20).fill(0),
+    ]
+    const track = walkTrack(turnRates, 2)
+    const corners = detectCornersByCurvature(track, 0, track.valid.length, CURVATURE_DEFAULTS)
+    expect(corners).toHaveLength(2)
   })
 })
 

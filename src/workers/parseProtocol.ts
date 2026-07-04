@@ -6,6 +6,12 @@ export interface ParseRequest {
   /** Which registered importer parses this file, e.g. 'loga' | 'nmea'. */
   importerId: string
   file: File
+  /**
+   * Importer-specific parse option, e.g. the chosen `sess_N` for a
+   * multi-session `.rcnx` (see `RcnxImporter` / `listRcnxSessions`). Ignored
+   * by importers that don't understand it.
+   */
+  sessionIndex?: number
 }
 
 /** A channel in transferable form (the buffer is transferred, not copied). */

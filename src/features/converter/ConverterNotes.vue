@@ -16,13 +16,19 @@ const IMPORT_GUIDE_URL = 'https://racechrono.com/article/2572'
     <p v-if="outputFormat === 'vbo'" class="note">
       {{ t('converter.notes.vbo') }}
     </p>
+    <p v-else-if="outputFormat === 'csv'" class="note">
+      {{ t('converter.notes.csv') }}
+    </p>
+    <p v-else-if="outputFormat === 'loga'" class="note">
+      {{ t('converter.notes.loga') }}
+    </p>
     <p v-else class="note">
       {{ t('converter.notes.racechrono') }}
       <a :href="IMPORT_GUIDE_URL" target="_blank" rel="noopener noreferrer">
         {{ t('converter.notes.importGuide') }} ↗
       </a>
     </p>
-    <p class="note muted">⚠ {{ t('converter.notes.raceModule') }}</p>
+    <p v-if="outputFormat !== 'loga'" class="note muted">⚠ {{ t('converter.notes.raceModule') }}</p>
   </section>
 </template>
 

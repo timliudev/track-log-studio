@@ -42,18 +42,24 @@ function ensureWorker(): Worker {
  * importer is selected in the worker by `importerId`.
  */
 export function useLogImport(): {
-  parseFile: (file: File, importerId: string, onProgress?: ProgressFn) => Promise<LogSession>
+  parseFile: (
+    file: File,
+    importerId: string,
+    onProgress?: ProgressFn,
+    sessionIndex?: number,
+  ) => Promise<LogSession>
 } {
   function parseFile(
     file: File,
     importerId: string,
     onProgress?: ProgressFn,
+    sessionIndex?: number,
   ): Promise<LogSession> {
     const w = ensureWorker()
     const id = nextId++
     return new Promise<LogSession>((resolve, reject) => {
       pending.set(id, { resolve, reject, onProgress })
-      w.postMessage({ id, importerId, file } satisfies ParseRequest)
+      w.postMessage({ id, importerId, file, sessionIndex } satisfies ParseRequest)
     })
   }
 
