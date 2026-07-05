@@ -61,12 +61,21 @@ export default defineConfig(({ mode }) => {
           // letting the runtimeCaching rule below cache-on-first-actual-use
           // keeps the precache (and PWA install/update payload) to just the
           // app shell, matching the code-splitting intent.
-          globIgnores: ['**/GgChart-*.js', '**/sql-wasm-*.js', '**/sql-wasm-*.wasm'],
+          globIgnores: [
+            '**/GgChart-*.js',
+            '**/GgChart-*.css',
+            '**/sql-wasm-*.js',
+            '**/sql-wasm-*.wasm',
+          ],
           runtimeCaching: [
             {
               // Content-hashed filenames (immutable per build) — safe to
-              // cache indefinitely once actually requested.
-              urlPattern: /\/assets\/(GgChart|sql-wasm)-.*\.(js|wasm)$/,
+              // cache indefinitely once actually requested. GgChart also
+              // emits a split CSS chunk (its own <style> imports), which
+              // must be excluded from precache and caught here exactly like
+              // its .js chunk — otherwise it would be silently re-eagerfied
+              // via the default {js,css,...} globPattern above.
+              urlPattern: /\/assets\/(GgChart|sql-wasm)-.*\.(js|css|wasm)$/,
               handler: 'CacheFirst',
               options: {
                 cacheName: 'lazy-chunks',
