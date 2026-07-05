@@ -103,4 +103,38 @@ describe('circuitKey', () => {
   it('circuitKeysMatch: malformed key never matches', () => {
     expect(circuitKeysMatch('garbage', '24.123,121.456')).toBe(false)
   })
+
+  it('circuitKeysMatch: Taiwan-latitude (~23.1°) regression — behaviour ~unchanged near equator', () => {
+    // cos(23.1°) ≈ 0.9196, so the corrected tolerance (~0.001087°) is only
+    // slightly looser than the plain equatorial one — a delta safely inside
+    // the old tolerance still matches...
+    const a = '23.100,120.500'
+    const bInside = `23.100,${(120.5 + CIRCUIT_MATCH_TOLERANCE_DEG * 0.5).toFixed(4)}`
+    expect(circuitKeysMatch(a, bInside)).toBe(true)
+    // ...and a delta well beyond both the old and corrected tolerance still doesn't.
+    const bOutside = '23.100,120.600'
+    expect(circuitKeysMatch(a, bOutside)).toBe(false)
+  })
+
+  it('circuitKeysMatch: high latitude (60°) — cos(lat) correction widens longitude tolerance', () => {
+    // At the equator a 0.0015° longitude delta is beyond CIRCUIT_MATCH_TOLERANCE_DEG
+    // (0.001°) and would not match. At 60° latitude, 1° of longitude covers only
+    // cos(60°) = 0.5 of the equatorial distance, so the same 0.0015° delta is only
+    // ~75m — within the ~100m tolerance once corrected — and should now match.
+    const a = '60.000,120.5000'
+    const b = '60.000,120.5015'
+    expect(circuitKeysMatch(a, b)).toBe(true)
+  })
+
+  it('circuitKeysMatch: high latitude (60°) — still rejects a delta beyond the corrected tolerance', () => {
+    const a = '60.000,120.500'
+    const b = '60.000,120.700'
+    expect(circuitKeysMatch(a, b)).toBe(false)
+  })
+
+  it('circuitKeysMatch: latitude tolerance itself is unaffected by the longitude correction', () => {
+    const a = '60.000,120.500'
+    const b = `${(60 + CIRCUIT_MATCH_TOLERANCE_DEG * 2).toFixed(3)},120.500`
+    expect(circuitKeysMatch(a, b)).toBe(false)
+  })
 })
