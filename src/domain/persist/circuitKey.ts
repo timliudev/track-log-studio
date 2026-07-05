@@ -65,19 +65,37 @@ export function parseCircuitKey(key: string): { lat: number; lon: number } | nul
   return { lat, lon }
 }
 
+/** Lower clamp on `cos(lat)` used to scale the longitude tolerance below, so
+ *  the correction can't blow up near the poles (no real circuit is anywhere
+ *  close to that latitude — this is just a safety rail against division by a
+ *  near-zero number). */
+const MIN_COS_LAT = 0.01
+
 /**
  * Whether two circuit keys should be considered the same circuit: exact
  * string match (the common case — same rounding grid), OR their parsed
- * centroids fall within {@link CIRCUIT_MATCH_TOLERANCE_DEG} on both axes
- * (covers a centroid that lands just across a grid boundary between visits).
+ * centroids fall within tolerance on both axes (covers a centroid that lands
+ * just across a grid boundary between visits).
+ *
+ * Latitude tolerance is the plain {@link CIRCUIT_MATCH_TOLERANCE_DEG}. A
+ * degree of longitude, however, covers less physical distance the further
+ * from the equator it is (≈ `111km * cos(lat)`), so the same 0.001°
+ * threshold that's ~100 m at the equator shrinks to ~50 m at 60° latitude —
+ * over-strict at high latitudes. Scale the longitude tolerance by
+ * `1 / cos(lat)` (lat = mean of the two centroids' latitudes, clamped away
+ * from the poles) so it represents a consistent physical distance
+ * everywhere. This only affects the *matching* comparison, never the key
+ * string itself — existing stored/localStorage keys are untouched.
  */
 export function circuitKeysMatch(a: string, b: string): boolean {
   if (a === b) return true
   const pa = parseCircuitKey(a)
   const pb = parseCircuitKey(b)
   if (!pa || !pb) return false
+  const meanLatRad = ((pa.lat + pb.lat) / 2) * (Math.PI / 180)
+  const cosLat = Math.max(Math.abs(Math.cos(meanLatRad)), MIN_COS_LAT)
+  const lonTolerance = CIRCUIT_MATCH_TOLERANCE_DEG / cosLat
   return (
-    Math.abs(pa.lat - pb.lat) <= CIRCUIT_MATCH_TOLERANCE_DEG &&
-    Math.abs(pa.lon - pb.lon) <= CIRCUIT_MATCH_TOLERANCE_DEG
+    Math.abs(pa.lat - pb.lat) <= CIRCUIT_MATCH_TOLERANCE_DEG && Math.abs(pa.lon - pb.lon) <= lonTolerance
   )
 }
