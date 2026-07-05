@@ -231,10 +231,22 @@ export function parseLayout(raw: string | null): DashboardLayoutItem[] | null {
 export function loadLayout(): DashboardLayoutItem[] {
   try {
     const parsed = parseLayout(localStorage.getItem(STORAGE_KEY))
+    if (!parsed) return defaultLayout()
     // Clamp on load so a layout saved BEFORE the B6 minimum-size table existed
     // (or corrupted by a manual localStorage edit) can't hand GridItem a
     // smaller-than-minW/minH item — see clampToMinSize's doc.
-    return parsed ? parsed.map(clampToMinSize) : defaultLayout()
+    const clamped = parsed.map(clampToMinSize)
+    // If clamping didn't actually change anything, the layout is either a
+    // normal (already-valid) user layout or was never touched — return it
+    // AS-IS rather than running it through resolveOverlaps, which reorders
+    // nothing but does re-derive `y` for anything it deems "overlapping" by
+    // placement order; a legitimately-authored layout must come back
+    // byte-for-byte identical (see test: "leaves an already-valid persisted
+    // layout untouched"). Only when clamping actually grew some item's
+    // w/h — which can newly create overlaps with an old, pre-B6 layout — do
+    // we need resolveOverlaps's collision guarantee.
+    const changed = clamped.some((it, idx) => it !== parsed[idx])
+    return changed ? resolveOverlaps(clamped) : clamped
   } catch {
     return defaultLayout()
   }
