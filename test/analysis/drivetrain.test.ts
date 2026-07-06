@@ -18,6 +18,7 @@ import {
   buildCvtRatioTimeSeries,
   cvtRatioSummary,
   estimateClutchEngagementRpm,
+  estimateCircumferenceFromLog,
   type MtDrivetrainSpec,
 } from '@/domain/analysis/drivetrain'
 
@@ -481,5 +482,129 @@ describe('estimateClutchEngagementRpm', () => {
     expect(
       estimateClutchEngagementRpm(rpm, speed, { standstillSpeedKmh: 1, risingSpeedKmh: 1.5, sustainSamples: 3 }),
     ).toBeCloseTo(1500, 6)
+  })
+})
+
+describe('estimateCircumferenceFromLog', () => {
+  /** Build a synthetic multi-gear log at a known TRUE circumference: for each
+   *  gear's total reduction, sweep engine RPM 5000..9000 and derive the
+   *  exactly-consistent speed, with optional deterministic pseudo-noise on
+   *  the speed channel (alternating +/-, no RNG in tests — same convention as
+   *  detectGearPlateaus' syntheticTrace). */
+  function synthLog(
+    reductions: number[],
+    circMm: number,
+    samplesPerGear: number,
+    noiseFrac = 0,
+  ): { rpm: Float64Array; speed: Float64Array } {
+    const rpm: number[] = []
+    const speed: number[] = []
+    for (const r of reductions) {
+      for (let i = 0; i < samplesPerGear; i++) {
+        const engineRpm = 5000 + (4000 * i) / Math.max(1, samplesPerGear - 1)
+        const cleanSpeed = wheelRpmToSpeedKmh(engineRpm / r, circMm)
+        const sign = i % 2 === 0 ? 1 : -1
+        const frac = (i % 5) / 5
+        rpm.push(engineRpm)
+        speed.push(cleanSpeed * (1 + sign * noiseFrac * frac))
+      }
+    }
+    return { rpm: new Float64Array(rpm), speed: new Float64Array(speed) }
+  }
+
+  it('matches a hand-computed single-gear inversion exactly', () => {
+    // rpm 6000, total reduction 10 -> wheel 600 rpm; at C=1870mm that's
+    // 600*1870*60/1e6 = 67.32 km/h. Feed the pair back in -> C recovered.
+    const n = 30
+    const rpm = new Float64Array(n).fill(6000)
+    const speed = new Float64Array(n).fill(67.32)
+    const est = estimateCircumferenceFromLog(rpm, speed, [10])
+    expect(est.circumferenceMm).toBeCloseTo(1870, 3)
+    expect(est.sampleCount).toBeGreaterThanOrEqual(n - 1)
+  })
+
+  it('recovers the true circumference from a clean multi-gear log', () => {
+    const { rpm, speed } = synthLog(REF_TOTAL_REDUCTIONS, 1870, 60)
+    const est = estimateCircumferenceFromLog(rpm, speed, REF_TOTAL_REDUCTIONS)
+    expect(est.circumferenceMm).toBeCloseTo(1870, 0)
+    expect(est.sampleCount).toBeGreaterThan(100)
+  })
+
+  it('stays within 1% under speed-channel noise', () => {
+    const { rpm, speed } = synthLog(REF_TOTAL_REDUCTIONS, 1870, 80, 0.005)
+    const est = estimateCircumferenceFromLog(rpm, speed, REF_TOTAL_REDUCTIONS)
+    expect(Math.abs(est.circumferenceMm - 1870) / 1870).toBeLessThan(0.01)
+  })
+
+  it('ignores shift/slip transients between steady stretches (stability gate)', () => {
+    const a = synthLog([REF_TOTAL_REDUCTIONS[0]], 1870, 40)
+    const b = synthLog([REF_TOTAL_REDUCTIONS[1]], 1870, 40)
+    // Splice a clutch-slip transient between the two gears: RPM flares while
+    // speed stays put — implied circumference garbage if not filtered.
+    const rpm = new Float64Array([...a.rpm, 9500, 9800, 9900, ...b.rpm])
+    const speed = new Float64Array([...a.speed, 60, 61, 62, ...b.speed])
+    const est = estimateCircumferenceFromLog(rpm, speed, REF_TOTAL_REDUCTIONS)
+    expect(est.circumferenceMm).toBeCloseTo(1870, 0)
+  })
+
+  it('excludes samples below the speed/RPM floors', () => {
+    // All samples idle-ish / parking speed: nothing qualifies.
+    const rpm = new Float64Array(50).fill(1500)
+    const speed = new Float64Array(50).fill(5)
+    const est = estimateCircumferenceFromLog(rpm, speed, REF_TOTAL_REDUCTIONS)
+    expect(est.circumferenceMm).toBeNaN()
+    expect(est.sampleCount).toBe(0)
+  })
+
+  it('returns NaN when there are too few qualifying samples', () => {
+    const rpm = new Float64Array(5).fill(6000)
+    const speed = new Float64Array(5).fill(67.32)
+    const est = estimateCircumferenceFromLog(rpm, speed, [10])
+    expect(est.circumferenceMm).toBeNaN()
+    expect(est.sampleCount).toBe(0)
+  })
+
+  it('returns NaN for empty data or no valid reductions', () => {
+    expect(estimateCircumferenceFromLog([], [], [10]).circumferenceMm).toBeNaN()
+    const rpm = new Float64Array(30).fill(6000)
+    const speed = new Float64Array(30).fill(67.32)
+    expect(estimateCircumferenceFromLog(rpm, speed, []).circumferenceMm).toBeNaN()
+    expect(estimateCircumferenceFromLog(rpm, speed, [NaN, -3, 0]).circumferenceMm).toBeNaN()
+  })
+
+  it('discards implausible candidates (out of the mm plausibility range)', () => {
+    // A "reduction" of 100 would imply an 18-metre circumference at these
+    // samples — every vote lands outside the plausible range.
+    const rpm = new Float64Array(30).fill(6000)
+    const speed = new Float64Array(30).fill(67.32)
+    const est = estimateCircumferenceFromLog(rpm, speed, [100])
+    expect(est.circumferenceMm).toBeNaN()
+  })
+
+  it('breaks a single-gear ambiguity toward the reference circumference', () => {
+    // Only ONE gear was actually ridden, so each gear hypothesis forms an
+    // equally-big cluster (the data cannot distinguish them) — the tire-spec
+    // reference should pick the physically-right one.
+    const { rpm, speed } = synthLog([REF_TOTAL_REDUCTIONS[1]], 1870, 60)
+    const est = estimateCircumferenceFromLog(rpm, speed, REF_TOTAL_REDUCTIONS, {
+      referenceCircumferenceMm: 1900,
+    })
+    expect(est.circumferenceMm).toBeCloseTo(1870, 0)
+  })
+
+  it('returns NaN for a single-gear ambiguity when no reference is given', () => {
+    // Same one-gear log as above, but nothing to break the tie with — the
+    // estimator must refuse rather than guess a gear.
+    const { rpm, speed } = synthLog([REF_TOTAL_REDUCTIONS[1]], 1870, 60)
+    const est = estimateCircumferenceFromLog(rpm, speed, REF_TOTAL_REDUCTIONS)
+    expect(est.circumferenceMm).toBeNaN()
+    expect(est.sampleCount).toBe(0)
+  })
+
+  it('does not need the reference when multiple gears were ridden', () => {
+    const { rpm, speed } = synthLog(REF_TOTAL_REDUCTIONS, 1560, 60)
+    // No reference passed — the true value's cluster wins on votes alone.
+    const est = estimateCircumferenceFromLog(rpm, speed, REF_TOTAL_REDUCTIONS)
+    expect(est.circumferenceMm).toBeCloseTo(1560, 0)
   })
 })
