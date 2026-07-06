@@ -1,6 +1,13 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { COLORMAP_IDS, type ColormapId } from '@/domain/analysis/colormap'
+import {
+  loadCharts,
+  saveCharts,
+  nextChartId,
+  type ChartConfig,
+  type ChartMode,
+} from '@/domain/layout/chartConfigs'
 
 export type XAxis = 'time' | 'distance'
 
@@ -13,44 +20,30 @@ export type AccelCondition =
   | { kind: 'speed'; fromKmh: number; toKmh: number }
 
 /**
- * How a chart plots its channels:
- * - `timeline`: each channel over the full session, shared X (time/distance).
- * - `overlay`: the selected laps re-based to a lap-relative X (from 0) and
- *   overlaid — colour by lap, line style by channel (see {@link buildLapOverlay}).
+ * Chart-card config types + persistence now live in
+ * `domain/layout/chartConfigs.ts` (T5 — charts are PERSISTED alongside their
+ * grid positions, so a dynamically added chart survives a reload; see that
+ * module's doc for the storage shape/validation rules). Re-exported here so
+ * existing consumers (TimeSeriesChart/ScatterChart/AnalyzerView) keep
+ * importing them from the store, their natural home.
  */
-export type ChartMode = 'timeline' | 'overlay'
-
-/** A time-series chart (existing behaviour, unchanged): N channels over a
- *  shared X (time/distance or lap-relative overlay — see {@link ChartMode}). */
-export interface TimeSeriesChartConfig {
-  kind: 'timeseries'
-  id: number
-  channels: string[]
-  mode: ChartMode
-}
-
-/** A10+A12 — XY scatter chart: any two channels plotted against each other
- *  (free choice, not limited to force channels — the friction-circle G-G
- *  diagram is just the default/featured use). Independent per-instance state,
- *  same as timeseries charts; does NOT participate in the shared X
- *  cursor/zoom (different axis domain — see ScatterChart.vue). */
-export interface ScatterChartConfig {
-  kind: 'scatter'
-  id: number
-  xChannel: string | null
-  yChannel: string | null
-}
-
-/** One chart on the analyzer dashboard. Discriminated on `kind` so existing
- *  timeseries behaviour stays byte-compatible; charts are transient UI state
- *  (not persisted), so this shape can evolve freely. */
-export type ChartConfig = TimeSeriesChartConfig | ScatterChartConfig
+export type {
+  ChartConfig,
+  ChartMode,
+  TimeSeriesChartConfig,
+  ScatterChartConfig,
+} from '@/domain/layout/chartConfigs'
 
 /** Transient analyzer UI state. The data itself comes from converterStore. */
 export const useAnalyzerStore = defineStore('analyzer', () => {
   const activeFileId = ref<number | null>(null)
   const xAxis = ref<XAxis>('time')
-  const charts = ref<ChartConfig[]>([{ kind: 'timeseries', id: 1, channels: [], mode: 'timeline' }])
+  // T5 — the chart cards (existence + per-chart config) are PERSISTED
+  // (aracer-loga.analyzerCharts.v1), unlike the transient view state below
+  // (cursor/zoom/toggles): without this, a reload reset `charts` to the
+  // single default chart and reconcileLayout then dropped every other chart
+  // card's saved grid position — dynamically added charts silently vanished.
+  const charts = ref<ChartConfig[]>(loadCharts())
   // Shared X-axis zoom range across all charts (null = auto / full extent).
   const xRange = ref<{ min: number; max: number } | null>(null)
   // Shared hovered sample index across charts + track map (null = no hover).
@@ -88,7 +81,20 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     distanceM: 100,
     minEntrySpeedKmh: null,
   })
-  let nextId = 2
+  // One past the highest restored id — ids are never reused, so a restored
+  // layout/panel-state entry can't collide with a newly added chart's card id.
+  let nextId = nextChartId(charts.value)
+
+  // Persist on every chart add/remove/config change (deep: per-chart channel
+  // picks and mode toggles mutate in place). Same watch-and-save pattern as
+  // settingsStore/drivetrainStore.
+  watch(
+    charts,
+    (next) => {
+      saveCharts(next)
+    },
+    { deep: true },
+  )
 
   function setXRange(range: { min: number; max: number } | null): void {
     xRange.value = range
