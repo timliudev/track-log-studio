@@ -252,6 +252,32 @@ Below the acceleration test panel, a motorcycle drivetrain gear-ratio calculator
   - The **RPM drop on each upshift** (e.g. how far RPM falls shifting 1st→2nd at redline).
 - **CVT (scooter)**: enter the CVT ratio range (low/high), final/gear reduction, wheel circumference, and engine max RPM. This produces the speed range at max RPM across the CVT's ratio span (the high-ratio end is the top speed).
 
+#### Three ways to set the rear wheel circumference (MT mode)
+
+MT mode's "Tire spec / rear wheel circumference" block offers three complementary ways to set the circumference:
+
+1. **Convert from tire spec**: switch to the "Tire spec" tab and enter a standard metric motorcycle tire size string (`WIDTH/ASPECT-DIAMETER`, e.g. `120/70-17`). Supported format details:
+   - The separator can be `-`, `x`, or omitted, and accepts the standard construction-type letters `R` (radial), `ZR`, `B` (bias-belted), or `D` (diagonal), case-insensitive, e.g. `120/70ZR17`.
+   - An optional `M/C` (motorcycle) marking may appear before the rim diameter, common on scooter tires, e.g. `130/70 M/C 12`.
+   - An optional trailing load-index/speed-rating token may follow (e.g. `58W`), e.g. `120/70ZR17 58W`.
+   - Conversion formula: sidewall height = width × aspect ratio ÷ 100; overall diameter = rim diameter (in) × 25.4 + 2 × sidewall height; circumference = π × overall diameter.
+   - On a successful parse, "Resolved circumference: ___ mm" is shown; unparseable strings show "Could not parse the tire spec."
+   - Click **"Apply as circumference (fine-tunable)"** to write the converted value into the "Direct input" mode's circumference field and switch to that mode automatically — since real tires of the same nominal spec still vary (worn vs. fresh), the applied value is only a starting point and remains editable. After switching back to "Direct input," if a spec string was entered, a reference hint appears next to the field: "Spec ___ converts to approx. ___ mm (real tires vary — feel free to fine-tune)," so you can see how far your fine-tuned value has drifted from the spec's raw estimate.
+2. **Direct circumference input**: switch to the "Direct input" tab and enter the measured or fine-tuned rear wheel circumference (mm) directly.
+3. **Back-estimate from the recording**: see below.
+
+#### Back-estimating the effective circumference from the recording
+
+Below the circumference block, a **"Estimate circumference from recording (speed / RPM)"** button inverts the actual effective rear wheel circumference from the recording's speed/RPM ratio (no need to know the circumference in advance — only the per-gear ratios and final drive are needed):
+
+- **Preconditions**:
+  - A log is loaded, and it has both an RPM (`RPM`) and a speed (`GPS_Speed` / `Vehicle_Speed`) channel.
+  - Valid per-gear ratios and final drive have been entered (ratio or teeth form, either works) — these convert the speed/RPM quotient back into a circumference and don't themselves require a circumference to be entered first.
+  - The panel is currently in MT mode (CVT mode doesn't support this — a CVT's ratio changes continuously, so there's no discrete "gear plateau" to cluster against).
+  - If any precondition isn't met, the button is disabled and shows the corresponding reason as a hint (e.g. "Enter valid per-gear ratios and final drive first (no circumference needed) to back-estimate from the recording.").
+- **Reading the result**: on success, it shows "Estimated circumference: ___ mm (___ samples), applied to the circumference field — feel free to fine-tune." — the mm value is the median estimated effective circumference, and the sample count is how many log samples passed quality filtering (after removing standing-start / clutch-slip / shift transients, etc.) and backed this estimate. The result is written into the "Direct input" circumference field and the mode switches there automatically, and remains editable.
+- **When it fails**: if there isn't enough qualifying data, or the entire recording was ridden in a single gear (in which case the gear assignment can't be resolved unless a rough circumference reference — e.g. from the tire-spec conversion — was already entered to break the tie), or the ratios/final drive are invalid, it shows "Could not back-estimate reliably: not enough stable samples, or the whole recording is in a single gear so the gear assignment can't be determined (enter an approximate circumference as a reference and try again)." In that case, enter an approximate circumference (e.g. from the tire-spec conversion, or a rough manual guess) first, then click the estimate button again.
+
 **Recover ratio from recording** (shown only when a session is loaded and it has both an RPM (`RPM`) and a speed (`GPS_Speed` / `Vehicle_Speed`) channel):
 
 - Enter the wheel circumference; the app computes `ratio(t) = engine RPM / wheel RPM` (wheel RPM derived from road speed) at every sample across the whole recording, automatically filtering out samples below 5 km/h (standing starts, clutch slip) and any non-finite RPM/speed values as noise.
@@ -299,8 +325,8 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 - **Drag to move**: press and drag a card's **title bar** (the strip at the top with the card's name) to move it; interacting with a card's content (panning/zooming the map, clicking a table row) does not start a drag.
 - **Drag to resize**: hover the card's **bottom-right corner** until the resize cursor appears, then drag to resize; the map and charts redraw immediately to fit the new size without blurring or misalignment. Every card has a minimum size, so resizing can't shrink it below a still-readable floor.
 - **Auto-saved**: the layout (every card's position and size) is automatically saved in the browser (localStorage) and persists across reloads and closed tabs.
-- **Reset layout**: the "Reset layout" button in the toolbar restores the default arrangement (map and lap table in the left column, charts and tool panels in the right column).
-- **Adding chart cards**: a chart added via "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
+- **Reset layout**: the "Reset layout" button in the toolbar restores the default arrangement (map and lap table in the left column, charts and tool panels in the right column). "Add chart," "Add XY scatter chart," and "Reset layout" all live in the same toolbar button cluster (next to each other), since adding chart cards and resetting the overall arrangement are related layout actions.
+- **Adding chart cards**: a chart added via the toolbar's "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
 - **Collapsing a card**: every card's title bar has a collapse/expand button (chevron) on the right — click it to hide the card's content and keep just the title bar, useful for tidying up cards you don't need right now. Works on both desktop and mobile; the collapsed state is saved automatically.
 
 #### Mobile: single column + collapse + pin
