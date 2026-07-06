@@ -30,7 +30,7 @@
  *   (前普利尺寸/珠重/彈簧硬度/開閉盤規格/套管長度/終傳比 etc.) persisted with the
  *   drivetrain settings for setup comparison.
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -122,6 +122,19 @@ const estimateDisabledReason = computed<string | null>(() => {
 
 const estimateResult = ref<CircumferenceFromLogEstimate | null>(null)
 const estimateFailed = ref(false)
+
+// GearPanel is a single long-lived instance (AnalyzerView mounts it once,
+// no :key on file switch — see AnalyzerView.vue), so without this the
+// estimate result/error from a PREVIOUS log session stayed on screen after
+// switching to a different file, misrepresenting a value computed from data
+// that's no longer loaded.
+watch(
+  () => props.session,
+  () => {
+    estimateResult.value = null
+    estimateFailed.value = false
+  },
+)
 
 function runCircumferenceEstimate(): void {
   const rpm = rpmData.value
