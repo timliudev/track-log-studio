@@ -504,8 +504,18 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
             {{ t('analyzer.distance') }}
           </button>
         </div>
+        <!-- T4 — the add-chart buttons live HERE, grouped with the reset-layout
+             button, so every dashboard-level layout action (add cards / reset
+             arrangement) sits in one toolbar cluster instead of the add
+             buttons floating below the grid. -->
         <div class="layout-tools">
           <span v-if="!isMobile" class="drag-hint">{{ t('analyzer.layout.dragHint') }}</span>
+          <button type="button" class="add" @click="onAddTimeseries">
+            ＋ {{ t('analyzer.addChart') }}
+          </button>
+          <button type="button" class="add" @click="onAddScatter">
+            ＋ {{ t('analyzer.addScatterChart') }}
+          </button>
           <button type="button" class="reset-layout" @click="onResetLayout">
             {{ t('analyzer.layout.resetLayout') }}
           </button>
@@ -832,15 +842,6 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
             </template>
         </template>
       </GridLayout>
-
-      <div class="add-menu">
-        <button type="button" class="add" @click="onAddTimeseries">
-          ＋ {{ t('analyzer.addChart') }}
-        </button>
-        <button type="button" class="add" @click="onAddScatter">
-          ＋ {{ t('analyzer.addScatterChart') }}
-        </button>
-      </div>
     </template>
   </div>
 </template>
@@ -898,6 +899,9 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  /* T4 — now holds add-chart + reset-layout; allow wrapping on narrow
+     viewports instead of overflowing the toolbar row. */
+  flex-wrap: wrap;
 }
 .drag-hint {
   font-size: 0.8rem;
@@ -1000,18 +1004,15 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
 .band-count {
   color: var(--color-text-muted);
 }
-.add-menu {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+/* T4 — add-chart buttons live in the toolbar's .layout-tools cluster next to
+   reset-layout; sized to match its neighbours (the dashed border keeps their
+   established "add" affordance). */
 .add {
-  align-self: flex-start;
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px dashed var(--color-border);
   border-radius: var(--radius);
-  padding: 8px 16px;
+  padding: 5px 10px;
   font: inherit;
   cursor: pointer;
 }
