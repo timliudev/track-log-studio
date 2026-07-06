@@ -130,11 +130,20 @@ export function resolveFinalDrive(input: FinalDriveInput): number {
  * → ~1884.5mm circumference, in the right ballpark for a sport-bike front/rear.)
  *
  * Accepts a little formatting slack (extra spaces, `x` or `-` separator
- * before the diameter, e.g. `120/70x17` or `120/70 R17`). Returns NaN if the
- * string doesn't parse or any component is non-positive.
+ * before the diameter, e.g. `120/70x17` or `120/70 R17`), plus the standard
+ * construction-type letters in the separator position — `R` (radial,
+ * `120/70R17`), `ZR` (`120/70ZR17`), `B` (bias belted) or `D` (diagonal),
+ * case-insensitive — an optional `M/C` motorcycle marking before the rim
+ * diameter (`130/70 M/C 12`, printed on many scooter tires), and an optional
+ * trailing load-index/speed-rating token (`120/70ZR17 58W`), all of which are
+ * ignored for the geometry. Returns NaN if the string doesn't parse or any
+ * component is non-positive.
  */
 export function tireSpecToCircumferenceMm(spec: string): number {
-  const m = /^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*[-xX]?\s*[Rr]?\s*(\d+(?:\.\d+)?)\s*$/.exec(spec)
+  const m =
+    /^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*[-xX]?\s*(?:ZR|[RBD])?\s*(?:M\/C)?\s*(\d+(?:\.\d+)?)(?:\s+\d{2,3}\s*[A-Z]{0,2})?\s*$/i.exec(
+      spec,
+    )
   if (!m) return NaN
   const width = Number(m[1])
   const aspect = Number(m[2])
