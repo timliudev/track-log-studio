@@ -79,7 +79,15 @@ GearPanel 齒比計算現在支援:
 查證後發現 **7/5 已完成**(SessionMerge 卡片選好兩個 session 後自動顯示 speed 疊圖,nudge 即時反映)— 昨晚沒有重工,只修正了過時的狀態文件。驗收:載入兩個 session → SessionMerge 卡片 → 自動對齊 → 看疊圖隨 ±100ms 微調移動。
 
 ### 4. 品質補強(W3a/W3b,今晨 07:06 起跑)
-(結果待補 — 見下方進度紀錄末段)
+
+**W3a build 驗證+依賴健康(07:10 完成)— 全部通過,無需變更:**
+- echarts 確實獨立 async chunk(GgChart-*.js,480kB raw/160kB gzip),主 entry grep echarts 0 命中
+- PWA precache 正確排除 GgChart 與 sql-wasm(vite.config.ts globIgnores,有註解),runtime CacheFirst 快取(maxEntries 8、一年),precache 19 entries 共 706KB
+- 前四大 chunk:sql-wasm.wasm 660kB、echarts 480kB、AnalyzerView 330kB、主 entry 157kB(gzip 分別 323/160/108/58)
+- **npm outdated 全空(所有依賴已 latest)、npm audit 0 漏洞** — 前幾晚的升級已清空待辦
+- chore/deps-round2 分支與 develop 完全一致,無 commit,稍後刪除
+
+**W3b 正確性 review:**(待補)
 
 ### 5. 未完成 / 等你決定
 - Cloud-track §8 決策(repo/授權/CDN/OAuth)— 依你指示跳過,等你拍板
