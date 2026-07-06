@@ -93,12 +93,44 @@ describe('tireSpecToCircumferenceMm', () => {
     expect(tireSpecToCircumferenceMm('120/70 R17')).toBeCloseTo(base, 6)
     expect(tireSpecToCircumferenceMm(' 120 / 70 - 17 ')).toBeCloseTo(base, 6)
   })
+  it('accepts construction-type letters glued to the diameter (R/ZR/B/D, any case)', () => {
+    const base = tireSpecToCircumferenceMm('120/70-17')
+    expect(tireSpecToCircumferenceMm('120/70R17')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('120/70r17')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('120/70ZR17')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('120/70zr17')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('120/70B17')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('120/70-R17')).toBeCloseTo(base, 6)
+  })
+  it('accepts an M/C motorcycle marking before the rim diameter', () => {
+    const base = tireSpecToCircumferenceMm('130/70-12')
+    expect(tireSpecToCircumferenceMm('130/70 M/C 12')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('130/70 m/c 12')).toBeCloseTo(base, 6)
+  })
+  it('ignores a trailing load-index/speed-rating token', () => {
+    const base = tireSpecToCircumferenceMm('120/70-17')
+    expect(tireSpecToCircumferenceMm('120/70ZR17 58W')).toBeCloseTo(base, 6)
+    expect(tireSpecToCircumferenceMm('120/70-17 58')).toBeCloseTo(base, 6)
+    // scooter sizes with a rating too
+    expect(tireSpecToCircumferenceMm('120/80-12 55J')).toBeCloseTo(tireSpecToCircumferenceMm('120/80-12'), 6)
+  })
+  it('parses the small-scooter sizes from the feature request', () => {
+    // 120/80-12: rim 12*25.4=304.8mm + 2*(120*0.80)=192mm sidewall = 496.8mm diameter
+    expect(tireSpecToCircumferenceMm('120/80-12')).toBeCloseTo(Math.PI * 496.8, 1)
+    // 100/90-10: rim 10*25.4=254mm + 2*(100*0.90)=180mm sidewall = 434mm diameter
+    expect(tireSpecToCircumferenceMm('100/90-10')).toBeCloseTo(Math.PI * 434, 1)
+  })
   it('returns NaN for an unparsable string', () => {
     expect(tireSpecToCircumferenceMm('not a tire size')).toBeNaN()
     expect(tireSpecToCircumferenceMm('')).toBeNaN()
+    // wrong/unknown construction letter must not silently parse
+    expect(tireSpecToCircumferenceMm('120/70Q17')).toBeNaN()
+    // missing aspect ratio
+    expect(tireSpecToCircumferenceMm('120-17')).toBeNaN()
   })
   it('returns NaN for non-positive components', () => {
     expect(tireSpecToCircumferenceMm('0/70-17')).toBeNaN()
+    expect(tireSpecToCircumferenceMm('120/0-17')).toBeNaN()
   })
 })
 
