@@ -283,15 +283,26 @@ function removeChannel(name: string): void {
   flex-direction: column;
   gap: 8px;
 }
-/* #8 — inside a dashboard grid item's card body: stretch to fill it and let
-   UPlotChart's own .fill (via fillHeight) claim the remaining space below
-   the toolbar/chips. */
+/* #8/T1 — inside a dashboard grid item's card body (a flex COLUMN — see
+   DashboardCard's `.body`): grow into the remaining space as a flex item
+   (`flex: 1`, not the old `height: 100%`, which overflowed the body once any
+   sibling text existed) and let UPlotChart's own .fill (via fillHeight)
+   claim the remaining space below the toolbar/chips. */
 .chart.fill {
-  height: 100%;
-}
-.chart.fill .chart-fill {
   flex: 1 1 auto;
   min-height: 0;
+}
+.chart.fill .chart-fill {
+  /* Basis 0 (not auto): the host's content is a canvas whose height is set
+     FROM the host's measured height (UPlotChart's targetHeight), so a
+     content-based flex basis would feed the canvas's current size back into
+     its own layout. Basis 0 + grow 1 sizes the host purely from the space
+     left over after the toolbar/chips rows. */
+  flex: 1 1 0;
+  /* Keep enough room that the plot area never collapses to nothing — the
+     uPlot legend inside is subtracted from this by targetHeight(), see
+     UPlotChart.vue. Past this minimum the card body scrolls instead. */
+  min-height: 60px;
 }
 .toolbar {
   display: flex;
