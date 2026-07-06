@@ -46,6 +46,7 @@ import UPlotChart from '@/components/UPlotChart.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
+  tireSpecToCircumferenceMm,
   resolveRpmChannel,
   computeRatioSeries,
   detectGearPlateaus,
@@ -81,6 +82,15 @@ const mtSpec = computed(() => toMtDrivetrainSpec(store.mt))
 const mtResults = computed(() => (isMt.value ? computeMtGearTable(mtSpec.value) : []))
 const mtValid = computed(() => mtResults.value.length > 0)
 const specCircumferenceValid = computed(() => Number.isFinite(mtSpec.value.wheelCircumferenceMm) && mtSpec.value.wheelCircumferenceMm > 0)
+
+/** In DIRECT mode, what the (last-entered) tire spec would convert to — shown
+ *  as a reference hint next to the manual field so the user can see how far
+ *  their fine-tuned value drifted from the spec estimate. Null when the spec
+ *  string doesn't parse (no hint). */
+const specReferenceMm = computed<number | null>(() => {
+  const circ = tireSpecToCircumferenceMm(store.mt.tireSpec)
+  return Number.isFinite(circ) && circ > 0 ? circ : null
+})
 
 const topGear = computed(() =>
   mtResults.value.length > 0
@@ -464,9 +474,14 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
             />
           </label>
           <p v-if="!specCircumferenceValid" class="hint inline-hint">{{ t('analyzer.gear.tireSpecInvalid') }}</p>
-          <p v-else class="hint inline-hint">
-            {{ t('analyzer.gear.tireSpecResolved', { mm: mtSpec.wheelCircumferenceMm.toFixed(0) }) }}
-          </p>
+          <template v-else>
+            <p class="hint inline-hint">
+              {{ t('analyzer.gear.tireSpecResolved', { mm: mtSpec.wheelCircumferenceMm.toFixed(0) }) }}
+            </p>
+            <button type="button" class="apply-btn" @click="store.applyTireSpecCircumference()">
+              {{ t('analyzer.gear.tireSpecApply') }}
+            </button>
+          </template>
         </div>
         <div v-else class="row params">
           <label class="field">
@@ -480,6 +495,9 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
               @input="store.setMt({ wheelCircumferenceMm: numField($event) })"
             />
           </label>
+          <p v-if="specReferenceMm != null" class="hint inline-hint">
+            {{ t('analyzer.gear.tireSpecReference', { spec: store.mt.tireSpec.trim(), mm: specReferenceMm.toFixed(0) }) }}
+          </p>
         </div>
       </div>
 
@@ -812,6 +830,25 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 }
 .inline-hint {
   align-self: center;
+}
+.apply-btn {
+  align-self: center;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.apply-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.apply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .inversion-circ {
   margin-top: 4px;
