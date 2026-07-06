@@ -186,6 +186,8 @@ export default {
       tireSpecLabel: '輪胎規格（例：120/70-17）',
       tireSpecInvalid: '無法解析輪胎規格，請確認格式（寬度/扁平比-輪徑，例 120/70-17）。',
       tireSpecResolved: '解析後周長：{mm} mm',
+      tireSpecApply: '套用為周長（可再微調）',
+      tireSpecReference: '規格 {spec} 換算約 {mm} mm（實胎有尖有圓，可微調）',
       redlineRpm: '紅線／換檔轉速 (RPM)',
       modeRatio: '齒比',
       modeTeeth: '齒數',

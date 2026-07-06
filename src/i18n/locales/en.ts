@@ -189,6 +189,8 @@ export default {
       tireSpecLabel: 'Tire spec (e.g. 120/70-17)',
       tireSpecInvalid: 'Could not parse the tire spec — check the format (width/aspect-diameter, e.g. 120/70-17).',
       tireSpecResolved: 'Resolved circumference: {mm} mm',
+      tireSpecApply: 'Apply as circumference (fine-tune after)',
+      tireSpecReference: 'Spec {spec} converts to ~{mm} mm (real profiles vary — tweak as needed)',
       redlineRpm: 'Redline / shift RPM',
       modeRatio: 'Ratio',
       modeTeeth: 'Teeth',

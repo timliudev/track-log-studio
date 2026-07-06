@@ -304,6 +304,21 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     inversionWheelCircumferenceMm.value = mm
   }
 
+  /**
+   * Parse the current MT tire spec and, when it's valid, copy the resolved
+   * circumference (rounded to whole mm) into the direct-entry field and
+   * switch to 'direct' mode so the user can fine-tune the number afterwards —
+   * a spec is only an estimate (same size varies between pointy/round
+   * profiles), so the workflow is "convert, then tweak". No-op returning
+   * false when the spec doesn't parse.
+   */
+  function applyTireSpecCircumference(): boolean {
+    const circ = tireSpecToCircumferenceMm(mt.value.tireSpec)
+    if (!Number.isFinite(circ) || !(circ > 0)) return false
+    mt.value = { ...mt.value, wheelCircumferenceMm: Math.round(circ), circumferenceMode: 'direct' }
+    return true
+  }
+
   return {
     kind,
     mt,
@@ -319,6 +334,7 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     setGearRatio,
     setGearCount,
     setInversionWheelCircumferenceMm,
+    applyTireSpecCircumference,
   }
 })
 
