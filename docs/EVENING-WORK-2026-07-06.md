@@ -26,8 +26,8 @@
 
 | # | 任務 | 分支 | 狀態 |
 |---|------|------|------|
-| W2a | Phase5-UI 收尾 | feature/phase5-ui | ⬜ |
-| W2b | G-G bundle split(echarts 首載優化) | chore/gg-bundle-split | ⬜ |
+| W2a | Phase5-UI 收尾 → 實際剩餘:SessionMerge 合併前 speed 疊圖預覽 + speed 通道 fallback(見 PHASE5-MERGE-STATUS.md「Not done」) | feature/merge-preview | ⬜ |
+| W2b | G-G bundle split → **查證發現已完成**:chore/gg-lazy-chunk(df784d8「GgPanel 改 defineAsyncComponent — echarts 拆獨立 chunk」)已合入 develop;Wave 3 改為驗證 build 產物確實拆出 echarts chunk | — | ✅(待驗證) |
 
 ### Wave 3
 
@@ -38,6 +38,9 @@
 ## 進度紀錄
 
 - 17:35 開工。用量檢查通過,建立本文件。
+- 17:40 Wave 1 兩個 sub-agent 啟動(dashboard-layout-fixes、tire-spec-input,各自獨立 worktree)。
+- 17:42 偵察:G-G bundle split 已於先前完成並合入 develop(df784d8);Phase5-UI 實際剩餘為 SessionMerge 合併前預覽疊圖。
+- 17:44 T2 agent 首次回合異常(轉派後即結束、無分支產出),已叫回要求親自實作。
 
 ## 給使用者的驗收摘要
 
