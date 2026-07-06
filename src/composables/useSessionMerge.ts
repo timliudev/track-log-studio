@@ -1,4 +1,4 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useFileStore, type ImportedFile } from '@/stores/fileStore'
 import { LogSession } from '@/domain/model/LogSession'
 import { crossCorrelateOffset, type AlignmentResult } from '@/domain/analysis/sessionAlign'
@@ -159,6 +159,38 @@ export function useSessionMerge(): {
       maxPoints: PREVIEW_MAX_POINTS,
     })
   })
+
+  // A previously picked base/GPS session can vanish out from under the panel
+  // (e.g. fileStore.removeFile while the merge panel is open) — the picker's
+  // <select> would then show a blank/stale option even though canAlign/
+  // canMerge already correctly fall back to false. Watch the live candidate
+  // list and drop any id that's no longer present, clearing the derived
+  // alignment/offset state that only makes sense for a still-picked pair.
+  watch(
+    candidates,
+    (list) => {
+      const validIds = new Set(list.map((c) => c.id))
+      let stale = false
+      if (baseId.value != null && !validIds.has(baseId.value)) {
+        baseId.value = null
+        stale = true
+      }
+      if (gpsId.value != null && !validIds.has(gpsId.value)) {
+        gpsId.value = null
+        stale = true
+      }
+      if (stale) {
+        alignment.value = null
+        offsetMs.value = null
+        lastError.value = null
+      }
+    },
+    // Sync flush: fileStore.removeFile should invalidate a stale pick
+    // immediately (not on the next microtask/render tick) so canAlign/
+    // canMerge and the picker's bound v-model are consistent as soon as the
+    // caller's removeFile() call returns.
+    { flush: 'sync' },
+  )
 
   const canMerge = computed(() => canAlign.value && offsetMs.value != null)
 
