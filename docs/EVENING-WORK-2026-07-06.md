@@ -33,8 +33,8 @@
 
 | # | 任務 | 分支 | 狀態 |
 |---|------|------|------|
-| W3a | 依賴更新(npm outdated/audit)+ build 產物驗證(echarts chunk/precache/chunk 尺寸) | chore/deps-and-build-verify | ✅(部分)aeb6c14 vitest 4.1.10 已合併;**agent 急停前稱兩項任務完成但最終報告遺失** — build 驗證結論與 outdated/audit 全貌需 03:50 續跑時重新確認 |
-| W3b | code review(今晚全部 diff)+ 覆蓋補強 | — | ⬜ 03:50 續跑 |
+| W3a | 依賴更新(npm outdated/audit)+ build 產物驗證(echarts chunk/precache/chunk 尺寸) | chore/deps-and-build-verify | ✅ 完成:vitest 4.1.10 已合併(aeb6c14);7/7 晨補齊報告 — chunk/precache 全數核實正確、依賴全 latest、audit 0 漏洞(詳見驗收摘要 §4) |
+| W3b | code review(今晚全部 diff) | fix/evening-review | ✅ 已合併:抓到並修掉 1 個真 bug(倒算結果切檔殘留,4d2f90d),其餘核實無誤 |
 
 ## 進度紀錄
 
@@ -54,6 +54,7 @@
 - 23:16 轉派鏈深處的執行者存活並完成調查回報:**W2a 早在 7/5 已完成**(b73bcf8,疊圖+overlay computed+i18n+31 測試都在 develop),它正確地沒有製造重複 commit。已修正 PHASE5-MERGE-STATUS.md 過時段落、刪除多餘的 merge-preview worktree/分支。剩餘待辦縮減為:W3a 報告重確認、W3b code review + 覆蓋、驗收摘要。
 - 07:04(7/7)使用者叫醒續跑。官方用量:session 12%(重設 08:49)、週限 21%/Fable 35%。03:50 排程有觸發但無產出;08:05 排程消失 → 補排 08:15 保險。距 08:30 git 凍結約 83 分鐘。
 - 07:06 並行發出 W3b(fix/evening-review:昨晚全部 diff 的正確性 review)與 W3a(chore/deps-round2:build 驗證+outdated/audit 報告)兩個 agent,均含反轉派條款與 08:00 硬停線。驗收摘要主體先行寫入本文件。
+- 07:15 **全部待辦完成**。W3a:build/依賴全數健康無需變更;W3b:review 修 1 bug 已合併(develop head,832/832 綠)。取消 08:15 保險排程、清理 agent worktree 與已合併分支。今晚成果全在 develop,等使用者驗收後再 release。
 - 23:00 使用者指出上次仍撞牆中斷 → 用量協議強化為四層:①5hr 窗 ≥80% 不再發新 agent(一個 sonnet agent ≈ 10–15%)②≥90% 即開始收尾(留 5% 給收尾本身)③**事前保險:已排 03:05 與 08:05 兩個 dead-man 恢復排程**(scheduled task,會自行判斷主 session 是否存活/工作是否完成,避免重複)④每個 agent 完成點+發新 agent 前必查 monitor。目前 5hr 窗 6%。
 
 ## 給使用者的驗收摘要
@@ -87,7 +88,11 @@ GearPanel 齒比計算現在支援:
 - **npm outdated 全空(所有依賴已 latest)、npm audit 0 漏洞** — 前幾晚的升級已清空待辦
 - chore/deps-round2 分支與 develop 完全一致,無 commit,稍後刪除
 
-**W3b 正確性 review:**(待補)
+**W3b 正確性 review(07:12 完成,fix/evening-review 已合併):**
+- 審了 20 檔 +1192/-111,重點:輪胎三來源運算、持久化 schema、CSS 布局修正、i18n 對齊
+- **抓到並修掉 1 個真 bug(4d2f90d)**:GearPanel 是長駐元件,在檔案 A 倒算周長後切到檔案 B,結果訊息不會清除 — 顯示的是舊檔案算出的值,誤導性強;修法是 watch session 變動即清除
+- 核實無誤:規格 regex 容錯(含 `180/55ZR17 73W` 實測)、倒算單位換算手算一致、T5 新 storage key 舊資料 fallback 正確、i18n 六個新 key 兩語系對齊
+- 低信心觀察(未動,留意即可):GearPanel 其他 ref 是否也有類似殘留未逐一排查;AnalyzerView 的 reconcileLayout 與三個 storage blob 對照邏輯未逐行深挖;元件層 reactive 接線目前無自動化測試基礎設施(repo 慣例是邏輯下沉,可考慮日後補 component 測試骨架)
 
 ### 5. 未完成 / 等你決定
 - Cloud-track §8 決策(repo/授權/CDN/OAuth)— 依你指示跳過,等你拍板
