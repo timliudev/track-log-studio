@@ -94,6 +94,11 @@ GearPanel 齒比計算現在支援:
 - 核實無誤:規格 regex 容錯(含 `180/55ZR17 73W` 實測)、倒算單位換算手算一致、T5 新 storage key 舊資料 fallback 正確、i18n 六個新 key 兩語系對齊
 - 低信心觀察(未動,留意即可):GearPanel 其他 ref 是否也有類似殘留未逐一排查;AnalyzerView 的 reconcileLayout 與三個 storage blob 對照邏輯未逐行深挖;元件層 reactive 接線目前無自動化測試基礎設施(repo 慣例是邏輯下沉,可考慮日後補 component 測試骨架)
 
+**7/7 晨追加排查(07:38 完成)— 上面兩個低信心項已收掉,全部乾淨:**
+- GearPanel 全狀態分類:真正的 ref 只有已修的 estimateResult/estimateFailed 兩個,其餘都是 computed(天然跟隨 session)或刻意持久化的車輛設定;AccelTestPanel 無殘留風險
+- reconcileLayout 四檢查點全過:孤兒 id 有濾除(含測試)、三個 blob 同步讀取無競態、nextId 單調遞增不撞號、f0b53b9 舊資料升級路徑正確(無 key fallback 預設、空陣列保留清空狀態)
+- 唯一記錄未修的邊角:移除檔案後 SessionMerge 下拉殘留失效 id — null-guard 齊全、按鈕正確停用、不產生錯誤數據,屬 UI 磨光項
+
 ### 5. 未完成 / 等你決定
 - Cloud-track §8 決策(repo/授權/CDN/OAuth)— 依你指示跳過,等你拍板
 - G-G bundle split 已是既有功能;echarts chunk 的 build 實證見 W3a 報告
