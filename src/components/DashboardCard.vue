@@ -188,6 +188,17 @@ function onTogglePinned(): void {
   min-height: 0;
   overflow: auto;
   padding: calc(var(--space) * 1.5);
+  /* T1 — the body is a flex COLUMN so a fill-height chart/map child can take
+     `flex: 1 1 auto` (the remaining space) while its sibling text rows
+     (legend/hints/inputs) keep their natural height and stay VISIBLE at any
+     card size. Previously the chart claimed `height: 100%` OF THE BODY and
+     pushed every text row below the fold, where `overflow: auto` hid it
+     unless the user thought to scroll — and growing the window only widened
+     the chart, never revealed the text. Non-fill cards are unaffected: block
+     children simply become full-width column flex items with auto height. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
 }
 
 /* #9 — mobile pin: sticky to the top of the single-column flow so the rest
