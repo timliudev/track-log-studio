@@ -421,25 +421,7 @@ export function detectGearPlateaus(ratioSeries: ArrayLike<number>, opts: Plateau
   if (finite.length < 5) return []
   finite.sort((a, b) => a - b)
 
-  // Greedy sweep: extend the current cluster while the next value is within
-  // toleranceFrac of the cluster's running mean; otherwise close it and start
-  // a new one.
-  const clusters: number[][] = []
-  let current: number[] = [finite[0]]
-  let currentMean = finite[0]
-  for (let i = 1; i < finite.length; i++) {
-    const v = finite[i]
-    const rel = Math.abs(v - currentMean) / currentMean
-    if (rel <= toleranceFrac) {
-      current.push(v)
-      currentMean = current.reduce((a, b) => a + b, 0) / current.length
-    } else {
-      clusters.push(current)
-      current = [v]
-      currentMean = v
-    }
-  }
-  clusters.push(current)
+  const clusters = clusterSorted1d(finite, toleranceFrac)
 
   const minCount = Math.max(1, Math.ceil(finite.length * minSampleFrac))
   let plateaus: GearPlateau[] = clusters
@@ -458,6 +440,245 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b)
   const mid = Math.floor(sorted.length / 2)
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+}
+
+/**
+ * Greedy 1-D clustering over an ASCENDING-sorted value array: extend the
+ * current cluster while the next value is within `toleranceFrac` (relative)
+ * of the cluster's running mean; otherwise close it and start a new one.
+ * Sorted input makes "close in value" equivalent to "adjacent in the array",
+ * so a single left-to-right sweep is a simple/robust clustering pass (no
+ * k-means/binning-boundary edge cases). Shared by {@link detectGearPlateaus}
+ * (ratio plateaus) and {@link estimateCircumferenceFromLog} (implied-
+ * circumference votes).
+ */
+function clusterSorted1d(sortedValues: readonly number[], toleranceFrac: number): number[][] {
+  const clusters: number[][] = []
+  if (sortedValues.length === 0) return clusters
+  let current: number[] = [sortedValues[0]]
+  let currentMean = sortedValues[0]
+  for (let i = 1; i < sortedValues.length; i++) {
+    const v = sortedValues[i]
+    const rel = Math.abs(v - currentMean) / currentMean
+    if (rel <= toleranceFrac) {
+      current.push(v)
+      currentMean = current.reduce((a, b) => a + b, 0) / current.length
+    } else {
+      clusters.push(current)
+      current = [v]
+      currentMean = v
+    }
+  }
+  clusters.push(current)
+  return clusters
+}
+
+// ── Layer 2b: circumference inversion (speed + RPM + known ratios) ─────────
+
+export interface CircumferenceFromLogOptions {
+  /** Minimum speed (km/h) for a sample to qualify — below this, wheel RPM is
+   *  tiny/noisy and parking-speed clutch slip produces garbage. Default 10
+   *  (stricter than `computeRatioSeries`'s 5: this estimate feeds a NUMBER
+   *  the user will keep, so prefer fewer, better samples). */
+  minSpeedKmh?: number
+  /** Minimum engine RPM for a sample to qualify — filters idle/launch
+   *  clutch-slip samples where engine RPM isn't drivetrain-coupled.
+   *  Default 3000. */
+  minRpm?: number
+  /** Stability gate: a sample only qualifies when its speed/RPM quotient
+   *  changed by at most this fraction vs. the previous sample — rides out
+   *  gear shifts, wheelies/wheelspin and clutch-slip transients, keeping only
+   *  steady "locked drivetrain" stretches. Default 0.02 (2%). */
+  maxQuotientJumpFrac?: number
+  /** Relative tolerance for clustering the speed/RPM quotients into per-gear
+   *  groups (same greedy sorted-sweep as {@link detectGearPlateaus}).
+   *  Default 0.03. */
+  toleranceFrac?: number
+  /** Maximum relative spread ((max-min)/mean) the per-cluster circumference
+   *  values of a cluster->gear assignment may have to be accepted — the
+   *  correct assignment agrees on ONE circumference across every ridden
+   *  gear, wrong assignments disagree. Default 0.015 (1.5%). */
+  maxAssignmentSpreadFrac?: number
+  /** Plausibility range (mm) for the resulting circumference — assignments
+   *  landing outside are discarded (motorcycle wheels are well inside this).
+   *  Defaults 500–3500. */
+  minPlausibleMm?: number
+  maxPlausibleMm?: number
+  /** Optional current/estimated circumference (e.g. from the tire spec).
+   *  Used ONLY to break genuine ambiguities — e.g. a log ridden entirely in
+   *  ONE gear fits every gear hypothesis equally well, and the reference
+   *  picks the physically-right one. Ignored when the data alone decides. */
+  referenceCircumferenceMm?: number
+}
+
+/** Result of {@link estimateCircumferenceFromLog}. */
+export interface CircumferenceFromLogEstimate {
+  /** Estimated effective rolling circumference (mm) — the pooled median over
+   *  every qualifying sample under the winning cluster->gear assignment. NaN
+   *  when no confident estimate could be formed. */
+  circumferenceMm: number
+  /** Number of qualifying log samples backing the estimate (the UI shows
+   *  this next to the value). 0 when `circumferenceMm` is NaN. */
+  sampleCount: number
+}
+
+/** Minimum qualifying samples before an estimate is even attempted — below
+ *  this the log simply doesn't contain enough steady riding to trust. */
+const MIN_ESTIMATE_SAMPLES = 10
+
+/**
+ * Invert the EFFECTIVE rear-wheel rolling circumference from a session's
+ * measured RPM + speed channels, given the drivetrain's known per-gear total
+ * reductions (primary x gear x final drive — ratio-only, so this deliberately
+ * does NOT need a circumference input; that's the quantity being solved for).
+ *
+ * Physics per sample, for a specific engaged gear with total reduction `R`:
+ * wheelRpm = engineRpm / R and speedKmh = wheelRpm * C(mm) * 60 / 1e6 (see
+ * {@link wheelRpmToSpeedKmh}), so with the measured quotient q = speed/rpm:
+ *
+ *   C = q * R * 1e6 / 60
+ *
+ * Which gear was engaged at each sample is unknown, so it's recovered
+ * structurally instead of guessed per-sample:
+ *
+ * 1. Quality-gate the samples (speed/RPM floors + a consecutive-sample
+ *    stability gate on q that drops shift/slip/wheelspin transients where
+ *    engine and rear wheel aren't cleanly locked — see {@link
+ *    CircumferenceFromLogOptions}).
+ * 2. Cluster the surviving q values ({@link clusterSorted1d}, same greedy
+ *    sorted sweep as {@link detectGearPlateaus}): each ridden gear produces
+ *    one tight q cluster (q is constant within a locked gear). Tiny clusters
+ *    (transient residue) are dropped.
+ * 3. Try every ORDER-PRESERVING assignment of q clusters to the entered
+ *    gears (ascending q maps to descending reduction — a strictly harder
+ *    constraint than per-sample voting, which is what makes this robust:
+ *    cross-gear coincidences can't pool). The correct assignment makes every
+ *    cluster agree on ONE circumference; assignments whose per-cluster
+ *    circumferences spread more than `maxAssignmentSpreadFrac`, or land
+ *    outside the plausibility range, are rejected.
+ * 4. If several surviving assignments still disagree (a genuine ambiguity —
+ *    e.g. only one gear was ridden, which fits every gear hypothesis), the
+ *    optional `referenceCircumferenceMm` (tire-spec estimate) picks the
+ *    closest; without a reference such a log returns NaN rather than a
+ *    guess.
+ *
+ * The reported value is the pooled MEDIAN over every qualifying sample's
+ * implied circumference under the winning assignment (robust to outliers),
+ * with `sampleCount` telling the UI how much data backs it.
+ *
+ * Returns `{ circumferenceMm: NaN, sampleCount: 0 }` when there are no valid
+ * reductions, fewer than {@link MIN_ESTIMATE_SAMPLES} qualifying samples,
+ * more q clusters than entered gears, no assignment fits, or the ambiguity
+ * above can't be resolved.
+ */
+export function estimateCircumferenceFromLog(
+  engineRpm: ArrayLike<number>,
+  speedKmh: ArrayLike<number>,
+  totalReductions: readonly number[],
+  opts: CircumferenceFromLogOptions = {},
+): CircumferenceFromLogEstimate {
+  const NO_ESTIMATE: CircumferenceFromLogEstimate = { circumferenceMm: NaN, sampleCount: 0 }
+  const minSpeed = opts.minSpeedKmh ?? 10
+  const minRpm = opts.minRpm ?? 3000
+  const maxJump = opts.maxQuotientJumpFrac ?? 0.02
+  const toleranceFrac = opts.toleranceFrac ?? 0.03
+  const maxSpread = opts.maxAssignmentSpreadFrac ?? 0.015
+  const minPlausible = opts.minPlausibleMm ?? 500
+  const maxPlausible = opts.maxPlausibleMm ?? 3500
+
+  // Descending reduction = ascending gear number (1st gear reduces most).
+  const reductions = totalReductions.filter((r) => Number.isFinite(r) && r > 0).sort((a, b) => b - a)
+  const n = Math.min(engineRpm.length, speedKmh.length)
+  if (reductions.length === 0 || n < 2) return NO_ESTIMATE
+
+  // 1. Quality-gated speed/RPM quotients (km/h per engine RPM). `prevQuotient`
+  // tracks the PREVIOUS RAW sample's quotient (whether or not it qualified)
+  // so the stability gate always compares physically-adjacent samples.
+  const quotients: number[] = []
+  let prevQuotient = NaN
+  for (let i = 0; i < n; i++) {
+    const rpm = engineRpm[i]
+    const speed = speedKmh[i]
+    const ok = Number.isFinite(rpm) && rpm >= minRpm && Number.isFinite(speed) && speed >= minSpeed
+    const q = ok ? speed / rpm : NaN
+    if (Number.isFinite(q) && Number.isFinite(prevQuotient) && Math.abs(q - prevQuotient) / prevQuotient <= maxJump) {
+      quotients.push(q)
+    }
+    prevQuotient = q
+  }
+  if (quotients.length < MIN_ESTIMATE_SAMPLES) return NO_ESTIMATE
+
+  // 2. One q cluster per ridden gear; drop transient residue (tiny clusters).
+  const sortedQ = [...quotients].sort((a, b) => a - b)
+  const minClusterSize = Math.max(3, Math.ceil(quotients.length * 0.02))
+  let qClusters = clusterSorted1d(sortedQ, toleranceFrac).filter((c) => c.length >= minClusterSize)
+  if (qClusters.length === 0) return NO_ESTIMATE
+  // More clusters than entered gears: keep the biggest ones (fragments/rare
+  // noise clusters go), preserving ascending-q order for the assignment.
+  if (qClusters.length > reductions.length) {
+    const bySize = [...qClusters].sort((a, b) => b.length - a.length).slice(0, reductions.length)
+    const keep = new Set(bySize)
+    qClusters = qClusters.filter((c) => keep.has(c))
+  }
+  const clusterMedians = qClusters.map((c) => median(c))
+
+  // 3. Enumerate order-preserving cluster->gear assignments: pick k gear
+  // indices out of G (combination, ascending), where cluster j (ascending q)
+  // gets the j-th picked gear COUNTING FROM THE HIGHEST-GEAR END — ascending
+  // q means descending reduction, and `reductions` is sorted descending, so
+  // ascending q maps to ascending index within `reductions`.
+  const k = qClusters.length
+  const G = reductions.length
+  interface Candidate {
+    circumferenceMm: number
+    spreadFrac: number
+    gearIdx: number[]
+  }
+  const candidates: Candidate[] = []
+  const pick: number[] = []
+  function enumerate(nextGear: number): void {
+    if (pick.length === k) {
+      const circs = clusterMedians.map((m, j) => (m * reductions[pick[j]] * 1_000_000) / 60)
+      const min = Math.min(...circs)
+      const max = Math.max(...circs)
+      const mean = circs.reduce((a, b) => a + b, 0) / circs.length
+      const spread = (max - min) / mean
+      if (spread <= maxSpread && mean >= minPlausible && mean <= maxPlausible) {
+        candidates.push({ circumferenceMm: mean, spreadFrac: spread, gearIdx: [...pick] })
+      }
+      return
+    }
+    for (let g = nextGear; g <= G - (k - pick.length); g++) {
+      pick.push(g)
+      enumerate(g + 1)
+      pick.pop()
+    }
+  }
+  enumerate(0)
+  if (candidates.length === 0) return NO_ESTIMATE
+
+  // 4. Pick the tightest assignment; if others disagree on the circumference
+  // by more than the cluster tolerance, the data alone is ambiguous — let the
+  // reference decide, or give up rather than guess.
+  candidates.sort((a, b) => a.spreadFrac - b.spreadFrac)
+  let best = candidates[0]
+  const disagreeing = candidates.filter(
+    (c) => Math.abs(c.circumferenceMm - best.circumferenceMm) / best.circumferenceMm > toleranceFrac,
+  )
+  if (disagreeing.length > 0) {
+    const ref = opts.referenceCircumferenceMm
+    if (ref == null || !Number.isFinite(ref) || !(ref > 0)) return NO_ESTIMATE
+    best = candidates.reduce((a, b) => (Math.abs(b.circumferenceMm - ref) < Math.abs(a.circumferenceMm - ref) ? b : a))
+  }
+
+  // Pooled per-sample median under the winning assignment (robust, and uses
+  // every sample rather than just the k cluster medians).
+  const implied: number[] = []
+  qClusters.forEach((cluster, j) => {
+    const r = reductions[best.gearIdx[j]]
+    for (const q of cluster) implied.push((q * r * 1_000_000) / 60)
+  })
+  return { circumferenceMm: median(implied), sampleCount: implied.length }
 }
 
 /** One point of a CVT's continuous ratio-vs-speed sweep, for plotting. */
