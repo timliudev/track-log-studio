@@ -23,6 +23,36 @@ export function axisNameFields(name: string | null | undefined): {
   if (!name) return {}
   return { name, nameLocation: 'middle', nameGap: 28 }
 }
+
+/**
+ * T3 — the explicit pixel size for `echarts.init` AND every later
+ * `chart.resize({...})` call, measured from the host element.
+ *
+ * `resize()` must be passed this explicitly: this chart is init'd with an
+ * explicit `{width, height}` (jsdom-less tests / first-frame safety), and
+ * zrender REMEMBERS init-time sizes in its painter opts — an argument-less
+ * `chart.resize()` re-reads those stored numbers instead of measuring the
+ * container (see zrender `getSize`: `if (opts[wh] != null && opts[wh] !==
+ * 'auto') return parseFloat(opts[wh])`), so the chart stayed frozen at its
+ * mount-time size forever no matter how the window/card resized — the
+ * reported "新增的 XY 圖不隨視窗大小變化" bug. Passing the measured size on
+ * every resize overwrites the stored opts and keeps the chart following its
+ * container.
+ *
+ * Falls back to 400×`fixedHeight` before the host has laid out (clientWidth/
+ * Height 0) — same fallbacks the old init path used.
+ */
+export function measuredSize(
+  clientWidth: number,
+  clientHeight: number,
+  fillHeight: boolean,
+  fixedHeight: number,
+): { width: number; height: number } {
+  return {
+    width: clientWidth || 400,
+    height: fillHeight && clientHeight > 0 ? clientHeight : fixedHeight,
+  }
+}
 </script>
 
 <script setup lang="ts">
@@ -138,23 +168,21 @@ function render(): void {
   chart.setOption(buildOption(), true)
 }
 
-/** Mirrors UPlotChart's `targetHeight()`: the host's own measured height in
- *  fillHeight mode (once laid out), else the fixed `height` prop. */
-function targetHeight(): number {
-  if (props.fillHeight && host.value) {
-    const h = host.value.clientHeight
-    if (h > 0) return h
-  }
-  return props.height ?? 360
+/** Current measured size for init/resize — see {@link measuredSize} (T3). */
+function hostSize(): { width: number; height: number } {
+  const el = host.value
+  return measuredSize(
+    el?.clientWidth ?? 0,
+    el?.clientHeight ?? 0,
+    props.fillHeight ?? false,
+    props.height ?? 360,
+  )
 }
 
 function create(): void {
   if (!host.value) return
   destroy()
-  chart = echarts.init(host.value, undefined, {
-    width: host.value.clientWidth || 400,
-    height: targetHeight(),
-  })
+  chart = echarts.init(host.value, undefined, hostSize())
   render()
 }
 
@@ -164,7 +192,10 @@ function destroy(): void {
 }
 
 function resize(): void {
-  chart?.resize()
+  // T3 — MUST pass the measured size: an argument-less resize() would reuse
+  // the init-time explicit width/height stored by zrender and never follow
+  // the container. See measuredSize's doc.
+  if (chart) chart.resize(hostSize())
 }
 
 onMounted(() => {
