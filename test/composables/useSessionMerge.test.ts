@@ -219,6 +219,47 @@ describe('useSessionMerge', () => {
     expect(merge.overlay.value).toBeNull()
   })
 
+  it('resets baseId/gpsId and derived alignment/offset when a picked file is removed', () => {
+    const fileStore = useFileStore()
+    const baseId = fileStore.addMergedSession('base.loga', makeBase())
+    const gpsId = fileStore.addMergedSession('gps.nmea', makeGps(2000))
+
+    const merge = useSessionMerge()
+    merge.baseId.value = baseId
+    merge.gpsId.value = gpsId
+    merge.autoAlign()
+    expect(merge.alignment.value).not.toBeNull()
+    expect(merge.offsetMs.value).not.toBeNull()
+
+    fileStore.removeFile(gpsId)
+
+    expect(merge.gpsId.value).toBeNull()
+    expect(merge.baseId.value).toBe(baseId) // untouched side stays picked
+    expect(merge.alignment.value).toBeNull()
+    expect(merge.offsetMs.value).toBeNull()
+    expect(merge.canAlign.value).toBe(false)
+    expect(merge.canMerge.value).toBe(false)
+  })
+
+  it('leaves baseId/gpsId untouched when the removed file is unrelated to the current pick', () => {
+    const fileStore = useFileStore()
+    const baseId = fileStore.addMergedSession('base.loga', makeBase())
+    const gpsId = fileStore.addMergedSession('gps.nmea', makeGps(0))
+    const unrelatedId = fileStore.addMergedSession('other.nmea', makeGps(500))
+
+    const merge = useSessionMerge()
+    merge.baseId.value = baseId
+    merge.gpsId.value = gpsId
+    merge.autoAlign()
+    const offsetBefore = merge.offsetMs.value
+
+    fileStore.removeFile(unrelatedId)
+
+    expect(merge.baseId.value).toBe(baseId)
+    expect(merge.gpsId.value).toBe(gpsId)
+    expect(merge.offsetMs.value).toBe(offsetBefore)
+  })
+
   it('autoAlign sets lastError when a picked session has no resolvable speed channel', () => {
     const fileStore = useFileStore()
     const noSpeed = new LogSession(
