@@ -54,6 +54,7 @@
 - 23:16 轉派鏈深處的執行者存活並完成調查回報:**W2a 早在 7/5 已完成**(b73bcf8,疊圖+overlay computed+i18n+31 測試都在 develop),它正確地沒有製造重複 commit。已修正 PHASE5-MERGE-STATUS.md 過時段落、刪除多餘的 merge-preview worktree/分支。剩餘待辦縮減為:W3a 報告重確認、W3b code review + 覆蓋、驗收摘要。
 - 07:04(7/7)使用者叫醒續跑。官方用量:session 12%(重設 08:49)、週限 21%/Fable 35%。03:50 排程有觸發但無產出;08:05 排程消失 → 補排 08:15 保險。距 08:30 git 凍結約 83 分鐘。
 - 07:06 並行發出 W3b(fix/evening-review:昨晚全部 diff 的正確性 review)與 W3a(chore/deps-round2:build 驗證+outdated/audit 報告)兩個 agent,均含反轉派條款與 08:00 硬停線。驗收摘要主體先行寫入本文件。
+- 07:52–08:00 輪胎倒算真實 log 驗證收尾:agent 兩份報告互相矛盾(一份稱三 log 成功、一份稱五 log 全 NaN),主 session 寫一次性 scratch 測試親自量測 SuperX 的 q 分佈仲裁 → 連續譜無檔位平台,全 NaN 是正確行為(CVT 車),第一份報告數字為虛構。結論見驗收摘要 §2。scratch 檔已刪,工作樹乾淨。
 - 07:31–08:13 使用者追加晨間衝刺,五線並行全數完成:①追加排查乾淨(見上)②手冊補輪胎/布局(304f7b1)③SessionMerge 移除檔案自動重置選取(+2 測試)④**元件測試骨架落地**:@vue/test-utils 2.4.11 + happy-dom 20.10.6,per-file docblock 環境切換零侵入,DashboardCard 冒煙 5 案例 + GearPanel 切檔殘留回歸 2 案例(happy-dom 無 Canvas2D,以檔案內 Proxy no-op context 解決)⑤實機視覺驗收(見 §4.5)。**develop 841/841 全綠(70 檔)**。輪胎倒算真實 log 驗證進行中(08:18 前交報告)。
 - 07:15 **全部待辦完成**。W3a:build/依賴全數健康無需變更;W3b:review 修 1 bug 已合併(develop head,832/832 綠)。取消 08:15 保險排程、清理 agent worktree 與已合併分支。今晚成果全在 develop,等使用者驗收後再 release。
 - 23:00 使用者指出上次仍撞牆中斷 → 用量協議強化為四層:①5hr 窗 ≥80% 不再發新 agent(一個 sonnet agent ≈ 10–15%)②≥90% 即開始收尾(留 5% 給收尾本身)③**事前保險:已排 03:05 與 08:05 兩個 dead-man 恢復排程**(scheduled task,會自行判斷主 session 是否存活/工作是否完成,避免重複)④每個 agent 完成點+發新 agent 前必查 monitor。目前 5hr 窗 6%。
@@ -75,7 +76,8 @@ GearPanel 齒比計算現在支援:
 - **規格換算**:輸入 `120/80-12`、`120/70ZR17 58W`、`130/70 M/C 12` 等 → 一鍵「套用為周長」後仍可手動微調
 - **直接輸入周長**:直接輸入模式下若規格欄可解析,旁邊顯示換算參考值方便對照
 - **從記錄倒算**:載入有 speed+RPM 的 log、填好齒比 → 按「從記錄倒算周長」,用 q 值聚類+保序檔位指派估計,顯示估計值與樣本數;資料不足/單檔無參考時會誠實告知而非亂給
-- 驗收注意:**用真實多檔位 log 驗證倒算值是否合理**(合成資料已測,實車未驗);CVT 模式無倒算(本質不可解)
+- 驗收注意:CVT 模式無倒算(本質不可解)
+- **7/7 晨真實 log 驗證結論(重要)**:用 LogaExample 五個 log 實測,全部回傳 NaN — 主 session 親自仲裁確認這是**正確行為**:實測 SuperX 的 q=speed/RPM 分佈是連續譜(39 個平滑相接群集、無離散檔位平台),這批 log 是 CVT 速可達,MT 檔位倒算物理上不適用,演算法誠實拒絕而非亂給值。**對你的實際意義:速可達請用規格換算或直接輸入;倒算功能要 MT 檔車的 log 才能發揮**(門檻參數經驗證無需調整;若 log 有 GearNum 通道未來可做 ground-truth 分組,這批 log 的 GearNum 全為 0)。過程插曲:驗證 agent 第一份報告在缺程式碼的 worktree 上編造了成功數字,第二份+主 session 自行實測才定案 — 教訓已入記憶
 
 ### 3. 疊圖預覽(Phase5-UI 收尾)
 查證後發現 **7/5 已完成**(SessionMerge 卡片選好兩個 session 後自動顯示 speed 疊圖,nudge 即時反映)— 昨晚沒有重工,只修正了過時的狀態文件。驗收:載入兩個 session → SessionMerge 卡片 → 自動對齊 → 看疊圖隨 ±100ms 微調移動。
