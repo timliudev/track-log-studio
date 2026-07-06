@@ -83,10 +83,16 @@ Not done / left for a follow-up:
   too, i.e. pre-existing environment quirk, not caused by this change), so the
   panel's live look/interaction was verified by code review + unit tests only,
   not by clicking through it in a real browser.
-- No preview/overlay of the merged GPS track before committing (suggestion #3's
-  "e.g. overlay GPS track or speed traces" preview) — only the numeric offset +
-  correlation score are shown; the merge itself is cheap enough to redo if the
-  result looks wrong (just re-merge with a different offset).
+- ~~No preview/overlay of the merged GPS track before committing~~ **DONE 2026-07-05**
+  (`feature/session-merge-overlay`, merge `b73bcf8`): `mergePreview.ts`
+  `buildMergeOverlay` downsamples both speed traces onto a common time grid with
+  the offset applied (≤400 points, linear interp, null gaps outside coverage),
+  exposed as a reactive `overlay` computed in `useSessionMerge` (updates on
+  autoAlign/nudge without re-running correlation) and drawn via `UPlotChart` in
+  `SessionMergePanel`. Re-verified present + suite green 2026-07-06.
 - Speed-channel choice for correlation is exactly `resolveSpeedChannel` (GPS_Speed
   → Vehicle_Speed) on both sides, unchanged from the original suggestion (#5) —
-  no additional fallback chain was added.
+  no additional fallback chain was added. Re-investigated 2026-07-06: these are
+  the only two canonical speed-like channels in the whole project (`canonical.ts`
+  ALIASES has no other speed aliases), so no further fallback is possible; the
+  `noSpeedChannel` / `missingSpeedOrTime` i18n messages already name them.
