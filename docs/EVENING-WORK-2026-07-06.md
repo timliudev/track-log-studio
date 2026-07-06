@@ -54,6 +54,7 @@
 - 23:16 轉派鏈深處的執行者存活並完成調查回報:**W2a 早在 7/5 已完成**(b73bcf8,疊圖+overlay computed+i18n+31 測試都在 develop),它正確地沒有製造重複 commit。已修正 PHASE5-MERGE-STATUS.md 過時段落、刪除多餘的 merge-preview worktree/分支。剩餘待辦縮減為:W3a 報告重確認、W3b code review + 覆蓋、驗收摘要。
 - 07:04(7/7)使用者叫醒續跑。官方用量:session 12%(重設 08:49)、週限 21%/Fable 35%。03:50 排程有觸發但無產出;08:05 排程消失 → 補排 08:15 保險。距 08:30 git 凍結約 83 分鐘。
 - 07:06 並行發出 W3b(fix/evening-review:昨晚全部 diff 的正確性 review)與 W3a(chore/deps-round2:build 驗證+outdated/audit 報告)兩個 agent,均含反轉派條款與 08:00 硬停線。驗收摘要主體先行寫入本文件。
+- 07:31–08:13 使用者追加晨間衝刺,五線並行全數完成:①追加排查乾淨(見上)②手冊補輪胎/布局(304f7b1)③SessionMerge 移除檔案自動重置選取(+2 測試)④**元件測試骨架落地**:@vue/test-utils 2.4.11 + happy-dom 20.10.6,per-file docblock 環境切換零侵入,DashboardCard 冒煙 5 案例 + GearPanel 切檔殘留回歸 2 案例(happy-dom 無 Canvas2D,以檔案內 Proxy no-op context 解決)⑤實機視覺驗收(見 §4.5)。**develop 841/841 全綠(70 檔)**。輪胎倒算真實 log 驗證進行中(08:18 前交報告)。
 - 07:15 **全部待辦完成**。W3a:build/依賴全數健康無需變更;W3b:review 修 1 bug 已合併(develop head,832/832 綠)。取消 08:15 保險排程、清理 agent worktree 與已合併分支。今晚成果全在 develop,等使用者驗收後再 release。
 - 23:00 使用者指出上次仍撞牆中斷 → 用量協議強化為四層:①5hr 窗 ≥80% 不再發新 agent(一個 sonnet agent ≈ 10–15%)②≥90% 即開始收尾(留 5% 給收尾本身)③**事前保險:已排 03:05 與 08:05 兩個 dead-man 恢復排程**(scheduled task,會自行判斷主 session 是否存活/工作是否完成,避免重複)④每個 agent 完成點+發新 agent 前必查 monitor。目前 5hr 窗 6%。
 
@@ -98,6 +99,11 @@ GearPanel 齒比計算現在支援:
 - GearPanel 全狀態分類:真正的 ref 只有已修的 estimateResult/estimateFailed 兩個,其餘都是 computed(天然跟隨 session)或刻意持久化的車輛設定;AccelTestPanel 無殘留風險
 - reconcileLayout 四檢查點全過:孤兒 id 有濾除(含測試)、三個 blob 同步讀取無競態、nextId 單調遞增不撞號、f0b53b9 舊資料升級路徑正確(無 key fallback 預設、空陣列保留清空狀態)
 - 唯一記錄未修的邊角:移除檔案後 SessionMerge 下拉殘留失效 id — null-guard 齊全、按鈕正確停用、不產生錯誤數據,屬 UI 磨光項
+
+### 4.5 今晨自動視覺驗收結果(08:07)
+- **PASS**:空狀態文字三種視窗尺寸(手機/平板/桌面)皆無裁切;全程 console 零錯誤/警告
+- **BLOCKED(需要你實機測)**:T1 卡片內圖例/T3 XY 縮放/T5 持久化/T2 輪胎 UI — 自動化注入 .loga 到 dev server 不穩定(Vite 對 public 下 .loga/.nmea 回退 SPA fallback,偶發成功那次 superX.loga 還解析失敗),所以卡片級驗證得靠你用「載入記錄」手動選檔走一輪
+- 順帶發現兩個之後可查的小怪事:①Vite dev 對 public/ 非常規副檔名的 SPA fallback 行為 ②superX.loga fixture 經瀏覽器注入時解析失敗的原因
 
 ### 5. 未完成 / 等你決定
 - Cloud-track §8 決策(repo/授權/CDN/OAuth)— 依你指示跳過,等你拍板
