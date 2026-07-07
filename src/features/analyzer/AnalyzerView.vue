@@ -39,6 +39,7 @@ import AccelTestPanel from './AccelTestPanel.vue'
 import GearPanel from './GearPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
 import SessionMergePanel from './SessionMergePanel.vue'
+import SuspensionCard from './SuspensionCard.vue'
 import ScatterChart from './ScatterChart.vue'
 
 const { t } = useI18n()
@@ -781,6 +782,18 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               @update:pinned="togglePinned(item.i)"
             >
               <SessionMergePanel />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'suspension'"
+              :title="t('analyzer.layout.cardSuspension')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <SuspensionCard :session="session" />
             </DashboardCard>
 
             <DashboardCard
