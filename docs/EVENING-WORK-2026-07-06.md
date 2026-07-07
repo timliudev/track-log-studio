@@ -108,6 +108,6 @@ GearPanel 齒比計算現在支援:
 - 順帶發現兩個之後可查的小怪事:①Vite dev 對 public/ 非常規副檔名的 SPA fallback 行為 ②superX.loga fixture 經瀏覽器注入時解析失敗的原因
 
 ### 5. 未完成 / 等你決定
-- Cloud-track §8 決策(repo/授權/CDN/OAuth)— 依你指示跳過,等你拍板
+- ~~Cloud-track §8 決策~~ → **08:25 已全部拍板**(track-log-studio-tracks 同帳號/CC0/@main 即生效/多配置=預設+選單切換/個人備份留第四階段/種子賽道等你清單;詳見 CLOUD-TRACK-DESIGN.md §8 決策紀錄)。**Release 政策:你驗收後才 release。CVT 穩定段倒算列入下次夜班研究。**
 - G-G bundle split 已是既有功能;echarts chunk 的 build 實證見 W3a 報告
 - 昨晚三次 agent「轉派鏈」異常浪費了些 token,教訓已寫入記憶(prompt 加反轉派條款)

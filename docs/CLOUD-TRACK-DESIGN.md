@@ -562,6 +562,17 @@ jsDelivr CDN 對 GitHub 內容預設快取 7 天，可用 purge API 或 GitHub A
 
 ## 8. 待使用者決策的開放問題
 
+> **✅ 決策紀錄(2026-07-07 使用者拍板):**
+> 1. **Repo**:採 `track-log-studio-tracks`,同一 GitHub 帳號下。討論過替代方案後確認維持 GitHub+jsDelivr(PR 協作生態不可替代;短期也只有這一個 repo 要開,個人備份走使用者自己的雲端)。
+> 2. **授權**:CC0-1.0。
+> 3. **CDN**:跟 `@main`,審核合併即生效(接受 CDN 快取延遲數小時)。
+> 4. **種子賽道**:使用者之後提供清單。
+> 5. **多配置**:自動套用「預設配置」+ 提供選單可手動切換其他配置(非跳窗中斷、也非放棄處理)。
+> 6/7. **個人雲端備份**:維持第四階段(後期),Drive vs Gist 屆時再選。
+> 8. **TrackFilePanel 手動匯出/匯入**:保留(依本文件原假設,貢獻流程依賴它)。
+>
+> 阻塞已解除:下次夜班可建 repo、上 CI、接 runtime @main 增量更新(§2、§3.2)。
+
 1. **獨立 repo 命名確認**：本文件建議 `track-log-studio-tracks`（與 app repo `track-log-studio`
    對應），是否採用？是否要放在同一個 GitHub 帳號/org 下？
 2. **賽道資料授權**：建議 **CC0-1.0**（公眾領域，最大化社群自由使用/衍生，類似 OpenStreetMap
