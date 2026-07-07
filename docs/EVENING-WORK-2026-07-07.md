@@ -21,23 +21,23 @@
 
 | # | 項目 | 歸屬 | 狀態 |
 |---|------|------|------|
-| 1+21 | 鎖定兩功能分離(📌sticky+🔒布局鎖) | Agent A feature/dashboard-lock-and-mobile | 🔄 W1 |
-| 3 | 手機不能調 grid 大小 | Agent A | 🔄 W1 |
-| 6 | grid 預設填滿頁面 | Agent A | 🔄 W1 |
-| 12 | tooltip 直角黑色 → 圓角主題化 | Agent B feature/ui-polish-branding | 🔄 W1 |
-| 13 | 副標題去 aRacer 中心化 | Agent B | 🔄 W1 |
-| 14 | 轉換頁說明文案通用化 | Agent B | 🔄 W1 |
-| 7 | GitHub star 按鈕(header 右側) | Agent B | 🔄 W1 |
-| 8+9 | 避震校正全格式+共用車輛設定 store | Agent C feature/suspension-universal | 🔄 W1 |
+| 1+21 | 鎖定兩功能分離(📌sticky+🔒布局鎖) | Agent A feature/dashboard-lock-and-mobile | ✅ 已合併 |
+| 3 | 手機不能調 grid 大小 | Agent A | ✅ 已合併 |
+| 6 | grid 預設填滿頁面 | Agent A | ✅ 已合併 |
+| 12 | tooltip 直角黑色 → 圓角主題化 | Agent B feature/ui-polish-branding | ✅ 已合併 |
+| 13 | 副標題去 aRacer 中心化 | Agent B | ✅ 已合併 |
+| 14 | 轉換頁說明文案通用化 | Agent B | ✅ 已合併 |
+| 7 | GitHub star 按鈕(header 右側) | Agent B | ✅ 已合併 |
+| 8+9 | 避震校正全格式+共用車輛設定 store | Agent C feature/suspension-universal | ✅ 已合併 |
 | 11 | Cloudflare Web Analytics | 主 session | ✅ index.html |
-| 22 | 推一版到 main | 主 session | 🔄 本次 |
+| 22 | 推一版到 main | 主 session | ✅ fc8896c 已部署 |
 | 2 | 地圖疊多檔案軌跡 | Agent D(W2) | ⏳ |
 | 4 | XY 散佈圖 1:1 等比(可調) | Agent E(W2) | ⏳ |
 | 10 | 輪胎規格即時換算套用 | Agent E(W2) | ⏳ |
 | 5 | 拖動 grid 縫隙調整整頁布局 | Agent F(W2,依賴 A) | ⏳ |
 | 16 | 賽道庫方案比較報告 | Agent G(W2,docs) | ⏳ |
 | 20 | docs 分類整理 | Agent G(W2) | ⏳ |
-| 18+19 | UX/載入+計算效能審計(先量測後行動) | Agent H(W2) | ⏳ |
+| 18+19 | UX/載入+計算效能審計(先量測後行動) | Agent H(W2) | ✅ 已合併,無需優化 |
 | 15 | 測試 log 來源(唯讀):`C:\Users\c1211\OneDrive\aracer`、`C:\Users\c1211\OneDrive\Documents\aRacerLogSave`;要改先複製到 LogaExample | 給所有 agent 的資訊 | 📝 |
 | 17 | 架構整潔、必要就重構 | 寫進所有 agent prompt | 📝 |
 
@@ -50,10 +50,19 @@
 - 23:0x 三個 Wave 1 agent 高速消耗,5hr 窗撞頂(12:20am 重設):C 避震完成(856 綠),A/B 在最終驗證階段被切,工作都已在分支/worktree 上。
 - 00:5x(7/8)新窗口接手:官方 session 0%、週 40%/Fable 50%。B 分支我親自驗證(846 綠+build 過)→ 合併;C 合併;develop **861/861 全綠**。A 由原 agent 續跑收尾中。
 - 01:2x Wave 2 並行開出:D 地圖疊多檔軌跡(feature/trackmap-multi-overlay)、E XY 1:1+輪胎即時換算(feature/xy-aspect-and-tire-live)、G 賽道庫方案報告+docs 整理(docs/track-repo-options-and-reorg)、H 效能審計(docs/perf-audit-2026-07-08)。dead-man 排程改排 06:20。
+- 01:4x **使用者授權方案 (b)** → filter-branch 改寫 48 個未推送 commit 的 email 為 noreply(備份 tag `backup/pre-email-rewrite-{main,develop}`)→ **push 成功**:develop db5113a..eb980fc、main 742a97b..fc8896c,Workers Builds 自動部署。⚠ 後果:既有 agent 分支基於改寫前舊 hash,**每支合併前必須 `git rebase --onto develop $(git merge-base backup/pre-email-rewrite-develop <branch>) <branch>`**,否則舊 email commit 會回到歷史再觸發 GH007。
+- 01:33 5hr 窗撞頂(重設 06:10),四個執行中 agent 被切;A 已在撞頂前交完工報告(858 綠,3 commits)。
+- 07:00 使用者叫醒續跑(「繼續完成,請多加注意 limit」)。官方用量:session 11%(11:48 重設)、週 51%/Fable 63%。dead-man 排程未曾自行啟動(Manual only),無撞車。
+- 07:0x 四個中斷 agent 全部從 transcript 叫回收尾(D/E/G 續跑中)。H 效能審計率先完工。
+- 07:06 **A 合併**:rebase --onto 解 1 衝突(develop 的避震卡片補進 A 的三欄預設布局 B 欄+STATIC_CARD_TITLE_KEYS)→ merge --no-ff → **878/878 全綠(73 檔)** → push(386b7a2)。
+- 07:10 **H 合併**:效能審計報告+bench 腳本(rebase→merge→push f87ff56)。**結論:現階段無需優化**——冷啟動 gzip 105.8kB、大檔(39MB/5.7萬列)解析 834ms(Worker 內)、全計算管線 <100ms、記憶體吻合理論值;唯一建議列 backlog:TimeSeriesChart 接上現成的 lttb 抽點(目前無安全網)。詳見 docs/PERF-AUDIT-2026-07-08.md。
 
 ## 待辦(下個窗口/routine 接手時從這裡讀)
 
-- [ ] Wave 1 三分支驗收合併(A/B/C 完成後:review diff → npm test → merge --no-ff 進 develop,每合一支查用量)
-- [ ] Wave 2:D 多檔軌跡疊圖、E XY 1:1+輪胎即時換算、F 縫隙拖動(等 A 合併)、G 賽道庫報告+docs 整理、H 效能審計
-- [ ] Wave 2 全合併後:第二次 release main(視驗收情況)
+- [x] Wave 1 三分支驗收合併(B/C 861 綠;A 07:06 合併,878 綠)
+- [x] H 效能審計(f87ff56,結論無需優化,lttb 列 backlog)
+- [ ] Wave 2 進行中:D 多檔軌跡疊圖、E XY 1:1+輪胎即時換算、G 賽道庫報告+docs 整理(07:0x 叫回收尾中)
+- [ ] ⚠ D/E/G 合併前必須先 rebase --onto(見 01:4x 紀錄,否則 GH007 復發)
+- [ ] F 縫隙拖動(A 已合併,可開工;發 agent 前查用量)
+- [ ] Wave 2 全合併後:第二次 release main(視使用者驗收情況)
 - [ ] 記憶更新+最終驗收摘要寫進本文件
