@@ -14,6 +14,9 @@ import {
   minSizeFor,
   clampToMinSize,
   resolveOverlaps,
+  isItemDraggable,
+  isItemResizable,
+  STATIC_CARD_TITLE_KEYS,
 } from '@/domain/layout/dashboardLayout'
 
 /** Node's test environment has no real localStorage (Vitest runs with
@@ -140,6 +143,47 @@ describe('defaultLayout', () => {
     const layout = defaultLayout()
     const map = layout.find((it) => it.i === STATIC_CARD_IDS.map)
     expect(map).toMatchObject({ x: 0, y: 0 })
+  })
+
+  it('uses the FULL grid width across its columns (no default item extends past GRID_COLS, columns partition 0..GRID_COLS)', () => {
+    const layout = defaultLayout()
+    const xs = [...new Set(layout.map((it) => it.x))].sort((a, b) => a - b)
+    // Every distinct column start, plus GRID_COLS itself, are evenly spaced —
+    // i.e. the columns tile the full width with no left/right margin gap.
+    expect(xs[0]).toBe(0)
+    for (const it of layout) {
+      expect(it.x + it.w).toBeLessThanOrEqual(GRID_COLS)
+    }
+  })
+
+  it('has no overlapping items (a sane starting arrangement, independent of resolveOverlaps)', () => {
+    const layout = defaultLayout()
+    for (let i = 0; i < layout.length; i++) {
+      for (let j = i + 1; j < layout.length; j++) {
+        const a = layout[i]
+        const b = layout[j]
+        const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+        expect(overlap).toBe(false)
+      }
+    }
+  })
+
+  it('balances column heights so no column leaves a large blank gap versus the others (T3 — fills the page)', () => {
+    // Regression for the old 5/7-split layout, whose right column (with the
+    // align panels in their default-hidden state) bottomed out ~35 rows
+    // above the left column's bottom, reading as a big empty area on wide
+    // screens. Compare the ALWAYS-VISIBLE cards per column (excluding
+    // mapAlign/lapAlign, which only appear once ≥2 laps are selected).
+    const layout = defaultLayout()
+    const alwaysVisible = layout.filter(
+      (it) => it.i !== STATIC_CARD_IDS.mapAlign && it.i !== STATIC_CARD_IDS.lapAlign,
+    )
+    const columns = [...new Set(alwaysVisible.map((it) => it.x))]
+    const bottoms = columns.map((x) =>
+      Math.max(...alwaysVisible.filter((it) => it.x === x).map((it) => it.y + it.h)),
+    )
+    const spread = Math.max(...bottoms) - Math.min(...bottoms)
+    expect(spread).toBeLessThanOrEqual(10)
   })
 })
 
@@ -370,6 +414,40 @@ describe('reconcileLayout', () => {
     const next = reconcileLayout(layout, [1])
     const added = next.find((it) => it.i === chartItemId(1))!
     expect(added.y).toBeGreaterThanOrEqual(10)
+  })
+})
+
+describe('isItemDraggable / isItemResizable (lock + pin interplay)', () => {
+  it('is draggable/resizable when the grid-wide toggle allows it and the card is not pinned', () => {
+    expect(isItemDraggable(true, false)).toBe(true)
+    expect(isItemResizable(true, false)).toBe(true)
+  })
+
+  it('is never draggable/resizable when the grid-wide toggle is off (鎖定布局 locked)', () => {
+    expect(isItemDraggable(false, false)).toBe(false)
+    expect(isItemResizable(false, false)).toBe(false)
+    expect(isItemDraggable(false, true)).toBe(false)
+    expect(isItemResizable(false, true)).toBe(false)
+  })
+
+  it('is never draggable/resizable when the card itself is pinned, even if the grid allows it', () => {
+    expect(isItemDraggable(true, true)).toBe(false)
+    expect(isItemResizable(true, true)).toBe(false)
+  })
+})
+
+describe('STATIC_CARD_TITLE_KEYS', () => {
+  it('has an i18n key entry for every static card id', () => {
+    for (const id of Object.values(STATIC_CARD_IDS)) {
+      expect(typeof STATIC_CARD_TITLE_KEYS[id]).toBe('string')
+      expect(STATIC_CARD_TITLE_KEYS[id].length).toBeGreaterThan(0)
+    }
+  })
+
+  it('every key lives under the analyzer.layout namespace', () => {
+    for (const key of Object.values(STATIC_CARD_TITLE_KEYS)) {
+      expect(key.startsWith('analyzer.layout.')).toBe(true)
+    }
   })
 })
 
