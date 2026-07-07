@@ -572,6 +572,14 @@ jsDelivr CDN 對 GitHub 內容預設快取 7 天，可用 purge API 或 GitHub A
 > 8. **TrackFilePanel 手動匯出/匯入**:保留(依本文件原假設,貢獻流程依賴它)。
 >
 > 阻塞已解除:下次夜班可建 repo、上 CI、接 runtime @main 增量更新(§2、§3.2)。
+>
+> **⏸️ 重新考慮(2026-07-07 晚間)：** 使用者出門前提出「git repo 是否為最佳解、有無更好免費方案
+> （如 Firebase）」的疑問，故上述決策**暫緩動工**，先產出
+> [`TRACK-LIBRARY-OPTIONS.md`](./TRACK-LIBRARY-OPTIONS.md) 重新比較 GitHub+jsDelivr / Firebase /
+> Cloudflare KV·R2·D1 / Supabase 四個方案，待使用者回來二次拍板後再建 repo。該報告建議**混合方案**：
+> 貢獻/審核層維持本節的 GitHub PR 流程不變（§1/§2 的 schema、repo 結構、CI、貢獻指南全部照舊），
+> 只把 §3.2 的 runtime 分發層從 jsDelivr 換成 Cloudflare Worker + KV（本專案已有 Cloudflare 帳號與
+> 部署流程，整合成本最低）。
 
 1. **獨立 repo 命名確認**：本文件建議 `track-log-studio-tracks`（與 app repo `track-log-studio`
    對應），是否採用？是否要放在同一個 GitHub 帳號/org 下？
