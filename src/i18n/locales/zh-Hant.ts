@@ -6,6 +6,10 @@ export default {
   footer: {
     developedBy: 'Developed by',
   },
+  header: {
+    githubTooltip: '在 GitHub 上為本專案加星',
+    githubStar: 'Star',
+  },
   nav: {
     converter: '轉換',
     analyzer: '分析',

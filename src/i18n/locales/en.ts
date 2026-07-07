@@ -6,6 +6,10 @@ export default {
   footer: {
     developedBy: 'Developed by',
   },
+  header: {
+    githubTooltip: 'Star this project on GitHub',
+    githubStar: 'Star',
+  },
   nav: {
     converter: 'Converter',
     analyzer: 'Analyzer',
