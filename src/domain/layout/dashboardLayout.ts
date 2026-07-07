@@ -88,6 +88,48 @@ export function minSizeFor(id: string): { minW: number; minH: number } {
   return STATIC_MIN_SIZE[id] ?? DEFAULT_MIN_SIZE
 }
 
+/**
+ * Per-item drag/resize eligibility — pure decision functions so AnalyzerView
+ * only needs to CALL these rather than encode the rule itself (logic lives in
+ * the domain layer per this project's "component stays thin" convention).
+ *
+ * A card is draggable/resizable when the GRID-WIDE toggle allows it (the
+ * global 鎖定布局 lock — see layoutLock.ts — combined with whatever the
+ * current breakpoint already permits) AND the card itself isn't the
+ * currently-pinned one: a pinned card's real content has been Teleported out
+ * of the grid into the sticky pinned anchor (see AnalyzerView's module doc),
+ * so its grid slot is just an empty placeholder — dragging/resizing that
+ * placeholder would be meaningless (nothing visibly moves) and would desync
+ * the placeholder's size from the card's actual position it returns to on
+ * unpin.
+ */
+export function isItemDraggable(globalDraggable: boolean, pinned: boolean): boolean {
+  return globalDraggable && !pinned
+}
+export function isItemResizable(globalResizable: boolean, pinned: boolean): boolean {
+  return globalResizable && !pinned
+}
+
+/** i18n message key (under `analyzer.layout`) for each STATIC card's title —
+ *  a plain data table so AnalyzerView's pinned-placeholder label (rendered
+ *  OUTSIDE the big per-card template branch — see its module doc) can look up
+ *  a title without duplicating that branch's own per-card `t(...)` calls.
+ *  Dynamic chart cards aren't in this table — their title is numbered by
+ *  position (see chartTitle in AnalyzerView) rather than a fixed key. */
+export const STATIC_CARD_TITLE_KEYS: Record<string, string> = {
+  [STATIC_CARD_IDS.map]: 'analyzer.layout.cardMap',
+  [STATIC_CARD_IDS.lapTable]: 'analyzer.layout.cardLapTable',
+  [STATIC_CARD_IDS.sectors]: 'analyzer.layout.cardSectors',
+  [STATIC_CARD_IDS.trackChannel]: 'analyzer.layout.cardTrackChannel',
+  [STATIC_CARD_IDS.accelTest]: 'analyzer.layout.cardAccelTest',
+  [STATIC_CARD_IDS.gear]: 'analyzer.layout.cardGear',
+  [STATIC_CARD_IDS.trackFile]: 'analyzer.layout.cardTrackFile',
+  [STATIC_CARD_IDS.mapAlign]: 'analyzer.layout.cardMapAlign',
+  [STATIC_CARD_IDS.lapAlign]: 'analyzer.layout.cardLapAlign',
+  [STATIC_CARD_IDS.sessionMerge]: 'analyzer.layout.cardSessionMerge',
+  [STATIC_CARD_IDS.suspension]: 'analyzer.layout.cardSuspension',
+}
+
 /** Returns `item` unchanged if it already meets its minimum size, otherwise a
  *  NEW object clamped up to the minimum (never shrinks — only grows a
  *  too-small `w`/`h`). Pure; does not touch `x`/`y`. */
@@ -164,43 +206,55 @@ export function isChartItemId(id: string): boolean {
 }
 
 /**
- * Default (wide/desktop) layout: map + lap table anchor a left column (map on
- * top, lap table below it), tool panels (sectors/track-channel/accel/gear/
- * track-file) continue that left column further down, and the right column —
- * wider, since charts benefit most from horizontal space — starts with the
- * two align panels (only relevant once laps are selected, so they sit right
- * above where charts appear) followed by chart cards (appended dynamically,
- * see {@link reconcileLayout}). This keeps the map+lap-table "at a glance"
- * priority from the old single-column flow while actually using a wide
- * screen's side space, per the task's design goal.
+ * Default (wide/desktop) layout: THREE equal (GRID_COLS/3 = 4-unit-wide)
+ * columns rather than the old lopsided 5/7 two-column split — the old split
+ * crammed all 8 control-panel cards into ONE narrow left column (~54 rows
+ * tall) against a right column that (with the align panels hidden, their
+ * normal default-state) bottomed out around row ~10, leaving a large blank
+ * swath of background below the chart on wide screens. Spreading the same
+ * cards across three columns keeps each column's bottom within a handful of
+ * rows of the others (see dashboardLayout.test.ts's "balances column
+ * heights" regression test), which is what actually reads as "the dashboard
+ * fills the page" rather than any specific pixel-height target (unknowable
+ * here — this is a fixed grid-unit array, not something that measures the
+ * user's real viewport).
+ *
+ * Column A (x:0..4): map + lap table + sectors — the "at a glance" cards.
+ * Column B (x:4..8): the remaining control panels (channel/accel/gear/file).
+ * Column C (x:8..12): session-merge + the first chart, with the align panels
+ * (hidden until ≥2 laps are selected — see AnalyzerView's isVisibleId) placed
+ * BELOW the chart rather than above it, so their default hidden state never
+ * leaves a gap above visible content in this column.
  */
 export function defaultLayout(): DashboardLayoutItem[] {
   return [
-    { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 },
-    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 10, w: 5, h: 8 },
-    { i: STATIC_CARD_IDS.sectors, x: 0, y: 18, w: 5, h: 6 },
-    { i: STATIC_CARD_IDS.trackChannel, x: 0, y: 24, w: 5, h: 5 },
-    { i: STATIC_CARD_IDS.accelTest, x: 0, y: 29, w: 5, h: 5 },
-    { i: STATIC_CARD_IDS.gear, x: 0, y: 34, w: 5, h: 7 },
-    { i: STATIC_CARD_IDS.trackFile, x: 0, y: 41, w: 5, h: 5 },
-    { i: STATIC_CARD_IDS.sessionMerge, x: 0, y: 46, w: 5, h: 8 },
-    { i: STATIC_CARD_IDS.suspension, x: 0, y: 54, w: 5, h: 5 },
-    { i: STATIC_CARD_IDS.mapAlign, x: 5, y: 0, w: 7, h: 5 },
-    { i: STATIC_CARD_IDS.lapAlign, x: 5, y: 5, w: 7, h: 5 },
-    // First chart (the store's initial default chart) starts the right
-    // column's chart stack; further charts are appended below it by
-    // reconcileLayout's "new item" path.
-    { i: chartItemId(1), x: 5, y: 10, w: 7, h: 9 },
+    // Column A
+    { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 },
+    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 10, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.sectors, x: 0, y: 18, w: 4, h: 6 },
+    // Column B
+    { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 5, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.gear, x: 4, y: 10, w: 4, h: 7 },
+    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 17, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.suspension, x: 4, y: 22, w: 4, h: 5 },
+    // Column C — first chart (the store's initial default chart) sits right
+    // under session-merge; further charts are appended below by
+    // reconcileLayout's "new item" path (see defaultChartItem).
+    { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 8 },
+    { i: chartItemId(1), x: 8, y: 8, w: 4, h: 11 },
+    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 19, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.lapAlign, x: 8, y: 24, w: 4, h: 5 },
   ]
 }
 
 /** Default size for a chart card appended after the initial layout (e.g. via
- *  "add chart"), placed at the bottom of the right (wide) column so it
- *  doesn't overlap existing cards — grid-layout-plus's vertical compaction
- *  then settles it upward if there's room. */
+ *  "add chart"), placed at the bottom of column C (x:8..12) so it doesn't
+ *  overlap existing cards — grid-layout-plus's vertical compaction then
+ *  settles it upward if there's room. */
 function defaultChartItem(id: string, layout: DashboardLayoutItem[]): DashboardLayoutItem {
   const maxY = layout.reduce((m, it) => Math.max(m, it.y + it.h), 0)
-  return { i: id, x: 5, y: maxY, w: 7, h: 9 }
+  return { i: id, x: 8, y: maxY, w: 4, h: 9 }
 }
 
 /** Parse persisted JSON into a layout array, or null if missing/invalid
