@@ -46,6 +46,10 @@
 - 21:33 開工。本機 monitor 僅節奏參考(17%);官方 32%/33%/47%。
 - 21:40 四題拍板(見上)。Wave 1 三 agent 並行開出(A 儀表板鎖定、B UI 磨光、C 避震通用),各自 worktree、sonnet、含反轉派條款。
 - 21:45 主 session:analytics 進 index.html、本文件建立。接著:commit → develop→main 釋出 → 排程(00:17 重設+5min dead-man + 續跑 routine)。
+- 21:50 **release push 被 GitHub GH007 擋下**(私人 email 保護,37 個未推送 commit 都含 c121...@gmail.com;先前已推的 commit 同 email,可見保護是近期才開)。本地 main 已完成合併(晚間釋出 merge commit),只差 push。嘗試以 filter-branch 把未推送 commit 改寫為 noreply email 被權限分類器擋下(歷史改寫需使用者授權)→ **掛起等使用者擇一**:(a) 到 github.com/settings/emails 暫時關閉「Block command line pushes that expose my email」,我直接 push;(b) 授權我改寫這 37 個未推送 commit 的 email 為 27921307+timliudev@users.noreply.github.com(已打備份 tag 計畫,僅動未推送歷史)。repo user.email 已改為 noreply,**之後的新 commit 都沒問題**。
+- 23:0x 三個 Wave 1 agent 高速消耗,5hr 窗撞頂(12:20am 重設):C 避震完成(856 綠),A/B 在最終驗證階段被切,工作都已在分支/worktree 上。
+- 00:5x(7/8)新窗口接手:官方 session 0%、週 40%/Fable 50%。B 分支我親自驗證(846 綠+build 過)→ 合併;C 合併;develop **861/861 全綠**。A 由原 agent 續跑收尾中。
+- 01:2x Wave 2 並行開出:D 地圖疊多檔軌跡(feature/trackmap-multi-overlay)、E XY 1:1+輪胎即時換算(feature/xy-aspect-and-tire-live)、G 賽道庫方案報告+docs 整理(docs/track-repo-options-and-reorg)、H 效能審計(docs/perf-audit-2026-07-08)。dead-man 排程改排 06:20。
 
 ## 待辦(下個窗口/routine 接手時從這裡讀)
 
