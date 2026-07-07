@@ -7,6 +7,7 @@ import {
   defaultSuspensionConfig,
   deriveSuspensionChannels,
   fitLinear,
+  legacyAdChannelName,
   suggestConfig,
   type SuspensionChannelConfig,
   type SuspensionConfig,
@@ -92,6 +93,13 @@ describe('derived suspension channels', () => {
   it('produces nothing when sourceChannel is empty (unset)', () => {
     const session = parseLoga(loadFixture('raceAmp.loga'))
     expect(deriveSuspensionChannels(session, frontEnabled({ sourceChannel: '' }))).toHaveLength(0)
+  })
+})
+
+describe('legacyAdChannelName (v1 -> v2 migration helper)', () => {
+  it('maps the two hardcoded v1 sources to their .loga channel names', () => {
+    expect(legacyAdChannelName('AD1')).toBe('SuspensionAD1')
+    expect(legacyAdChannelName('AD2')).toBe('SuspensionAD2')
   })
 })
 
