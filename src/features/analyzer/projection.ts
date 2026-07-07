@@ -13,30 +13,41 @@ export interface MapProjection {
 }
 
 /**
- * Fit a projection to the track's valid-fix bounds within a w x h canvas
- * (CSS px) with `pad` margin. Reproduces TrackMap.draw()'s original math: a
- * cos(latMean) longitude scaling, uniform scale to fit, centring offsets and a
- * flipped Y so north is up. Returns null when there are fewer than two valid
- * fixes (nothing to fit).
+ * Fit a projection to the combined valid-fix bounds of one or more tracks
+ * within a w x h canvas (CSS px) with `pad` margin. Reproduces
+ * TrackMap.draw()'s original math: a cos(latMean) longitude scaling, uniform
+ * scale to fit, centring offsets and a flipped Y so north is up. Returns null
+ * when there are fewer than two valid fixes across ALL given tracks combined
+ * (nothing to fit).
+ *
+ * Accepts either a single track (the original call shape, still used
+ * everywhere the map draws just the active session) or an array — passing an
+ * array of `[activeTrack, ...overlayTracks]` (see TrackMap.vue's
+ * `overlayTracks` prop) fits the view to whatever's actually drawn instead of
+ * just the active track, so multi-session overlays aren't clipped off-canvas.
  */
 export function fitProjection(
-  track: GpsTrack,
+  tracks: GpsTrack | readonly GpsTrack[],
   w: number,
   h: number,
   pad: number,
 ): MapProjection | null {
+  const list = Array.isArray(tracks) ? tracks : [tracks as GpsTrack]
+
   let minLat = Infinity
   let maxLat = -Infinity
   let minLon = Infinity
   let maxLon = -Infinity
   let count = 0
-  for (let i = 0; i < track.valid.length; i++) {
-    if (!track.valid[i]) continue
-    count++
-    if (track.lat[i] < minLat) minLat = track.lat[i]
-    if (track.lat[i] > maxLat) maxLat = track.lat[i]
-    if (track.lon[i] < minLon) minLon = track.lon[i]
-    if (track.lon[i] > maxLon) maxLon = track.lon[i]
+  for (const track of list) {
+    for (let i = 0; i < track.valid.length; i++) {
+      if (!track.valid[i]) continue
+      count++
+      if (track.lat[i] < minLat) minLat = track.lat[i]
+      if (track.lat[i] > maxLat) maxLat = track.lat[i]
+      if (track.lon[i] < minLon) minLon = track.lon[i]
+      if (track.lon[i] > maxLon) maxLon = track.lon[i]
+    }
   }
   if (count < 2) return null
 
