@@ -1,7 +1,7 @@
 export default {
   app: {
     title: 'Track Log Studio',
-    subtitle: 'Lap & telemetry analysis for aRacer ECU .loga — RaceChrono-compatible export',
+    subtitle: 'Lap & telemetry analysis, compatible with ECU and multiple GPS logger formats',
   },
   footer: {
     developedBy: 'Developed by',
