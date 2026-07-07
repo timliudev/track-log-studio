@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the perf-audit bench scripts (docs/PERF-AUDIT-2026-07-08.md).
+ * Shared helpers for the perf-audit bench scripts (docs/journal/PERF-AUDIT-2026-07-08.md).
  * Not part of the app build — run standalone via `npx vite-node scripts/perf/<name>.ts`
  * (vite-node resolves the `@/` alias from vite.config.ts, so these scripts can
  * import straight from `src/domain/...` exactly like the app / vitest do).

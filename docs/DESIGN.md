@@ -444,16 +444,16 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 | # | 項目 | 狀態 |
 |---|------|------|
-| 1+21 | 鎖定兩功能分離（📌 每卡 sticky + 🔒 工具列布局鎖） | 🔄 `feature/dashboard-lock-and-mobile`，未合併 |
-| 3 | 手機不能調 grid 大小 | 🔄 同上分支 |
-| 6 | grid 預設填滿頁面 | 🔄 同上分支 |
+| 1+21 | 鎖定兩功能分離（📌 每卡 sticky + 🔒 工具列布局鎖） | ✅ `feature/dashboard-lock-and-mobile` 已合併（386b7a2），待實機驗收 |
+| 3 | 手機不能調 grid 大小 | ✅ 同上合併，待實機驗收 |
+| 6 | grid 預設填滿頁面 | ✅ 同上合併（三欄平衡預設布局），待實機驗收 |
 | 2 | 地圖疊多檔案軌跡 | 🔄 `feature/trackmap-multi-overlay`（W2） |
 | 4 | XY 散佈圖 1:1 等比（可調） | 🔄 `feature/xy-aspect-and-tire-live`（W2） |
 | 10 | 輪胎規格即時換算自動套用 | 🔄 同上分支（W2） |
-| 5 | 拖動 grid 縫隙調整整頁布局 | ⏳ 依賴 #1+21 的分支先合併 |
+| 5 | 拖動 grid 縫隙調整整頁布局 | ⏳ 依賴項 #1+21 已合併，可開工 |
 | 16 | 賽道庫方案比較報告 | ✅ 本輪 → [`TRACK-LIBRARY-OPTIONS.md`](./TRACK-LIBRARY-OPTIONS.md)，**等使用者二次拍板** |
 | 20 | docs 分類整理（journal/ + specs/ + 本總表） | ✅ 本輪 |
-| 18+19 | UX 載入 + 計算效能審計（先量測後行動） | ⏳ W2 |
+| 18+19 | UX 載入 + 計算效能審計（先量測後行動） | ✅ 已完成並合併（f87ff56），結論**暫無需優化** → [`journal/PERF-AUDIT-2026-07-08.md`](./journal/PERF-AUDIT-2026-07-08.md) |
 | 22 | 推一版到 main | ⛔ 被 GH007（GitHub email privacy）擋住 push，待使用者處理 |
 
 **較長期 / 跨日誌的待辦**：
@@ -478,7 +478,8 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **儀表板拖曳 grid、手機摺疊/釘選、傳動重做（MT 幾何+CVT 曲線）、tracks schema v1、距離帶、轉換頁整併** → [`journal/EVENING-WORK-2026-07-03.md`](./journal/EVENING-WORK-2026-07-03.md)
 - **T6 場次合併 UI、T8 卡片縮放下限、PWA precache -64%、A2/A3 第二階段（seed library）、釋出 main `742a97b`** → [`journal/NIGHT-WORK-2026-07-05.md`](./journal/NIGHT-WORK-2026-07-05.md)
 - **T1–T5 使用者回饋修正（含動態圖表持久化）、輪胎三來源周長、合併預覽查證** → [`journal/EVENING-WORK-2026-07-06.md`](./journal/EVENING-WORK-2026-07-06.md)
-- **2026-07-07 W1：tooltip 主題化+文案多格式化+star 按鈕（#7/12/13/14）、避震校正全格式通用（#8/9）、Web Analytics（#11）** → [`EVENING-WORK-2026-07-07.md`](./EVENING-WORK-2026-07-07.md)（進行中日誌）
+- **2026-07-07 W1：tooltip 主題化+文案多格式化+star 按鈕（#7/12/13/14）、避震校正全格式通用（#8/9）、Web Analytics（#11）、儀表板鎖定/釘選/手機縮放（#1/3/6/21）** → [`EVENING-WORK-2026-07-07.md`](./EVENING-WORK-2026-07-07.md)（進行中日誌）
+- **效能稽核（#18/19）：載入/解析/計算/渲染/記憶體實測，結論暫無需優化** → [`journal/PERF-AUDIT-2026-07-08.md`](./journal/PERF-AUDIT-2026-07-08.md)
 - **匯入格式矩陣（loga/nmea/vbo/rcz/xrk/rcnx）+ 可插拔 Importer 架構** → 狀態見 [`IMPORT-FORMATS-STATUS.md`](./IMPORT-FORMATS-STATUS.md)，規格研究見 [`specs/`](./specs/)
 
 ---
