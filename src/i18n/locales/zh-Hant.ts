@@ -354,8 +354,8 @@ export default {
       vbo: '.vbo 檔供 Racelogic Circuit Tools 3（與 RaceChrono）使用。會輸出所有 ECU 通道；各通道對應請見 _channels.csv 對照表。',
       csv: '.csv 為通用格式（每筆取樣一列：Time、GPS_Lat、GPS_Lon、GPS_Speed，之後接每個其他通道），可供 Race Studio 3、Excel 或任何試算表/分析工具匯入。會自動輸出所有 ECU 通道，各自使用自己的通道名稱。',
       loga: '把校正後的避震行程等衍生通道寫進一份新的 .loga（不覆寫原始檔案；欄位有就替換、沒有就新增）。可於下方展開「避震校正」調整參數。',
-      raceModule:
-        '需安裝 aRacer Race Module 才有 GPS 數據可於底圖對位；若無 GPS，仍可轉出感測器數據（RC3），此時時間戳以轉檔當下時間合成。',
+      gpsNote:
+        '只要記錄含有 GPS 資料，就能對位到底圖；若無 GPS（例如未接 GPS 模組的 ECU 記錄檔），仍可轉出感測器數據（RC3），此時時間戳以轉檔當下時間合成。（若來源為 aRacer .loga：需安裝 Race Module 才會有 GPS 頻道。）',
     },
     upload: {
       title: '載入 .loga 檔',

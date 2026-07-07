@@ -357,8 +357,8 @@ export default {
       vbo: 'The .vbo files are for Racelogic Circuit Tools 3 (and RaceChrono). Every ECU channel is exported; see the _channels.csv map for what each one is.',
       csv: 'The .csv is a generic, one-row-per-sample export (Time, GPS_Lat, GPS_Lon, GPS_Speed, then every other channel) for Race Studio 3, Excel, or any spreadsheet/analysis tool. Every ECU channel is exported automatically under its own name.',
       loga: 'Writes the calibrated suspension travel (and other derived channels) into a new .loga (original untouched; columns are replaced if present, otherwise appended). Expand "Suspension calibration" below to adjust the parameters.',
-      raceModule:
-        'An aRacer Race Module is required for GPS positioning on the map; without GPS you can still convert sensor data (RC3), with the timestamp synthesized from the conversion time.',
+      gpsNote:
+        'Any recording that includes GPS data can be aligned to the map; without GPS (e.g. an ECU log with no GPS module attached) you can still convert sensor data (RC3), with the timestamp synthesized from the conversion time. (For aRacer .loga sources: the Race Module is required for GPS channels.)',
     },
     upload: {
       title: 'Load .loga files',
