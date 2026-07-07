@@ -571,7 +571,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
             type="button"
             class="apply-btn"
             :disabled="estimateDisabledReason != null"
-            :title="estimateDisabledReason ? (t(estimateDisabledReason) as string) : undefined"
+            v-tooltip="estimateDisabledReason ? (t(estimateDisabledReason) as string) : undefined"
             @click="runCircumferenceEstimate"
           >
             {{ t('analyzer.gear.estimateFromLog') }}

@@ -226,7 +226,7 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
       <span>{{ t('fileBar.dropHint') }}</span>
     </div>
 
-    <label class="load-btn" :title="loadTitle">
+    <label class="load-btn" v-tooltip="loadTitle">
       <input
         type="file"
         name="logfile"
@@ -239,7 +239,7 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
     </label>
 
     <details class="sources">
-      <summary class="info-btn" :title="t('fileBar.sources.title')" :aria-label="t('fileBar.sources.title')">ⓘ</summary>
+      <summary class="info-btn" v-tooltip="t('fileBar.sources.title')" :aria-label="t('fileBar.sources.title')">ⓘ</summary>
       <div class="sources-panel">
         <p class="src-title">{{ t('fileBar.sources.title') }}</p>
 
@@ -280,7 +280,7 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
           {{ f.formatId }} · {{ t('fileBar.rows', { n: f.rowCount }) }}
         </span>
         <span v-else class="pill-meta err">{{ t('fileBar.error') }}</span>
-        <button type="button" class="pill-x" :title="t('fileBar.remove')" @click="fileStore.removeFile(f.id)">×</button>
+        <button type="button" class="pill-x" v-tooltip="t('fileBar.remove')" @click="fileStore.removeFile(f.id)">×</button>
       </span>
     </div>
 

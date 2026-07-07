@@ -258,7 +258,7 @@ const rows = computed<Row[]>(() => {
         <button
           type="button"
           class="remove"
-          :title="t('analyzer.removeColumn')"
+          v-tooltip="t('analyzer.removeColumn')"
           :aria-label="t('analyzer.removeColumn')"
           @click="lapStore.removeColumn(col.id)"
         >
@@ -326,7 +326,7 @@ const rows = computed<Row[]>(() => {
                 type="button"
                 class="exclude"
                 :class="{ on: lapStore.isExcluded(r.index), 'auto-disabled': excludeDisabled(r.index) }"
-                :title="excludeLabel(r.index)"
+                v-tooltip="excludeLabel(r.index)"
                 :aria-label="excludeLabel(r.index)"
                 :aria-pressed="lapStore.isExcluded(r.index)"
                 :aria-disabled="excludeDisabled(r.index)"
@@ -343,8 +343,8 @@ const rows = computed<Row[]>(() => {
             </div>
           </td>
           <td>
-            <span v-if="r.index === bestLapIndex" class="mark" :title="t('analyzer.bestLap')">⚡</span>
-            <span v-else-if="r.index === worstLapIndex" class="mark" :title="t('analyzer.slowestLap')">🐢</span>
+            <span v-if="r.index === bestLapIndex" class="mark" v-tooltip="t('analyzer.bestLap')">⚡</span>
+            <span v-else-if="r.index === worstLapIndex" class="mark" v-tooltip="t('analyzer.slowestLap')">🐢</span>
             {{ r.lapTime }}
           </td>
           <td>{{ r.distanceKm === '—' ? '—' : `${r.distanceKm} km` }}</td>

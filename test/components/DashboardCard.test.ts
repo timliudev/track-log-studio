@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import DashboardCard from '@/components/DashboardCard.vue'
+import { vTooltip } from '@/directives/tooltip'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 
@@ -28,7 +29,7 @@ function mountCard(props: Partial<InstanceType<typeof DashboardCard>['$props']> 
   return mount(DashboardCard, {
     props: { title: '測試卡片', ...props },
     slots: { default: '<p>body content</p>' },
-    global: { plugins: [i18n] },
+    global: { plugins: [i18n], directives: { tooltip: vTooltip } },
   })
 }
 

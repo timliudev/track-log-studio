@@ -59,7 +59,7 @@ function downloadAllZip(): void {
           :disabled="!logaAvailable"
           class="seg-btn"
           :class="{ active: outputFormat === 'loga' }"
-          :title="!logaAvailable ? t('converter.format.logaDisabledHint') : undefined"
+          v-tooltip="!logaAvailable ? t('converter.format.logaDisabledHint') : undefined"
           @click="store.setOutputFormat('loga')"
         >
           {{ t('converter.format.loga') }}
