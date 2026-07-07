@@ -1,13 +1,26 @@
 import type { Channel } from '@/domain/model/types'
 import { LogSession } from '@/domain/model/LogSession'
 
-export type AdSource = 'AD1' | 'AD2'
+/** @deprecated Kept only so `legacyAdChannelName` (v1→v2 persisted-data
+ *  migration, see suspensionStore.ts) has a name for the two hardcoded loga
+ *  channel IDs it maps from. Not used by any calibration/derivation logic. */
+export type LegacyAdSource = 'AD1' | 'AD2'
 export type SuspensionPart = 'front' | 'rear'
 
-/** Calibration for one suspension channel (front or rear). 5 params, mv/mm. */
+/**
+ * Calibration for one suspension channel (front or rear). 5 linear-transfer
+ * params (mv/mm) plus WHICH raw channel to read the sensor voltage from.
+ *
+ * `sourceChannel` is a plain channel name looked up via `LogSession.get`
+ * (alias-aware), not tied to any importer — it defaults to .loga's RaceAmp
+ * `SuspensionAD1`/`SuspensionAD2` names (so existing .loga workflows keep
+ * working unchanged), but the user can point it at ANY channel a session
+ * provides (VBO/RCZ/XRK/RCNX/NMEA analog channels included). This is what
+ * makes calibration format-agnostic — see the module doc below.
+ */
 export interface SuspensionChannelConfig {
   enabled: boolean
-  source: AdSource
+  sourceChannel: string
   minMv: number
   maxMv: number
   zeroMv: number
@@ -41,21 +54,32 @@ const DERIVED_DESC: Record<SuspensionPart, string> = {
   rear: '後避震行程 (校正)',
 }
 
-export function adChannelName(source: AdSource): string {
+/** Default source-channel name per part — .loga's RaceAmp naming, used only
+ *  as the out-of-the-box default; the user is free to repoint `sourceChannel`
+ *  at any other channel name (see the interface doc above). */
+const DEFAULT_SOURCE_CHANNEL: Record<SuspensionPart, string> = {
+  front: 'SuspensionAD1',
+  rear: 'SuspensionAD2',
+}
+
+/** @deprecated v1→v2 migration helper only (see suspensionStore.ts) — maps
+ *  the old hardcoded `source: 'AD1'|'AD2'` field to the channel name it always
+ *  meant. New code should just use `sourceChannel` directly. */
+export function legacyAdChannelName(source: LegacyAdSource): string {
   return source === 'AD1' ? 'SuspensionAD1' : 'SuspensionAD2'
 }
 
 export function defaultSuspensionConfig(): SuspensionConfig {
-  const base = (source: AdSource): SuspensionChannelConfig => ({
+  const base = (part: SuspensionPart): SuspensionChannelConfig => ({
     enabled: false,
-    source,
+    sourceChannel: DEFAULT_SOURCE_CHANNEL[part],
     minMv: 0,
     maxMv: 5000,
     zeroMv: 0,
     minMm: 0,
     maxMm: 0,
   })
-  return { front: base('AD1'), rear: base('AD2') }
+  return { front: base('front'), rear: base('rear') }
 }
 
 /**
@@ -83,7 +107,7 @@ export function derivedSuspensionNames(
   const out: { name: string; description: string }[] = []
   for (const part of PARTS) {
     const cfg = config[part]
-    if (cfg.enabled && session.has(adChannelName(cfg.source))) {
+    if (cfg.enabled && cfg.sourceChannel && session.has(cfg.sourceChannel)) {
       out.push({ name: OUTPUT_NAME[part], description: DERIVED_DESC[part] })
     }
   }
@@ -98,8 +122,8 @@ export function deriveSuspensionChannels(
   const out: Channel[] = []
   for (const part of PARTS) {
     const cfg = config[part]
-    if (!cfg.enabled) continue
-    const ad = session.get(adChannelName(cfg.source))?.data
+    if (!cfg.enabled || !cfg.sourceChannel) continue
+    const ad = session.get(cfg.sourceChannel)?.data
     if (!ad) continue
     const data = new Float32Array(ad.length)
     for (let i = 0; i < ad.length; i++) data[i] = adToTravelMm(ad[i], cfg)

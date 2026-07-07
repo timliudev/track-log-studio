@@ -41,6 +41,7 @@ export const STATIC_CARD_IDS = {
   mapAlign: 'mapalign',
   lapAlign: 'lapalign',
   sessionMerge: 'sessionmerge',
+  suspension: 'suspension',
 } as const
 
 /** Prefix for dynamic chart-card ids — see {@link chartItemId}. */
@@ -70,6 +71,7 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.mapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.sessionMerge]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.suspension]: { minW: 2, minH: 3 },
 }
 
 /** Chart cards (uPlot/echarts) need more room than a small control panel to
@@ -182,6 +184,7 @@ export function defaultLayout(): DashboardLayoutItem[] {
     { i: STATIC_CARD_IDS.gear, x: 0, y: 34, w: 5, h: 7 },
     { i: STATIC_CARD_IDS.trackFile, x: 0, y: 41, w: 5, h: 5 },
     { i: STATIC_CARD_IDS.sessionMerge, x: 0, y: 46, w: 5, h: 8 },
+    { i: STATIC_CARD_IDS.suspension, x: 0, y: 54, w: 5, h: 5 },
     { i: STATIC_CARD_IDS.mapAlign, x: 5, y: 0, w: 7, h: 5 },
     { i: STATIC_CARD_IDS.lapAlign, x: 5, y: 5, w: 7, h: 5 },
     // First chart (the store's initial default chart) starts the right
