@@ -1,5 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
-import { beforeEach, describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 
 beforeEach(() => {
@@ -118,5 +119,80 @@ describe('analyzerStore', () => {
     expect(s.cursorIdx).toBe(42)
     s.setCursor(null)
     expect(s.cursorIdx).toBeNull()
+  })
+})
+
+/** T5 — chart-card persistence: added charts + their config survive a
+ *  "reload" (fresh pinia instance re-runs the store setup, which re-loads
+ *  from localStorage). In-memory localStorage stub, same approach as
+ *  dashboardLayout.test.ts. */
+describe('analyzerStore — chart persistence (T5)', () => {
+  function installMemoryLocalStorage(): void {
+    let store = new Map<string, string>()
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => {
+        store.set(k, v)
+      },
+      removeItem: (k: string) => {
+        store.delete(k)
+      },
+      clear: () => {
+        store = new Map<string, string>()
+      },
+    })
+  }
+
+  beforeEach(() => {
+    installMemoryLocalStorage()
+    localStorage.clear()
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('dynamically added charts + config are restored by a fresh store (reload)', async () => {
+    const s = useAnalyzerStore()
+    s.addChart()
+    s.setChartChannels(s.charts[1].id, ['RPM', 'T_Eng'])
+    s.setChartMode(s.charts[1].id, 'overlay')
+    s.addChart('scatter', { xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' })
+    await nextTick() // deep watch persists on the next flush
+
+    // Simulated reload: a fresh pinia re-runs the store setup -> loadCharts().
+    setActivePinia(createPinia())
+    const s2 = useAnalyzerStore()
+    expect(s2.charts).toEqual([
+      { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
+      { kind: 'timeseries', id: 2, channels: ['RPM', 'T_Eng'], mode: 'overlay' },
+      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' },
+    ])
+  })
+
+  it('new ids continue past the restored maximum (no card-id collisions)', async () => {
+    const s = useAnalyzerStore()
+    s.addChart()
+    await nextTick()
+    setActivePinia(createPinia())
+    const s2 = useAnalyzerStore()
+    s2.addChart('scatter')
+    expect(s2.charts.map((c) => c.id)).toEqual([1, 2, 3])
+  })
+
+  it('an emptied dashboard (every chart removed) survives reload as empty', async () => {
+    const s = useAnalyzerStore()
+    s.removeChart(s.charts[0].id)
+    await nextTick()
+    setActivePinia(createPinia())
+    expect(useAnalyzerStore().charts).toHaveLength(0)
+  })
+
+  it('falls back to the single default chart when storage is corrupt', () => {
+    localStorage.setItem('aracer-loga.analyzerCharts.v1', '{corrupt')
+    setActivePinia(createPinia())
+    const s = useAnalyzerStore()
+    expect(s.charts).toEqual([{ kind: 'timeseries', id: 1, channels: [], mode: 'timeline' }])
   })
 })

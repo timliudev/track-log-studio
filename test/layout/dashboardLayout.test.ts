@@ -13,6 +13,7 @@ import {
   mobileLayout,
   minSizeFor,
   clampToMinSize,
+  resolveOverlaps,
 } from '@/domain/layout/dashboardLayout'
 
 /** Node's test environment has no real localStorage (Vitest runs with
@@ -229,6 +230,86 @@ describe('loadLayout / saveLayout', () => {
     const custom = [{ i: STATIC_CARD_IDS.map, x: 1, y: 2, w: 6, h: 8 }]
     saveLayout(custom)
     expect(loadLayout()).toEqual(custom)
+  })
+
+  it('loadLayout returns a normal user layout byte-for-byte (deep-equal, no reorder)', () => {
+    // A realistic hand-arranged layout where nothing needs clamping — must
+    // come back completely unchanged, not run through overlap resolution.
+    const custom = [
+      { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 },
+      { i: STATIC_CARD_IDS.lapTable, x: 0, y: 10, w: 5, h: 8 },
+      { i: chartItemId(1), x: 5, y: 0, w: 7, h: 9 },
+    ]
+    saveLayout(custom)
+    expect(loadLayout()).toStrictEqual(custom)
+  })
+
+  it('loadLayout resolves overlaps introduced by clamping an old small-sized layout', () => {
+    // Old layout saved before the B6 minimum-size table existed: map is
+    // right next to gear with no gap, both undersized. Clamping grows map's
+    // w/h past gear's x — resolveOverlaps must then push gear down clear.
+    const old = [
+      { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 1, h: 1 },
+      { i: STATIC_CARD_IDS.gear, x: 1, y: 0, w: 1, h: 1 },
+    ]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(old))
+    const loaded = loadLayout()
+    const map = loaded.find((it) => it.i === STATIC_CARD_IDS.map)!
+    const gear = loaded.find((it) => it.i === STATIC_CARD_IDS.gear)!
+    const overlap = map.x < gear.x + gear.w && gear.x < map.x + map.w && map.y < gear.y + gear.h && gear.y < map.y + map.h
+    expect(overlap).toBe(false)
+    // Relative order preserved: map was placed first (y=0,x=0 sorts first),
+    // so gear (originally alongside it) should end up pushed BELOW map, not
+    // reordered ahead of it.
+    expect(gear.y).toBeGreaterThanOrEqual(map.y + map.h)
+  })
+})
+
+describe('resolveOverlaps', () => {
+  it('is a no-op on a layout with no overlaps (every item keeps its x/y/w/h)', () => {
+    const layout = defaultLayout()
+    expect(resolveOverlaps(layout)).toEqual(layout)
+  })
+
+  it('pushes a later (lower/righter) overlapping item straight down, never touching x/w/h', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 2, y: 0, w: 4, h: 4 }, // overlaps a
+    ]
+    const resolved = resolveOverlaps(layout)
+    const a = resolved.find((it) => it.i === 'a')!
+    const b = resolved.find((it) => it.i === 'b')!
+    expect(a).toEqual(layout[0]) // earlier item untouched
+    expect(b.x).toBe(2)
+    expect(b.w).toBe(4)
+    expect(b.h).toBe(4)
+    expect(b.y).toBeGreaterThanOrEqual(a.y + a.h)
+  })
+
+  it('resolves a chain of overlaps (re-scans after each push) without infinite looping', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 0, y: 1, w: 4, h: 4 }, // overlaps a
+      { i: 'c', x: 0, y: 2, w: 4, h: 4 }, // overlaps a and, after b is pushed, may overlap b
+    ]
+    const resolved = resolveOverlaps(layout)
+    for (let i = 0; i < resolved.length; i++) {
+      for (let j = i + 1; j < resolved.length; j++) {
+        const x = resolved[i]
+        const y = resolved[j]
+        const overlap = x.x < y.x + y.w && y.x < x.x + x.w && x.y < y.y + y.h && y.y < x.y + x.h
+        expect(overlap).toBe(false)
+      }
+    }
+  })
+
+  it('preserves array order/identity of the result (same ids at same indices as input)', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 2, y: 0, w: 4, h: 4 },
+    ]
+    const resolved = resolveOverlaps(layout)
+    expect(resolved.map((it) => it.i)).toEqual(['a', 'b'])
   })
 })
 

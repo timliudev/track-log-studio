@@ -157,6 +157,109 @@ describe('useSessionMerge', () => {
     expect(merge.merge()).toBeNull()
   })
 
+  it('overlay is null until both sessions are picked and an offset exists', () => {
+    const fileStore = useFileStore()
+    const baseId = fileStore.addMergedSession('base.loga', makeBase())
+    const gpsId = fileStore.addMergedSession('gps.nmea', makeGps(0))
+
+    const merge = useSessionMerge()
+    expect(merge.overlay.value).toBeNull()
+
+    merge.baseId.value = baseId
+    expect(merge.overlay.value).toBeNull() // gps side not picked yet
+
+    merge.gpsId.value = gpsId
+    expect(merge.overlay.value).toBeNull() // no offset established yet (autoAlign not run)
+
+    merge.autoAlign()
+    expect(merge.overlay.value).not.toBeNull()
+  })
+
+  it('overlay reflects the current offsetMs and updates live on nudge', () => {
+    const fileStore = useFileStore()
+    const baseId = fileStore.addMergedSession('base.loga', makeBase())
+    const gpsId = fileStore.addMergedSession('gps.nmea', makeGps(2000))
+
+    const merge = useSessionMerge()
+    merge.baseId.value = baseId
+    merge.gpsId.value = gpsId
+    merge.autoAlign()
+
+    const before = merge.overlay.value
+    expect(before).not.toBeNull()
+    expect(before!.timeS.length).toBeGreaterThan(0)
+    expect(before!.base.length).toBe(before!.timeS.length)
+    expect(before!.gps.length).toBe(before!.timeS.length)
+
+    merge.nudge(NUDGE_STEP_MS)
+    const after = merge.overlay.value
+    expect(after).not.toBeNull()
+    // Nudging the offset shifts the shared grid's union bounds, so the two
+    // recomputed overlays should differ (not the identical object/array).
+    expect(after).not.toBe(before)
+  })
+
+  it('overlay is null when offsetMs is reset to null by re-picking a session', () => {
+    const fileStore = useFileStore()
+    const baseId = fileStore.addMergedSession('base.loga', makeBase())
+    const gpsId = fileStore.addMergedSession('gps.nmea', makeGps(0))
+    const gpsId2 = fileStore.addMergedSession('gps2.nmea', makeGps(500))
+
+    const merge = useSessionMerge()
+    merge.baseId.value = baseId
+    merge.gpsId.value = gpsId
+    merge.autoAlign()
+    expect(merge.overlay.value).not.toBeNull()
+
+    // Simulate the panel's own re-pick invalidation (SessionMergePanel.vue
+    // watches [baseId, gpsId] and nulls alignment/offset on change) — the
+    // composable itself doesn't auto-null offsetMs, so drive it explicitly.
+    merge.gpsId.value = gpsId2
+    merge.offsetMs.value = null
+    expect(merge.overlay.value).toBeNull()
+  })
+
+  it('resets baseId/gpsId and derived alignment/offset when a picked file is removed', () => {
+    const fileStore = useFileStore()
+    const baseId = fileStore.addMergedSession('base.loga', makeBase())
+    const gpsId = fileStore.addMergedSession('gps.nmea', makeGps(2000))
+
+    const merge = useSessionMerge()
+    merge.baseId.value = baseId
+    merge.gpsId.value = gpsId
+    merge.autoAlign()
+    expect(merge.alignment.value).not.toBeNull()
+    expect(merge.offsetMs.value).not.toBeNull()
+
+    fileStore.removeFile(gpsId)
+
+    expect(merge.gpsId.value).toBeNull()
+    expect(merge.baseId.value).toBe(baseId) // untouched side stays picked
+    expect(merge.alignment.value).toBeNull()
+    expect(merge.offsetMs.value).toBeNull()
+    expect(merge.canAlign.value).toBe(false)
+    expect(merge.canMerge.value).toBe(false)
+  })
+
+  it('leaves baseId/gpsId untouched when the removed file is unrelated to the current pick', () => {
+    const fileStore = useFileStore()
+    const baseId = fileStore.addMergedSession('base.loga', makeBase())
+    const gpsId = fileStore.addMergedSession('gps.nmea', makeGps(0))
+    const unrelatedId = fileStore.addMergedSession('other.nmea', makeGps(500))
+
+    const merge = useSessionMerge()
+    merge.baseId.value = baseId
+    merge.gpsId.value = gpsId
+    merge.autoAlign()
+    const offsetBefore = merge.offsetMs.value
+
+    fileStore.removeFile(unrelatedId)
+
+    expect(merge.baseId.value).toBe(baseId)
+    expect(merge.gpsId.value).toBe(gpsId)
+    expect(merge.offsetMs.value).toBe(offsetBefore)
+  })
+
   it('autoAlign sets lastError when a picked session has no resolvable speed channel', () => {
     const fileStore = useFileStore()
     const noSpeed = new LogSession(

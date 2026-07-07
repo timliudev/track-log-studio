@@ -139,6 +139,49 @@ describe('drivetrainStore persistence', () => {
   })
 })
 
+describe('applyTireSpecCircumference', () => {
+  it('copies the resolved circumference into the direct field and switches mode', () => {
+    const s = useDrivetrainStore()
+    s.setMt({ circumferenceMode: 'tire', tireSpec: '120/70-17' })
+    expect(s.applyTireSpecCircumference()).toBe(true)
+    expect(s.mt.circumferenceMode).toBe('direct')
+    // 120/70-17 -> ~1884.33mm, rounded to whole mm for a tweakable field.
+    expect(s.mt.wheelCircumferenceMm).toBe(1884)
+  })
+
+  it('lets the user fine-tune the applied value afterwards', () => {
+    const s = useDrivetrainStore()
+    s.setMt({ circumferenceMode: 'tire', tireSpec: '120/80-12' })
+    s.applyTireSpecCircumference()
+    const applied = s.mt.wheelCircumferenceMm
+    s.setMt({ wheelCircumferenceMm: applied - 20 })
+    expect(s.mt.wheelCircumferenceMm).toBe(applied - 20)
+    // The spec string is retained (persisted) for reference/re-apply.
+    expect(s.mt.tireSpec).toBe('120/80-12')
+  })
+
+  it('is a no-op returning false for an unparsable spec', () => {
+    const s = useDrivetrainStore()
+    s.setMt({ circumferenceMode: 'tire', tireSpec: 'garbage', wheelCircumferenceMm: 1870 })
+    expect(s.applyTireSpecCircumference()).toBe(false)
+    expect(s.mt.circumferenceMode).toBe('tire')
+    expect(s.mt.wheelCircumferenceMm).toBe(1870)
+  })
+
+  it('persists the applied circumference and mode', async () => {
+    const s1 = useDrivetrainStore()
+    s1.setMt({ circumferenceMode: 'tire', tireSpec: '100/90-10' })
+    s1.applyTireSpecCircumference()
+    await nextTick()
+
+    setActivePinia(createPinia())
+    const s2 = useDrivetrainStore()
+    expect(s2.mt.circumferenceMode).toBe('direct')
+    expect(s2.mt.wheelCircumferenceMm).toBe(Math.round(Math.PI * 434))
+    expect(s2.mt.tireSpec).toBe('100/90-10')
+  })
+})
+
 describe('toMtDrivetrainSpec', () => {
   it('forwards ratio-mode gears/final-drive and direct circumference', () => {
     const s = useDrivetrainStore()

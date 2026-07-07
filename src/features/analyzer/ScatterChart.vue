@@ -168,15 +168,23 @@ const axisMode = computed<'square' | 'auto'>(() => {
    * window/panel narrows. */
   min-width: 0;
 }
-/* #8 — inside a dashboard grid item's card body: stretch to fill it and let
-   GgChart's own .fill (via fillHeight) claim the remaining space below the
-   toolbar/hint. */
+/* #8/T1 — inside a dashboard grid item's card body (a flex COLUMN — see
+   DashboardCard's `.body`): grow into the remaining space as a flex item
+   (`flex: 1`, not the old `height: 100%`, which overflowed the body once any
+   sibling text existed) and let GgChart's own .fill (via fillHeight) claim
+   the remaining space below the toolbar/hint. */
 .scatter-chart.fill {
-  height: 100%;
-}
-.scatter-chart.fill .chart-fill {
   flex: 1 1 auto;
   min-height: 0;
+}
+.scatter-chart.fill .chart-fill {
+  /* Basis 0, not auto — see TimeSeriesChart's .chart-fill for why (the
+     echarts canvas's height derives from this host's measured height, so a
+     content-based basis would be circular). */
+  flex: 1 1 0;
+  /* Same floor as TimeSeriesChart's .chart-fill — keeps the plot usable at
+     tiny card sizes; beyond it the card body scrolls. */
+  min-height: 60px;
 }
 .toolbar {
   display: flex;

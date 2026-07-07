@@ -1,3 +1,26 @@
+<script lang="ts">
+/**
+ * T1 — plot-area height for `fillHeight` mode: the HOST's measured height
+ * minus uPlot's own HTML legend (which lives INSIDE the host, below the
+ * canvas). uPlot's `options.height` sizes only the plot area + axes — the
+ * legend adds its own height on top, so handing it the full host height made
+ * canvas + legend overflow the host and the legend text got clipped by the
+ * card body at every card/window size. `fallback` (the `height` prop) is
+ * used when the host hasn't laid out yet (0/negative remaining space).
+ *
+ * Plain-script export (same pattern as GgChart's `axisNameFields`) so the
+ * sizing rule is unit-testable without mounting uPlot.
+ */
+export function fillPlotHeight(
+  hostHeight: number,
+  legendHeight: number,
+  fallback: number,
+): number {
+  const h = hostHeight - legendHeight
+  return h > 0 ? h : fallback
+}
+</script>
+
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
@@ -63,13 +86,21 @@ function themeColor(name: string, fallback: string): string {
   return v || fallback
 }
 
-/** The chart's current target height: the host's own measured height in
- *  `fillHeight` mode (falling back to the `height` prop before layout has
- *  happened, e.g. on the very first frame), else the fixed `height` prop. */
+/** Measured height of uPlot's HTML legend inside the host (0 before the plot
+ *  exists — e.g. during the very first create()). */
+function legendHeight(): number {
+  const legend = host.value?.querySelector<HTMLElement>('.u-legend')
+  return legend?.offsetHeight ?? 0
+}
+
+/** The chart's current target height: in `fillHeight` mode, the host's own
+ *  measured height MINUS the legend's (see {@link fillPlotHeight} — T1: the
+ *  legend lives inside the host, so sizing the plot to the full host height
+ *  pushed the legend out and clipped its text), falling back to the `height`
+ *  prop before the container has laid out; else the fixed `height` prop. */
 function targetHeight(): number {
   if (props.fillHeight && host.value) {
-    const h = host.value.clientHeight
-    if (h > 0) return h
+    return fillPlotHeight(host.value.clientHeight, legendHeight(), props.height ?? 260)
   }
   return props.height ?? 260
 }
@@ -145,6 +176,12 @@ function create(): void {
   plot = new uPlot(buildOptions(width), props.data, host.value)
   applyXRange(false) // adopt the shared zoom on (re)create, e.g. a newly added chart
   clearApplyingRangeSoon()
+  // T1 — the legend only exists AFTER construction, so the height baked into
+  // buildOptions() couldn't subtract it yet; re-measure once now that it's in
+  // the DOM so canvas + legend fit the host exactly (fillHeight mode only —
+  // fixed-height callers size the canvas to the `height` prop and let the
+  // page flow around the legend, unchanged).
+  if (props.fillHeight) resize()
 }
 
 function destroy(): void {

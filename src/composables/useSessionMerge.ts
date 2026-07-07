@@ -1,9 +1,14 @@
-import { computed, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useFileStore, type ImportedFile } from '@/stores/fileStore'
 import { LogSession } from '@/domain/model/LogSession'
 import { crossCorrelateOffset, type AlignmentResult } from '@/domain/analysis/sessionAlign'
 import { mergeSessions } from '@/domain/analysis/sessionMerge'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { buildMergeOverlay, type MergeOverlayData } from '@/domain/analysis/mergePreview'
+
+/** Point cap for the live alignment-preview chart — see buildMergeOverlay's
+ *  own default rationale (cheap enough to redo on every ±100ms nudge). */
+const PREVIEW_MAX_POINTS = 400
 
 /** Lag search window and scan step passed to {@link crossCorrelateOffset} —
  *  generous defaults per docs/PHASE5-MERGE-STATUS.md's suggestion #6: two
@@ -44,6 +49,7 @@ export function useSessionMerge(): {
   canAlign: ComputedRef<boolean>
   alignment: Ref<AlignmentResult | null>
   offsetMs: Ref<number | null>
+  overlay: ComputedRef<MergeOverlayData | null>
   autoAlign: () => void
   nudge: (deltaMs: number) => void
   canMerge: ComputedRef<boolean>
@@ -124,6 +130,68 @@ export function useSessionMerge(): {
     offsetMs.value = (offsetMs.value ?? 0) + deltaMs
   }
 
+  /**
+   * Live alignment-preview overlay: both sessions' speed curves resampled
+   * onto a shared, decimated time grid with the current `offsetMs` applied to
+   * the GPS side — recomputed reactively so every ±100ms nudge (or a fresh
+   * autoAlign) immediately redraws the preview chart, without re-running the
+   * (more expensive) cross-correlation search. Null until both sessions are
+   * picked, both resolve a speed+time channel, and an offset exists.
+   */
+  const overlay = computed<MergeOverlayData | null>(() => {
+    if (baseId.value == null || gpsId.value == null || offsetMs.value == null) return null
+    const base = fileStore.getSession(baseId.value)
+    const gps = fileStore.getSession(gpsId.value)
+    if (!base || !gps) return null
+
+    const baseSpeedName = resolveSpeedChannel(base)
+    const gpsSpeedName = resolveSpeedChannel(gps)
+    const baseTime = base.timeChannel
+    const gpsTime = gps.timeChannel
+    if (!baseSpeedName || !gpsSpeedName || !baseTime || !gpsTime) return null
+
+    const baseSpeed = base.get(baseSpeedName)
+    const gpsSpeed = gps.get(gpsSpeedName)
+    if (!baseSpeed || !gpsSpeed) return null
+
+    return buildMergeOverlay(baseSpeed.data, baseTime.data, gpsSpeed.data, gpsTime.data, {
+      offsetMs: offsetMs.value,
+      maxPoints: PREVIEW_MAX_POINTS,
+    })
+  })
+
+  // A previously picked base/GPS session can vanish out from under the panel
+  // (e.g. fileStore.removeFile while the merge panel is open) — the picker's
+  // <select> would then show a blank/stale option even though canAlign/
+  // canMerge already correctly fall back to false. Watch the live candidate
+  // list and drop any id that's no longer present, clearing the derived
+  // alignment/offset state that only makes sense for a still-picked pair.
+  watch(
+    candidates,
+    (list) => {
+      const validIds = new Set(list.map((c) => c.id))
+      let stale = false
+      if (baseId.value != null && !validIds.has(baseId.value)) {
+        baseId.value = null
+        stale = true
+      }
+      if (gpsId.value != null && !validIds.has(gpsId.value)) {
+        gpsId.value = null
+        stale = true
+      }
+      if (stale) {
+        alignment.value = null
+        offsetMs.value = null
+        lastError.value = null
+      }
+    },
+    // Sync flush: fileStore.removeFile should invalidate a stale pick
+    // immediately (not on the next microtask/render tick) so canAlign/
+    // canMerge and the picker's bound v-model are consistent as soon as the
+    // caller's removeFile() call returns.
+    { flush: 'sync' },
+  )
+
   const canMerge = computed(() => canAlign.value && offsetMs.value != null)
 
   /** Build the merged session and register it into fileStore. Returns the new
@@ -155,6 +223,7 @@ export function useSessionMerge(): {
     canAlign,
     alignment,
     offsetMs,
+    overlay,
     autoAlign,
     nudge,
     canMerge,

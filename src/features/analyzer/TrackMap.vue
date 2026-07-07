@@ -906,12 +906,19 @@ watch(() => props.extremaMarkers, () => draw())
 .track-wrap {
   position: relative;
 }
-/* #8 — inside a dashboard grid item's card body, stretch to fill it (the
-   card body is itself flex/min-height:0, so a percentage height resolves
-   against the item's actual resized height — see DashboardCard.vue). */
+/* #8/T1 — inside a dashboard grid item's card body (a flex COLUMN — see
+   DashboardCard's `.body`): take the REMAINING space after the card's text
+   rows (legend/hints/lap-band inputs) instead of the old `height: 100%`,
+   which claimed the whole body and pushed every text row out of view. The
+   min-height keeps the map usable when the card is small — beyond that the
+   body scrolls rather than squashing the canvas to nothing. */
 .track-wrap.fill {
   display: flex;
-  height: 100%;
+  /* Basis 0, not auto — the canvas inside sizes itself from THIS wrapper's
+     laid-out height (draw() reads clientHeight), so a content-based basis
+     would be circular. Basis 0 + grow 1 = "whatever the text rows leave". */
+  flex: 1 1 0;
+  min-height: 120px;
 }
 .track {
   display: block;

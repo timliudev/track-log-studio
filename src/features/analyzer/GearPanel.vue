@@ -30,7 +30,7 @@
  *   (前普利尺寸/珠重/彈簧硬度/開閉盤規格/套管長度/終傳比 etc.) persisted with the
  *   drivetrain settings for setup comparison.
  */
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -46,6 +46,9 @@ import UPlotChart from '@/components/UPlotChart.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
+  tireSpecToCircumferenceMm,
+  resolveGearRatio,
+  resolveFinalDrive,
   resolveRpmChannel,
   computeRatioSeries,
   detectGearPlateaus,
@@ -53,6 +56,8 @@ import {
   buildCvtRatioTimeSeries,
   cvtRatioSummary,
   estimateClutchEngagementRpm,
+  estimateCircumferenceFromLog,
+  type CircumferenceFromLogEstimate,
 } from '@/domain/analysis/drivetrain'
 
 const props = defineProps<{
@@ -81,6 +86,77 @@ const mtSpec = computed(() => toMtDrivetrainSpec(store.mt))
 const mtResults = computed(() => (isMt.value ? computeMtGearTable(mtSpec.value) : []))
 const mtValid = computed(() => mtResults.value.length > 0)
 const specCircumferenceValid = computed(() => Number.isFinite(mtSpec.value.wheelCircumferenceMm) && mtSpec.value.wheelCircumferenceMm > 0)
+
+/** In DIRECT mode, what the (last-entered) tire spec would convert to — shown
+ *  as a reference hint next to the manual field so the user can see how far
+ *  their fine-tuned value drifted from the spec estimate. Null when the spec
+ *  string doesn't parse (no hint). */
+const specReferenceMm = computed<number | null>(() => {
+  const circ = tireSpecToCircumferenceMm(store.mt.tireSpec)
+  return Number.isFinite(circ) && circ > 0 ? circ : null
+})
+
+// ── MT: circumference back-estimation from the log (speed / RPM inversion) ──
+// Per-gear total reductions resolved WITHOUT the circumference (ratio-only:
+// primary x gear x final drive) — `estimateCircumferenceFromLog` solves FOR
+// the circumference, so this must not depend on it (unlike `mtResults`).
+const totalReductionsForEstimate = computed<number[]>(() => {
+  const spec = mtSpec.value
+  const final = resolveFinalDrive(spec.finalDrive)
+  if (!Number.isFinite(final) || !(final > 0)) return []
+  const primary = spec.primaryReduction != null && spec.primaryReduction > 0 ? spec.primaryReduction : 1
+  return spec.gearRatios
+    .map(resolveGearRatio)
+    .filter((g) => Number.isFinite(g) && g > 0)
+    .map((g) => primary * g * final)
+})
+
+/** Why the estimate button is disabled (i18n key), or null when it can run. */
+const estimateDisabledReason = computed<string | null>(() => {
+  if (!props.session) return 'analyzer.gear.noSession'
+  if (!hasRpmChannel.value) return 'analyzer.gear.noRpmChannel'
+  if (!hasSpeedChannel.value) return 'analyzer.gear.noSpeedChannel'
+  if (totalReductionsForEstimate.value.length === 0) return 'analyzer.gear.estimateNeedGears'
+  return null
+})
+
+const estimateResult = ref<CircumferenceFromLogEstimate | null>(null)
+const estimateFailed = ref(false)
+
+// GearPanel is a single long-lived instance (AnalyzerView mounts it once,
+// no :key on file switch — see AnalyzerView.vue), so without this the
+// estimate result/error from a PREVIOUS log session stayed on screen after
+// switching to a different file, misrepresenting a value computed from data
+// that's no longer loaded.
+watch(
+  () => props.session,
+  () => {
+    estimateResult.value = null
+    estimateFailed.value = false
+  },
+)
+
+function runCircumferenceEstimate(): void {
+  const rpm = rpmData.value
+  const speed = speedData.value
+  if (!rpm || !speed || estimateDisabledReason.value) return
+  // Current circumference (spec-resolved or direct) as the ambiguity
+  // reference — see `estimateCircumferenceFromLog`'s single-gear-log note.
+  const current = mtSpec.value.wheelCircumferenceMm
+  const est = estimateCircumferenceFromLog(rpm, speed, totalReductionsForEstimate.value, {
+    referenceCircumferenceMm: Number.isFinite(current) && current > 0 ? current : undefined,
+  })
+  if (Number.isFinite(est.circumferenceMm)) {
+    estimateResult.value = est
+    estimateFailed.value = false
+    // One-click apply into the tweakable direct field (same flow as the
+    // tire-spec apply button).
+    store.setMt({ wheelCircumferenceMm: Math.round(est.circumferenceMm), circumferenceMode: 'direct' })
+  } else {
+    estimateResult.value = null
+    estimateFailed.value = true
+  }
+}
 
 const topGear = computed(() =>
   mtResults.value.length > 0
@@ -464,9 +540,14 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
             />
           </label>
           <p v-if="!specCircumferenceValid" class="hint inline-hint">{{ t('analyzer.gear.tireSpecInvalid') }}</p>
-          <p v-else class="hint inline-hint">
-            {{ t('analyzer.gear.tireSpecResolved', { mm: mtSpec.wheelCircumferenceMm.toFixed(0) }) }}
-          </p>
+          <template v-else>
+            <p class="hint inline-hint">
+              {{ t('analyzer.gear.tireSpecResolved', { mm: mtSpec.wheelCircumferenceMm.toFixed(0) }) }}
+            </p>
+            <button type="button" class="apply-btn" @click="store.applyTireSpecCircumference()">
+              {{ t('analyzer.gear.tireSpecApply') }}
+            </button>
+          </template>
         </div>
         <div v-else class="row params">
           <label class="field">
@@ -480,6 +561,33 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
               @input="store.setMt({ wheelCircumferenceMm: numField($event) })"
             />
           </label>
+          <p v-if="specReferenceMm != null" class="hint inline-hint">
+            {{ t('analyzer.gear.tireSpecReference', { spec: store.mt.tireSpec.trim(), mm: specReferenceMm.toFixed(0) }) }}
+          </p>
+        </div>
+        <!-- Third circumference source: back-estimate from the log's speed/RPM -->
+        <div class="row params">
+          <button
+            type="button"
+            class="apply-btn"
+            :disabled="estimateDisabledReason != null"
+            :title="estimateDisabledReason ? (t(estimateDisabledReason) as string) : undefined"
+            @click="runCircumferenceEstimate"
+          >
+            {{ t('analyzer.gear.estimateFromLog') }}
+          </button>
+          <p v-if="estimateDisabledReason" class="hint inline-hint">{{ t(estimateDisabledReason) }}</p>
+          <p v-else-if="estimateResult" class="hint inline-hint estimate-ok">
+            {{
+              t('analyzer.gear.estimateApplied', {
+                mm: estimateResult.circumferenceMm.toFixed(0),
+                n: estimateResult.sampleCount,
+              })
+            }}
+          </p>
+          <p v-else-if="estimateFailed" class="hint inline-hint estimate-err">
+            {{ t('analyzer.gear.estimateFailed') }}
+          </p>
         </div>
       </div>
 
@@ -812,6 +920,31 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 }
 .inline-hint {
   align-self: center;
+}
+.apply-btn {
+  align-self: center;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.apply-btn:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.apply-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.estimate-ok {
+  color: var(--color-accent);
+}
+.estimate-err {
+  color: #e63946;
 }
 .inversion-circ {
   margin-top: 4px;
