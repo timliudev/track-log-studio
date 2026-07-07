@@ -6,6 +6,7 @@ import { createI18n } from 'vue-i18n'
 import GearPanel from '@/features/analyzer/GearPanel.vue'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
+import { vTooltip } from '@/directives/tooltip'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 
@@ -49,7 +50,7 @@ function mountPanel(session: LogSession | null) {
   })
   return mount(GearPanel, {
     props: { session },
-    global: { plugins: [i18n] },
+    global: { plugins: [i18n], directives: { tooltip: vTooltip } },
   })
 }
 

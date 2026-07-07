@@ -61,7 +61,7 @@ function resetAll(): void {
         <div class="nudge">
           <button
             type="button"
-            :title="t('analyzer.alignEarlier')"
+            v-tooltip="t('analyzer.alignEarlier')"
             :aria-label="t('analyzer.alignEarlier')"
             @click="nudge(lap.index, -1)"
           >
@@ -72,7 +72,7 @@ function resetAll(): void {
           </span>
           <button
             type="button"
-            :title="t('analyzer.alignLater')"
+            v-tooltip="t('analyzer.alignLater')"
             :aria-label="t('analyzer.alignLater')"
             @click="nudge(lap.index, 1)"
           >
@@ -83,7 +83,7 @@ function resetAll(): void {
           type="button"
           class="reset"
           :disabled="lapStore.offsetOf(lap.index, xAxis) === 0"
-          :title="t('analyzer.alignResetLap')"
+          v-tooltip="t('analyzer.alignResetLap')"
           :aria-label="t('analyzer.alignResetLap')"
           @click="lapStore.resetOffset(lap.index)"
         >

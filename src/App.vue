@@ -5,6 +5,7 @@ import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
+import GithubStarButton from '@/components/GithubStarButton.vue'
 
 // Lazy tab views: async imports keep each top-level view in its own chunk so
 // heavy per-tab dependencies (notably grid-layout-plus + interactjs pulled in
@@ -52,6 +53,9 @@ const buildDate = __BUILD_DATE__
       <div class="brand">
         <h1 class="brand-title">{{ t('app.title') }}</h1>
         <span class="brand-subtitle">{{ t('app.subtitle') }}</span>
+      </div>
+      <div class="topbar-actions">
+        <GithubStarButton />
       </div>
     </header>
 
@@ -146,6 +150,11 @@ const buildDate = __BUILD_DATE__
 .brand-subtitle {
   font-size: 0.78rem;
   color: var(--color-text-muted);
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
 }
 .tabs {
   display: flex;

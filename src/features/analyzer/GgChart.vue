@@ -145,6 +145,16 @@ function buildOption(): echarts.EChartsCoreOption {
     },
     tooltip: {
       trigger: 'item',
+      // Themed to match the shared v-tooltip bubble (src/directives/tooltip.ts)
+      // instead of echarts' default square, always-dark box — rounded corners
+      // + surface/border/text colours that follow light/dark (buildOption()
+      // re-reads these on every theme change via the MutationObserver below).
+      backgroundColor: themeColor('--color-surface', '#fff'),
+      borderColor: themeColor('--color-border', '#ccc'),
+      borderWidth: 1,
+      borderRadius: parseFloat(themeColor('--radius', '8')) || 8,
+      textStyle: { color: themeColor('--color-text', '#1a1c20') },
+      extraCssText: 'box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);',
       formatter: (p: { seriesName?: string; value?: number[] }) => {
         const v = p.value ?? [0, 0]
         const unit = square ? ' g' : ''

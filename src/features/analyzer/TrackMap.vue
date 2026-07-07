@@ -887,7 +887,7 @@ watch(() => props.extremaMarkers, () => draw())
       ref="canvas"
       class="track"
       :class="{ fill: fillHeight }"
-      :title="t('analyzer.zoomHint')"
+      v-tooltip="t('analyzer.zoomHint')"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
