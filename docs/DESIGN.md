@@ -405,7 +405,7 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 > **格式對稱補強**：**VBO 已可匯入**（feature/vbo-import，`parseVbo` + `VboImporter`），
 > 與既有 VBO 匯出形成對稱，**分析器可直接開啟 `.vbo`**。匯入 / 匯出 / `LogSession` 的整體
 > 格式轉換架構與擴充計畫見 [`ARCHITECTURE-FORMATS.md`](./ARCHITECTURE-FORMATS.md)；
-> 二進位 / ZIP 格式（XRK / RCZ / Qstarz）研究見 [`FORMAT-SUPPORT-RESEARCH.md`](./FORMAT-SUPPORT-RESEARCH.md)。
+> 二進位 / ZIP 格式（XRK / RCZ / Qstarz）研究見 [`FORMAT-SUPPORT-RESEARCH.md`](./specs/FORMAT-SUPPORT-RESEARCH.md)。
 
 ### 新增點子（2026-06-23 實機回饋，待細化）
 - ~~**快速篩選無用圈（時間帶過濾）**：設一個有效圈速區間，超出者自動標記無用圈剔除。

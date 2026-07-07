@@ -1,7 +1,7 @@
 # 雲端賽道機制設計文件（A2 自動套用 + A3 公開賽道庫）
 
 > 狀態：**第一、二階段已實作**（`feature/cloud-track` 分支，未合併 develop）。
-> 對應 [`docs/NIGHT-WORK-2026-07-03.md`](./NIGHT-WORK-2026-07-03.md) T5、
+> 對應 [`docs/journal/NIGHT-WORK-2026-07-03.md`](./journal/NIGHT-WORK-2026-07-03.md) T5、
 > [`docs/DESIGN.md`](./DESIGN.md) §11b「Track 獨立匯入檔 + 雲端同步（分流儲存）」點子的具體化。
 > 最後更新：2026-07-05。
 >
