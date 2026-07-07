@@ -90,7 +90,7 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
         class="tc-swatch"
         :class="{ active: analyzer.trackColormap === id }"
         :style="{ background: colormapPreview(id) }"
-        :title="id"
+        v-tooltip="id"
         @click="analyzer.setTrackColormap(id)"
       />
     </div>
