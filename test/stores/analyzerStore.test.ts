@@ -120,6 +120,25 @@ describe('analyzerStore', () => {
     s.setCursor(null)
     expect(s.cursorIdx).toBeNull()
   })
+
+  it('toggleOverlayFile adds/removes a file id from the track-map overlay set', () => {
+    const s = useAnalyzerStore()
+    expect(s.overlayFileIds).toEqual([])
+    s.toggleOverlayFile(7)
+    expect(s.overlayFileIds).toEqual([7])
+    s.toggleOverlayFile(9)
+    expect(s.overlayFileIds).toEqual([7, 9])
+    s.toggleOverlayFile(7)
+    expect(s.overlayFileIds).toEqual([9])
+  })
+
+  it('clearOverlayFiles empties the track-map overlay set', () => {
+    const s = useAnalyzerStore()
+    s.toggleOverlayFile(1)
+    s.toggleOverlayFile(2)
+    s.clearOverlayFiles()
+    expect(s.overlayFileIds).toEqual([])
+  })
 })
 
 /** T5 — chart-card persistence: added charts + their config survive a
