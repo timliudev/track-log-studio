@@ -60,7 +60,7 @@ function hasOffset(index: number): boolean {
           <button
             type="button"
             class="up"
-            :title="t('analyzer.mapNorth')"
+            v-tooltip="t('analyzer.mapNorth')"
             :aria-label="t('analyzer.mapNorth')"
             @click="nudge(lap.index, 0, 1)"
           >
@@ -69,7 +69,7 @@ function hasOffset(index: number): boolean {
           <button
             type="button"
             class="left"
-            :title="t('analyzer.mapWest')"
+            v-tooltip="t('analyzer.mapWest')"
             :aria-label="t('analyzer.mapWest')"
             @click="nudge(lap.index, -1, 0)"
           >
@@ -78,7 +78,7 @@ function hasOffset(index: number): boolean {
           <button
             type="button"
             class="right"
-            :title="t('analyzer.mapEast')"
+            v-tooltip="t('analyzer.mapEast')"
             :aria-label="t('analyzer.mapEast')"
             @click="nudge(lap.index, 1, 0)"
           >
@@ -87,7 +87,7 @@ function hasOffset(index: number): boolean {
           <button
             type="button"
             class="down"
-            :title="t('analyzer.mapSouth')"
+            v-tooltip="t('analyzer.mapSouth')"
             :aria-label="t('analyzer.mapSouth')"
             @click="nudge(lap.index, 0, -1)"
           >
@@ -101,7 +101,7 @@ function hasOffset(index: number): boolean {
           type="button"
           class="reset"
           :disabled="!hasOffset(lap.index)"
-          :title="t('analyzer.mapAlignResetLap')"
+          v-tooltip="t('analyzer.mapAlignResetLap')"
           :aria-label="t('analyzer.mapAlignResetLap')"
           @click="lapStore.resetMapOffset(lap.index)"
         >

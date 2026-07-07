@@ -72,3 +72,31 @@ body {
 #app {
   min-height: 100%;
 }
+
+/* Shared v-tooltip bubble (src/directives/tooltip.ts) — rounded + themed
+   replacement for the native `title` attribute, which browsers render as an
+   unstyleable square OS-chrome box. A single instance is created lazily and
+   repositioned per hover/focus target instead of one per element. */
+.app-tooltip {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1000;
+  max-width: 260px;
+  width: max-content;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.app-tooltip.is-visible {
+  opacity: 1;
+}
