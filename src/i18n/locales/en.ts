@@ -242,6 +242,11 @@ export default {
       session: 'Whole session',
       lapSeries: 'Lap {n}',
       loading: 'Loading chart component…',
+      aspectLabel: 'Axis scaling',
+      aspectEqual: '1:1',
+      aspectAuto: 'Auto',
+      aspectEqualHint: 'Equal axis scaling — the same value span covers the same pixels on X and Y (a circle plots as a circle).',
+      aspectAutoHint: 'Auto scaling — each axis ranges independently to fill the card.',
     },
     trackFile: {
       export: 'Export track setup',

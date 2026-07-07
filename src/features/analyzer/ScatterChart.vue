@@ -64,6 +64,14 @@ function setY(name: string | null): void {
   analyzer.setChartXY(props.chart.id, 'y', name)
 }
 
+// XY-aspect feature — persisted per chart card alongside the X/Y picks
+// (chartConfigs.ts / aracer-loga.analyzerCharts.v1); ON by default for both
+// new and pre-feature persisted charts (parseCharts backfills true).
+const equalAspect = computed(() => props.chart.equalAspect)
+function setEqualAspect(on: boolean): void {
+  analyzer.setChartEqualAspect(props.chart.id, on)
+}
+
 // Scale is only meaningful for aRacer's milli-g force channels; any other
 // channel pair plots in its native units (raw scale = 1).
 function looksLikeForce(name: string | null): boolean {
@@ -136,6 +144,24 @@ const axisMode = computed<'square' | 'auto'>(() => {
         <span class="picker-label">{{ t('analyzer.gg.yAxis') }}</span>
         <SearchableSelect :model-value="yChannel" :options="allChannels" @update:model-value="setY" />
       </div>
+      <div class="aspect" role="group" :aria-label="t('analyzer.gg.aspectLabel')">
+        <button
+          type="button"
+          :class="{ active: equalAspect }"
+          v-tooltip="t('analyzer.gg.aspectEqualHint')"
+          @click="setEqualAspect(true)"
+        >
+          {{ t('analyzer.gg.aspectEqual') }}
+        </button>
+        <button
+          type="button"
+          :class="{ active: !equalAspect }"
+          v-tooltip="t('analyzer.gg.aspectAutoHint')"
+          @click="setEqualAspect(false)"
+        >
+          {{ t('analyzer.gg.aspectAuto') }}
+        </button>
+      </div>
       <button type="button" class="remove" @click="analyzer.removeChart(chart.id)">
         {{ t('analyzer.removeChart') }}
       </button>
@@ -150,6 +176,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
       :x-name="xChannel"
       :y-name="yChannel"
       :fill-height="fillHeight"
+      :equal-aspect="equalAspect"
     />
   </section>
 </template>
@@ -203,6 +230,28 @@ const axisMode = computed<'square' | 'auto'>(() => {
 }
 .picker-label {
   font-size: 0.85rem;
+}
+/* Same segmented-toggle look as TimeSeriesChart's timeline/overlay `.mode`
+   buttons — two mutually exclusive presentation modes for one chart. */
+.aspect {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  align-self: flex-end;
+}
+.aspect button {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: none;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.aspect button.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
 }
 .remove {
   background: var(--color-bg);

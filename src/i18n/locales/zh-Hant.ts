@@ -239,6 +239,11 @@ export default {
       session: '整份記錄',
       lapSeries: '第 {n} 圈',
       loading: '圖表元件載入中…',
+      aspectLabel: '軸縮放模式',
+      aspectEqual: '1:1',
+      aspectAuto: '自動',
+      aspectEqualHint: '等比例：X、Y 軸相同數值跨度佔相同像素（圓形資料畫出來就是圓形）。',
+      aspectAutoHint: '自動縮放：兩軸各自依資料範圍鋪滿卡片。',
     },
     trackFile: {
       export: '匯出賽道設定',

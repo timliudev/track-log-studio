@@ -153,6 +153,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         id: nextId++,
         xChannel: initial?.xChannel ?? null,
         yChannel: initial?.yChannel ?? null,
+        equalAspect: true,
       })
     } else {
       charts.value.push({ kind: 'timeseries', id: nextId++, channels: [], mode: 'timeline' })
@@ -183,6 +184,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     else chart.yChannel = channel
   }
 
+  /** Toggle a scatter chart's 1:1 axis-scaling setting — persisted alongside
+   *  its X/Y channel picks (same "one field, one setter, no-op on the wrong
+   *  chart kind" contract as `setChartXY`). */
+  function setChartEqualAspect(id: number, equalAspect: boolean): void {
+    const chart = charts.value.find((c) => c.id === id)
+    if (!chart || chart.kind !== 'scatter') return
+    chart.equalAspect = equalAspect
+  }
+
   return {
     activeFileId,
     xAxis,
@@ -210,5 +220,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     setChartChannels,
     setChartMode,
     setChartXY,
+    setChartEqualAspect,
   }
 })

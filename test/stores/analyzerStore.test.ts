@@ -25,7 +25,7 @@ describe('analyzerStore', () => {
     expect(s.charts[1].kind).toBe('timeseries')
   })
 
-  it('addChart("scatter") appends a scatter chart, defaulting to empty pickers', () => {
+  it('addChart("scatter") appends a scatter chart, defaulting to empty pickers and 1:1 axes', () => {
     const s = useAnalyzerStore()
     s.addChart('scatter')
     const chart = s.charts[1]
@@ -33,7 +33,24 @@ describe('analyzerStore', () => {
     if (chart.kind === 'scatter') {
       expect(chart.xChannel).toBeNull()
       expect(chart.yChannel).toBeNull()
+      expect(chart.equalAspect).toBe(true)
     }
+  })
+
+  it('setChartEqualAspect toggles only the targeted scatter chart; no-op on timeseries', () => {
+    const s = useAnalyzerStore()
+    const timeseriesId = s.charts[0].id
+    s.addChart('scatter')
+    s.addChart('scatter')
+    const [id1, id2] = [s.charts[1].id, s.charts[2].id]
+    s.setChartEqualAspect(id1, false)
+    s.setChartEqualAspect(timeseriesId, false) // wrong kind — must not throw/mutate
+    const c1 = s.charts.find((c) => c.id === id1)
+    const c2 = s.charts.find((c) => c.id === id2)
+    if (c1?.kind === 'scatter') expect(c1.equalAspect).toBe(false)
+    if (c2?.kind === 'scatter') expect(c2.equalAspect).toBe(true)
+    s.setChartEqualAspect(id1, true)
+    if (c1?.kind === 'scatter') expect(c1.equalAspect).toBe(true)
   })
 
   it('addChart("scatter", initial) seeds the initial X/Y channels', () => {
@@ -167,8 +184,21 @@ describe('analyzerStore — chart persistence (T5)', () => {
     expect(s2.charts).toEqual([
       { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
       { kind: 'timeseries', id: 2, channels: ['RPM', 'T_Eng'], mode: 'overlay' },
-      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' },
+      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true },
     ])
+  })
+
+  it('a toggled-off equalAspect survives reload (persisted with the chart card)', async () => {
+    const s = useAnalyzerStore()
+    s.addChart('scatter', { xChannel: 'RPM', yChannel: 'Vehicle_Speed' })
+    s.setChartEqualAspect(s.charts[1].id, false)
+    await nextTick()
+
+    setActivePinia(createPinia())
+    const s2 = useAnalyzerStore()
+    const restored = s2.charts.find((c) => c.kind === 'scatter')
+    expect(restored?.kind).toBe('scatter')
+    if (restored?.kind === 'scatter') expect(restored.equalAspect).toBe(false)
   })
 
   it('new ids continue past the restored maximum (no card-id collisions)', async () => {

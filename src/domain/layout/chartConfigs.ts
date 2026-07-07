@@ -40,6 +40,11 @@ export interface ScatterChartConfig {
   id: number
   xChannel: string | null
   yChannel: string | null
+  /** Whether the X/Y axes are scaled 1:1 (equal pixels per data unit, so a
+   *  circle plots as a circle) vs each axis auto-ranging independently to
+   *  fill the card. Defaults to true — see GgChart.vue's `equalAspectGrid`
+   *  for how this survives a non-square card and window/card resizes. */
+  equalAspect: boolean
 }
 
 /** One chart on the analyzer dashboard, discriminated on `kind`. */
@@ -97,6 +102,10 @@ export function parseCharts(raw: string | null): ChartConfig[] | null {
           id,
           xChannel: typeof it.xChannel === 'string' ? it.xChannel : null,
           yChannel: typeof it.yChannel === 'string' ? it.yChannel : null,
+          // Missing/invalid (e.g. an older persisted chart from before this
+          // field existed) defaults to true — equal-aspect is the new default
+          // behaviour, not an opt-in.
+          equalAspect: typeof it.equalAspect === 'boolean' ? it.equalAspect : true,
         })
         seen.add(id)
       }

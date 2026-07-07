@@ -53,6 +53,84 @@ export function measuredSize(
     height: fillHeight && clientHeight > 0 ? clientHeight : fixedHeight,
   }
 }
+
+/**
+ * XY-aspect feature — the raw [min,max] data extent across every series'
+ * points, per axis. `Infinity`/`-Infinity` fields when there are no points
+ * (caller falls back to a default range via {@link paddedAxisRange}, which
+ * treats non-finite input as "no data yet").
+ */
+export function dataExtent(series: GgSeries[]): { xMin: number; xMax: number; yMin: number; yMax: number } {
+  let xMin = Infinity
+  let xMax = -Infinity
+  let yMin = Infinity
+  let yMax = -Infinity
+  for (const s of series) {
+    for (const [x, y] of s.points) {
+      if (x < xMin) xMin = x
+      if (x > xMax) xMax = x
+      if (y < yMin) yMin = y
+      if (y > yMax) yMax = y
+    }
+  }
+  return { xMin, xMax, yMin, yMax }
+}
+
+/**
+ * Pad a raw [min,max] extent by a fraction of its span for headroom, so
+ * points don't sit flush against the plot edge — same spirit as
+ * `computeMaxAbs`'s "round up to the nearest 0.5g" headroom for the G-G
+ * square axes, generalised to any (possibly unsigned/asymmetric) channel
+ * pair. A constant channel (min === max) pads by a fraction of its
+ * magnitude instead (falling back to ±1 around zero); a non-finite extent
+ * (no points yet) falls back to a fixed 0..1 range so callers always get a
+ * usable range to size a grid from.
+ */
+export function paddedAxisRange(min: number, max: number, padFrac = 0.08): { min: number; max: number } {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 1 }
+  if (min === max) {
+    const pad = Math.abs(min) * padFrac || 1
+    return { min: min - pad, max: max + pad }
+  }
+  const span = max - min
+  const pad = span * padFrac
+  return { min: min - pad, max: max + pad }
+}
+
+/**
+ * XY-aspect feature — grid pixel insets (left/right/top/bottom) that give
+ * BOTH axes the SAME pixels-per-data-unit, fit within the container's
+ * plotting area (container size minus the `chrome` reserved for axis
+ * labels/names) and centred — letterboxing whichever axis has spare room,
+ * the same way a `background-size: contain` image is centred rather than
+ * stretched. This is what makes a scatter's 1:1 toggle hold on a non-square
+ * card (dashboard cards are essentially never square) AND survive a
+ * window/card resize (the caller recomputes this on every resize — see
+ * GgChart's `resize()` — since it depends on the CURRENT container size).
+ */
+export function equalAspectGrid(
+  containerW: number,
+  containerH: number,
+  chrome: { left: number; right: number; top: number; bottom: number },
+  xRange: { min: number; max: number },
+  yRange: { min: number; max: number },
+): { left: number; right: number; top: number; bottom: number } {
+  const availW = Math.max(containerW - chrome.left - chrome.right, 1)
+  const availH = Math.max(containerH - chrome.top - chrome.bottom, 1)
+  const xSpan = Math.max(xRange.max - xRange.min, 1e-9)
+  const ySpan = Math.max(yRange.max - yRange.min, 1e-9)
+  const scale = Math.min(availW / xSpan, availH / ySpan)
+  const plotW = xSpan * scale
+  const plotH = ySpan * scale
+  const extraW = Math.max(availW - plotW, 0)
+  const extraH = Math.max(availH - plotH, 0)
+  return {
+    left: chrome.left + extraW / 2,
+    right: chrome.right + extraW / 2,
+    top: chrome.top + extraH / 2,
+    bottom: chrome.bottom + extraH / 2,
+  }
+}
 </script>
 
 <script setup lang="ts">
@@ -86,6 +164,13 @@ const props = defineProps<{
    *  CSS instead of the fixed `height` prop — see UPlotChart's `fillHeight`
    *  for the same pattern; `resize()` reads the host's own clientHeight. */
   fillHeight?: boolean
+  /** XY-aspect feature — true (default) scales X/Y at the SAME pixels-per-
+   *  data-unit (a circle plots as a circle), false lets each axis auto-range
+   *  independently to fill the card. Defaults to true when omitted so the
+   *  G-G force chart (axisMode 'square') gets a TRUE circle, not just a
+   *  symmetric-about-0 numeric range that only looked square by coincidence
+   *  of the card happening to be roughly square — see `equalAspectGrid`. */
+  equalAspect?: boolean
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -118,11 +203,30 @@ function buildOption(): echarts.EChartsCoreOption {
   const axisStroke = themeColor('--color-text-muted', '#888')
   const gridStroke = themeColor('--color-border', '#ccc')
   const square = (props.axisMode ?? 'auto') === 'square'
-  const bound = square ? computeMaxAbs(props.series) : undefined
+  const equal = props.equalAspect ?? true
+
+  // Explicit per-axis ranges. Needed for BOTH 1:1 flavours: echarts' own
+  // auto-ranging applies nice-tick rounding per axis independently, which
+  // would silently change each axis's data span and break any pixel ratio
+  // computed from it — so when `equal` is on, the ranges are pinned here and
+  // the grid insets below do the rest. `square` keeps its historic
+  // symmetric-about-0 range even when `equal` is toggled off (that numeric
+  // symmetry predates the 1:1 feature and is a property of the friction-
+  // circle reading, not of pixel scaling).
+  let xRange: { min: number; max: number } | null = null
+  let yRange: { min: number; max: number } | null = null
+  if (square) {
+    const bound = computeMaxAbs(props.series)
+    xRange = { min: -bound, max: bound }
+    yRange = { min: -bound, max: bound }
+  } else if (equal) {
+    const ext = dataExtent(props.series)
+    xRange = paddedAxisRange(ext.xMin, ext.xMax)
+    yRange = paddedAxisRange(ext.yMin, ext.yMax)
+  }
 
   const sharedAxis = {
     type: 'value' as const,
-    ...(square ? { min: -bound!, max: bound! } : {}),
     axisLine: { lineStyle: { color: axisStroke } },
     axisLabel: { color: axisStroke },
     splitLine: { lineStyle: { color: gridStroke } },
@@ -133,16 +237,24 @@ function buildOption(): echarts.EChartsCoreOption {
   // axis's tick labels) has room without being clipped by the chart edge.
   const hasXName = Boolean(props.xName)
   const hasYName = Boolean(props.yName)
+  const chrome = {
+    left: hasYName ? 64 : 48,
+    right: 16,
+    top: 16,
+    bottom: hasXName ? 56 : 40,
+  }
+  // 1:1 mode: measure the CURRENT container and letterbox the plot area so
+  // both axes get the same pixels-per-data-unit — recomputed on every
+  // render/resize (see `resize()`), which is what keeps the ratio true after
+  // a window or dashboard-card resize.
+  const grid =
+    equal && xRange && yRange
+      ? equalAspectGrid(hostSize().width, hostSize().height, chrome, xRange, yRange)
+      : chrome
 
   return {
     animation: false,
-    grid: {
-      left: hasYName ? 64 : 48,
-      right: 16,
-      top: 16,
-      bottom: hasXName ? 56 : 40,
-      containLabel: false,
-    },
+    grid: { ...grid, containLabel: false },
     tooltip: {
       trigger: 'item',
       // Themed to match the shared v-tooltip bubble (src/directives/tooltip.ts)
@@ -161,8 +273,16 @@ function buildOption(): echarts.EChartsCoreOption {
         return `${p.seriesName ?? ''}<br/>X: ${v[0].toFixed(2)}${unit}<br/>Y: ${v[1].toFixed(2)}${unit}`
       },
     },
-    xAxis: { ...sharedAxis, ...axisNameFields(props.xName) },
-    yAxis: { ...sharedAxis, ...axisNameFields(props.yName) },
+    xAxis: {
+      ...sharedAxis,
+      ...(xRange ? { min: xRange.min, max: xRange.max } : {}),
+      ...axisNameFields(props.xName),
+    },
+    yAxis: {
+      ...sharedAxis,
+      ...(yRange ? { min: yRange.min, max: yRange.max } : {}),
+      ...axisNameFields(props.yName),
+    },
     series: props.series.map((s) => ({
       name: s.name,
       type: 'scatter',
@@ -205,7 +325,12 @@ function resize(): void {
   // T3 — MUST pass the measured size: an argument-less resize() would reuse
   // the init-time explicit width/height stored by zrender and never follow
   // the container. See measuredSize's doc.
-  if (chart) chart.resize(hostSize())
+  if (!chart) return
+  chart.resize(hostSize())
+  // 1:1 mode letterboxes the grid from the CONTAINER size (see
+  // equalAspectGrid), so a resize invalidates the current grid insets —
+  // rebuild the option at the new size to keep the pixel ratio true.
+  if (props.equalAspect ?? true) render()
 }
 
 onMounted(() => {
@@ -230,7 +355,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.series, props.axisMode, props.xName, props.yName],
+  () => [props.series, props.axisMode, props.xName, props.yName, props.equalAspect],
   () => render(),
   { deep: false },
 )
