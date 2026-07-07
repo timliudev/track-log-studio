@@ -88,7 +88,7 @@ export default defineConfig(({ mode }) => {
           name: 'Track Log Studio',
           short_name: 'TrackLogStudio',
           description:
-            'Track Log Studio — convert aRacer ECU .loga logs to RaceChrono .nmea and analyse laps & telemetry.',
+            'Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry.',
           lang: 'zh-Hant',
           start_url: '/',
           display: 'standalone',
