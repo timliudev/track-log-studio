@@ -52,13 +52,12 @@ describe('DashboardCard (scaffold smoke test)', () => {
     expect(wrapper.emitted('update:collapsed')).toEqual([[true]])
   })
 
-  it('only shows the pin button when showPin is true', () => {
-    expect(mountCard({ showPin: false }).find('.pin-btn').exists()).toBe(false)
-    expect(mountCard({ showPin: true }).find('.pin-btn').exists()).toBe(true)
+  it('always shows the pin button (釘選 now works at every breakpoint, not just mobile)', () => {
+    expect(mountCard().find('.pin-btn').exists()).toBe(true)
   })
 
   it('emits update:pinned when the pin button is clicked', async () => {
-    const wrapper = mountCard({ showPin: true, pinned: false })
+    const wrapper = mountCard({ pinned: false })
     await wrapper.find('.pin-btn').trigger('click')
     expect(wrapper.emitted('update:pinned')).toEqual([[true]])
   })

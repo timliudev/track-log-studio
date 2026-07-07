@@ -20,19 +20,28 @@ import { useI18n } from 'vue-i18n'
  * (shrinking the GridItem's own `h` to a header-height value) would need to
  * remember + restore a "pre-collapse height" and would fight grid-layout-
  * plus's own vertical-compaction pass moving OTHER items into the reclaimed
- * space on every collapse/expand — body-hide sidesteps both problems and is
- * the same pattern used for the mobile pin (CSS-only, state lives one level
- * up in usePanelState). Pin is rendered here as a header button but is a
- * MOBILE-ONLY affordance (`showPin` — AnalyzerView passes it as `!isMobile
- * ? false : ...`): sticky positioning doesn't make sense inside a 2D
- * drag/resize grid, so the desktop card simply never shows the pin button.
+ * space on every collapse/expand — body-hide sidesteps both problems.
+ *
+ * 釘選 (pin) — redesigned to work at BOTH breakpoints (previously mobile-only,
+ * CSS `position: sticky`, which only worked because mobile's single-column
+ * layout is normal document flow; desktop's grid items are absolutely
+ * positioned via CSS transforms, where `position: sticky` does nothing).
+ * Pin is now purely a "which card is this" flag: `pinned` only drives this
+ * component's OWN chrome (button active-state, `.pinned` size/shadow
+ * styling) — the actual sticky-while-scrolling behaviour lives one level up,
+ * in AnalyzerView, which Teleports a pinned card's markup out of the grid
+ * into a single sticky anchor and leaves an empty placeholder in the card's
+ * original grid slot (so the layout doesn't jump). This component has no
+ * idea whether it's currently rendering inside the grid or inside that
+ * anchor — same props/emits either way, which is what makes the Teleport
+ * possible without DashboardCard itself changing. Only one card may be
+ * pinned at a time (enforced by panelState.ts's togglePinned, documented via
+ * the pin button's own tooltip) rather than supporting a multi-pin stack.
  */
 const props = defineProps<{
   title: string
   collapsed?: boolean
   pinned?: boolean
-  /** Show the pin toggle at all (mobile-only — see module doc). */
-  showPin?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -57,7 +66,6 @@ function onTogglePinned(): void {
       <span class="actions">
         <slot name="actions" />
         <button
-          v-if="showPin"
           type="button"
           class="icon-btn pin-btn"
           :class="{ active: pinned }"
@@ -201,16 +209,13 @@ function onTogglePinned(): void {
   align-items: stretch;
 }
 
-/* #9 — mobile pin: sticky to the top of the single-column flow so the rest
-   of the page's cards scroll underneath it. Only meaningful at the mobile
-   breakpoint (AnalyzerView only ever passes showPin there), but the rule
-   itself is written to only bite when .pinned is actually set (state that
-   only gets toggled true via the mobile-only button), so it's harmless left
-   unguarded by a media query. */
+/* 釘選 (pin) chrome: the STICKY positioning itself now lives on AnalyzerView's
+   pinned-card anchor (see its module doc) — a pinned card's markup is
+   Teleported there, so this class only needs to bound its own size/shape
+   once it's inside that anchor (an unbounded body could otherwise grow to
+   dominate the screen) and add a visual "floating" cue. Applies identically
+   at both breakpoints now. */
 .dashboard-card.pinned {
-  position: sticky;
-  top: 0;
-  z-index: 20;
   max-height: 45vh;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }
