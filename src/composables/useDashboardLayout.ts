@@ -49,8 +49,16 @@ const COLS: Breakpoints = { lg: GRID_COLS, md: GRID_COLS, sm: GRID_COLS, xs: 1, 
  * `layout` persistence watcher below still hard-guards against writing while
  * on the mobile breakpoint as belt-and-braces (the mobile path never assigns
  * into `layout` anyway).
+ *
+ * `isLocked` (鎖定布局, useLayoutLock) is an optional grid-wide override: when
+ * true, BOTH isDraggable and isResizable go false regardless of breakpoint —
+ * folded in here (rather than left to the caller) so every consumer of this
+ * composable's isDraggable/isResizable automatically respects the lock.
  */
-export function useDashboardLayout(chartIds: Ref<number[]> | ComputedRef<number[]>): {
+export function useDashboardLayout(
+  chartIds: Ref<number[]> | ComputedRef<number[]>,
+  isLocked?: Ref<boolean> | ComputedRef<boolean>,
+): {
   layout: Ref<DashboardLayoutItem[]>
   cols: Breakpoints
   breakpoints: Breakpoints
@@ -70,13 +78,25 @@ export function useDashboardLayout(chartIds: Ref<number[]> | ComputedRef<number[
   onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
   const isMobile = computed(() => windowWidth.value < MOBILE_BREAKPOINT_PX)
-  // Dragging is available at BOTH breakpoints now (#9 revised): desktop = free
-  // 2-D drag+resize; mobile = single-column vertical drag-to-REORDER only, so
-  // resize is disabled there (a full-width card has nothing to resize) while
-  // drag stays on. The card-header handle (`dragAllowFrom=".drag-handle"`) is
-  // the same on both, so content interactions never start a drag.
-  const isDraggable = computed(() => true)
-  const isResizable = computed(() => !isMobile.value)
+  // Dragging is available at BOTH breakpoints (#9 revised): desktop = free
+  // 2-D drag+resize; mobile = single-column vertical drag-to-REORDER. The
+  // card-header handle (`dragAllowFrom=".drag-handle"`) is the same on both,
+  // so content interactions never start a drag.
+  //
+  // Resize is now ALSO available on mobile (task: "手機模式下目前不能調整
+  // grid 大小") — a full-width single-column card can't usefully change ITS
+  // width (there's only 1 column, so grid-item.vue's own x/w clamping caps
+  // any horizontal drag back to w=1), but its HEIGHT is exactly as
+  // meaningful to resize as a desktop card's, and interactjs (the drag/resize
+  // engine grid-layout-plus uses) already handles touch pointers natively —
+  // the only reason mobile resize was off before was this explicit flag, not
+  // a technical limitation. AnalyzerView enlarges the resize-handle hit area
+  // on narrow viewports so it stays comfortably tappable.
+  //
+  // `isLocked` (鎖定布局) wins over both when set: locking disables drag AND
+  // resize grid-wide regardless of breakpoint, until unlocked again.
+  const isDraggable = computed(() => !(isLocked?.value ?? false))
+  const isResizable = computed(() => !(isLocked?.value ?? false))
 
   // Column count driven explicitly by breakpoint (we no longer use the
   // library's `responsive` reflow — the mobile 1-column layout is built by us
