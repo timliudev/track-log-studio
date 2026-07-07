@@ -4,12 +4,23 @@ import { useI18n } from 'vue-i18n'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LapLine } from '@/domain/analysis/laps'
 import { colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
+import type { TrackOverlayEntry } from '@/domain/analysis/trackOverlay'
 import { fitProjection, type MapProjection } from './projection'
 
 const props = defineProps<{
   track: GpsTrack | null
   cursorIdx: number | null
   line: LapLine | null
+  /**
+   * Multi-file track-map overlay (賽道地圖多檔疊圖): OTHER loaded sessions'
+   * racing lines, drawn faint (see OVERLAY_ALPHA) alongside `track`'s own
+   * full-opacity polyline so the active session always reads as the
+   * prominent one. Purely visual — no cursor scrub / line-drag / gate-drag
+   * hit-testing ever considers these (only `track`'s own px/py feed pointer
+   * interactions), so existing map interactions on the active session are
+   * unaffected by however many overlays are shown. See useTrackOverlay.ts.
+   */
+  overlayTracks?: TrackOverlayEntry[]
   /**
    * Selected laps to draw, each as a colored [startIdx, endIdx] segment. An
    * optional `offset` (metres east/north) shifts just that lap's polyline so
@@ -82,6 +93,13 @@ const GATE_COLOR = '#00c2ff'
 // Number of discrete colour buckets: caps strokes per frame regardless of
 // sample count, so the heatmap stays as cheap as the plain single-stroke track.
 const HEAT_BUCKETS = 32
+
+// Multi-file overlay styling: faint + thin so an overlaid session reads as
+// background context, never competing with the active session's full-opacity,
+// thicker (2px+) polyline drawn on top of it (see the draw() painter's-order
+// comment above the overlay stroke loop).
+const OVERLAY_ALPHA = 0.45
+const OVERLAY_LINE_WIDTH = 1.5
 const emit = defineEmits<{
   cursor: [number | null]
   'update:line': [LapLine]
@@ -168,7 +186,17 @@ function draw(): void {
     return
   }
 
-  const base = fitProjection(track, w, h, PAD)
+  // Multi-file overlay (賽道地圖多檔疊圖): fit the projection to the COMBINED
+  // bounds of the active track + every overlaid session, not just the active
+  // one — otherwise an overlay whose bbox extends past the active track's own
+  // would draw (partly) off-canvas. See fitProjection's multi-track doc.
+  const overlayTracks = props.overlayTracks ?? []
+  const base = fitProjection(
+    overlayTracks.length ? [track, ...overlayTracks.map((o) => o.track)] : track,
+    w,
+    h,
+    PAD,
+  )
   if (!base) {
     projection = null
     return
@@ -248,6 +276,41 @@ function draw(): void {
     focusMaxY = NaN
   }
 
+  // Multi-file overlay: project each OTHER session's track NOW (so its bbox
+  // folds into bMinX/Y..bMaxX/Y above, keeping panning clamped to whatever's
+  // actually drawn) but STROKE it later — right before the active track's own
+  // polyline below — so painter's-order keeps the active session on top.
+  const overlayPixels: { color: string; xs: Float64Array; ys: Float64Array }[] = []
+  for (const entry of overlayTracks) {
+    const ot = entry.track
+    const on = ot.lat.length
+    const oxs = new Float64Array(on)
+    const oys = new Float64Array(on)
+    for (let i = 0; i < on; i++) {
+      if (!ot.valid[i]) {
+        oxs[i] = NaN
+        oys[i] = NaN
+        continue
+      }
+      const p = base.toPixel(ot.lat[i], ot.lon[i])
+      if (p.x < bMinX) bMinX = p.x
+      if (p.x > bMaxX) bMaxX = p.x
+      if (p.y < bMinY) bMinY = p.y
+      if (p.y > bMaxY) bMaxY = p.y
+      oxs[i] = p.x * z + tx
+      oys[i] = p.y * z + ty
+    }
+    overlayPixels.push({ color: entry.color, xs: oxs, ys: oys })
+  }
+  // Re-derive the pan-clamp bbox now that overlay tracks may have widened it
+  // (the assignment above already ran before overlays were folded in).
+  if (bMinX <= bMaxX) {
+    baseMinX = bMinX
+    baseMaxX = bMaxX
+    baseMinY = bMinY
+    baseMaxY = bMaxY
+  }
+
   // Helper: stroke the polyline over sample range [lo, hi] (inclusive), breaking
   // the path across gaps (NaN) so missing fixes don't draw bogus connectors.
   // (dx, dy) is a constant pixel shift applied to this stroke (for #9 lap offset).
@@ -323,6 +386,34 @@ function draw(): void {
       }
       ctx.stroke()
     }
+  }
+
+  // Multi-file overlay: stroke every OTHER session's track now, faint (see
+  // OVERLAY_ALPHA/OVERLAY_LINE_WIDTH), BEFORE anything belonging to the
+  // active session below — painter's-order keeps the active track (and its
+  // heatmap/highlight/start-finish/gates/extrema/cursor) drawn on top, so it
+  // always reads as the prominent one regardless of how many overlays are on.
+  for (const { color, xs, ys } of overlayPixels) {
+    ctx.save()
+    ctx.globalAlpha = OVERLAY_ALPHA
+    ctx.strokeStyle = color
+    ctx.lineWidth = OVERLAY_LINE_WIDTH
+    ctx.beginPath()
+    let onSeg = false
+    for (let i = 0; i < xs.length; i++) {
+      if (Number.isNaN(xs[i])) {
+        onSeg = false
+        continue
+      }
+      if (!onSeg) {
+        ctx.moveTo(xs[i], ys[i])
+        onSeg = true
+      } else {
+        ctx.lineTo(xs[i], ys[i])
+      }
+    }
+    ctx.stroke()
+    ctx.restore()
   }
 
   // Emphasis segments: an explicit lap SELECTION takes precedence (enforced
@@ -879,6 +970,13 @@ watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
 watch(() => props.gates, () => draw())
 watch(() => props.extremaMarkers, () => draw())
+// Multi-file overlay: toggling a session on/off changes what's drawn AND the
+// combined fit (fitProjection bounds), so just redraw — the user's zoom/pan
+// is deliberately left alone (unlike a track IDENTITY change above, an
+// overlay toggle is an additive comparison act, not a context switch; the
+// re-fit only matters at zoom 1, and clampPan keeps any current pan legal
+// against the new bbox on the next gesture).
+watch(() => props.overlayTracks, () => draw())
 </script>
 
 <template>

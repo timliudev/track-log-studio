@@ -10,6 +10,7 @@ import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
 import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
+import { useTrackOverlay } from '@/composables/useTrackOverlay'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
@@ -67,6 +68,19 @@ const { ambiguousMatches, chooseTrack, dismissAmbiguous, appliedSharedTrack, det
   useCircuitPersistence()
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
+
+// Track-map multi-file overlay (賽道地圖多檔疊圖): other loaded sessions'
+// racing lines drawn faint under the active session's own track. The
+// candidate list doubles as the on-map legend (color swatch = the drawn
+// line's color); state lives in analyzerStore.overlayFileIds — see
+// useTrackOverlay.ts.
+const {
+  candidates: overlayCandidates,
+  overlayTracks,
+  toggle: toggleOverlay,
+  clear: clearOverlays,
+} = useTrackOverlay()
+const anyOverlayOn = computed(() => overlayCandidates.value.some((c) => c.active))
 
 const hasEcuLaps = computed(() => session.value?.has('IR_LapNumber') ?? false)
 
@@ -650,10 +664,34 @@ function titleForItemId(id: string): string {
                 :colormap="trackColormap"
                 :gates="mapGates"
                 :extrema-markers="mapExtremaMarkers"
+                :overlay-tracks="overlayTracks"
                 @cursor="analyzer.setCursor"
                 @update:line="lapStore.setLine($event)"
                 @update:gate="onUpdateGate"
               />
+              <!-- Multi-file overlay picker + legend: one checkbox row per
+                   OTHER loaded GPS session; the swatch is the exact color its
+                   faint line is drawn with on the map, so the list doubles as
+                   the legend. Hidden entirely when there's nothing to overlay
+                   (only one file loaded / no other file has GPS). -->
+              <div
+                v-if="overlayCandidates.length > 0"
+                class="overlay-files"
+                role="group"
+                :aria-label="t('analyzer.trackOverlayTitle')"
+              >
+                <span class="overlay-label" v-tooltip="t('analyzer.trackOverlayHint')">
+                  {{ t('analyzer.trackOverlayTitle') }}
+                </span>
+                <label v-for="c in overlayCandidates" :key="c.id" class="overlay-item">
+                  <input type="checkbox" :checked="c.active" @change="toggleOverlay(c.id)" />
+                  <span class="overlay-swatch" :style="{ background: c.color }" />
+                  <span class="overlay-name" :title="c.name">{{ c.name }}</span>
+                </label>
+                <button v-if="anyOverlayOn" type="button" class="overlay-clear" @click="clearOverlays">
+                  {{ t('analyzer.trackOverlayClear') }}
+                </button>
+              </div>
               <div v-if="heatNorm" class="tc-legend">
                 <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
                 <span class="tc-bar" :style="{ background: legendGradient }" />
@@ -1049,6 +1087,60 @@ function titleForItemId(id: string): string {
   margin: calc(var(--space) * 1.5) 0 0;
   font-size: 0.8rem;
   color: var(--color-text-muted);
+}
+/* Multi-file overlay picker/legend under the map — same compact text-row
+   styling as the heatmap legend (.tc-legend) so the map card's footer rows
+   read as one family. */
+.overlay-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: var(--space);
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.overlay-label {
+  flex: 0 0 auto;
+}
+.overlay-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--color-text);
+  max-width: 100%;
+}
+.overlay-item input {
+  accent-color: var(--color-accent);
+  margin: 0;
+}
+.overlay-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 1px var(--color-surface);
+}
+.overlay-name {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overlay-clear {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.overlay-clear:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .laps {
   display: flex;
