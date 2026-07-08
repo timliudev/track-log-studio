@@ -1278,10 +1278,20 @@ function titleForItemId(id: string): string {
 /* Bound the Teleported card so a tall body (e.g. an overlay chart) can't grow
    to dominate the screen once it's floating above the grid — matches
    DashboardCard's own `.pinned` max-height so the two agree on how big a
-   pinned card is allowed to get. */
+   pinned card is allowed to get. `width: min(560px, 100%)` is a DESKTOP-only
+   choice (a floating centered card looks intentional on a wide screen); on
+   mobile (#9 fix) the 560px cap left dead space on either side of the card
+   on any viewport wider than 560px — including exactly 768px, the phone
+   breakpoint itself — so the mobile media query below overrides back to a
+   full-width card, matching every other card's edge-to-edge mobile layout. */
 .pinned-anchor :deep(.dashboard-card) {
   width: min(560px, 100%);
   margin: 0 auto calc(var(--space) * 1.5);
+}
+@media (max-width: 768px) {
+  .pinned-anchor :deep(.dashboard-card) {
+    width: 100%;
+  }
 }
 .pin-placeholder {
   height: 100%;
@@ -1309,6 +1319,25 @@ function titleForItemId(id: string): string {
 }
 .pin-placeholder-text {
   font-size: 0.75rem;
+}
+
+/* #3 — theme the resize handle (grid-layout-plus's `.vgl-item__resizer`,
+   bottom-right corner of every card). The library draws it as a plain
+   right-angle "⌐" made of two straight border edges (`border-right-width` +
+   `border-bottom-width` on its `:before`, see grid-layout-plus's built-in
+   CSS) in a hardcoded dark grey (`--vgl-resizer-border-color: #444`) — this
+   reads as an abrupt, unstyled corner against the rest of the app's rounded,
+   theme-colored chrome (same mismatch the tooltip directive fixed for the
+   native `title` box). Recolor to the theme accent and round the corner
+   where the two border edges meet (`border-radius` on the bottom-right,
+   matching the card's own `--radius`) so it reads as a deliberate grab
+   affordance rather than a stray box corner. */
+.analyzer :deep(.vgl-layout) {
+  --vgl-resizer-border-color: var(--color-accent);
+  --vgl-resizer-border-width: 2px;
+}
+.analyzer :deep(.vgl-item__resizer)::before {
+  border-radius: 0 0 var(--radius) 0;
 }
 
 /* Touch resize (mobile task): the resize handle is grid-layout-plus's own

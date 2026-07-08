@@ -77,7 +77,16 @@ export function useDashboardLayout(
   onMounted(() => window.addEventListener('resize', onResize))
   onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
-  const isMobile = computed(() => windowWidth.value < MOBILE_BREAKPOINT_PX)
+  // #9 fix — inclusive comparison (`<=`) so this JS breakpoint agrees with
+  // every `@media (max-width: 768px)` rule in the app (App.vue's top-nav↔
+  // bottom-nav switch, BottomNav.vue, AnalyzerView.vue's pinned-card width
+  // and resize-handle sizing): a CSS `max-width: 768px` query MATCHES at
+  // exactly 768px, so a strict `<` here disagreed with it at that one exact
+  // width — the JS side kept treating a 768px-wide viewport as desktop (12
+  // columns, free 2-D drag) while the CSS side had already switched to
+  // mobile chrome (BottomNav visible), producing an inconsistent hybrid
+  // layout right at that boundary (see #9 in the triage report).
+  const isMobile = computed(() => windowWidth.value <= MOBILE_BREAKPOINT_PX)
   // Dragging is available at BOTH breakpoints (#9 revised): desktop = free
   // 2-D drag+resize; mobile = single-column vertical drag-to-REORDER. The
   // card-header handle (`dragAllowFrom=".drag-handle"`) is the same on both,
