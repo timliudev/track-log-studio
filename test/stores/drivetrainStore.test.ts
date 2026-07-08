@@ -139,39 +139,81 @@ describe('drivetrainStore persistence', () => {
   })
 })
 
-describe('applyTireSpecCircumference', () => {
-  it('copies the resolved circumference into the direct field and switches mode', () => {
+describe('setTireSpec — live conversion + auto-apply (2026-07-08 user decision)', () => {
+  it('auto-applies a valid spec into the circumference (rounded whole mm)', () => {
     const s = useDrivetrainStore()
-    s.setMt({ circumferenceMode: 'tire', tireSpec: '120/70-17' })
-    expect(s.applyTireSpecCircumference()).toBe(true)
+    expect(s.setTireSpec('100/90-10')).toBe(true)
+    // 100/90-10 -> π * 434mm, rounded to whole mm for a tweakable field.
+    expect(s.mt.wheelCircumferenceMm).toBe(Math.round(Math.PI * 434))
     expect(s.mt.circumferenceMode).toBe('direct')
-    // 120/70-17 -> ~1884.33mm, rounded to whole mm for a tweakable field.
+    expect(s.mt.tireSpec).toBe('100/90-10')
+  })
+
+  it('the default spec and default circumference agree (retyping it is a visible no-op, not a dead control)', () => {
+    const s = useDrivetrainStore()
+    // DEFAULT_MT pins mm to its own spec's conversion — the "effective
+    // change" rule below relies on this to behave sanely on a fresh panel.
+    expect(s.mt.tireSpec).toBe('120/70-17')
+    expect(s.mt.wheelCircumferenceMm).toBe(1884)
+    expect(s.setTireSpec('120/70-17')).toBe(false) // same geometry — nothing to re-apply
     expect(s.mt.wheelCircumferenceMm).toBe(1884)
   })
 
-  it('lets the user fine-tune the applied value afterwards', () => {
+  it('applies again on every EFFECTIVE spec change (real size change overwrites)', () => {
     const s = useDrivetrainStore()
-    s.setMt({ circumferenceMode: 'tire', tireSpec: '120/80-12' })
-    s.applyTireSpecCircumference()
+    s.setTireSpec('120/70-17')
+    expect(s.setTireSpec('120/80-12')).toBe(true)
+    expect(s.mt.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))
+  })
+
+  it('stores an unparsable (mid-edit) spec WITHOUT touching the circumference', () => {
+    const s = useDrivetrainStore()
+    s.setTireSpec('120/70-17')
+    expect(s.setTireSpec('120/70-')).toBe(false) // user still typing
+    expect(s.mt.tireSpec).toBe('120/70-') // text kept
+    expect(s.mt.wheelCircumferenceMm).toBe(1884) // value stays
+  })
+
+  it('a manual mm fine-tune never touches the spec field', () => {
+    const s = useDrivetrainStore()
+    s.setTireSpec('120/80-12')
     const applied = s.mt.wheelCircumferenceMm
     s.setMt({ wheelCircumferenceMm: applied - 20 })
     expect(s.mt.wheelCircumferenceMm).toBe(applied - 20)
-    // The spec string is retained (persisted) for reference/re-apply.
     expect(s.mt.tireSpec).toBe('120/80-12')
   })
 
-  it('is a no-op returning false for an unparsable spec', () => {
+  it('a COSMETIC spec edit (same resolved geometry) does not stomp a manual tweak', () => {
     const s = useDrivetrainStore()
-    s.setMt({ circumferenceMode: 'tire', tireSpec: 'garbage', wheelCircumferenceMm: 1870 })
-    expect(s.applyTireSpecCircumference()).toBe(false)
-    expect(s.mt.circumferenceMode).toBe('tire')
-    expect(s.mt.wheelCircumferenceMm).toBe(1870)
+    s.setTireSpec('120/70-17') // -> 1884
+    s.setMt({ wheelCircumferenceMm: 1850 }) // manual fine-tune
+    // Same geometry, different writing: construction letter + speed rating.
+    expect(s.setTireSpec('120/70ZR17 58W')).toBe(false)
+    expect(s.mt.wheelCircumferenceMm).toBe(1850) // tweak survives
+    expect(s.mt.tireSpec).toBe('120/70ZR17 58W') // text still updated
   })
 
-  it('persists the applied circumference and mode', async () => {
+  it('a REAL size change after a manual tweak overwrites the tweak (spec is authoritative)', () => {
+    const s = useDrivetrainStore()
+    s.setTireSpec('120/70-17')
+    s.setMt({ wheelCircumferenceMm: 1850 })
+    expect(s.setTireSpec('180/55-17')).toBe(true)
+    expect(s.mt.wheelCircumferenceMm).toBe(Math.round(Math.PI * (17 * 25.4 + 2 * 99)))
+  })
+
+  it('recovering from an invalid spec re-applies even at the same size as before', () => {
+    const s = useDrivetrainStore()
+    s.setTireSpec('120/70-17')
+    s.setMt({ wheelCircumferenceMm: 1850 })
+    s.setTireSpec('garbage') // invalid — mm untouched (1850)
+    // Valid again: previous spec was unparsable, so this counts as effective.
+    expect(s.setTireSpec('120/70-17')).toBe(true)
+    expect(s.mt.wheelCircumferenceMm).toBe(1884)
+  })
+
+  it('persists the auto-applied circumference and spec', async () => {
     const s1 = useDrivetrainStore()
-    s1.setMt({ circumferenceMode: 'tire', tireSpec: '100/90-10' })
-    s1.applyTireSpecCircumference()
+    s1.setTireSpec('100/90-10')
     await nextTick()
 
     setActivePinia(createPinia())
@@ -182,6 +224,44 @@ describe('applyTireSpecCircumference', () => {
   })
 })
 
+describe('legacy tire-mode migration (pre-live-conversion payloads)', () => {
+  it('resolves a persisted "tire" mode into the mm field once at init', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        kind: 'mt',
+        mt: {
+          circumferenceMode: 'tire',
+          tireSpec: '120/70-17',
+          wheelCircumferenceMm: 1870, // stale direct value from before 'tire' was active
+        },
+        cvt: { wheelCircumferenceMm: 1400, notes: [] },
+        inversionWheelCircumferenceMm: 1870,
+      }),
+    )
+    const s = useDrivetrainStore()
+    // Same effective circumference the old 'tire' mode computed live.
+    expect(s.mt.circumferenceMode).toBe('direct')
+    expect(s.mt.wheelCircumferenceMm).toBe(1884)
+    expect(s.mt.tireSpec).toBe('120/70-17')
+  })
+
+  it('falls back to the stored mm when a "tire" payload has an unparsable spec', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        kind: 'mt',
+        mt: { circumferenceMode: 'tire', tireSpec: 'garbage', wheelCircumferenceMm: 1870 },
+        cvt: { wheelCircumferenceMm: 1400, notes: [] },
+        inversionWheelCircumferenceMm: 1870,
+      }),
+    )
+    const s = useDrivetrainStore()
+    expect(s.mt.circumferenceMode).toBe('direct')
+    expect(s.mt.wheelCircumferenceMm).toBe(1870)
+  })
+})
+
 describe('toMtDrivetrainSpec', () => {
   it('forwards ratio-mode gears/final-drive and direct circumference', () => {
     const s = useDrivetrainStore()
@@ -189,7 +269,8 @@ describe('toMtDrivetrainSpec', () => {
     expect(spec.gearRatios[0]).toEqual({ ratio: 2.615 })
     // Default finalDrive mode is 'teeth' in DEFAULT_MT.
     expect(spec.finalDrive).toEqual({ frontTeeth: 15, rearTeeth: 45 })
-    expect(spec.wheelCircumferenceMm).toBe(1870)
+    // Default mm mirrors the default tireSpec's conversion (see DEFAULT_MT).
+    expect(spec.wheelCircumferenceMm).toBe(1884)
   })
 
   it('resolves circumference from a tire spec when circumferenceMode is "tire"', () => {

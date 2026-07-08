@@ -30,7 +30,7 @@
  *   (前普利尺寸/珠重/彈簧硬度/開閉盤規格/套管長度/終傳比 etc.) persisted with the
  *   drivetrain settings for setup comparison.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -85,15 +85,52 @@ const channelsAvailable = computed(() => hasRpmChannel.value && hasSpeedChannel.
 const mtSpec = computed(() => toMtDrivetrainSpec(store.mt))
 const mtResults = computed(() => (isMt.value ? computeMtGearTable(mtSpec.value) : []))
 const mtValid = computed(() => mtResults.value.length > 0)
-const specCircumferenceValid = computed(() => Number.isFinite(mtSpec.value.wheelCircumferenceMm) && mtSpec.value.wheelCircumferenceMm > 0)
 
-/** In DIRECT mode, what the (last-entered) tire spec would convert to — shown
- *  as a reference hint next to the manual field so the user can see how far
- *  their fine-tuned value drifted from the spec estimate. Null when the spec
- *  string doesn't parse (no hint). */
+/** What the (last-entered) tire spec converts to — shown as a reference hint
+ *  next to the manual mm field so the user can see how far a fine-tuned value
+ *  drifted from the spec estimate. Null when the spec string doesn't parse
+ *  (no hint). */
 const specReferenceMm = computed<number | null>(() => {
   const circ = tireSpecToCircumferenceMm(store.mt.tireSpec)
   return Number.isFinite(circ) && circ > 0 ? circ : null
+})
+
+// ── Tire-spec LIVE conversion (user decision 2026-07-08) ─────────────────
+// A valid spec edit auto-applies into the circumference via
+// store.setTireSpec (which also encodes the "only an EFFECTIVE change
+// overwrites a manual tweak" rule); the flash below is the visual feedback
+// that an overwrite just happened.
+const tireSpecInvalid = computed(
+  () => store.mt.tireSpec.trim() !== '' && specReferenceMm.value == null,
+)
+const tireSpecJustApplied = ref(false)
+let tireSpecFlashTimer: ReturnType<typeof setTimeout> | null = null
+
+function onTireSpecInput(e: Event): void {
+  const applied = store.setTireSpec((e.target as HTMLInputElement).value)
+  if (applied) {
+    tireSpecJustApplied.value = true
+    if (tireSpecFlashTimer != null) clearTimeout(tireSpecFlashTimer)
+    tireSpecFlashTimer = setTimeout(() => {
+      tireSpecJustApplied.value = false
+    }, 2500)
+  } else if (tireSpecJustApplied.value && specReferenceMm.value == null) {
+    // The spec stopped parsing mid-edit — drop the "auto-applied" banner
+    // immediately so it can't misdescribe the now-invalid spec text.
+    tireSpecJustApplied.value = false
+  }
+}
+
+function onCircumferenceInput(e: Event): void {
+  // Manual fine-tune: never touches the spec field, and dismisses the
+  // auto-applied flash (the number on screen is now the user's, not the
+  // conversion's).
+  tireSpecJustApplied.value = false
+  store.setMt({ wheelCircumferenceMm: numField(e) })
+}
+
+onBeforeUnmount(() => {
+  if (tireSpecFlashTimer != null) clearTimeout(tireSpecFlashTimer)
 })
 
 // ── MT: circumference back-estimation from the log (speed / RPM inversion) ──
@@ -510,46 +547,25 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         </div>
       </div>
 
-      <!-- Wheel circumference: tire-spec-or-direct toggle -->
+      <!-- Wheel circumference: the tire spec LIVE-converts and auto-applies
+           into the mm field as you type (user decision 2026-07-08 — replaces
+           the old tire/direct mode toggle + 套用 button). The mm field stays
+           manually tweakable; only an EFFECTIVE spec change (different
+           resolved geometry) overwrites a manual tweak — see
+           drivetrainStore.setTireSpec. -->
       <div class="sub-block">
-        <div class="row mode-toggle" role="group" :aria-label="t('analyzer.gear.wheelCircumference')">
-          <span class="mode-label">{{ t('analyzer.gear.wheelCircumference') }}</span>
-          <button
-            type="button"
-            :class="{ active: store.mt.circumferenceMode === 'tire' }"
-            @click="store.setMt({ circumferenceMode: 'tire' })"
-          >
-            {{ t('analyzer.gear.modeTireSpec') }}
-          </button>
-          <button
-            type="button"
-            :class="{ active: store.mt.circumferenceMode === 'direct' }"
-            @click="store.setMt({ circumferenceMode: 'direct' })"
-          >
-            {{ t('analyzer.gear.modeDirect') }}
-          </button>
-        </div>
-        <div v-if="store.mt.circumferenceMode === 'tire'" class="row params">
+        <span class="mode-label">{{ t('analyzer.gear.wheelCircumference') }}</span>
+        <div class="row params">
           <label class="field">
             <span>{{ t('analyzer.gear.tireSpecLabel') }}</span>
             <input
               type="text"
+              class="tire-spec-input"
               placeholder="120/70-17"
               :value="store.mt.tireSpec"
-              @input="store.setMt({ tireSpec: ($event.target as HTMLInputElement).value })"
+              @input="onTireSpecInput"
             />
           </label>
-          <p v-if="!specCircumferenceValid" class="hint inline-hint">{{ t('analyzer.gear.tireSpecInvalid') }}</p>
-          <template v-else>
-            <p class="hint inline-hint">
-              {{ t('analyzer.gear.tireSpecResolved', { mm: mtSpec.wheelCircumferenceMm.toFixed(0) }) }}
-            </p>
-            <button type="button" class="apply-btn" @click="store.applyTireSpecCircumference()">
-              {{ t('analyzer.gear.tireSpecApply') }}
-            </button>
-          </template>
-        </div>
-        <div v-else class="row params">
           <label class="field">
             <span>{{ t('analyzer.gear.wheelCircumferenceDirectLabel') }}</span>
             <input
@@ -557,14 +573,25 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
               inputmode="decimal"
               step="1"
               min="1"
+              class="circumference-input"
+              :class="{ 'auto-applied': tireSpecJustApplied }"
               :value="store.mt.wheelCircumferenceMm"
-              @input="store.setMt({ wheelCircumferenceMm: numField($event) })"
+              @input="onCircumferenceInput"
             />
           </label>
-          <p v-if="specReferenceMm != null" class="hint inline-hint">
-            {{ t('analyzer.gear.tireSpecReference', { spec: store.mt.tireSpec.trim(), mm: specReferenceMm.toFixed(0) }) }}
-          </p>
         </div>
+        <p v-if="tireSpecJustApplied" class="hint inline-hint estimate-ok tire-spec-applied" role="status">
+          {{
+            t('analyzer.gear.tireSpecAutoApplied', {
+              spec: store.mt.tireSpec.trim(),
+              mm: store.mt.wheelCircumferenceMm.toFixed(0),
+            })
+          }}
+        </p>
+        <p v-else-if="tireSpecInvalid" class="hint inline-hint">{{ t('analyzer.gear.tireSpecInvalid') }}</p>
+        <p v-else-if="specReferenceMm != null" class="hint inline-hint">
+          {{ t('analyzer.gear.tireSpecReference', { spec: store.mt.tireSpec.trim(), mm: specReferenceMm.toFixed(0) }) }}
+        </p>
         <!-- Third circumference source: back-estimate from the log's speed/RPM -->
         <div class="row params">
           <button
@@ -942,6 +969,19 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 }
 .estimate-ok {
   color: var(--color-accent);
+}
+/* Tire-spec live conversion — visual feedback when a valid spec change just
+   overwrote the circumference field: highlight the mm input briefly (the
+   companion hint text explains what happened). Transition both ways so the
+   highlight fades out instead of snapping. */
+.circumference-input {
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+.circumference-input.auto-applied {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 .estimate-err {
   color: #e63946;
