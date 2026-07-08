@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 /**
@@ -42,6 +43,15 @@ const props = defineProps<{
   title: string
   collapsed?: boolean
   pinned?: boolean
+  /** #18 fix — the card's own grid slot width/height RATIO (in grid units,
+   *  i.e. `layout item.w / item.h`), used ONLY while `pinned` to size the
+   *  floating card so it keeps roughly the same shape it had in the grid
+   *  instead of every pinned card being squashed into the same fixed
+   *  `max-height: 45vh` regardless of whether it was originally short-and-
+   *  wide (a control panel) or tall-and-narrow (a chart). Optional: when
+   *  omitted (or not finite), falls back to the old fixed-height behaviour —
+   *  see the `.pinned` CSS below. */
+  aspectRatio?: number
 }>()
 
 const emit = defineEmits<{
@@ -50,6 +60,15 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// Only feed a POSITIVE finite ratio through to CSS — an unset/zero/NaN
+// aspectRatio (e.g. a card whose layout entry momentarily has h:0) must not
+// produce an invalid `aspect-ratio: NaN` or a divide-by-zero shape.
+const cardStyle = computed(() =>
+  props.pinned && props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0
+    ? { aspectRatio: String(props.aspectRatio) }
+    : undefined,
+)
 
 function onToggleCollapsed(): void {
   emit('update:collapsed', !props.collapsed)
@@ -60,7 +79,7 @@ function onTogglePinned(): void {
 </script>
 
 <template>
-  <div class="dashboard-card" :class="{ pinned, collapsed }">
+  <div class="dashboard-card" :class="{ pinned, collapsed }" :style="cardStyle">
     <header class="drag-handle">
       <span class="title">{{ title }}</span>
       <span class="actions">
@@ -214,8 +233,24 @@ function onTogglePinned(): void {
    Teleported there, so this class only needs to bound its own size/shape
    once it's inside that anchor (an unbounded body could otherwise grow to
    dominate the screen) and add a visual "floating" cue. Applies identically
-   at both breakpoints now. */
+   at both breakpoints now.
+   #18 fix — `aspect-ratio` (set inline via `cardStyle`, from the card's own
+   grid w/h ratio) now drives the card's HEIGHT from its width, so a pinned
+   card keeps roughly the shape it had in the grid instead of every pinned
+   card — short control panel or tall chart alike — being squashed into the
+   exact same 45vh box. `max-height: 45vh` stays as a SAFETY CEILING (a very
+   tall/narrow card's aspect-ratio-derived height could otherwise still push
+   past a comfortable viewport share) rather than the primary sizing rule;
+   when `aspectRatio` isn't supplied, this falls back to the old behaviour
+   unchanged. */
 .dashboard-card.pinned {
+  /* Override the base rule's `height: 100%` — that fills the (100%-height)
+     GRID slot the un-pinned card normally lives in, but the pinned anchor
+     it's Teleported into has no fixed height of its own, and `height: 100%`
+     would otherwise WIN over `aspect-ratio` (a percentage height is a used
+     value the aspect-ratio calculation must respect, not override) and
+     silently defeat the whole fix above. */
+  height: auto;
   max-height: 45vh;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
 }

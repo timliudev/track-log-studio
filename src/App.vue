@@ -198,12 +198,21 @@ const buildDate = __BUILD_DATE__
 
 /* Below 768px the top tab row gives way to the iOS-style bottom bar
    (BottomNav.vue mirrors this breakpoint), and the content area reserves
-   room at the bottom so the fixed bar never overlaps scrolled content. */
+   room at the bottom so the fixed bar never overlaps scrolled content.
+   #13 fix: `<footer class="site-footer">` is `<main>`'s SIBLING (after both
+   it and BottomNav in the template), not inside `.content` — so it never
+   got this same protection. BottomNav is `position: fixed; z-index: 40`
+   (see BottomNav.vue), so whenever a page's content is short enough that
+   the footer lands at the very bottom of the viewport, the fixed bar covers
+   part or all of it. Give the footer the SAME reserved space as `.content`. */
 @media (max-width: 768px) {
   .tabs {
     display: none;
   }
   .content {
+    padding-bottom: calc(var(--space) * 2 + 56px + env(safe-area-inset-bottom, 0px));
+  }
+  .site-footer {
     padding-bottom: calc(var(--space) * 2 + 56px + env(safe-area-inset-bottom, 0px));
   }
 }

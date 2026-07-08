@@ -30,6 +30,7 @@ import {
   minSizeFor,
   isItemDraggable,
   isItemResizable,
+  mergeLayoutPositions,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -483,11 +484,33 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
       return
     }
     // Desktop: merge visible items' new positions back into the full layout,
-    // preserving hidden items untouched.
-    const nextById = new Map(next.map((it) => [it.i, it]))
-    layout.value = layout.value.map((it) => nextById.get(it.i) ?? it)
+    // preserving hidden items untouched (pure function — only coordinates
+    // are copied, decoration fields like dragAllowFrom/minW never leak into
+    // the persisted array — see mergeLayoutPositions's doc).
+    layout.value = mergeLayoutPositions(layout.value, next)
   },
 })
+
+// #1 fix — grid-layout-plus's `update:layout` (our v-model, handled by
+// activeLayout's setter above) only fires on initial MOUNT and on a
+// responsive BREAKPOINT change. A drag or resize ENDING instead fires
+// `layout-updated` (confirmed by reading grid-layout-plus's own source:
+// dragend/resizeend call `emit("layout-updated", ...)`, never
+// `emit("update:layout", ...)`) — so without this listener, a drag/resize's
+// new position was rendered by the library's OWN internal state but never
+// written back into `layout.value` (and so never persisted to
+// localStorage). The very next action that makes `activeLayout`'s getter
+// re-run (鎖定布局/釘選/收合/新增圖表/斷點切換all change SOMETHING that
+// activeLayout's getter reads) would then re-derive `:layout` from that
+// STALE `layout.value`, and grid-layout-plus's own `watch(() => [a.layout,
+// ...])` would forcibly reset its internal state back to it — the "layout
+// resets itself" bug. Routing this event through the SAME writable
+// `activeLayout` computed as the v-model reuses its existing merge/mobile-
+// order logic, so there's exactly one code path deciding how a raw
+// grid-layout-plus payload gets persisted, regardless of which event fired.
+function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): void {
+  activeLayout.value = next
+}
 
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
@@ -616,6 +639,7 @@ function titleForItemId(id: string): string {
         :margin="[12, 12]"
         :vertical-compact="true"
         :use-css-transforms="true"
+        @layout-updated="onLayoutUpdated"
       >
         <template #item="{ item }">
           <!-- IMPORTANT: the `#item` slot renders ONLY the card content —
@@ -650,6 +674,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardMap')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -790,6 +815,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardLapTable')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -808,6 +834,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardSectors')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -825,6 +852,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardTrackChannel')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -840,6 +868,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardAccelTest')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -851,6 +880,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardGear')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -862,6 +892,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardTrackFile')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -880,6 +911,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardSessionMerge')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -891,6 +923,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardSuspension')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               :show-pin="isMobile"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
@@ -903,6 +936,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardMapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -914,6 +948,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardLapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -927,6 +962,7 @@ function titleForItemId(id: string): string {
                   :title="chartTitle(c)"
                   :collapsed="isCollapsed(item.i)"
                   :pinned="isPinned(item.i)"
+                  :aspect-ratio="item.w / item.h"
                   @update:collapsed="toggleCollapsed(item.i)"
                   @update:pinned="togglePinned(item.i)"
                 >
@@ -1254,10 +1290,20 @@ function titleForItemId(id: string): string {
 /* Bound the Teleported card so a tall body (e.g. an overlay chart) can't grow
    to dominate the screen once it's floating above the grid — matches
    DashboardCard's own `.pinned` max-height so the two agree on how big a
-   pinned card is allowed to get. */
+   pinned card is allowed to get. `width: min(560px, 100%)` is a DESKTOP-only
+   choice (a floating centered card looks intentional on a wide screen); on
+   mobile (#9 fix) the 560px cap left dead space on either side of the card
+   on any viewport wider than 560px — including exactly 768px, the phone
+   breakpoint itself — so the mobile media query below overrides back to a
+   full-width card, matching every other card's edge-to-edge mobile layout. */
 .pinned-anchor :deep(.dashboard-card) {
   width: min(560px, 100%);
   margin: 0 auto calc(var(--space) * 1.5);
+}
+@media (max-width: 768px) {
+  .pinned-anchor :deep(.dashboard-card) {
+    width: 100%;
+  }
 }
 .pin-placeholder {
   height: 100%;
@@ -1285,6 +1331,25 @@ function titleForItemId(id: string): string {
 }
 .pin-placeholder-text {
   font-size: 0.75rem;
+}
+
+/* #3 — theme the resize handle (grid-layout-plus's `.vgl-item__resizer`,
+   bottom-right corner of every card). The library draws it as a plain
+   right-angle "⌐" made of two straight border edges (`border-right-width` +
+   `border-bottom-width` on its `:before`, see grid-layout-plus's built-in
+   CSS) in a hardcoded dark grey (`--vgl-resizer-border-color: #444`) — this
+   reads as an abrupt, unstyled corner against the rest of the app's rounded,
+   theme-colored chrome (same mismatch the tooltip directive fixed for the
+   native `title` box). Recolor to the theme accent and round the corner
+   where the two border edges meet (`border-radius` on the bottom-right,
+   matching the card's own `--radius`) so it reads as a deliberate grab
+   affordance rather than a stray box corner. */
+.analyzer :deep(.vgl-layout) {
+  --vgl-resizer-border-color: var(--color-accent);
+  --vgl-resizer-border-width: 2px;
+}
+.analyzer :deep(.vgl-item__resizer)::before {
+  border-radius: 0 0 var(--radius) 0;
 }
 
 /* Touch resize (mobile task): the resize handle is grid-layout-plus's own

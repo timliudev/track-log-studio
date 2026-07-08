@@ -61,4 +61,34 @@ describe('DashboardCard (scaffold smoke test)', () => {
     await wrapper.find('.pin-btn').trigger('click')
     expect(wrapper.emitted('update:pinned')).toEqual([[true]])
   })
+
+  describe('aspectRatio (#18 fix — pinned card keeps its original grid shape)', () => {
+    it('applies aspect-ratio inline style when pinned with a valid ratio', () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 10 })
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.4')
+    })
+
+    it('does NOT apply aspect-ratio when the card is not pinned, even if a ratio is given', () => {
+      const wrapper = mountCard({ pinned: false, aspectRatio: 4 / 10 })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('does NOT apply aspect-ratio when pinned but no ratio is given (falls back to fixed max-height)', () => {
+      const wrapper = mountCard({ pinned: true })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('ignores a non-finite/zero/negative ratio rather than emitting an invalid style', () => {
+      for (const bad of [0, -1, NaN, Infinity]) {
+        const wrapper = mountCard({ pinned: true, aspectRatio: bad })
+        expect(wrapper.attributes('style')).toBeUndefined()
+      }
+    })
+
+    it('a wide/short card (e.g. a control panel, w:h=4:5) gets a different ratio than a tall/narrow one (e.g. a chart, w:h=4:11)', () => {
+      const wide = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const tall = mountCard({ pinned: true, aspectRatio: 4 / 11 })
+      expect(wide.attributes('style')).not.toBe(tall.attributes('style'))
+    })
+  })
 })
