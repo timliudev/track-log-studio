@@ -16,6 +16,7 @@ import {
   resolveOverlaps,
   isItemDraggable,
   isItemResizable,
+  mergeLayoutPositions,
   STATIC_CARD_TITLE_KEYS,
 } from '@/domain/layout/dashboardLayout'
 
@@ -447,6 +448,88 @@ describe('STATIC_CARD_TITLE_KEYS', () => {
   it('every key lives under the analyzer.layout namespace', () => {
     for (const key of Object.values(STATIC_CARD_TITLE_KEYS)) {
       expect(key.startsWith('analyzer.layout.')).toBe(true)
+    }
+  })
+})
+
+describe('mergeLayoutPositions (#1 fix — layout-updated write-back)', () => {
+  it('overwrites only the coordinate fields of a matching item, dropping decoration fields', () => {
+    const base = [{ i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 }]
+    const updated = [
+      {
+        i: STATIC_CARD_IDS.map,
+        x: 2,
+        y: 3,
+        w: 5,
+        h: 6,
+        // Decoration fields AnalyzerView's decorateForGrid spreads onto
+        // items before handing them to grid-layout-plus — must NOT leak
+        // into the merged/persisted result.
+        dragAllowFrom: '.drag-handle',
+        dragIgnoreFrom: '.actions',
+        isDraggable: true,
+        isResizable: true,
+        minW: 3,
+        minH: 5,
+      },
+    ]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged).toEqual([{ i: STATIC_CARD_IDS.map, x: 2, y: 3, w: 5, h: 6 }])
+  })
+
+  it('leaves an item present in base but absent from updated completely unchanged', () => {
+    const base = [
+      { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 },
+      { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 19, w: 4, h: 5 }, // hidden align card
+    ]
+    const updated = [{ i: STATIC_CARD_IDS.map, x: 1, y: 1, w: 4, h: 10 }]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged.find((it) => it.i === STATIC_CARD_IDS.mapAlign)).toEqual(base[1])
+  })
+
+  it('preserves the original array order regardless of updated item order', () => {
+    const base = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 4 },
+    ]
+    const updated = [
+      { i: 'b', x: 5, y: 1, w: 4, h: 4 },
+      { i: 'a', x: 1, y: 1, w: 4, h: 4 },
+    ]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged.map((it) => it.i)).toEqual(['a', 'b'])
+  })
+
+  it('keeps the SAME object reference for an item whose coordinates did not change (no-op detection)', () => {
+    const base = [{ i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 }]
+    const updated = [{ i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10, isDraggable: true }]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged[0]).toBe(base[0])
+  })
+
+  it('is a no-op (returns items equal to base) when updated is empty', () => {
+    const base = defaultLayout()
+    expect(mergeLayoutPositions(base, [])).toEqual(base)
+  })
+
+  it('simulates a drag: only the dragged item moves, everything else is untouched', () => {
+    const base = defaultLayout()
+    const dragged = base.find((it) => it.i === STATIC_CARD_IDS.gear)!
+    // grid-layout-plus's layout-updated payload is the FULL visible array
+    // (every item, not just the one that moved) — with only the dragged
+    // item's x/y actually different.
+    const payload = base.map((it) =>
+      it.i === STATIC_CARD_IDS.gear ? { ...it, x: 9, y: 20 } : it,
+    )
+    const merged = mergeLayoutPositions(base, payload)
+    expect(merged.find((it) => it.i === STATIC_CARD_IDS.gear)).toEqual({
+      ...dragged,
+      x: 9,
+      y: 20,
+    })
+    for (const it of merged) {
+      if (it.i === STATIC_CARD_IDS.gear) continue
+      expect(it).toEqual(base.find((b) => b.i === it.i))
     }
   })
 })

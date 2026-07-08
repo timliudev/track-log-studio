@@ -30,6 +30,7 @@ import {
   minSizeFor,
   isItemDraggable,
   isItemResizable,
+  mergeLayoutPositions,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -483,11 +484,33 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
       return
     }
     // Desktop: merge visible items' new positions back into the full layout,
-    // preserving hidden items untouched.
-    const nextById = new Map(next.map((it) => [it.i, it]))
-    layout.value = layout.value.map((it) => nextById.get(it.i) ?? it)
+    // preserving hidden items untouched (pure function — only coordinates
+    // are copied, decoration fields like dragAllowFrom/minW never leak into
+    // the persisted array — see mergeLayoutPositions's doc).
+    layout.value = mergeLayoutPositions(layout.value, next)
   },
 })
+
+// #1 fix — grid-layout-plus's `update:layout` (our v-model, handled by
+// activeLayout's setter above) only fires on initial MOUNT and on a
+// responsive BREAKPOINT change. A drag or resize ENDING instead fires
+// `layout-updated` (confirmed by reading grid-layout-plus's own source:
+// dragend/resizeend call `emit("layout-updated", ...)`, never
+// `emit("update:layout", ...)`) — so without this listener, a drag/resize's
+// new position was rendered by the library's OWN internal state but never
+// written back into `layout.value` (and so never persisted to
+// localStorage). The very next action that makes `activeLayout`'s getter
+// re-run (鎖定布局/釘選/收合/新增圖表/斷點切換all change SOMETHING that
+// activeLayout's getter reads) would then re-derive `:layout` from that
+// STALE `layout.value`, and grid-layout-plus's own `watch(() => [a.layout,
+// ...])` would forcibly reset its internal state back to it — the "layout
+// resets itself" bug. Routing this event through the SAME writable
+// `activeLayout` computed as the v-model reuses its existing merge/mobile-
+// order logic, so there's exactly one code path deciding how a raw
+// grid-layout-plus payload gets persisted, regardless of which event fired.
+function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): void {
+  activeLayout.value = next
+}
 
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
@@ -616,6 +639,7 @@ function titleForItemId(id: string): string {
         :margin="[12, 12]"
         :vertical-compact="true"
         :use-css-transforms="true"
+        @layout-updated="onLayoutUpdated"
       >
         <template #item="{ item }">
           <!-- IMPORTANT: the `#item` slot renders ONLY the card content —

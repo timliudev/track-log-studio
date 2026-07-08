@@ -194,6 +194,48 @@ export function resolveOverlaps(layout: DashboardLayoutItem[]): DashboardLayoutI
   return layout.map((it) => byId.get(it.i)!)
 }
 
+/**
+ * #1 fix — merge a grid-layout-plus callback payload (from `update:layout`,
+ * `layout-updated`, `resized`, or `moved`; the library emits the SAME shape
+ * for all of them: an array of every VISIBLE item's CURRENT x/y/w/h/i,
+ * carrying whatever extra per-item props the caller decorated the layout
+ * with, e.g. AnalyzerView's `dragAllowFrom`/`isDraggable`/`minW` —
+ * see `decorateForGrid`) back into the full persisted layout array.
+ *
+ * Two things this guards against:
+ *  - Only the COORDINATE fields (`x`/`y`/`w`/`h`) are copied from `updated` —
+ *    every other field on a decorated item is UI-only (drag config, min-size)
+ *    and must never leak into the persisted array / localStorage.
+ *  - An item present in `base` but ABSENT from `updated` (e.g. a hidden
+ *    align card that isn't part of the currently-visible slice passed to
+ *    the grid) is kept UNCHANGED, at its original array position — this is
+ *    a merge, not a replace.
+ *
+ * Pure; returns a NEW array, but keeps the exact same object reference for
+ * any item whose coordinates didn't actually change (cheap no-op detection,
+ * same pattern as {@link clampToMinSize}).
+ *
+ * This exists because grid-layout-plus's `update:layout` (the v-model event)
+ * only fires on initial mount and on a responsive breakpoint change — a
+ * drag or resize ending instead fires `layout-updated` (and, per-item,
+ * `resized`/`moved`), which a v-model-only binding never observes. Callers
+ * must wire ALL of those events into this same merge so a card's new
+ * position is written back into the persisted `layout` ref regardless of
+ * which one fired (see AnalyzerView's `activeLayout` setter / `onLayoutUpdated`).
+ */
+export function mergeLayoutPositions<T extends DashboardLayoutItem>(
+  base: DashboardLayoutItem[],
+  updated: T[],
+): DashboardLayoutItem[] {
+  const byId = new Map(updated.map((it) => [it.i, it]))
+  return base.map((it) => {
+    const next = byId.get(it.i)
+    if (!next) return it
+    if (next.x === it.x && next.y === it.y && next.w === it.w && next.h === it.h) return it
+    return { i: it.i, x: next.x, y: next.y, w: next.w, h: next.h }
+  })
+}
+
 /** The grid item id for a chart, keyed by the chart's OWN store id (stable
  *  across add/remove/reorder) — never its index in `analyzerStore.charts`. */
 export function chartItemId(chartId: number): string {
