@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 
-export type NavTab = 'converter' | 'analyzer' | 'settings'
+export type NavTab = 'converter' | 'analyzer' | 'settings' | 'about'
 
 defineProps<{
   tab: NavTab
@@ -23,6 +23,7 @@ const items: { id: NavTab; labelKey: string }[] = [
   { id: 'converter', labelKey: 'nav.converter' },
   { id: 'analyzer', labelKey: 'nav.analyzer' },
   { id: 'settings', labelKey: 'nav.settings' },
+  { id: 'about', labelKey: 'nav.about' },
 ]
 </script>
 
@@ -69,7 +70,7 @@ const items: { id: NavTab; labelKey: string }[] = [
         <path d="M7 16l4-5 3 3 5-7" />
       </svg>
       <svg
-        v-else
+        v-else-if="item.id === 'settings'"
         class="bottom-nav__icon"
         viewBox="0 0 24 24"
         fill="none"
@@ -83,6 +84,21 @@ const items: { id: NavTab; labelKey: string }[] = [
         <path
           d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
         />
+      </svg>
+      <svg
+        v-else
+        class="bottom-nav__icon"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <line x1="12" y1="11" x2="12" y2="16.5" />
+        <circle cx="12" cy="7.5" r="0.5" fill="currentColor" stroke="none" />
       </svg>
       <span class="bottom-nav__label">{{ t(item.labelKey) }}</span>
     </button>
