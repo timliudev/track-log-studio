@@ -23,6 +23,8 @@
  * validation happens here.
  */
 
+import { looksLikeForcePair } from '@/domain/analysis/ggData'
+
 /** How a chart plots its channels — see analyzerStore (re-exported there). */
 export type ChartMode = 'timeline' | 'overlay'
 
@@ -42,8 +44,15 @@ export interface ScatterChartConfig {
   yChannel: string | null
   /** Whether the X/Y axes are scaled 1:1 (equal pixels per data unit, so a
    *  circle plots as a circle) vs each axis auto-ranging independently to
-   *  fill the card. Defaults to true — see GgChart.vue's `equalAspectGrid`
-   *  for how this survives a non-square card and window/card resizes. */
+   *  fill the card. Defaults to true ONLY when both channels look like a
+   *  force/acceleration pair (see `looksLikeForcePair` — the aRacer G-G
+   *  friction-circle use, where 1:1 is meaningful) and false for any other
+   *  channel pair (e.g. RPM vs a small-range channel, where forcing true
+   *  data-unit 1:1 scaling squashes the smaller-magnitude axis into a
+   *  sliver — #5 in the equal-aspect fix). Always user-overridable via
+   *  `setChartEqualAspect` regardless of this default. See GgChart.vue's
+   *  `equalAspectGrid` for how the ON state survives a non-square card and
+   *  window/card resizes. */
   equalAspect: boolean
 }
 
@@ -97,15 +106,20 @@ export function parseCharts(raw: string | null): ChartConfig[] | null {
         })
         seen.add(id)
       } else if (it.kind === 'scatter') {
+        const xChannel = typeof it.xChannel === 'string' ? it.xChannel : null
+        const yChannel = typeof it.yChannel === 'string' ? it.yChannel : null
         charts.push({
           kind: 'scatter',
           id,
-          xChannel: typeof it.xChannel === 'string' ? it.xChannel : null,
-          yChannel: typeof it.yChannel === 'string' ? it.yChannel : null,
+          xChannel,
+          yChannel,
           // Missing/invalid (e.g. an older persisted chart from before this
-          // field existed) defaults to true — equal-aspect is the new default
-          // behaviour, not an opt-in.
-          equalAspect: typeof it.equalAspect === 'boolean' ? it.equalAspect : true,
+          // field existed) backfills from the channel pair itself — see
+          // `equalAspect`'s doc: true only for a force/acceleration pair,
+          // false otherwise (not a blanket true — #5 in the equal-aspect
+          // fix).
+          equalAspect:
+            typeof it.equalAspect === 'boolean' ? it.equalAspect : looksLikeForcePair(xChannel, yChannel),
         })
         seen.add(id)
       }

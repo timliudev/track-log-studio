@@ -5,6 +5,33 @@
  * coupling, mirroring the other `domain/analysis` helpers.
  */
 
+/**
+ * Whether a channel name "looks like" a signed force/acceleration channel
+ * (aRacer's `TC_Xforce`/`TC_Yforce` and similar — anything with "force" in
+ * its name), i.e. the kind of channel pair where a 1:1 XY plot is
+ * meaningful (both axes share the same physical unit and roughly the same
+ * magnitude, so a circle really does mean "equal grip in every direction").
+ * Shared between ScatterChart.vue (milli-g scale + the equal-aspect default)
+ * and analyzerStore's `addChart`/chartConfigs' persisted-payload backfill —
+ * see #5 in the equal-aspect fix: defaulting EVERY channel pair to a
+ * true-1:1 axis scale (not just force pairs) squashes the axis with the
+ * smaller data range into a sliver whenever the two channels have very
+ * different magnitudes (e.g. RPM vs a 0–100 signal).
+ */
+export function looksLikeForce(name: string | null | undefined): boolean {
+  return name != null && /force/i.test(name)
+}
+
+/** Whether BOTH sides of an XY channel pair look like force/acceleration
+ *  channels — the only case where defaulting to a 1:1 axis scale is safe
+ *  (see {@link looksLikeForce}). */
+export function looksLikeForcePair(
+  xChannel: string | null | undefined,
+  yChannel: string | null | undefined,
+): boolean {
+  return looksLikeForce(xChannel) && looksLikeForce(yChannel)
+}
+
 export interface BuildGgPointsOptions {
   /** Multiply raw channel values by this to get g units. aRacer TC_*force is
    *  milli-g, so 0.001. Default 1 (already in g). */

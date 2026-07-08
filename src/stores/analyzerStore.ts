@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { COLORMAP_IDS, type ColormapId } from '@/domain/analysis/colormap'
+import { looksLikeForcePair } from '@/domain/analysis/ggData'
 import {
   loadCharts,
   saveCharts,
@@ -162,7 +163,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
    *  unchanged call sites keep working). For 'scatter', callers may pass an
    *  initial X/Y pick (e.g. AnalyzerView defaulting to TC_Xforce/TC_Yforce
    *  for the friction-circle convenience when those channels exist) — the
-   *  store itself doesn't know about sessions/channels. */
+   *  store itself doesn't know about sessions/channels.
+   *
+   *  `equalAspect` defaults to true ONLY when the initial pick is a
+   *  force/acceleration pair (see `looksLikeForcePair`) — the classic G-G
+   *  friction-circle case, where a true 1:1 data-unit scale is meaningful.
+   *  Any other pair (including no pick yet) defaults to auto-ranged axes:
+   *  forcing 1:1 on an arbitrary pair (e.g. RPM vs a small-range channel)
+   *  squashes the smaller-magnitude axis into a sliver (#5 in the
+   *  equal-aspect fix) — the user can still flip it on manually. */
   function addChart(kind?: 'timeseries'): void
   function addChart(kind: 'scatter', initial?: { xChannel?: string | null; yChannel?: string | null }): void
   function addChart(
@@ -170,12 +179,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     initial?: { xChannel?: string | null; yChannel?: string | null },
   ): void {
     if (kind === 'scatter') {
+      const xChannel = initial?.xChannel ?? null
+      const yChannel = initial?.yChannel ?? null
       charts.value.push({
         kind: 'scatter',
         id: nextId++,
-        xChannel: initial?.xChannel ?? null,
-        yChannel: initial?.yChannel ?? null,
-        equalAspect: true,
+        xChannel,
+        yChannel,
+        equalAspect: looksLikeForcePair(xChannel, yChannel),
       })
     } else {
       charts.value.push({ kind: 'timeseries', id: nextId++, channels: [], mode: 'timeline' })
