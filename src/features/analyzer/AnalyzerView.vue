@@ -674,6 +674,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardMap')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -814,6 +815,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardLapTable')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -832,6 +834,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardSectors')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -849,6 +852,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardTrackChannel')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -864,6 +868,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardAccelTest')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -875,6 +880,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardGear')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -886,6 +892,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardTrackFile')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -904,6 +911,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardSessionMerge')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -915,6 +923,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardSuspension')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               :show-pin="isMobile"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
@@ -927,6 +936,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardMapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -938,6 +948,7 @@ function titleForItemId(id: string): string {
               :title="t('analyzer.layout.cardLapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -951,6 +962,7 @@ function titleForItemId(id: string): string {
                   :title="chartTitle(c)"
                   :collapsed="isCollapsed(item.i)"
                   :pinned="isPinned(item.i)"
+                  :aspect-ratio="item.w / item.h"
                   @update:collapsed="toggleCollapsed(item.i)"
                   @update:pinned="togglePinned(item.i)"
                 >
