@@ -773,6 +773,20 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
             @input="store.setCvtWheelCircumferenceMm(numField($event))"
           />
         </label>
+        <!-- #4 — CVT has no discrete gear plateaus to solve for (see
+             `estimateCircumferenceFromLog`'s MT-only design), so unlike the MT
+             tab there is no working "由記錄反推周長" button here — a real user
+             on a CVT bike would otherwise see NOTHING at all where MT users
+             see a button + explanation, and reasonably conclude the feature
+             "isn't implemented". This permanently-disabled button + hint makes
+             that limitation visible and actionable (measure directly, or use
+             the MT tab's tire-spec converter) instead of silent absence. -->
+        <div class="row params">
+          <button type="button" class="apply-btn" disabled v-tooltip="t('analyzer.gear.estimateNotAvailableCvtHint') as string">
+            {{ t('analyzer.gear.estimateFromLog') }}
+          </button>
+          <p class="hint inline-hint">{{ t('analyzer.gear.estimateNotAvailableCvtHint') }}</p>
+        </div>
 
         <div class="summary-row">
           <span v-if="cvtSummary" class="summary-item">
