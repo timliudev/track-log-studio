@@ -41,19 +41,27 @@ describe('chartConfigs — parseCharts (T5)', () => {
     expect(parseCharts(JSON.stringify(charts))).toEqual(charts)
   })
 
-  it('backfills equalAspect: true on pre-feature scatter payloads (default is ON)', () => {
+  it('backfills equalAspect from the channel pair on pre-feature payloads — false for a non-force pair (#5 fix)', () => {
     // A payload persisted before the XY-aspect feature has no equalAspect
-    // field at all — restored charts must default to the new 1:1 behaviour.
+    // field at all — restored charts backfill from the channel pair itself
+    // (true only for a force/acceleration pair), not a blanket true.
     const raw = JSON.stringify([{ kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed' }])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: true },
+      { kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: false },
     ])
   })
 
-  it('coerces a non-boolean equalAspect back to the default true', () => {
+  it('backfills equalAspect: true on pre-feature payloads whose channel pair IS a force pair', () => {
+    const raw = JSON.stringify([{ kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' }])
+    expect(parseCharts(raw)).toEqual([
+      { kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true },
+    ])
+  })
+
+  it('coerces a non-boolean equalAspect back to the channel-pair default (false — no channels picked)', () => {
     const raw = JSON.stringify([{ kind: 'scatter', id: 2, xChannel: null, yChannel: null, equalAspect: 'yes' }])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'scatter', id: 2, xChannel: null, yChannel: null, equalAspect: true },
+      { kind: 'scatter', id: 2, xChannel: null, yChannel: null, equalAspect: false },
     ])
   })
 
@@ -77,7 +85,7 @@ describe('chartConfigs — parseCharts (T5)', () => {
       { kind: 'timeseries', id: 4, channels: ['RPM', 5], mode: 'weird' }, // bad channels/mode
     ])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'scatter', id: 3, xChannel: null, yChannel: 'RPM', equalAspect: true },
+      { kind: 'scatter', id: 3, xChannel: null, yChannel: 'RPM', equalAspect: false },
       { kind: 'timeseries', id: 4, channels: [], mode: 'timeline' },
     ])
   })

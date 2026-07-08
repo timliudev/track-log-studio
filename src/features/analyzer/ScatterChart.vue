@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAnalyzerStore, type ScatterChartConfig } from '@/stores/analyzerStore'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
-import { buildGgPoints } from '@/domain/analysis/ggData'
+import { buildGgPoints, looksLikeForce } from '@/domain/analysis/ggData'
 import { lapColor } from './lapColors'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GgSeries } from './GgChart.vue'
@@ -73,10 +73,9 @@ function setEqualAspect(on: boolean): void {
 }
 
 // Scale is only meaningful for aRacer's milli-g force channels; any other
-// channel pair plots in its native units (raw scale = 1).
-function looksLikeForce(name: string | null): boolean {
-  return name != null && /force/i.test(name)
-}
+// channel pair plots in its native units (raw scale = 1). `looksLikeForce`
+// is shared with analyzerStore's addChart/chartConfigs' backfill — see
+// ggData.ts's doc for why the equal-aspect default now uses the same rule.
 const useMilliG = computed(() => looksLikeForce(xChannel.value) && looksLikeForce(yChannel.value))
 
 const ggSeries = computed<GgSeries[]>(() => {

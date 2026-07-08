@@ -25,7 +25,7 @@ describe('analyzerStore', () => {
     expect(s.charts[1].kind).toBe('timeseries')
   })
 
-  it('addChart("scatter") appends a scatter chart, defaulting to empty pickers and 1:1 axes', () => {
+  it('addChart("scatter") appends a scatter chart, defaulting to empty pickers and AUTO axes (no force pair yet)', () => {
     const s = useAnalyzerStore()
     s.addChart('scatter')
     const chart = s.charts[1]
@@ -33,8 +33,29 @@ describe('analyzerStore', () => {
     if (chart.kind === 'scatter') {
       expect(chart.xChannel).toBeNull()
       expect(chart.yChannel).toBeNull()
-      expect(chart.equalAspect).toBe(true)
+      expect(chart.equalAspect).toBe(false)
     }
+  })
+
+  it('addChart("scatter", initial) defaults equalAspect true for a force/acceleration pair', () => {
+    const s = useAnalyzerStore()
+    s.addChart('scatter', { xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' })
+    const chart = s.charts[1]
+    if (chart.kind === 'scatter') expect(chart.equalAspect).toBe(true)
+  })
+
+  it('addChart("scatter", initial) defaults equalAspect false for an arbitrary (non-force) pair — #5 fix', () => {
+    const s = useAnalyzerStore()
+    s.addChart('scatter', { xChannel: 'RPM', yChannel: 'Vehicle_Speed' })
+    const chart = s.charts[1]
+    if (chart.kind === 'scatter') expect(chart.equalAspect).toBe(false)
+  })
+
+  it('addChart("scatter", initial) defaults equalAspect false when only one side looks like force', () => {
+    const s = useAnalyzerStore()
+    s.addChart('scatter', { xChannel: 'TC_Xforce', yChannel: 'RPM' })
+    const chart = s.charts[1]
+    if (chart.kind === 'scatter') expect(chart.equalAspect).toBe(false)
   })
 
   it('setChartEqualAspect toggles only the targeted scatter chart; no-op on timeseries', () => {
@@ -43,14 +64,16 @@ describe('analyzerStore', () => {
     s.addChart('scatter')
     s.addChart('scatter')
     const [id1, id2] = [s.charts[1].id, s.charts[2].id]
-    s.setChartEqualAspect(id1, false)
-    s.setChartEqualAspect(timeseriesId, false) // wrong kind — must not throw/mutate
+    s.setChartEqualAspect(id1, true)
+    s.setChartEqualAspect(timeseriesId, true) // wrong kind — must not throw/mutate
     const c1 = s.charts.find((c) => c.id === id1)
     const c2 = s.charts.find((c) => c.id === id2)
-    if (c1?.kind === 'scatter') expect(c1.equalAspect).toBe(false)
-    if (c2?.kind === 'scatter') expect(c2.equalAspect).toBe(true)
-    s.setChartEqualAspect(id1, true)
     if (c1?.kind === 'scatter') expect(c1.equalAspect).toBe(true)
+    // id2 was never touched — still at its (no-force-pair) default, proving
+    // the toggle above only affected id1.
+    if (c2?.kind === 'scatter') expect(c2.equalAspect).toBe(false)
+    s.setChartEqualAspect(id1, false)
+    if (c1?.kind === 'scatter') expect(c1.equalAspect).toBe(false)
   })
 
   it('addChart("scatter", initial) seeds the initial X/Y channels', () => {
