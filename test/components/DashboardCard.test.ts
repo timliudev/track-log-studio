@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -60,6 +60,60 @@ describe('DashboardCard (scaffold smoke test)', () => {
     const wrapper = mountCard({ pinned: false })
     await wrapper.find('.pin-btn').trigger('click')
     expect(wrapper.emitted('update:pinned')).toEqual([[true]])
+  })
+
+  describe('pin/unpin FLIP transition (#19 — see src/domain/layout/flip.ts for the pure math)', () => {
+    it('still emits update:pinned immediately (synchronously, before the FLIP animation) even when the card actually moved', async () => {
+      const wrapper = mountCard({ pinned: false })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      let call = 0
+      // First call (inside onTogglePinned, before emit) reports the OLD spot;
+      // every call after (inside playPinFlip, post-nextTick) reports the NEW
+      // spot — exercises the translate branch of the FLIP math for real.
+      vi.spyOn(el, 'getBoundingClientRect').mockImplementation(
+        () =>
+          ({
+            left: 0,
+            top: call++ === 0 ? 400 : 0,
+            width: 300,
+            height: 150,
+            right: 300,
+            bottom: 0,
+            x: 0,
+            y: 0,
+            toJSON() {
+              return this
+            },
+          }) as DOMRect,
+      )
+
+      await wrapper.find('.pin-btn').trigger('click')
+      // The emit happens synchronously inside the click handler, well before
+      // the FLIP's nextTick/rAF/transitionend chain settles.
+      expect(wrapper.emitted('update:pinned')).toEqual([[true]])
+
+      // Let the nextTick -> requestAnimationFrame chain run without throwing
+      // (happy-dom's rAF is timer-backed, not vitest fake-timer driven here).
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(el.style.transform).toBe('')
+    })
+
+    it('skips measuring/animating under prefers-reduced-motion, but still emits the toggle', async () => {
+      const wrapper = mountCard({ pinned: false })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      const rectSpy = vi.spyOn(el, 'getBoundingClientRect')
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query.includes('reduce'),
+        addEventListener() {},
+        removeEventListener() {},
+      }))
+
+      await wrapper.find('.pin-btn').trigger('click')
+      expect(wrapper.emitted('update:pinned')).toEqual([[true]])
+      expect(rectSpy).not.toHaveBeenCalled()
+
+      vi.unstubAllGlobals()
+    })
   })
 
   describe('aspectRatio (#18 fix — pinned card keeps its original grid shape)', () => {

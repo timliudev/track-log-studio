@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { GridLayout } from 'grid-layout-plus'
@@ -14,6 +14,7 @@ import { useTrackOverlay } from '@/composables/useTrackOverlay'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
+import { useGridGutters } from '@/composables/useGridGutters'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
@@ -25,6 +26,9 @@ import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import {
   STATIC_CARD_IDS,
   STATIC_CARD_TITLE_KEYS,
+  GRID_COLS,
+  GRID_ROW_HEIGHT,
+  GRID_MARGIN,
   chartItemId,
   mobileLayout,
   minSizeFor,
@@ -512,6 +516,47 @@ function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): vo
   activeLayout.value = next
 }
 
+// --- #2: draggable gutters between adjacent cards (IDE-style split-pane
+// resize) — see gridGutter.ts's module doc for the domain math and
+// useGridGutters.ts for the DOM/pointer wiring this just calls into. Desktop-
+// only (isMobile has no side-by-side pairs) and disabled while the dashboard
+// is locked, same two conditions that already gate the grid's own drag/
+// resize (isDraggable/isResizable in useDashboardLayout). The currently-
+// pinned card is excluded from `gutterItems` — its grid slot is an inert
+// Teleport placeholder (see the template's pin-placeholder note), so a
+// gutter touching it would visibly do nothing.
+const gutterItems = computed<DashboardLayoutItem[]>(() =>
+  desktopVisibleLayout.value.filter((it) => !isPinned(it.i)),
+)
+const gutterEnabled = computed(() => !isMobile.value && !isLocked.value)
+const gridGutters = useGridGutters({
+  items: gutterItems,
+  enabled: gutterEnabled,
+  cols: GRID_COLS,
+  rowHeight: GRID_ROW_HEIGHT,
+  marginX: GRID_MARGIN[0],
+  marginY: GRID_MARGIN[1],
+  // Same persistence path as onLayoutUpdated above (#1's fix) — a gutter drag
+  // is just another source of new coordinates, merged back into the full
+  // layout the identical way a corner-resize's `layout-updated` is.
+  onChange: (next) => {
+    layout.value = mergeLayoutPositions(layout.value, next)
+  },
+})
+const gutters = gridGutters.gutters
+const draggingKey = gridGutters.draggingKey
+const onGutterPointerDown = gridGutters.onGutterPointerDown
+// A plain local template ref, forwarded into the composable's own
+// containerRef via watch — kept as a separate binding (rather than the
+// template pointing `ref="..."` straight at `gridGutters.containerRef`)
+// because a template ref attribute must name a binding vue-tsc can see
+// genuinely READ somewhere in this component's own <script>; the watch
+// below is that read.
+const gridWrapRef = ref<HTMLElement | null>(null)
+watch(gridWrapRef, (el) => {
+  gridGutters.containerRef.value = el
+})
+
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
 }
@@ -629,14 +674,20 @@ function titleForItemId(id: string): string {
            resize (height only — a full-width card can't usefully resize its
            width). A pinned card's own slot is always non-draggable/
            non-resizable regardless of breakpoint (decorateForGrid). -->
+      <!-- #2 縫隙拖動: gridWrapRef is the positioning context (`position:
+           relative`) the gutter overlay's absolutely-positioned hit-boxes
+           are placed relative to — it must wrap `<GridLayout>` exactly (no
+           extra padding/border) so its measured width matches the library's
+           own colWidth math (see useGridGutters.ts's `containerRef` doc). -->
+      <div ref="gridWrapRef" class="grid-wrap">
       <GridLayout
         v-model:layout="activeLayout"
         :col-num="colNum"
         :is-draggable="isDraggable"
         :is-resizable="isResizable"
         :responsive="false"
-        :row-height="24"
-        :margin="[12, 12]"
+        :row-height="GRID_ROW_HEIGHT"
+        :margin="GRID_MARGIN"
         :vertical-compact="true"
         :use-css-transforms="true"
         @layout-updated="onLayoutUpdated"
@@ -991,6 +1042,21 @@ function titleForItemId(id: string): string {
           </Teleport>
         </template>
       </GridLayout>
+      <!-- #2 縫隙拖動 overlay: one thin hit-box per shared card edge, drawn
+           exactly over the margin gap between two adjacent cards (see
+           gridGutter.ts's `gutterRect`) — never over any card's own content,
+           so it can't intercept clicks meant for the dashboard. Empty
+           (nothing rendered) on mobile / while locked / while nothing is
+           adjacent — see useGridGutters's `enabled` gate. -->
+      <div
+        v-for="g in gutters"
+        :key="g.key"
+        class="grid-gutter"
+        :class="[g.orientation, { dragging: draggingKey === g.key }]"
+        :style="{ left: `${g.rect.left}px`, top: `${g.rect.top}px`, width: `${g.rect.width}px`, height: `${g.rect.height}px` }"
+        @pointerdown="onGutterPointerDown(g, $event)"
+      />
+      </div>
     </template>
   </div>
 </template>
@@ -1255,6 +1321,40 @@ function titleForItemId(id: string): string {
 .add:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+
+/* #2 縫隙拖動 — the positioning context the gutter overlay's absolutely-
+   positioned hit-boxes are placed relative to (see the template's doc on
+   gridWrapRef). Must wrap `<GridLayout>` with zero extra box (no padding/
+   border) so ITS measured width is exactly what grid-layout-plus itself
+   lays cards out against. */
+.grid-wrap {
+  position: relative;
+}
+/* One draggable hit-box per shared card edge, sized/positioned to exactly
+   fill the margin gap between two touching cards (gridGutter.ts's
+   `gutterRect`) — invisible by default (a visible line there all the time
+   would read as a stray grid rule), with a themed highlight only on
+   hover/active so the affordance discovers itself without adding permanent
+   visual noise to the dashboard. */
+.grid-gutter {
+  position: absolute;
+  z-index: 25;
+  touch-action: none;
+  background: transparent;
+  border-radius: 2px;
+  transition: background-color 0.1s ease;
+}
+.grid-gutter.vertical {
+  cursor: col-resize;
+}
+.grid-gutter.horizontal {
+  cursor: row-resize;
+}
+.grid-gutter:hover,
+.grid-gutter.dragging {
+  background: var(--color-accent);
+  opacity: 0.45;
 }
 
 /* #8 — snap grid items to position instead of easing the library's default
