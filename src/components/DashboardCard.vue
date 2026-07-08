@@ -1,6 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import {
+  computeFlipInvert,
+  isFlipNoop,
+  flipTransformCss,
+  PIN_FLIP_DURATION_MS,
+  PIN_FLIP_EASING,
+  type FlipRect,
+} from '@/domain/layout/flip'
 
 /**
  * #8/#9 — one grid item's visual chrome on the analyzer dashboard: a header
@@ -38,6 +46,16 @@ import { useI18n } from 'vue-i18n'
  * possible without DashboardCard itself changing. Only one card may be
  * pinned at a time (enforced by panelState.ts's togglePinned, documented via
  * the pin button's own tooltip) rather than supporting a multi-pin stack.
+ *
+ * #19 — the Teleport move itself is otherwise an instant DOM jump (Vue's own
+ * `<Transition>` can't help here — see flip.ts's module doc for why), so
+ * `onTogglePinned` below hand-animates it with FLIP: measure this card's rect
+ * synchronously BEFORE emitting (still at its pre-toggle position), then
+ * once Vue has relocated it (`nextTick`), invert from the new rect back to
+ * the old one and transition to identity — the card visibly slides (and, if
+ * its size also changed, resizes) between the grid slot and the pinned
+ * anchor instead of teleporting instantly. Skipped entirely under
+ * `prefers-reduced-motion: reduce`.
  */
 const props = defineProps<{
   title: string
@@ -73,13 +91,78 @@ const cardStyle = computed(() =>
 function onToggleCollapsed(): void {
   emit('update:collapsed', !props.collapsed)
 }
-function onTogglePinned(): void {
-  emit('update:pinned', !props.pinned)
+
+// #19 — FLIP transition for the pin/unpin Teleport move (see flip.ts's
+// module doc for why this can't just be a `<Transition>` around the
+// `<Teleport>`, and for the maths this delegates to). `rootEl` is the same
+// physical DOM node whether it's currently rendered in the grid slot or
+// inside #dashboard-pinned-anchor — Teleport relocates it, never remounts
+// it, so one ref keeps working across the move.
+const rootEl = ref<HTMLElement | null>(null)
+let cleanupTransition: (() => void) | null = null
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
 }
+
+/** Apply the FLIP "invert, then play" animation to `el`, given its rect
+ *  `before` the toggle (measured synchronously in {@link onTogglePinned},
+ *  i.e. before Vue/Teleport have moved anything) — `el`'s CURRENT rect is
+ *  `after` (this runs post-`nextTick`, once the move has actually happened). */
+function playPinFlip(el: HTMLElement, before: FlipRect): void {
+  const after = el.getBoundingClientRect()
+  const t = computeFlipInvert(before, after)
+  if (isFlipNoop(t)) return
+
+  cleanupTransition?.()
+  el.style.transition = 'none'
+  el.style.transformOrigin = 'top left'
+  el.style.transform = flipTransformCss(t)
+  // Force a synchronous style flush so the browser registers the INVERTED
+  // (no-transition) state before the next frame re-enables the transition —
+  // otherwise the browser could coalesce both style writes into one paint
+  // and skip straight to the final state with nothing to animate.
+  void el.offsetWidth
+
+  const raf = requestAnimationFrame(() => {
+    el.style.transition = `transform ${PIN_FLIP_DURATION_MS}ms ${PIN_FLIP_EASING}`
+    el.style.transform = ''
+    function onTransitionEnd(e: TransitionEvent): void {
+      if (e.target === el && e.propertyName === 'transform') finish()
+    }
+    function finish(): void {
+      el.style.transition = ''
+      el.style.transform = ''
+      el.style.transformOrigin = ''
+      el.removeEventListener('transitionend', onTransitionEnd)
+      cleanupTransition = null
+    }
+    el.addEventListener('transitionend', onTransitionEnd)
+    // Belt-and-braces: guarantee cleanup even if `transitionend` never fires
+    // (e.g. the element is hidden/collapsed mid-animation).
+    const timeout = setTimeout(finish, PIN_FLIP_DURATION_MS + 100)
+    cleanupTransition = () => {
+      clearTimeout(timeout)
+      el.removeEventListener('transitionend', onTransitionEnd)
+    }
+  })
+  cleanupTransition = () => cancelAnimationFrame(raf)
+}
+
+function onTogglePinned(): void {
+  const el = rootEl.value
+  const before = el && !prefersReducedMotion() ? el.getBoundingClientRect() : null
+  emit('update:pinned', !props.pinned)
+  if (el && before) {
+    void nextTick(() => playPinFlip(el, before))
+  }
+}
+
+onBeforeUnmount(() => cleanupTransition?.())
 </script>
 
 <template>
-  <div class="dashboard-card" :class="{ pinned, collapsed }" :style="cardStyle">
+  <div ref="rootEl" class="dashboard-card" :class="{ pinned, collapsed }" :style="cardStyle">
     <header class="drag-handle">
       <span class="title">{{ title }}</span>
       <span class="actions">
