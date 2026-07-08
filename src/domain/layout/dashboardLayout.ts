@@ -29,6 +29,16 @@ export const STORAGE_KEY = 'aracer-loga.dashboardLayout.v1'
 /** Total column count of the wide (desktop) grid — see AnalyzerView's GridLayout `cols`. */
 export const GRID_COLS = 12
 
+/** Row height (px) and [x,y] margin (px) passed to `<GridLayout>` — exported
+ *  (rather than left as literals in AnalyzerView.vue's template) so
+ *  useGridGutters.ts's pixel math (gridGutter.ts's `GridMetrics`) can use the
+ *  EXACT same numbers grid-layout-plus itself lays cards out with; two
+ *  independent copies of "24" and "[12, 12]" would silently drift if either
+ *  one were ever tuned without remembering the other (#2 — gutter overlay
+ *  must line up pixel-for-pixel with the real card edges). */
+export const GRID_ROW_HEIGHT = 24
+export const GRID_MARGIN: [number, number] = [12, 12]
+
 /** Static (always-present) card ids, in the same order as the default layout below. */
 export const STATIC_CARD_IDS = {
   map: 'map',
