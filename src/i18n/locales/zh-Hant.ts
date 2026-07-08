@@ -15,6 +15,7 @@ export default {
     analyzer: '分析',
     analyzerSoon: '（Phase 4）',
     settings: '設定',
+    about: '關於',
     mainLabel: '主導覽',
   },
   settings: {
@@ -22,6 +23,30 @@ export default {
     futureNote: '更多設定（設定匯出 / 匯入等）將陸續加入。',
     timezone: '時區',
     timezoneAuto: '自動（瀏覽器）',
+  },
+  about: {
+    project: {
+      heading: '專案資訊',
+      author: '開發者',
+      repo: '原始碼',
+      version: '版本',
+      versionValue: '{sha}（{date} 建置）',
+      license: '授權',
+      licenseValue: 'MIT License',
+    },
+    licenses: {
+      heading: '第三方開源套件授權',
+      intro: '本專案使用以下開源套件，在此致謝：',
+      colName: '套件',
+      colVersion: '版本',
+      colLicense: '授權條款',
+      colLink: '連結',
+      viewLink: '查看',
+      notes: {
+        vitePluginPwa: '用於產生 PWA 離線快取用的 Service Worker（基於 Workbox）。',
+        interactjs: '透過 grid-layout-plus 間接引入，用於分析頁儀表板卡片的拖曳／縮放互動。',
+      },
+    },
   },
   fileBar: {
     load: '載入記錄',

@@ -15,6 +15,7 @@ export default {
     analyzer: 'Analyzer',
     analyzerSoon: '(Phase 4)',
     settings: 'Settings',
+    about: 'About',
     mainLabel: 'Main navigation',
   },
   settings: {
@@ -22,6 +23,31 @@ export default {
     futureNote: 'More settings (export / import, etc.) coming soon.',
     timezone: 'Time zone',
     timezoneAuto: 'Auto (browser)',
+  },
+  about: {
+    project: {
+      heading: 'Project info',
+      author: 'Author',
+      repo: 'Source code',
+      version: 'Version',
+      versionValue: '{sha} (built {date})',
+      license: 'License',
+      licenseValue: 'MIT License',
+    },
+    licenses: {
+      heading: 'Third-party open-source licenses',
+      intro: 'This project is built with the following open-source packages — thanks to their authors:',
+      colName: 'Package',
+      colVersion: 'Version',
+      colLicense: 'License',
+      colLink: 'Link',
+      viewLink: 'View',
+      notes: {
+        vitePluginPwa: 'Generates the Workbox-based service worker used for PWA offline caching.',
+        interactjs:
+          'Pulled in transitively via grid-layout-plus, powering drag/resize on the analyzer dashboard cards.',
+      },
+    },
   },
   fileBar: {
     load: 'Load files',
