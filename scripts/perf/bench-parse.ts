@@ -1,5 +1,5 @@
 /**
- * Perf audit — parsing bench (docs/PERF-AUDIT-2026-07-08.md, item 2).
+ * Perf audit — parsing bench (docs/journal/PERF-AUDIT-2026-07-08.md, item 2).
  *
  * Measures `parseLoga` (raw .loga text -> LogSession) and the RC3/.nmea
  * export path (LogSession -> RaceChrono .nmea text) for a small and a large

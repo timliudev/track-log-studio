@@ -1,5 +1,5 @@
 /**
- * Perf audit — compute pipeline bench (docs/PERF-AUDIT-2026-07-08.md, item 3
+ * Perf audit — compute pipeline bench (docs/journal/PERF-AUDIT-2026-07-08.md, item 3
  * + item 5 memory). Benches the domain-layer functions behind each analyzer
  * card: GPS track extraction, lap detection (ECU channel + geometric line),
  * sector timing, corner detection, G-G scatter prep, suspension calibration
