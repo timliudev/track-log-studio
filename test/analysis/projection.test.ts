@@ -71,4 +71,43 @@ describe('fitProjection', () => {
     expect(g.lat).toBeCloseTo(25.002, 6)
     expect(g.lon).toBeCloseTo(121.001, 6)
   })
+
+  describe('multi-track overlay fit', () => {
+    it('accepts a single track wrapped in an array identically to the bare track', () => {
+      const track = makeTrack([25.0, 25.002, 25.004], [121.0, 121.001, 121.0])
+      const asBare = fitProjection(track, W, H, PAD)!
+      const asArray = fitProjection([track], W, H, PAD)!
+      expect(asArray.toPixel(25.002, 121.001)).toEqual(asBare.toPixel(25.002, 121.001))
+    })
+
+    it('fits the COMBINED bounds so a second, disjoint track is not clipped', () => {
+      const active = makeTrack([25.0, 25.001], [121.0, 121.001])
+      // Far outside `active`'s own bbox — with only `active` fitted, this
+      // would project well outside the canvas.
+      const overlay = makeTrack([25.05, 25.051], [121.05, 121.051])
+      const proj = fitProjection([active, overlay], W, H, PAD)!
+      for (const [lat, lon] of [
+        [25.0, 121.0],
+        [25.001, 121.001],
+        [25.05, 121.05],
+        [25.051, 121.051],
+      ]) {
+        const p = proj.toPixel(lat, lon)
+        expect(p.x).toBeGreaterThanOrEqual(0)
+        expect(p.x).toBeLessThanOrEqual(W)
+        expect(p.y).toBeGreaterThanOrEqual(0)
+        expect(p.y).toBeLessThanOrEqual(H)
+      }
+    })
+
+    it('returns null when the COMBINED valid-fix count across every track is still under two', () => {
+      const a = makeTrack([25.0], [121.0])
+      const b: typeof a = { lat: new Float64Array([26.0]), lon: new Float64Array([122.0]), valid: new Uint8Array([0]) }
+      expect(fitProjection([a, b], W, H, PAD)).toBeNull()
+    })
+
+    it('an empty array has nothing to fit', () => {
+      expect(fitProjection([], W, H, PAD)).toBeNull()
+    })
+  })
 })

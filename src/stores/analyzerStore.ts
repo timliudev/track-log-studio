@@ -81,6 +81,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     distanceM: 100,
     minEntrySpeedKmh: null,
   })
+  // Track-map multi-file overlay: fileStore ids of OTHER loaded sessions whose
+  // racing line is drawn (faint, alongside the active session's own
+  // full-opacity track) on TrackMap — see useTrackOverlay.ts, which derives
+  // the actual drawable entries (name/color/decimated track) from this id set
+  // + fileStore. Transient like the other analyzer toggles above (not
+  // persisted); a stale id (its file got removed) is harmless — the
+  // composable simply drops it when building the drawable list, and toggling
+  // it again re-adds a fresh one.
+  const overlayFileIds = ref<number[]>([])
   // One past the highest restored id — ids are never reused, so a restored
   // layout/panel-state entry can't collide with a newly added chart's card id.
   let nextId = nextChartId(charts.value)
@@ -134,6 +143,19 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setAccelCondition(condition: AccelCondition): void {
     accelCondition.value = condition
+  }
+
+  /** Toggle whether `id` (a fileStore file id) is drawn as a track-map
+   *  overlay — on if it was off, off if it was on. */
+  function toggleOverlayFile(id: number): void {
+    const i = overlayFileIds.value.indexOf(id)
+    if (i === -1) overlayFileIds.value = [...overlayFileIds.value, id]
+    else overlayFileIds.value = overlayFileIds.value.filter((x) => x !== id)
+  }
+
+  /** Drop every overlaid file (e.g. a "clear overlays" affordance). */
+  function clearOverlayFiles(): void {
+    overlayFileIds.value = []
   }
 
   /** Add a new chart. `kind` defaults to 'timeseries' (existing behaviour,
@@ -196,6 +218,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     markMinima,
     markMaxima,
     accelCondition,
+    overlayFileIds,
     setXRange,
     setCursor,
     setOverlayCursor,
@@ -205,6 +228,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     setMarkMinima,
     setMarkMaxima,
     setAccelCondition,
+    toggleOverlayFile,
+    clearOverlayFiles,
     addChart,
     removeChart,
     setChartChannels,

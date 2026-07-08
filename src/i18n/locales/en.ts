@@ -142,6 +142,10 @@ export default {
     extremumMax: 'Max',
     resetView: 'Reset view',
     zoomHint: 'Scroll to zoom, drag to pan, pinch to zoom, double-click to reset',
+    trackOverlayTitle: 'Overlay tracks',
+    trackOverlayHint:
+      'Tick other loaded logs to draw their racing lines faintly on the map for comparison; the active log stays on top at full opacity.',
+    trackOverlayClear: 'Clear all',
     sectorAutoDetect: 'Auto-detect corners',
     sectorRedetectConfirm:
       'Re-detecting will overwrite your manually-adjusted sector gates. Continue?',
