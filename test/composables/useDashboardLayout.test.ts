@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, defineComponent, h } from 'vue'
+import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
+import { mergeLayoutPositions } from '@/domain/layout/dashboardLayout'
 
 /** Node's default test environment has no real localStorage; this file opts
  *  into happy-dom (for `window`) but still needs the same in-memory stub
@@ -69,5 +70,76 @@ describe('useDashboardLayout — isMobile breakpoint (#9 fix)', () => {
     const { layout } = mountHarness()
     expect(layout.isMobile.value).toBe(false)
     expect(layout.colNum.value).toBe(12)
+  })
+})
+
+/**
+ * #4 crash fix — "load two files -> Maximum recursive updates exceeded in
+ * <AnalyzerView>" reproduction at the REACTIVITY level (not just the pure
+ * mergeLayoutPositions/reconcileLayout unit tests in dashboardLayout.test.ts).
+ *
+ * Real grid-layout-plus + AnalyzerView are heavy to mount here, so this
+ * simulates the exact shape of the wiring that caused the loop:
+ *  - `decorated` stands in for AnalyzerView's `activeLayout` GETTER
+ *    (decorateForGrid): it derives a BRAND NEW array/objects from
+ *    `composable.layout` on every read, same as the real one.
+ *  - the `watch(decorated, ...)` stands in for grid-layout-plus's own
+ *    internal watcher on its `layout` PROP: a prop is just a computed the
+ *    child re-evaluates whenever its source changes BY REFERENCE, and the
+ *    library's compaction pass can re-emit `layout-updated` off that (not
+ *    only off a real user drag) — exactly like AnalyzerView's
+ *    `onLayoutUpdated` handler, the watcher's own callback writes back via
+ *    `mergeLayoutPositions`.
+ *  - reassigning `chartIdsRef.value` to a new-but-equal-content array
+ *    simulates whatever caused `useDashboardLayout`'s `chartIds` watcher to
+ *    fire and re-run `reconcileLayout` when the SECOND file was loaded (the
+ *    reported trigger — see reconcileLayout's doc for why that watcher can
+ *    fire even when nothing chart-related actually changed).
+ *
+ * Before the #4 fix, `reconcileLayout`/`mergeLayoutPositions` always
+ * returned a freshly-allocated (if structurally-equal) array, so EVERY
+ * write-back looked like "a change" to Vue's `ref` (which only skips
+ * notifying on `Object.is`-equal reassignment) — each echo produced another
+ * echo, unbounded. With the fix, once coordinates converge, the write-back
+ * hands back the SAME array reference, the `ref` assignment becomes a true
+ * no-op, and the chain terminates.
+ */
+describe('useDashboardLayout — layout/layout-updated feedback loop (#4 crash fix)', () => {
+  it('does not runaway-echo when chartIds is reassigned to an equal-content array (load-second-file repro)', async () => {
+    window.innerWidth = 1280
+    const chartIdsRef = ref<number[]>([1])
+    let composable!: ReturnType<typeof useDashboardLayout>
+    let echoCount = 0
+    const MAX_ECHOES = 5 // safety valve: a regression should fail fast, not hang the test runner
+
+    const Harness = defineComponent({
+      setup() {
+        const ids = computed(() => chartIdsRef.value)
+        composable = useDashboardLayout(ids)
+
+        const decorated = computed(() =>
+          composable.layout.value.map((it) => ({ ...it, isDraggable: true, isResizable: true })),
+        )
+
+        watch(
+          decorated,
+          (next) => {
+            echoCount++
+            if (echoCount > MAX_ECHOES) return
+            composable.layout.value = mergeLayoutPositions(composable.layout.value, next)
+          },
+          { flush: 'sync' },
+        )
+
+        return () => h('div')
+      },
+    })
+    mount(Harness)
+
+    echoCount = 0 // ignore whatever the initial mount settled at
+    chartIdsRef.value = [1] // new array, SAME ids — the reported trigger
+    await nextTick()
+
+    expect(echoCount).toBeLessThan(MAX_ECHOES)
   })
 })

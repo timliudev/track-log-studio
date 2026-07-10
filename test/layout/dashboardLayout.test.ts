@@ -389,6 +389,22 @@ describe('reconcileLayout', () => {
     expect(next).toEqual(layout)
   })
 
+  // #4 crash fix — useDashboardLayout's `chartIds` watcher writes
+  // `layout.value = reconcileLayout(layout.value, ids)` on every change to
+  // the id SET, even ones that add/remove nothing here. If that always
+  // produced a fresh-but-equal array, the assignment would never be a true
+  // Vue no-op (a `ref` only skips notifying watchers when the new value is
+  // the SAME object as the old one) and could feed the exact "layout ref
+  // reassigned -> GridLayout re-renders -> emits layout-updated -> writes
+  // back -> ..." cycle reported as the "load two files -> infinite recursive
+  // updates" crash. See mergeLayoutPositions's matching test below for the
+  // other half of the write-back path.
+  it('returns the SAME array reference (not just equal) on a true no-op call', () => {
+    const layout = defaultLayout()
+    const next = reconcileLayout(layout, [1])
+    expect(next).toBe(layout)
+  })
+
   it('preserves an existing chart item position instead of resetting it', () => {
     const layout = defaultLayout().map((it) =>
       it.i === chartItemId(1) ? { ...it, x: 9, y: 99, w: 3, h: 3 } : it,
@@ -510,6 +526,37 @@ describe('mergeLayoutPositions (#1 fix — layout-updated write-back)', () => {
   it('is a no-op (returns items equal to base) when updated is empty', () => {
     const base = defaultLayout()
     expect(mergeLayoutPositions(base, [])).toEqual(base)
+  })
+
+  // #4 crash fix — AnalyzerView's `activeLayout` setter / `onLayoutUpdated`
+  // write straight into `layout.value` via `layout.value =
+  // mergeLayoutPositions(layout.value, next)`. Vue's `ref` setter only skips
+  // notifying dependents when the assigned value is the SAME object
+  // (`Object.is`) as the current one — a structurally-equal-but-freshly-
+  // allocated array (what plain `.map()` always returns) would still trigger
+  // every downstream computed/watcher, including re-rendering
+  // `<GridLayout>`'s `:layout` prop, which can itself re-emit `layout-
+  // updated` (its own compaction pass runs on prop changes, not only drags)
+  // and call back into `onLayoutUpdated` — an unbounded loop ("Maximum
+  // recursive updates exceeded"), reported after loading a second file.
+  // Returning `base` itself when NOTHING's coordinates changed makes that
+  // assignment a genuine no-op and breaks the cycle once positions converge.
+  it('returns the SAME array reference (not just equal) as base when nothing changed', () => {
+    const base = defaultLayout()
+    // Same coordinates, only decoration fields differ (as decorateForGrid
+    // would produce) — a real "nothing actually moved" payload.
+    const updated = base.map((it) => ({ ...it, isDraggable: true, isResizable: true }))
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged).toBe(base)
+  })
+
+  it('returns a NEW array reference when at least one item genuinely moved', () => {
+    const base = defaultLayout()
+    const updated = base.map((it) =>
+      it.i === STATIC_CARD_IDS.gear ? { ...it, x: 9, y: 20 } : it,
+    )
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged).not.toBe(base)
   })
 
   it('simulates a drag: only the dragged item moves, everything else is untouched', () => {
