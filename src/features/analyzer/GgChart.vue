@@ -162,6 +162,38 @@ export function squareGridBox(
     height: side,
   }
 }
+
+/**
+ * #5 fix — decimal precision for an axis whose range was pinned explicitly
+ * (the 1:1 `square`/`equal` modes — see `squareAxisRanges`): widening the
+ * smaller-span axis to match the larger one usually produces a NON-"nice"
+ * min/max (e.g. widening a 0..2 span to match an 8 span centres it at
+ * -3..5... but the more common case is a fractional widen like -0.333..),
+ * unlike echarts' own auto-ranging (which always picks nice round ticks) —
+ * so its default label formatting could print long floats (e.g.
+ * `-0.3333333`), and since the grid box is drawn at a fixed pixel chrome
+ * (`containLabel: false`), an unexpectedly wide label pushes into — and
+ * visually squeezes — the plotting area, breaking the square aspect (the
+ * reported bug). Chosen from the axis's overall SPAN (not the individual
+ * tick value) so every tick on the same axis renders at the same precision.
+ */
+export function axisLabelDecimals(span: number): number {
+  if (!Number.isFinite(span) || span <= 0) return 2
+  if (span >= 100) return 0
+  if (span >= 10) return 1
+  if (span >= 1) return 2
+  if (span >= 0.1) return 3
+  return 4
+}
+
+/** Formats one axis tick at `axisLabelDecimals(span)` precision, trimming
+ *  trailing zeros (and normalising `-0` to `0`) for a compact label that
+ *  doesn't squeeze the plotting area (see `axisLabelDecimals`). */
+export function formatAxisTick(value: number, span: number): string {
+  const decimals = axisLabelDecimals(span)
+  const rounded = Number(value.toFixed(decimals))
+  return String(rounded === 0 ? 0 : rounded)
+}
 </script>
 
 <script setup lang="ts">
@@ -266,6 +298,12 @@ function buildOption(): echarts.EChartsCoreOption {
     xRange = squared.xRange
     yRange = squared.yRange
   }
+  // #5 fix — snapshot each pinned axis's span as a plain `const` number (not
+  // a closure over the mutable `let xRange`/`yRange` above) so the axisLabel
+  // `formatter` below captures a stable value; unused (NaN) when the axis
+  // isn't pinned, since the formatter is only wired in for that case.
+  const xSpan = xRange ? xRange.max - xRange.min : NaN
+  const ySpan = yRange ? yRange.max - yRange.min : NaN
 
   const sharedAxis = {
     type: 'value' as const,
@@ -316,12 +354,33 @@ function buildOption(): echarts.EChartsCoreOption {
     },
     xAxis: {
       ...sharedAxis,
-      ...(xRange ? { min: xRange.min, max: xRange.max } : {}),
+      ...(xRange
+        ? {
+            min: xRange.min,
+            max: xRange.max,
+            // #5 fix — pinned 1:1 ranges aren't "nice" numbers; cap decimals
+            // from the axis's own span so long floats don't widen the label
+            // column and squeeze the square plotting area.
+            axisLabel: {
+              ...sharedAxis.axisLabel,
+              formatter: (v: number) => formatAxisTick(v, xSpan),
+            },
+          }
+        : {}),
       ...axisNameFields(props.xName),
     },
     yAxis: {
       ...sharedAxis,
-      ...(yRange ? { min: yRange.min, max: yRange.max } : {}),
+      ...(yRange
+        ? {
+            min: yRange.min,
+            max: yRange.max,
+            axisLabel: {
+              ...sharedAxis.axisLabel,
+              formatter: (v: number) => formatAxisTick(v, ySpan),
+            },
+          }
+        : {}),
       ...axisNameFields(props.yName),
     },
     series: props.series.map((s) => ({
