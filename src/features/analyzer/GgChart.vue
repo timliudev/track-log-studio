@@ -98,37 +98,68 @@ export function paddedAxisRange(min: number, max: number, padFrac = 0.08): { min
 }
 
 /**
- * XY-aspect feature — grid pixel insets (left/right/top/bottom) that give
- * BOTH axes the SAME pixels-per-data-unit, fit within the container's
- * plotting area (container size minus the `chrome` reserved for axis
- * labels/names) and centred — letterboxing whichever axis has spare room,
- * the same way a `background-size: contain` image is centred rather than
- * stretched. This is what makes a scatter's 1:1 toggle hold on a non-square
- * card (dashboard cards are essentially never square) AND survive a
+ * #6 — force both axes to the SAME numeric span (the larger of the two,
+ * centred on each axis's own original centre) so that, combined with a
+ * literal square grid box (see {@link squareGridBox}), X and Y end up with
+ * IDENTICAL pixels-per-data-unit. This is the piece the earlier "equal
+ * pixels-per-unit via grid-inset letterboxing" attempt was missing: that
+ * approach (kept the raw, possibly very different, per-axis ranges and only
+ * padded the GRID INSETS to equalise scale) produced a grid box whose outer
+ * pixel width/height were themselves unequal whenever the two channels'
+ * data spans differed a lot (e.g. RPM 0..8000 vs speed 0..200) — the plot
+ * area came out as a wide sliver, not a square, which is exactly the "Y軸被
+ * 拍扁" (Y axis squashed flat) symptom reported against that version.
+ * Widening the SMALLER axis's numeric range instead (rather than padding
+ * grid pixels) means the grid box itself can always be sized as a literal
+ * square (equal width AND height in pixels) — see `squareGridBox` — while
+ * the actual data (still centred) occupies a smaller, but honestly-scaled,
+ * region within that square. For the classic G-G friction-circle case (both
+ * axes already forced to the same symmetric-about-0 bound by
+ * `computeMaxAbs`) the spans are already equal, so this is a no-op there.
+ */
+export function squareAxisRanges(
+  xRange: { min: number; max: number },
+  yRange: { min: number; max: number },
+): { xRange: { min: number; max: number }; yRange: { min: number; max: number } } {
+  const xSpan = Math.max(xRange.max - xRange.min, 1e-9)
+  const ySpan = Math.max(yRange.max - yRange.min, 1e-9)
+  const span = Math.max(xSpan, ySpan)
+  const xMid = (xRange.min + xRange.max) / 2
+  const yMid = (yRange.min + yRange.max) / 2
+  return {
+    xRange: { min: xMid - span / 2, max: xMid + span / 2 },
+    yRange: { min: yMid - span / 2, max: yMid + span / 2 },
+  }
+}
+
+/**
+ * #6 — a LITERAL square grid pixel box (equal width AND height, not just
+ * equal units-per-pixel): side = the smaller of the container's two
+ * available-plotting dimensions (container size minus `chrome`, the space
+ * reserved for axis labels/names), centred in whichever dimension has spare
+ * room — the same "background-size: contain, centred" idea the old
+ * grid-inset letterbox used, just applied to the OUTER box shape instead of
+ * to per-axis scale. Paired with {@link squareAxisRanges} (equal numeric
+ * spans on both axes), this guarantees symmetric data (e.g. a circle) plots
+ * as a visually square/round shape on ANY container shape, and holds after a
  * window/card resize (the caller recomputes this on every resize — see
  * GgChart's `resize()` — since it depends on the CURRENT container size).
  */
-export function equalAspectGrid(
+export function squareGridBox(
   containerW: number,
   containerH: number,
   chrome: { left: number; right: number; top: number; bottom: number },
-  xRange: { min: number; max: number },
-  yRange: { min: number; max: number },
-): { left: number; right: number; top: number; bottom: number } {
+): { left: number; top: number; width: number; height: number } {
   const availW = Math.max(containerW - chrome.left - chrome.right, 1)
   const availH = Math.max(containerH - chrome.top - chrome.bottom, 1)
-  const xSpan = Math.max(xRange.max - xRange.min, 1e-9)
-  const ySpan = Math.max(yRange.max - yRange.min, 1e-9)
-  const scale = Math.min(availW / xSpan, availH / ySpan)
-  const plotW = xSpan * scale
-  const plotH = ySpan * scale
-  const extraW = Math.max(availW - plotW, 0)
-  const extraH = Math.max(availH - plotH, 0)
+  const side = Math.max(Math.min(availW, availH), 1)
+  const extraW = Math.max(availW - side, 0)
+  const extraH = Math.max(availH - side, 0)
   return {
     left: chrome.left + extraW / 2,
-    right: chrome.right + extraW / 2,
     top: chrome.top + extraH / 2,
-    bottom: chrome.bottom + extraH / 2,
+    width: side,
+    height: side,
   }
 }
 </script>
@@ -169,7 +200,8 @@ const props = defineProps<{
    *  independently to fill the card. Defaults to true when omitted so the
    *  G-G force chart (axisMode 'square') gets a TRUE circle, not just a
    *  symmetric-about-0 numeric range that only looked square by coincidence
-   *  of the card happening to be roughly square — see `equalAspectGrid`. */
+   *  of the card happening to be roughly square — see `squareAxisRanges`/
+   *  `squareGridBox`. */
   equalAspect?: boolean
 }>()
 
@@ -209,7 +241,7 @@ function buildOption(): echarts.EChartsCoreOption {
   // auto-ranging applies nice-tick rounding per axis independently, which
   // would silently change each axis's data span and break any pixel ratio
   // computed from it — so when `equal` is on, the ranges are pinned here and
-  // the grid insets below do the rest. `square` keeps its historic
+  // the grid box below does the rest. `square` keeps its historic
   // symmetric-about-0 range even when `equal` is toggled off (that numeric
   // symmetry predates the 1:1 feature and is a property of the friction-
   // circle reading, not of pixel scaling).
@@ -223,6 +255,16 @@ function buildOption(): echarts.EChartsCoreOption {
     const ext = dataExtent(props.series)
     xRange = paddedAxisRange(ext.xMin, ext.xMax)
     yRange = paddedAxisRange(ext.yMin, ext.yMax)
+  }
+  // #6 — when 1:1 is on, widen whichever axis has the smaller span so BOTH
+  // axes cover the SAME numeric span (see `squareAxisRanges`) — this is what
+  // lets the grid box below be a literal square while still giving both axes
+  // identical pixels-per-data-unit. No-op for `square` axisMode (its bound is
+  // already symmetric/equal on both axes).
+  if (equal && xRange && yRange) {
+    const squared = squareAxisRanges(xRange, yRange)
+    xRange = squared.xRange
+    yRange = squared.yRange
   }
 
   const sharedAxis = {
@@ -243,14 +285,13 @@ function buildOption(): echarts.EChartsCoreOption {
     top: 16,
     bottom: hasXName ? 56 : 40,
   }
-  // 1:1 mode: measure the CURRENT container and letterbox the plot area so
-  // both axes get the same pixels-per-data-unit — recomputed on every
-  // render/resize (see `resize()`), which is what keeps the ratio true after
-  // a window or dashboard-card resize.
+  // #6 — 1:1 mode: measure the CURRENT container and force a literal SQUARE
+  // grid box (equal pixel width/height — see `squareGridBox`), combined with
+  // the equal-span axis ranges above — recomputed on every render/resize (see
+  // `resize()`), which is what keeps the square shape true after a window or
+  // dashboard-card resize.
   const grid =
-    equal && xRange && yRange
-      ? equalAspectGrid(hostSize().width, hostSize().height, chrome, xRange, yRange)
-      : chrome
+    equal && xRange && yRange ? squareGridBox(hostSize().width, hostSize().height, chrome) : chrome
 
   return {
     animation: false,
@@ -327,9 +368,9 @@ function resize(): void {
   // the container. See measuredSize's doc.
   if (!chart) return
   chart.resize(hostSize())
-  // 1:1 mode letterboxes the grid from the CONTAINER size (see
-  // equalAspectGrid), so a resize invalidates the current grid insets —
-  // rebuild the option at the new size to keep the pixel ratio true.
+  // 1:1 mode sizes the square grid box from the CONTAINER size (see
+  // squareGridBox), so a resize invalidates the current box — rebuild the
+  // option at the new size to keep the square shape true.
   if (props.equalAspect ?? true) render()
 }
 

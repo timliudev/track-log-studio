@@ -1,11 +1,23 @@
 import { describe, it, expect } from 'vitest'
-import { dataExtent, paddedAxisRange, equalAspectGrid, type GgSeries } from '@/features/analyzer/GgChart.vue'
+import {
+  dataExtent,
+  paddedAxisRange,
+  squareAxisRanges,
+  squareGridBox,
+  type GgSeries,
+} from '@/features/analyzer/GgChart.vue'
 
 /**
- * XY-aspect feature — the scatter chart's 1:1 axis scaling: the same data
- * span must cover the same number of pixels on X and Y, on ANY container
- * shape, and keep holding after a window/card resize (GgChart recomputes
- * `equalAspectGrid` from the CURRENT container size on every resize).
+ * XY-aspect feature (#6) — the scatter chart's 1:1 axis scaling: the plotted
+ * grid box must be a LITERAL SQUARE (equal pixel width AND height — not just
+ * equal pixels-per-data-unit, which an earlier version got wrong: it padded
+ * only the grid INSETS to equalise scale, leaving the outer box itself
+ * however-shaped the data spans happened to produce — a wide sliver instead
+ * of a square whenever the two channels' spans differed a lot, which is
+ * exactly the "Y軸被拍扁" bug report this fix addresses), on ANY container
+ * shape, and this must keep holding after a window/card resize (GgChart
+ * recomputes both `squareAxisRanges` and `squareGridBox` from the CURRENT
+ * container size on every resize).
  */
 
 function series(points: [number, number][]): GgSeries[] {
@@ -48,68 +60,112 @@ describe('paddedAxisRange', () => {
   })
 })
 
-describe('equalAspectGrid', () => {
-  const chrome = { left: 48, right: 16, top: 16, bottom: 40 }
-
-  /** Pixels-per-data-unit on each axis under the returned insets. */
-  function scales(
-    w: number,
-    h: number,
-    x: { min: number; max: number },
-    y: { min: number; max: number },
-  ): { sx: number; sy: number } {
-    const g = equalAspectGrid(w, h, chrome, x, y)
-    const plotW = w - g.left - g.right
-    const plotH = h - g.top - g.bottom
-    return { sx: plotW / (x.max - x.min), sy: plotH / (y.max - y.min) }
-  }
-
-  it('gives both axes the same pixels-per-data-unit on a wide container', () => {
-    const { sx, sy } = scales(800, 400, { min: -2, max: 2 }, { min: -2, max: 2 })
-    expect(sx).toBeCloseTo(sy, 6)
+describe('squareAxisRanges', () => {
+  it('widens the smaller-span axis to match the larger, centred on its own midpoint', () => {
+    const { xRange, yRange } = squareAxisRanges({ min: 0, max: 8000 }, { min: 0, max: 200 })
+    expect(xRange).toEqual({ min: 0, max: 8000 }) // larger span: untouched
+    expect(yRange.max - yRange.min).toBeCloseTo(8000, 6) // matched to the larger span
+    expect((yRange.min + yRange.max) / 2).toBeCloseTo(100, 6) // still centred on the original data
   })
 
-  it('holds the ratio on a tall container too (letterboxes the other axis)', () => {
-    const { sx, sy } = scales(300, 900, { min: 0, max: 10 }, { min: 0, max: 2 })
-    expect(sx).toBeCloseTo(sy, 6)
+  it('is a no-op when both axes already have the same span', () => {
+    const { xRange, yRange } = squareAxisRanges({ min: -2, max: 2 }, { min: -2, max: 2 })
+    expect(xRange).toEqual({ min: -2, max: 2 })
+    expect(yRange).toEqual({ min: -2, max: 2 })
+  })
+
+  it('picks whichever axis has the larger span regardless of which is X or Y', () => {
+    const { xRange, yRange } = squareAxisRanges({ min: 10, max: 12 }, { min: -50, max: 50 })
+    expect(yRange).toEqual({ min: -50, max: 50 }) // larger span: untouched
+    expect(xRange.max - xRange.min).toBeCloseTo(100, 6)
+    expect((xRange.min + xRange.max) / 2).toBeCloseTo(11, 6)
+  })
+})
+
+describe('squareGridBox', () => {
+  const chrome = { left: 48, right: 16, top: 16, bottom: 40 }
+
+  it('produces a LITERAL square (equal pixel width and height) on a wide container', () => {
+    const g = squareGridBox(800, 400, chrome)
+    expect(g.width).toBeCloseTo(g.height, 6)
+  })
+
+  it('produces a literal square on a tall container too', () => {
+    const g = squareGridBox(300, 900, chrome)
+    expect(g.width).toBeCloseTo(g.height, 6)
+  })
+
+  it('sizes the square to the SMALLER available dimension', () => {
+    // availW = 800-48-16=736, availH = 400-16-40=344 — height is limiting.
+    const g = squareGridBox(800, 400, chrome)
+    expect(g.height).toBeCloseTo(344, 6)
+    expect(g.width).toBeCloseTo(344, 6)
   })
 
   it('keeps the ratio across a resize (recomputed per size — the resize invariant)', () => {
-    const before = scales(800, 400, { min: 0, max: 4 }, { min: 0, max: 1 })
-    const after = scales(500, 700, { min: 0, max: 4 }, { min: 0, max: 1 })
-    expect(before.sx).toBeCloseTo(before.sy, 6)
-    expect(after.sx).toBeCloseTo(after.sy, 6)
+    const before = squareGridBox(800, 400, chrome)
+    const after = squareGridBox(500, 700, chrome)
+    expect(before.width).toBeCloseTo(before.height, 6)
+    expect(after.width).toBeCloseTo(after.height, 6)
   })
 
-  it('centres the plot: the letterboxed axis splits its spare pixels evenly', () => {
-    // Equal spans on an 800x400 container: height is limiting, so the extra
-    // width splits between left/right beyond the chrome.
-    const g = equalAspectGrid(800, 400, chrome, { min: -1, max: 1 }, { min: -1, max: 1 })
-    expect(g.left - chrome.left).toBeCloseTo(g.right - chrome.right, 6)
+  it('centres the square: the constrained dimension splits its spare pixels evenly', () => {
+    // Wide container: height is limiting, so the extra width splits between
+    // left/right beyond the chrome; top stays flush with the chrome.
+    const g = squareGridBox(800, 400, chrome)
+    const availW = 800 - chrome.left - chrome.right
+    const extraW = availW - g.width
+    expect(g.left - chrome.left).toBeCloseTo(extraW / 2, 6)
     expect(g.top).toBeCloseTo(chrome.top, 6)
-    expect(g.bottom).toBeCloseTo(chrome.bottom, 6)
   })
 
-  it('degrades safely on a container smaller than the chrome (no NaN / negative letterbox)', () => {
+  it('degrades safely on a container smaller than the chrome (no NaN / negative size)', () => {
     // 60x40 is smaller than the chrome itself — the available plot area
-    // floors at 1px, so the extra insets must stay finite and non-negative
+    // floors at 1px, so the square side must stay finite and positive
     // (echarts just renders a squeezed grid, nothing throws).
-    const g = equalAspectGrid(60, 40, chrome, { min: 0, max: 1 }, { min: 0, max: 1 })
-    for (const v of [g.left, g.right, g.top, g.bottom]) expect(Number.isFinite(v)).toBe(true)
-    expect(g.left).toBeGreaterThanOrEqual(chrome.left)
-    expect(g.right).toBeGreaterThanOrEqual(chrome.right)
-    expect(g.top).toBeGreaterThanOrEqual(chrome.top)
-    expect(g.bottom).toBeGreaterThanOrEqual(chrome.bottom)
+    const g = squareGridBox(60, 40, chrome)
+    expect(Number.isFinite(g.left)).toBe(true)
+    expect(Number.isFinite(g.top)).toBe(true)
+    expect(g.width).toBeGreaterThan(0)
+    expect(g.height).toBeGreaterThan(0)
   })
 
-  it('works with real series data end to end (dataExtent -> paddedAxisRange -> grid)', () => {
+  it('works with real series data end to end (dataExtent -> paddedAxisRange -> squareAxisRanges -> square grid)', () => {
     const s = series([[0, 0], [10, 2], [5, 1]])
     const e = dataExtent(s)
     const x = paddedAxisRange(e.xMin, e.xMax)
     const y = paddedAxisRange(e.yMin, e.yMax)
-    const g = equalAspectGrid(640, 480, chrome, x, y)
-    const sx = (640 - g.left - g.right) / (x.max - x.min)
-    const sy = (480 - g.top - g.bottom) / (y.max - y.min)
-    expect(sx).toBeCloseTo(sy, 6)
+    const { xRange, yRange } = squareAxisRanges(x, y)
+    expect(xRange.max - xRange.min).toBeCloseTo(yRange.max - yRange.min, 6)
+    const g = squareGridBox(640, 480, chrome)
+    expect(g.width).toBeCloseTo(g.height, 6)
+  })
+})
+
+describe('#6 regression — a symmetric circle stays a square/round shape, not a squashed line', () => {
+  it('a wide-container 1:1 plot of x,y both -1..1 gets a literal square box (not a horizontal sliver)', () => {
+    const chrome = { left: 64, right: 16, top: 16, bottom: 56 }
+    const { xRange, yRange } = squareAxisRanges({ min: -1, max: 1 }, { min: -1, max: 1 })
+    expect(xRange.max - xRange.min).toBeCloseTo(yRange.max - yRange.min, 6)
+    // A very wide, short dashboard-card-like container.
+    const g = squareGridBox(900, 220, chrome)
+    expect(g.width).toBeCloseTo(g.height, 6)
+    // The square must actually use most of the constrained (height) dimension
+    // — not collapse to a sliver like the old grid-inset-only letterbox did
+    // for disparate ranges.
+    expect(g.height).toBeGreaterThan(100)
+  })
+
+  it('a disparate-range pair (e.g. RPM vs speed) still yields a square box, not a squashed axis', () => {
+    const chrome = { left: 64, right: 16, top: 16, bottom: 56 }
+    const raw = squareAxisRanges({ min: 0, max: 8000 }, { min: 0, max: 200 })
+    const g = squareGridBox(700, 300, chrome)
+    // The box itself is square...
+    expect(g.width).toBeCloseTo(g.height, 6)
+    // ...and BOTH axes now cover the same numeric span, so pixels-per-unit
+    // is identical on X and Y (the actual root cause of the "Y軸被拍扁" bug:
+    // the old implementation kept Y's tiny original span but only equalised
+    // grid INSETS, producing a ~15px sliver instead of a square).
+    expect(raw.xRange.max - raw.xRange.min).toBeCloseTo(raw.yRange.max - raw.yRange.min, 6)
   })
 })
