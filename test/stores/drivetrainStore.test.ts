@@ -1,7 +1,7 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { useDrivetrainStore, toMtDrivetrainSpec } from '@/stores/drivetrainStore'
+import { useDrivetrainStore, toMtDrivetrainSpec, MAX_GEARS } from '@/stores/drivetrainStore'
 
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
 const OLD_V1_STORAGE_KEY = 'aracer-loga.drivetrain.v1'
@@ -259,6 +259,132 @@ describe('legacy tire-mode migration (pre-live-conversion payloads)', () => {
     const s = useDrivetrainStore()
     expect(s.mt.circumferenceMode).toBe('direct')
     expect(s.mt.wheelCircumferenceMm).toBe(1870)
+  })
+})
+
+describe('#7/#12 — gear count is adjustable 1..8 (was hardcoded to 6)', () => {
+  it('raises the ceiling to 8 gears', () => {
+    expect(MAX_GEARS).toBe(8)
+  })
+
+  it('setGearCount can grow past the old 6-gear ceiling up to 8', () => {
+    const s = useDrivetrainStore()
+    s.setGearCount(8)
+    expect(s.mt.gearRatios).toHaveLength(8)
+    // Newly-added gears zero-pad (same rule as growing within the old range).
+    expect(s.mt.gearRatios[6].ratio).toBe(0)
+    expect(s.mt.gearRatios[7].ratio).toBe(0)
+  })
+
+  it('setGearCount can shrink to as few as 1 gear (off-road/CUB bikes)', () => {
+    const s = useDrivetrainStore()
+    s.setGearCount(1)
+    expect(s.mt.gearRatios).toHaveLength(1)
+    expect(s.mt.gearRatios[0].ratio).toBe(2.615) // first gear's ratio survives the truncation
+  })
+
+  it('clamps a count above the new MAX_GEARS ceiling', () => {
+    const s = useDrivetrainStore()
+    s.setGearCount(99)
+    expect(s.mt.gearRatios).toHaveLength(8)
+  })
+
+  it('setGearRatio on the newly-reachable gears 7/8 works (was rejected as > old MAX_GEARS=6)', () => {
+    const s = useDrivetrainStore()
+    s.setGearCount(8)
+    s.setGearRatio(7, { ratio: 0.7 })
+    s.setGearRatio(8, { ratio: 0.6 })
+    expect(s.mt.gearRatios[6].ratio).toBe(0.7)
+    expect(s.mt.gearRatios[7].ratio).toBe(0.6)
+  })
+
+  it('an old persisted 6-gear payload keeps its original length on load (no forced backfill to 8)', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        kind: 'mt',
+        mt: { gearRatios: [2.615, 1.812, 1.409, 1.16, 1.0, 0.885].map((ratio) => ({ mode: 'ratio', ratio, drivenTeeth: 0, driveTeeth: 0 })) },
+        cvt: { wheelCircumferenceMm: 1400, notes: [] },
+        inversionWheelCircumferenceMm: 1870,
+      }),
+    )
+    const s = useDrivetrainStore()
+    expect(s.mt.gearRatios).toHaveLength(6)
+  })
+})
+
+describe('#7/#12 — setCvtTireSpec: CVT gets the same tire-spec live conversion as MT', () => {
+  it('defaults to a blank spec (CVT sizes vary too much for one sane guessed default)', () => {
+    const s = useDrivetrainStore()
+    expect(s.cvt.tireSpec).toBe('')
+    expect(s.cvt.wheelCircumferenceMm).toBe(1400)
+  })
+
+  it('auto-applies a valid spec into cvt.wheelCircumferenceMm (rounded whole mm)', () => {
+    const s = useDrivetrainStore()
+    expect(s.setCvtTireSpec('100/90-10')).toBe(true)
+    expect(s.cvt.wheelCircumferenceMm).toBe(Math.round(Math.PI * 434))
+    expect(s.cvt.tireSpec).toBe('100/90-10')
+  })
+
+  it('does not touch mt state at all (separate field per drivetrain kind)', () => {
+    const s = useDrivetrainStore()
+    const mtBefore = s.mt.wheelCircumferenceMm
+    s.setCvtTireSpec('100/90-10')
+    expect(s.mt.wheelCircumferenceMm).toBe(mtBefore)
+    expect(s.mt.tireSpec).toBe('120/70-17')
+  })
+
+  it('a cosmetic re-spec (same resolved geometry) does not stomp a manual mm tweak', () => {
+    const s = useDrivetrainStore()
+    s.setCvtTireSpec('120/70-17')
+    s.setCvtWheelCircumferenceMm(1850)
+    expect(s.setCvtTireSpec('120/70ZR17 58W')).toBe(false)
+    expect(s.cvt.wheelCircumferenceMm).toBe(1850)
+  })
+
+  it('a real size change overwrites a manual tweak (spec is authoritative)', () => {
+    const s = useDrivetrainStore()
+    s.setCvtTireSpec('120/70-17')
+    s.setCvtWheelCircumferenceMm(1850)
+    expect(s.setCvtTireSpec('180/55-17')).toBe(true)
+    expect(s.cvt.wheelCircumferenceMm).toBe(Math.round(Math.PI * (17 * 25.4 + 2 * 99)))
+  })
+
+  it('an unparsable spec is stored as text without touching the circumference', () => {
+    const s = useDrivetrainStore()
+    s.setCvtTireSpec('120/70-17')
+    const applied = s.cvt.wheelCircumferenceMm
+    expect(s.setCvtTireSpec('120/70-')).toBe(false) // user still typing — doesn't parse
+    expect(s.cvt.tireSpec).toBe('120/70-') // text kept
+    expect(s.cvt.wheelCircumferenceMm).toBe(applied) // value untouched
+  })
+
+  it('persists the auto-applied spec and circumference', async () => {
+    const s1 = useDrivetrainStore()
+    s1.setCvtTireSpec('100/90-10')
+    await nextTick()
+
+    setActivePinia(createPinia())
+    const s2 = useDrivetrainStore()
+    expect(s2.cvt.tireSpec).toBe('100/90-10')
+    expect(s2.cvt.wheelCircumferenceMm).toBe(Math.round(Math.PI * 434))
+  })
+
+  it('an old persisted CVT payload without tireSpec migrates cleanly (defaults to blank)', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        kind: 'cvt',
+        mt: {},
+        cvt: { wheelCircumferenceMm: 1450, notes: [{ label: '珠重', value: '18g' }] },
+        inversionWheelCircumferenceMm: 1870,
+      }),
+    )
+    const s = useDrivetrainStore()
+    expect(s.cvt.tireSpec).toBe('')
+    expect(s.cvt.wheelCircumferenceMm).toBe(1450) // pre-existing field untouched
+    expect(s.cvt.notes[0].value).toBe('18g') // pre-existing notes untouched
   })
 })
 

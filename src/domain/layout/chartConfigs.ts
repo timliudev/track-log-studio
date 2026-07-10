@@ -42,16 +42,18 @@ export interface ScatterChartConfig {
   id: number
   xChannel: string | null
   yChannel: string | null
-  /** Whether the X/Y axes are scaled 1:1 (equal pixels per data unit, so a
-   *  circle plots as a circle) vs each axis auto-ranging independently to
-   *  fill the card. Defaults to true ONLY when both channels look like a
-   *  force/acceleration pair (see `looksLikeForcePair` — the aRacer G-G
-   *  friction-circle use, where 1:1 is meaningful) and false for any other
-   *  channel pair (e.g. RPM vs a small-range channel, where forcing true
-   *  data-unit 1:1 scaling squashes the smaller-magnitude axis into a
-   *  sliver — #5 in the equal-aspect fix). Always user-overridable via
-   *  `setChartEqualAspect` regardless of this default. See GgChart.vue's
-   *  `equalAspectGrid` for how the ON state survives a non-square card and
+  /** Whether the X/Y axes are scaled 1:1 (equal pixels per data unit AND a
+   *  literal square plot box, so a circle plots as a circle — see #6) vs
+   *  each axis auto-ranging independently to fill the card. Defaults to true
+   *  ONLY when both channels look like a force/acceleration pair (see
+   *  `looksLikeForcePair` — the aRacer G-G friction-circle use, where 1:1 is
+   *  meaningful) and false for any other channel pair (e.g. RPM vs a
+   *  small-range channel, where forcing true data-unit 1:1 scaling still
+   *  clusters the smaller-magnitude axis's real data into a small region of
+   *  the square, even though the box itself stays square — #5 in the
+   *  equal-aspect fix). Always user-overridable via `setChartEqualAspect`
+   *  regardless of this default. See GgChart.vue's `squareAxisRanges`/
+   *  `squareGridBox` for how the ON state survives a non-square card and
    *  window/card resizes. */
   equalAspect: boolean
 }

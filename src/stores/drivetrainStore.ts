@@ -69,6 +69,14 @@ export interface CvtFormState {
   /** Wheel circumference used for the CVT's own log-inversion view (kept
    *  separate from MT's so switching kind doesn't clobber either). */
   wheelCircumferenceMm: number
+  /** #7/#12 — tire-spec string (e.g. "120/70-17") that LIVE-converts into
+   *  `wheelCircumferenceMm`, same mechanism as MT's `tireSpec`/`setTireSpec`
+   *  (see `setCvtTireSpec`). The wheel is the SAME physical tire regardless
+   *  of drivetrain kind, so CVT riders need the same spec-to-mm converter MT
+   *  has — CVT previously only exposed a bare mm number with no conversion
+   *  helper. Kept as a separate field from MT's `tireSpec` (not shared) so
+   *  switching `kind` doesn't clobber either bike's spec entry. */
+  tireSpec: string
   /** Free-form tuning notes, e.g. 前普利尺寸/珠重/彈簧硬度/開閉盤規格/終傳比. */
   notes: CvtNoteField[]
 }
@@ -112,6 +120,12 @@ function defaultCvtNotes(): CvtNoteField[] {
 
 const DEFAULT_CVT: CvtFormState = {
   wheelCircumferenceMm: 1400,
+  // Blank, not a guessed spec string: unlike MT (whose default spec/mm pair
+  // are chosen to agree with each other — see DEFAULT_MT's doc), CVT scooter
+  // tire sizes vary too widely to pick one sane default that matches 1400mm,
+  // and an unset spec is already handled cleanly (no "invalid spec" hint,
+  // no auto-apply) by the same live-conversion logic MT uses.
+  tireSpec: '',
   notes: defaultCvtNotes(),
 }
 
@@ -153,7 +167,16 @@ export function toMtDrivetrainSpec(mt: MtFormState): MtDrivetrainSpec {
   }
 }
 
-const MAX_GEARS = 6
+// #7/#12 — was a hardcoded 6 (the common sportbike/scooter gearbox size);
+// off-road/CUB (彎樑車) bikes often have FEWER gears (as low as 1-2 for some
+// mini/pit bikes), and some other vehicles run more, so the ceiling is raised
+// to 8 and the gear-count control (GearPanel's <select>, driven by this
+// constant) lets the user pick anywhere in 1..MAX_GEARS — the default seed
+// (DEFAULT_MT.gearRatios, 6 entries) is unchanged, only the ADJUSTABLE range
+// widens. Persisted gearRatios arrays keep whatever length they already had
+// on load (setGearCount only resizes on explicit user action — see below) —
+// no forced backfill/truncation migration needed for this bump.
+const MAX_GEARS = 8
 
 // v1 -> v2: MT's gearRatios/finalDrive/circumference shape changed from
 // plain numbers to either/or ratio-or-teeth objects (decisions #12/#13), and
@@ -361,6 +384,31 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     return apply
   }
 
+  /**
+   * #7/#12 — CVT counterpart of `setTireSpec`: same "effective change"
+   * auto-apply rule (a spec edit that resolves to a different whole-mm value
+   * overwrites `cvt.wheelCircumferenceMm`; a cosmetic edit or a still-typing/
+   * unparsable spec doesn't touch it), just against the CVT form's own
+   * `tireSpec`/`wheelCircumferenceMm` fields instead of MT's. CVT has no
+   * `circumferenceMode` (that field only exists for MT's now-vestigial
+   * tire/direct toggle — see `CircumferenceInputMode`'s doc) since CVT's mm
+   * field was always "direct" to begin with; the spec here is purely a
+   * convenience converter feeding the same one field, not a second mode.
+   */
+  function setCvtTireSpec(spec: string): boolean {
+    const prevCirc = tireSpecToCircumferenceMm(cvt.value.tireSpec)
+    const nextCirc = tireSpecToCircumferenceMm(spec)
+    const nextValid = Number.isFinite(nextCirc) && nextCirc > 0
+    const prevValid = Number.isFinite(prevCirc) && prevCirc > 0
+    const apply = nextValid && (!prevValid || Math.round(nextCirc) !== Math.round(prevCirc))
+    cvt.value = {
+      ...cvt.value,
+      tireSpec: spec,
+      ...(apply ? { wheelCircumferenceMm: Math.round(nextCirc) } : {}),
+    }
+    return apply
+  }
+
   return {
     kind,
     mt,
@@ -370,6 +418,7 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     setMt,
     setFinalDrive,
     setCvtWheelCircumferenceMm,
+    setCvtTireSpec,
     setCvtNote,
     addCvtNote,
     removeCvtNote,
