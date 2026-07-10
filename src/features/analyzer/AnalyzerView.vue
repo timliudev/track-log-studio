@@ -1336,13 +1336,26 @@ function titleForItemId(id: string): string {
    `gutterRect`) — invisible by default (a visible line there all the time
    would read as a stray grid rule), with a themed highlight only on
    hover/active so the affordance discovers itself without adding permanent
-   visual noise to the dashboard. */
+   visual noise to the dashboard.
+
+   #2 fix — `border-radius` now matches DashboardCard's own corner rounding
+   (`calc(var(--radius) * 1.5)`, see DashboardCard.vue's `.dashboard-card`)
+   instead of a near-square 2px, so the highlight reads as "part of the same
+   rounded-card visual language" rather than a stray right-angle box; on the
+   gutter's own thin strip this naturally rounds into a soft pill shape.
+   The highlight itself uses `color-mix(..., transparent)` — the same
+   translucent-accent pattern already used elsewhere in this app (see
+   FileBar.vue/GearPanel.vue/VboChannelMap.vue) — instead of a flat
+   `background: var(--color-accent); opacity: 0.45`, which read as a harsh,
+   overly-saturated "pink block" (the opacity also dims anything else drawn
+   on the element, not just the fill). color-mix blends the accent directly
+   into a transparent layer over the page, landing as a much softer tint. */
 .grid-gutter {
   position: absolute;
   z-index: 25;
   touch-action: none;
   background: transparent;
-  border-radius: 2px;
+  border-radius: calc(var(--radius) * 1.5);
   transition: background-color 0.1s ease;
 }
 .grid-gutter.vertical {
@@ -1353,8 +1366,7 @@ function titleForItemId(id: string): string {
 }
 .grid-gutter:hover,
 .grid-gutter.dragging {
-  background: var(--color-accent);
-  opacity: 0.45;
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 /* #8 — snap grid items to position instead of easing the library's default
