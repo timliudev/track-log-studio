@@ -131,7 +131,41 @@ function onCircumferenceInput(e: Event): void {
 
 onBeforeUnmount(() => {
   if (tireSpecFlashTimer != null) clearTimeout(tireSpecFlashTimer)
+  if (cvtTireSpecFlashTimer != null) clearTimeout(cvtTireSpecFlashTimer)
 })
+
+// ── CVT: tire-spec LIVE conversion (#7/#12) ───────────────────────────────
+// The wheel/tire is the SAME physical part regardless of drivetrain kind —
+// CVT previously only exposed a bare "反推用後輪周長" mm number with no way to
+// convert from a tire spec string, unlike MT's spec+direct-mm pair. Mirrors
+// MT's block above exactly, just against `store.cvt`/`setCvtTireSpec`.
+const cvtSpecReferenceMm = computed<number | null>(() => {
+  const circ = tireSpecToCircumferenceMm(store.cvt.tireSpec)
+  return Number.isFinite(circ) && circ > 0 ? circ : null
+})
+const cvtTireSpecInvalid = computed(
+  () => store.cvt.tireSpec.trim() !== '' && cvtSpecReferenceMm.value == null,
+)
+const cvtTireSpecJustApplied = ref(false)
+let cvtTireSpecFlashTimer: ReturnType<typeof setTimeout> | null = null
+
+function onCvtTireSpecInput(e: Event): void {
+  const applied = store.setCvtTireSpec((e.target as HTMLInputElement).value)
+  if (applied) {
+    cvtTireSpecJustApplied.value = true
+    if (cvtTireSpecFlashTimer != null) clearTimeout(cvtTireSpecFlashTimer)
+    cvtTireSpecFlashTimer = setTimeout(() => {
+      cvtTireSpecJustApplied.value = false
+    }, 2500)
+  } else if (cvtTireSpecJustApplied.value && cvtSpecReferenceMm.value == null) {
+    cvtTireSpecJustApplied.value = false
+  }
+}
+
+function onCvtCircumferenceInput(e: Event): void {
+  cvtTireSpecJustApplied.value = false
+  store.setCvtWheelCircumferenceMm(numField(e))
+}
 
 // ── MT: circumference back-estimation from the log (speed / RPM inversion) ──
 // Per-gear total reductions resolved WITHOUT the circumference (ratio-only:
@@ -319,7 +353,18 @@ const mtChartData = computed<uPlot.AlignedData>(() => {
   return [xs, scatterY, ...lineSeries] as unknown as uPlot.AlignedData
 })
 
-const GEAR_LINE_COLORS = ['#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#457b9d', '#8338ec']
+// #7/#12 — 8 entries to match the raised MAX_GEARS ceiling (was 6 colours for
+// a hardcoded 6-gear max); modulo-indexed below so any count still works.
+const GEAR_LINE_COLORS = [
+  '#e63946',
+  '#f4a261',
+  '#e9c46a',
+  '#2a9d8f',
+  '#457b9d',
+  '#8338ec',
+  '#ff6fb0',
+  '#6a994e',
+]
 
 const mtChartSeries = computed<uPlot.Series[]>(() => [
   {},
@@ -772,38 +817,73 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
     <template v-else>
       <p class="intro">{{ t('analyzer.gear.cvtIntro') }}</p>
 
-      <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
-      <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
-      <p v-else-if="!channelsAvailable" class="hint">
-        {{ t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') }}
-      </p>
-      <template v-else>
-        <label class="field">
-          <span>{{ t('analyzer.gear.inversionWheelCircumference') }}</span>
-          <input
-            type="number"
-            inputmode="decimal"
-            step="1"
-            min="1"
-            :value="store.cvt.wheelCircumferenceMm"
-            @input="store.setCvtWheelCircumferenceMm(numField($event))"
-          />
-        </label>
+      <!-- #7/#12 — same tire-spec-converter + direct-mm pair as MT's wheel
+           circumference block (the wheel is the same physical tire either
+           way), available regardless of whether a log is loaded — same as
+           MT's spec form (only the MEASURED overlay below needs a session).
+           倒算(from log speed/RPM) stays MT-only — see the disabled button +
+           hint further down, CVT has no discrete gear plateaus to solve for. -->
+      <h4 class="sub-heading">{{ t('analyzer.gear.wheelCircumference') }}</h4>
+      <div class="sub-block">
+        <div class="row params">
+          <label class="field">
+            <span>{{ t('analyzer.gear.tireSpecLabel') }}</span>
+            <input
+              type="text"
+              class="tire-spec-input"
+              placeholder="120/70-17"
+              :value="store.cvt.tireSpec"
+              @input="onCvtTireSpecInput"
+            />
+          </label>
+          <label class="field">
+            <span>{{ t('analyzer.gear.inversionWheelCircumference') }}</span>
+            <input
+              type="number"
+              inputmode="decimal"
+              step="1"
+              min="1"
+              class="circumference-input"
+              :class="{ 'auto-applied': cvtTireSpecJustApplied }"
+              :value="store.cvt.wheelCircumferenceMm"
+              @input="onCvtCircumferenceInput"
+            />
+          </label>
+        </div>
+        <p v-if="cvtTireSpecJustApplied" class="hint inline-hint estimate-ok tire-spec-applied" role="status">
+          {{
+            t('analyzer.gear.tireSpecAutoApplied', {
+              spec: store.cvt.tireSpec.trim(),
+              mm: store.cvt.wheelCircumferenceMm.toFixed(0),
+            })
+          }}
+        </p>
+        <p v-else-if="cvtTireSpecInvalid" class="hint inline-hint">{{ t('analyzer.gear.tireSpecInvalid') }}</p>
+        <p v-else-if="cvtSpecReferenceMm != null" class="hint inline-hint">
+          {{ t('analyzer.gear.tireSpecReference', { spec: store.cvt.tireSpec.trim(), mm: cvtSpecReferenceMm.toFixed(0) }) }}
+        </p>
         <!-- #4 — CVT has no discrete gear plateaus to solve for (see
              `estimateCircumferenceFromLog`'s MT-only design), so unlike the MT
              tab there is no working "由記錄反推周長" button here — a real user
              on a CVT bike would otherwise see NOTHING at all where MT users
              see a button + explanation, and reasonably conclude the feature
              "isn't implemented". This permanently-disabled button + hint makes
-             that limitation visible and actionable (measure directly, or use
-             the MT tab's tire-spec converter) instead of silent absence. -->
+             that limitation visible and actionable (measure directly, or via
+             the tire-spec converter right above) instead of silent absence. -->
         <div class="row params">
           <button type="button" class="apply-btn" disabled v-tooltip="t('analyzer.gear.estimateNotAvailableCvtHint') as string">
             {{ t('analyzer.gear.estimateFromLog') }}
           </button>
           <p class="hint inline-hint">{{ t('analyzer.gear.estimateNotAvailableCvtHint') }}</p>
         </div>
+      </div>
 
+      <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
+      <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
+      <p v-else-if="!channelsAvailable" class="hint">
+        {{ t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') }}
+      </p>
+      <template v-else>
         <div class="summary-row">
           <span v-if="cvtSummary" class="summary-item">
             {{ t('analyzer.gear.launchRatio', { ratio: fmtRatio(cvtSummary.launchRatio) }) }}

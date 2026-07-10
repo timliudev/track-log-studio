@@ -223,7 +223,7 @@ export default {
       estimateApplied: '倒算周長：{mm} mm（{n} 筆樣本），已填入周長欄位，可再微調。',
       estimateFailed: '無法穩定倒算：穩定樣本不足，或整段記錄僅單一檔位無法判定檔位（可先填入概略周長作為參考再試一次）。',
       estimateNeedGears: '請先輸入有效的齒比與終傳（不需周長）才能從記錄倒算。',
-      estimateNotAvailableCvtHint: 'CVT 為連續變速、沒有離散檔位可判定，無法像手排一樣從記錄倒算周長（誠實拒絕優於亂給估計值）。請直接量測後輪周長，或暫時切到「手排」分頁用胎報規格換算後填回此欄。',
+      estimateNotAvailableCvtHint: 'CVT 為連續變速、沒有離散檔位可判定，無法像手排一樣從記錄倒算周長（誠實拒絕優於亂給估計值）。請直接量測後輪周長，或使用上方的輪胎規格換算。',
       redlineRpm: '紅線／換檔轉速 (RPM)',
       modeRatio: '齒比',
       modeTeeth: '齒數',
