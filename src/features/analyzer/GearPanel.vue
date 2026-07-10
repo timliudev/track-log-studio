@@ -334,6 +334,22 @@ const mtChartSeries = computed<uPlot.Series[]>(() => [
     stroke: GEAR_LINE_COLORS[i % GEAR_LINE_COLORS.length],
     width: 2,
     points: { show: false },
+    // #8 — mtChartData merges this line's sparse 41-point RPM sweep onto ONE
+    // shared x-axis together with the measured scatter's much denser (often
+    // thousands of) sample RPMs (uPlot's AlignedData requires a single shared
+    // x-array — see mtChartData's doc), so at almost every x-position between
+    // two of this series' real points the y-value is null (contributed by the
+    // scatter having a sample there, this line not). uPlot's line renderer
+    // DOES connect real point to real point through those nulls, but by
+    // default (spanGaps: false) it then CLIPS the connecting segment wherever
+    // it detects a null run — which, given how sparse this line's real points
+    // are relative to the shared axis, clips away nearly the entire line,
+    // leaving nothing visible while the cursor/legend still reports a value
+    // (interpolated/nearest-point lookup, unaffected by the clip) — exactly
+    // the "hover shows a number, no line drawn" bug report. spanGaps: true
+    // skips that clip so the theoretical line renders as a continuous line
+    // through the interleaved nulls, same as before the shared-axis merge.
+    spanGaps: true,
   })),
 ])
 
