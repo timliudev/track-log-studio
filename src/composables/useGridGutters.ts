@@ -133,6 +133,11 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
   })
 
   const draggingKey = ref<string | null>(null)
+  // #1 fix — set only while a drag is in progress; onBeforeUnmount below uses
+  // this to force-end an in-flight drag (and its window-level listeners, see
+  // endDrag's doc) if the component unmounts mid-drag, so a leftover
+  // highlight can never survive past the composable's own lifetime either.
+  let endActiveDrag: (() => void) | null = null
 
   function onGutterPointerDown(gutter: GridGutter, event: PointerEvent): void {
     if (!enabled.value) return
@@ -145,26 +150,54 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
     const startY = event.clientY
     const itemsAtStart = items.value
     const m = metrics.value
+    const pointerId = event.pointerId
 
     function onMove(e: PointerEvent): void {
       const deltaPx = gutter.orientation === 'vertical' ? e.clientX - startX : e.clientY - startY
       const deltaUnits =
         gutter.orientation === 'vertical' ? pxDeltaToColUnits(deltaPx, m) : pxDeltaToRowUnits(deltaPx, m)
       if (deltaUnits === 0) return
-      const next = applyGutterDrag(itemsAtStart, gutter, deltaUnits)
+      const next = applyGutterDrag(itemsAtStart, gutter, deltaUnits, m.cols)
       if (next !== itemsAtStart) onChange(next)
     }
-    function onUp(e: PointerEvent): void {
-      target.releasePointerCapture?.(e.pointerId)
+    // #1 fix — end the drag's visual state (draggingKey -> null, which drives
+    // the `.dragging` class / pink highlight off) UNCONDITIONALLY, exactly
+    // once, however the drag ends: a normal pointerup/pointercancel on the
+    // ORIGINAL element, OR the leftover-highlight bug's actual trigger — the
+    // gutter's own DOM node getting swapped out from under an in-progress
+    // drag. `gutters`' v-for is keyed by `orientation:aId:bId`
+    // (gutterKey) — every `onChange` call re-derives the layout, which
+    // re-derives `gutters`, and if that changes which cards are adjacent
+    // (e.g. one side hit its min-size floor and a DIFFERENT neighbour is now
+    // edge-to-edge, or the compaction pass this triggers upstream shuffles
+    // something), the key this drag started on can stop matching any
+    // CURRENT gutter. Vue then unmounts that specific DOM node — events
+    // (and pointer capture) aimed at it never arrive again, so a
+    // target-only pointerup/pointercancel listener would leave `draggingKey`
+    // — and the highlight — stuck at its last value forever. A WINDOW-level
+    // listener doesn't depend on any particular element still being in the
+    // DOM, so it always fires and this always resolves.
+    function endDrag(e: PointerEvent): void {
+      if (e.pointerId !== pointerId) return
+      target.releasePointerCapture?.(pointerId)
       target.removeEventListener('pointermove', onMove)
-      target.removeEventListener('pointerup', onUp)
-      target.removeEventListener('pointercancel', onUp)
+      target.removeEventListener('pointerup', endDrag)
+      target.removeEventListener('pointercancel', endDrag)
+      window.removeEventListener('pointerup', endDrag)
+      window.removeEventListener('pointercancel', endDrag)
       draggingKey.value = null
+      endActiveDrag = null
     }
     target.addEventListener('pointermove', onMove)
-    target.addEventListener('pointerup', onUp)
-    target.addEventListener('pointercancel', onUp)
+    target.addEventListener('pointerup', endDrag)
+    target.addEventListener('pointercancel', endDrag)
+    // Safety-net registrations — see endDrag's doc above.
+    window.addEventListener('pointerup', endDrag)
+    window.addEventListener('pointercancel', endDrag)
+    endActiveDrag = () => endDrag({ pointerId } as PointerEvent)
   }
+
+  onBeforeUnmount(() => endActiveDrag?.())
 
   return { containerRef, gutters, draggingKey, onGutterPointerDown }
 }

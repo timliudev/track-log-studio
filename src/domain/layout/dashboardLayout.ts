@@ -212,7 +212,7 @@ export function resolveOverlaps(layout: DashboardLayoutItem[]): DashboardLayoutI
  * with, e.g. AnalyzerView's `dragAllowFrom`/`isDraggable`/`minW` —
  * see `decorateForGrid`) back into the full persisted layout array.
  *
- * Two things this guards against:
+ * Three things this guards against:
  *  - Only the COORDINATE fields (`x`/`y`/`w`/`h`) are copied from `updated` —
  *    every other field on a decorated item is UI-only (drag config, min-size)
  *    and must never leak into the persisted array / localStorage.
@@ -220,10 +220,33 @@ export function resolveOverlaps(layout: DashboardLayoutItem[]): DashboardLayoutI
  *    align card that isn't part of the currently-visible slice passed to
  *    the grid) is kept UNCHANGED, at its original array position — this is
  *    a merge, not a replace.
+ *  - #4 crash fix — when NO item's coordinates actually changed, the exact
+ *    same `base` ARRAY reference is returned (not a same-content-but-new
+ *    array). This matters because the caller assigns the result straight
+ *    into a `ref` (`layout.value = mergeLayoutPositions(...)`, see
+ *    AnalyzerView's `onLayoutUpdated`/`activeLayout` setter): Vue's ref
+ *    setter only triggers reactivity when the new value is NOT the same
+ *    object as the old one, so handing back the identical `base` reference
+ *    on a no-op merge makes that assignment a true no-op — it doesn't
+ *    re-trigger any computed/watcher, and in particular doesn't re-render
+ *    `<GridLayout>`'s `:layout` prop with a "new" (but equal) array. Without
+ *    this, EVERY call — including one whose payload changed nothing —
+ *    produced a fresh array via `.map()`, which re-triggered the whole
+ *    reactive chain (layout ref -> activeLayout computed -> GridLayout's own
+ *    `layout` prop watcher), which could itself re-emit `layout-updated`
+ *    (grid-layout-plus's compaction pass runs on prop changes, not just
+ *    drag) and call back in here — an unbounded `onLayoutUpdated` ->
+ *    `layout.value = ...` -> re-render -> `layout-updated` -> ... cycle
+ *    ("Maximum recursive updates exceeded"). Reported repro: loading a
+ *    SECOND file caused `reconcileLayout` to reassign `layout.value` (see
+ *    useDashboardLayout's `chartIds` watcher) which kicked off exactly this
+ *    cycle. Returning the SAME reference once coordinates converge breaks
+ *    it regardless of how many upstream reassignments kick it off.
  *
- * Pure; returns a NEW array, but keeps the exact same object reference for
- * any item whose coordinates didn't actually change (cheap no-op detection,
- * same pattern as {@link clampToMinSize}).
+ * Pure; returns a NEW array only when at least one item's coordinates
+ * actually changed, and even then keeps the exact same object reference for
+ * any INDIVIDUAL item whose coordinates didn't change (cheap no-op
+ * detection, same pattern as {@link clampToMinSize}).
  *
  * This exists because grid-layout-plus's `update:layout` (the v-model event)
  * only fires on initial mount and on a responsive breakpoint change — a
@@ -238,12 +261,18 @@ export function mergeLayoutPositions<T extends DashboardLayoutItem>(
   updated: T[],
 ): DashboardLayoutItem[] {
   const byId = new Map(updated.map((it) => [it.i, it]))
-  return base.map((it) => {
+  let changed = false
+  const merged = base.map((it) => {
     const next = byId.get(it.i)
     if (!next) return it
     if (next.x === it.x && next.y === it.y && next.w === it.w && next.h === it.h) return it
+    changed = true
     return { i: it.i, x: next.x, y: next.y, w: next.w, h: next.h }
   })
+  // No item's coordinates changed -> hand back `base` ITSELF (not `merged`,
+  // which is a structurally-equal but freshly-allocated array from `.map`)
+  // so the caller's `layout.value = ...` assignment is a genuine no-op.
+  return changed ? merged : base
 }
 
 /** The grid item id for a chart, keyed by the chart's OWN store id (stable
@@ -418,17 +447,29 @@ export function reconcileLayout(
   chartIds: number[],
 ): DashboardLayoutItem[] {
   const wantedChartItemIds = new Set(chartIds.map(chartItemId))
+  const present = new Set(layout.map((it) => it.i))
+  const missingChartIds = chartIds.filter((chartId) => !present.has(chartItemId(chartId)))
+  const hasStaleChartEntries = layout.some((it) => isChartItemId(it.i) && !wantedChartItemIds.has(it.i))
+
+  // True no-op (nothing to drop, nothing to add) -> hand back the SAME array
+  // reference. This is called from useDashboardLayout's `chartIds` watcher
+  // (`layout.value = reconcileLayout(layout.value, ids)`) on every change to
+  // the chart-id SET, including ones that don't actually add/remove a chart
+  // card here — without this short-circuit, `.filter()`/`[...kept]` below
+  // always manufacture a structurally-identical-but-new array, and assigning
+  // THAT into the `layout` ref re-triggers every downstream computed/watcher
+  // exactly like a real change would (see mergeLayoutPositions's doc for why
+  // that identity matters — #4 crash fix: this is the OTHER write path into
+  // `layout.value`, alongside the drag/gutter write-back).
+  if (!hasStaleChartEntries && missingChartIds.length === 0) return layout
+
   // Drop chart-card entries for charts that no longer exist; keep every
   // static-card entry (and any not-yet-recognised id) untouched.
   const kept = layout.filter((it) => !isChartItemId(it.i) || wantedChartItemIds.has(it.i))
 
-  const present = new Set(kept.map((it) => it.i))
   const result = [...kept]
-  for (const chartId of chartIds) {
-    const id = chartItemId(chartId)
-    if (!present.has(id)) {
-      result.push(defaultChartItem(id, result))
-    }
+  for (const chartId of missingChartIds) {
+    result.push(defaultChartItem(chartItemId(chartId), result))
   }
   return result
 }

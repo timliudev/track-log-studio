@@ -516,15 +516,17 @@ function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): vo
   activeLayout.value = next
 }
 
-// --- #2: draggable gutters between adjacent cards (IDE-style split-pane
-// resize) — see gridGutter.ts's module doc for the domain math and
-// useGridGutters.ts for the DOM/pointer wiring this just calls into. Desktop-
-// only (isMobile has no side-by-side pairs) and disabled while the dashboard
-// is locked, same two conditions that already gate the grid's own drag/
-// resize (isDraggable/isResizable in useDashboardLayout). The currently-
-// pinned card is excluded from `gutterItems` — its grid slot is an inert
-// Teleport placeholder (see the template's pin-placeholder note), so a
-// gutter touching it would visibly do nothing.
+// --- #2/#5: draggable gutters between adjacent cards — dragging a gap
+// resizes the card whose edge that gap is (the OTHER side reflows, it isn't
+// traded against — see gridGutter.ts's module doc for the domain math and
+// the #5 revision note) via useGridGutters.ts for the DOM/pointer wiring
+// this just calls into. Desktop-only (isMobile has no side-by-side pairs)
+// and disabled while the dashboard is locked, same two conditions that
+// already gate the grid's own drag/resize (isDraggable/isResizable in
+// useDashboardLayout). The currently-pinned card is excluded from
+// `gutterItems` — its grid slot is an inert Teleport placeholder (see the
+// template's pin-placeholder note), so a gutter touching it would visibly do
+// nothing.
 const gutterItems = computed<DashboardLayoutItem[]>(() =>
   desktopVisibleLayout.value.filter((it) => !isPinned(it.i)),
 )
@@ -537,8 +539,16 @@ const gridGutters = useGridGutters({
   marginX: GRID_MARGIN[0],
   marginY: GRID_MARGIN[1],
   // Same persistence path as onLayoutUpdated above (#1's fix) — a gutter drag
-  // is just another source of new coordinates, merged back into the full
-  // layout the identical way a corner-resize's `layout-updated` is.
+  // is just another source of new coordinates for the ONE resized card,
+  // merged back into the full layout the identical way a corner-resize's
+  // `layout-updated` is. Everything ELSE that needs to reflow around it
+  // (#5) arrives here too, but via a SEPARATE round trip: this writes
+  // `layout.value`, which flows out through `activeLayout` to
+  // `<GridLayout>`'s `layout` prop, whose own vertical-compaction reacts and
+  // re-emits `layout-updated` with the reflowed positions, which
+  // `onLayoutUpdated` merges back in — see gridGutter.ts's module doc for
+  // why this round trip is safe (doesn't loop) rather than a hand-rolled
+  // reflow living here.
   onChange: (next) => {
     layout.value = mergeLayoutPositions(layout.value, next)
   },
@@ -1336,13 +1346,26 @@ function titleForItemId(id: string): string {
    `gutterRect`) — invisible by default (a visible line there all the time
    would read as a stray grid rule), with a themed highlight only on
    hover/active so the affordance discovers itself without adding permanent
-   visual noise to the dashboard. */
+   visual noise to the dashboard.
+
+   #2 fix — `border-radius` now matches DashboardCard's own corner rounding
+   (`calc(var(--radius) * 1.5)`, see DashboardCard.vue's `.dashboard-card`)
+   instead of a near-square 2px, so the highlight reads as "part of the same
+   rounded-card visual language" rather than a stray right-angle box; on the
+   gutter's own thin strip this naturally rounds into a soft pill shape.
+   The highlight itself uses `color-mix(..., transparent)` — the same
+   translucent-accent pattern already used elsewhere in this app (see
+   FileBar.vue/GearPanel.vue/VboChannelMap.vue) — instead of a flat
+   `background: var(--color-accent); opacity: 0.45`, which read as a harsh,
+   overly-saturated "pink block" (the opacity also dims anything else drawn
+   on the element, not just the fill). color-mix blends the accent directly
+   into a transparent layer over the page, landing as a much softer tint. */
 .grid-gutter {
   position: absolute;
   z-index: 25;
   touch-action: none;
   background: transparent;
-  border-radius: 2px;
+  border-radius: calc(var(--radius) * 1.5);
   transition: background-color 0.1s ease;
 }
 .grid-gutter.vertical {
@@ -1353,8 +1376,7 @@ function titleForItemId(id: string): string {
 }
 .grid-gutter:hover,
 .grid-gutter.dragging {
-  background: var(--color-accent);
-  opacity: 0.45;
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 /* #8 — snap grid items to position instead of easing the library's default

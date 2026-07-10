@@ -3,25 +3,43 @@
  *
  * grid-layout-plus (see dashboardLayout.ts / useDashboardLayout.ts) already
  * gives every card its OWN bottom-right resize handle, which only ever
- * changes THAT card's own w/h — resizing it can open a gap or an overlap
- * (silently fixed by vertical-compaction, which pushes things DOWN, not
- * sideways) against whatever card happens to sit next to it. This module adds
- * the other half: dragging the GAP itself moves the shared edge, growing one
- * neighbour by exactly what the other shrinks — same feel as a split-pane/IDE
- * divider. Kept as pure functions (no Vue/DOM) so the tricky part — which two
- * cards actually share a draggable edge, and how a pixel delta maps to a
- * grid-unit delta — is unit-testable without mounting anything; the
- * composable that drives real pointer events (useGridGutters.ts) is a thin
- * wrapper that only does event wiring and calls into here.
+ * changes THAT card's own w/h. This module adds the other half: dragging the
+ * GAP itself resizes the card whose edge that gap actually is (`a` — the
+ * left/top side) — exactly like grabbing that card's own edge and pulling it,
+ * NOT a fixed two-card zero-sum trade with whatever happens to be its
+ * immediate neighbour (`b`) at that moment.
+ *
+ * #5 fix (revised from the original zero-sum design): earlier, `applyGutterDrag`
+ * grew `a` by exactly what it shrank `b` by, sliding `b`'s x/y to keep them
+ * touching — feedback was that this is the wrong mental model. Dragging a
+ * horizontal gutter down should grow the card ABOVE it and push everything
+ * BELOW further down (or, for a vertical gutter, to the side) — a reflow, not
+ * a private negotiation between two specific cards. `b`'s own position is now
+ * left untouched by this module entirely; `useGridGutters.ts` feeds the
+ * result back through AnalyzerView's normal `layout` prop / `onLayoutUpdated`
+ * pipeline, and grid-layout-plus's OWN vertical-compaction (`compact()`,
+ * confirmed by reading its source — it pulls every item up as far as it can
+ * without colliding, then pushes down whatever still collides, and runs on
+ * EVERY change to its `layout` prop, not just its own native drag gestures)
+ * does the actual reflow. This only works safely because AnalyzerView's
+ * write-back (`mergeLayoutPositions`) is idempotent on a converged layout
+ * (#4's crash fix) — otherwise a self-triggered `layout-updated` echo after
+ * compaction could loop.
+ *
+ * Kept as pure functions (no Vue/DOM) so the tricky part — which two cards
+ * actually share a draggable edge, and how a pixel delta maps to a grid-unit
+ * delta — is unit-testable without mounting anything; the composable that
+ * drives real pointer events (useGridGutters.ts) is a thin wrapper that only
+ * does event wiring and calls into here.
  *
  * SCOPE / known limitation: gutters are detected PAIRWISE. If three cards
  * meet along one straight edge (e.g. two short cards stacked against one tall
  * neighbour), each adjacent pair gets its own independently-draggable gutter
  * segment rather than one shared "column border" — dragging one segment only
- * ever touches the two cards on either side of THAT segment, same as the
- * task's "drag the boundary between two adjacent cards" framing. A full
- * "resize this whole column/row" mode is bigger scope (would need to grow a
- * SET of cards together) and isn't what was asked for here.
+ * ever resizes the ONE card that segment belongs to, same as the task's
+ * "drag the boundary" framing. A full "resize this whole column/row" mode is
+ * bigger scope (would need to grow a SET of cards together) and isn't what
+ * was asked for here.
  */
 
 import { minSizeFor, type DashboardLayoutItem } from './dashboardLayout'
@@ -96,63 +114,75 @@ export function detectGutters(items: DashboardLayoutItem[]): GridGutter[] {
 }
 
 /**
- * Clamp a proposed grid-unit delta so dragging a gutter can never shrink
- * EITHER side past its own {@link minSizeFor} floor (same floor the card's
- * own corner-resize handle already respects — B6). `a` grows by `delta`
- * (its `w`/`h`) while `b` shrinks by the same amount (and slides its `x`/`y`
- * to keep touching `a`'s new edge) — see {@link applyGutterDrag}. Both
- * `a`/`b` are assumed to already meet their own minimum (true for anything
+ * Clamp a proposed grid-unit delta so dragging a gutter can never shrink the
+ * DRAGGED side (`a` — the card whose trailing/bottom edge this gutter sits
+ * on) past its own {@link minSizeFor} floor (same floor the card's own
+ * corner-resize handle already respects — B6), nor — for a VERTICAL gutter,
+ * when `cols` is given — grow it past the grid's own column count: this grid
+ * only ever compacts VERTICALLY (see applyGutterDrag's doc), so there's no
+ * "push sideways to make room" for a width that would overflow the grid.
+ *
+ * #5 fix — `b` (the neighbour on the other side of the edge) is no longer
+ * involved in this clamp at all: it isn't resized by a gutter drag anymore,
+ * only reflowed (by grid-layout-plus's own compaction) around whatever `a`
+ * becomes. `a` is assumed to already meet its own minimum (true for anything
  * that ever reaches the grid — see dashboardLayout.ts's clampToMinSize), so
  * the returned range always straddles zero (a no-op drag is always valid).
  */
 export function clampGutterDeltaUnits(
   orientation: GutterOrientation,
   a: DashboardLayoutItem,
-  b: DashboardLayoutItem,
   deltaUnits: number,
+  cols?: number,
 ): number {
   const minA = minSizeFor(a.i)
-  const minB = minSizeFor(b.i)
   const aSize = orientation === 'vertical' ? a.w : a.h
-  const bSize = orientation === 'vertical' ? b.w : b.h
   const minASize = orientation === 'vertical' ? minA.minW : minA.minH
-  const minBSize = orientation === 'vertical' ? minB.minW : minB.minH
   // a.size + delta >= minASize  =>  delta >= minASize - aSize
-  // b.size - delta >= minBSize  =>  delta <= bSize - minBSize
   const low = minASize - aSize
-  const high = bSize - minBSize
+  // Vertical only: a.x + a.w + delta <= cols  =>  delta <= cols - a.x - aSize.
+  // Horizontal (row) growth has no analogous ceiling — rows just add height
+  // to the page, same as the corner-resize handle allows today.
+  const high = orientation === 'vertical' && cols != null ? cols - a.x - aSize : Infinity
   return Math.min(Math.max(deltaUnits, low), high)
 }
 
 /**
- * Apply a gutter drag: `a` (left/top) grows by the clamped delta, `b`
- * (right/bottom) shrinks by the same amount and slides its `x`/`y` so the two
- * keep touching — the shared edge simply moves, total footprint is
- * unchanged. Pure: returns a NEW array (only `a`/`b` are replaced; every
- * other item is returned as-is) and is a no-op (returns `items` unchanged) if
- * either card can't be found or the clamped delta is zero.
+ * Apply a gutter drag: resizes ONLY `a` (the card whose trailing/bottom edge
+ * this gutter is) by the clamped delta — `b` is left completely untouched
+ * here (see this module's doc for why: reflowing `b`, and anything past it,
+ * is grid-layout-plus's OWN vertical-compaction's job once this result flows
+ * back through the normal `layout` prop, not something this pure function
+ * does directly). `b` still has to EXIST for the drag to mean anything (an
+ * edge is only meaningful between two real cards), so this remains a no-op
+ * when either id can't be found.
+ *
+ * `cols` is optional (needed only to cap a VERTICAL gutter's growth at the
+ * grid's own column count — see {@link clampGutterDeltaUnits}); omit it for
+ * a horizontal gutter or when the caller doesn't care about that ceiling.
+ *
+ * Pure: returns a NEW array (only `a` is replaced; every other item is
+ * returned as-is) and is a no-op (returns `items` unchanged) if either card
+ * can't be found or the clamped delta is zero.
  */
 export function applyGutterDrag(
   items: DashboardLayoutItem[],
   gutter: Pick<GridGutter, 'orientation' | 'aId' | 'bId'>,
   deltaUnits: number,
+  cols?: number,
 ): DashboardLayoutItem[] {
   const a = items.find((it) => it.i === gutter.aId)
   const b = items.find((it) => it.i === gutter.bId)
   if (!a || !b) return items
-  const delta = clampGutterDeltaUnits(gutter.orientation, a, b, deltaUnits)
+  const delta = clampGutterDeltaUnits(gutter.orientation, a, deltaUnits, cols)
   if (delta === 0) return items
-  return items.map((it) => {
-    if (it.i === a.i) {
-      return gutter.orientation === 'vertical' ? { ...it, w: it.w + delta } : { ...it, h: it.h + delta }
-    }
-    if (it.i === b.i) {
-      return gutter.orientation === 'vertical'
-        ? { ...it, x: it.x + delta, w: it.w - delta }
-        : { ...it, y: it.y + delta, h: it.h - delta }
-    }
-    return it
-  })
+  return items.map((it) =>
+    it.i === a.i
+      ? gutter.orientation === 'vertical'
+        ? { ...it, w: it.w + delta }
+        : { ...it, h: it.h + delta }
+      : it,
+  )
 }
 
 /**

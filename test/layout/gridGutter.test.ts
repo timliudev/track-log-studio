@@ -93,47 +93,50 @@ describe('gutterKey', () => {
   })
 })
 
-describe('clampGutterDeltaUnits', () => {
-  it('allows a delta that keeps both sides at/above their minimum', () => {
-    // map minW=3, gear minW=3 (see dashboardLayout.ts's STATIC_MIN_SIZE)
+describe('clampGutterDeltaUnits (#5 — only the DRAGGED side, `a`, is clamped)', () => {
+  it('allows a delta that keeps a at/above its minimum', () => {
+    // map minW=3 (see dashboardLayout.ts's STATIC_MIN_SIZE)
     const a: DashboardLayoutItem = { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 }
-    const b: DashboardLayoutItem = { i: STATIC_CARD_IDS.gear, x: 5, y: 0, w: 5, h: 10 }
-    expect(clampGutterDeltaUnits('vertical', a, b, 1)).toBe(1)
-    expect(clampGutterDeltaUnits('vertical', a, b, -1)).toBe(-1)
+    expect(clampGutterDeltaUnits('vertical', a, 1)).toBe(1)
+    expect(clampGutterDeltaUnits('vertical', a, -1)).toBe(-1)
   })
 
-  it('clamps growth so the shrinking side never drops below its minimum', () => {
-    const a: DashboardLayoutItem = { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 }
-    const b: DashboardLayoutItem = { i: STATIC_CARD_IDS.gear, x: 5, y: 0, w: 5, h: 10 } // minW 3
-    // b would drop to 5-4=1 < minW(3); max allowed growth is 5-3=2
-    expect(clampGutterDeltaUnits('vertical', a, b, 4)).toBe(2)
-  })
-
-  it('clamps shrinkage so the growing-in-reverse side never drops below its minimum', () => {
+  it('clamps shrinkage so a never drops below its own minimum', () => {
     const a: DashboardLayoutItem = { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 } // minW 3
-    const b: DashboardLayoutItem = { i: STATIC_CARD_IDS.gear, x: 5, y: 0, w: 5, h: 10 }
     // a would drop to 5-4=1 < minW(3); max allowed negative delta is -(5-3)=-2
-    expect(clampGutterDeltaUnits('vertical', a, b, -4)).toBe(-2)
+    expect(clampGutterDeltaUnits('vertical', a, -4)).toBe(-2)
   })
 
-  it('handles the horizontal (row/height) axis the same way', () => {
+  it('handles the horizontal (row/height) axis the same way, with no upper bound', () => {
     const a: DashboardLayoutItem = { i: STATIC_CARD_IDS.sectors, x: 0, y: 0, w: 4, h: 6 } // minH 3
-    const b: DashboardLayoutItem = { i: STATIC_CARD_IDS.sectors, x: 0, y: 6, w: 4, h: 4 } // minH 3 (same id ok, just id-lookup)
-    expect(clampGutterDeltaUnits('horizontal', a, b, 10)).toBe(1) // b: 4 - delta >= 3 => delta <= 1
-    expect(clampGutterDeltaUnits('horizontal', a, b, -10)).toBe(-3) // a: 6 + delta >= 3 => delta >= -3
+    expect(clampGutterDeltaUnits('horizontal', a, 100)).toBe(100) // rows: no ceiling
+    expect(clampGutterDeltaUnits('horizontal', a, -10)).toBe(-3) // a: 6 + delta >= 3 => delta >= -3
+  })
+
+  it('caps a VERTICAL gutter\'s growth at the grid column count when `cols` is given', () => {
+    const a: DashboardLayoutItem = { i: STATIC_CARD_IDS.map, x: 8, y: 0, w: 4, h: 10 } // right edge at col 12
+    // a.x(8) + a.w(4) + delta <= cols(12) => delta <= 0
+    expect(clampGutterDeltaUnits('vertical', a, 5, 12)).toBe(0)
+    const roomy: DashboardLayoutItem = { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 }
+    expect(clampGutterDeltaUnits('vertical', roomy, 5, 12)).toBe(5) // room for +5 (0+4+5=9<=12)
+    expect(clampGutterDeltaUnits('vertical', roomy, 100, 12)).toBe(8) // clamps to fill exactly to col 12
+  })
+
+  it('is unbounded above when `cols` is omitted', () => {
+    const a: DashboardLayoutItem = { i: STATIC_CARD_IDS.map, x: 8, y: 0, w: 4, h: 10 }
+    expect(clampGutterDeltaUnits('vertical', a, 100)).toBe(100)
   })
 
   it('a zero delta is always a no-op', () => {
     const a: DashboardLayoutItem = { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 3, h: 5 }
-    const b: DashboardLayoutItem = { i: STATIC_CARD_IDS.gear, x: 3, y: 0, w: 3, h: 4 }
-    expect(clampGutterDeltaUnits('vertical', a, b, 0)).toBe(0)
+    expect(clampGutterDeltaUnits('vertical', a, 0)).toBe(0)
   })
 })
 
-describe('applyGutterDrag', () => {
+describe('applyGutterDrag (#5 — resizes only the dragged side, `a`; `b` reflows via grid-layout-plus compaction, not here)', () => {
   const gutter = { orientation: 'vertical' as const, aId: 'a', bId: 'b' }
 
-  it('grows a.w and shifts+shrinks b.x/b.w by the same clamped delta, leaving other items untouched', () => {
+  it('grows a.w by the clamped delta and leaves b (and every other item) completely untouched', () => {
     const items: DashboardLayoutItem[] = [
       { i: 'a', x: 0, y: 0, w: 4, h: 10 },
       { i: 'b', x: 4, y: 0, w: 4, h: 10 },
@@ -141,8 +144,19 @@ describe('applyGutterDrag', () => {
     ]
     const next = applyGutterDrag(items, gutter, 2)
     expect(next.find((it) => it.i === 'a')).toMatchObject({ x: 0, w: 6 })
-    expect(next.find((it) => it.i === 'b')).toMatchObject({ x: 6, w: 2 })
+    // b is byte-for-byte unchanged — no more x/w shift to "keep touching".
+    expect(next.find((it) => it.i === 'b')).toEqual(items[1])
     expect(next.find((it) => it.i === 'untouched')).toEqual(items[2])
+  })
+
+  it('shrinking a leaves a gap after it (no compensating change to b) — reflow is the grid\'s job', () => {
+    const items: DashboardLayoutItem[] = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 10 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 10 },
+    ]
+    const next = applyGutterDrag(items, gutter, -2)
+    expect(next.find((it) => it.i === 'a')).toMatchObject({ w: 2 })
+    expect(next.find((it) => it.i === 'b')).toEqual(items[1])
   })
 
   it('is pure — returns a new array without mutating the input items', () => {
@@ -155,14 +169,24 @@ describe('applyGutterDrag', () => {
     expect(items).toEqual(snapshot)
   })
 
-  it('clamps the delta via clampGutterDeltaUnits before applying it', () => {
+  it('clamps the delta via clampGutterDeltaUnits before applying it (a\'s own min floor)', () => {
     const items: DashboardLayoutItem[] = [
       { i: 'a', x: 0, y: 0, w: 3, h: 10 }, // STATIC_CARD_IDS-less id -> DEFAULT_MIN_SIZE (minW 2)
       { i: 'b', x: 3, y: 0, w: 3, h: 10 },
     ]
-    // requesting a huge delta should clamp to b's floor (minW 2): b can only shrink by 1
-    const next = applyGutterDrag(items, gutter, 100)
-    expect(next.find((it) => it.i === 'b')).toMatchObject({ w: 2 })
+    // Shrinking far past a's own floor (minW 2) clamps to exactly that floor.
+    const next = applyGutterDrag(items, gutter, -100)
+    expect(next.find((it) => it.i === 'a')).toMatchObject({ w: 2 })
+    expect(next.find((it) => it.i === 'b')).toEqual(items[1])
+  })
+
+  it('clamps a VERTICAL gutter\'s growth at the grid column count when `cols` is passed', () => {
+    const items: DashboardLayoutItem[] = [
+      { i: 'a', x: 8, y: 0, w: 3, h: 10 },
+      { i: 'b', x: 11, y: 0, w: 1, h: 10 },
+    ]
+    // a.x(8)+w(3)+delta <= 12 => delta <= 1
+    const next = applyGutterDrag(items, gutter, 100, 12)
     expect(next.find((it) => it.i === 'a')).toMatchObject({ w: 4 })
   })
 
@@ -171,8 +195,7 @@ describe('applyGutterDrag', () => {
       { i: 'a', x: 0, y: 0, w: 2, h: 10 },
       { i: 'b', x: 2, y: 0, w: 2, h: 10 },
     ]
-    // Both already at their (default) minimum width of 2 — any delta clamps to 0.
-    expect(applyGutterDrag(items, gutter, 1)).toBe(items)
+    // a is already at its (default) minimum width of 2 — a shrink delta clamps to 0.
     expect(applyGutterDrag(items, gutter, -1)).toBe(items)
   })
 
@@ -181,7 +204,7 @@ describe('applyGutterDrag', () => {
     expect(applyGutterDrag(items, gutter, 2)).toBe(items)
   })
 
-  it('applies the horizontal (top/bottom) case symmetrically', () => {
+  it('applies the horizontal (top/bottom) case: grows/shrinks ONLY top (a), bottom (b) untouched', () => {
     const hGutter = { orientation: 'horizontal' as const, aId: 'top', bId: 'bottom' }
     const items: DashboardLayoutItem[] = [
       { i: 'top', x: 0, y: 0, w: 4, h: 6 },
@@ -189,7 +212,7 @@ describe('applyGutterDrag', () => {
     ]
     const next = applyGutterDrag(items, hGutter, -2)
     expect(next.find((it) => it.i === 'top')).toMatchObject({ y: 0, h: 4 })
-    expect(next.find((it) => it.i === 'bottom')).toMatchObject({ y: 4, h: 8 })
+    expect(next.find((it) => it.i === 'bottom')).toEqual(items[1])
   })
 })
 
@@ -245,18 +268,17 @@ describe('pixel metrics (mirrors grid-layout-plus\'s own calcColWidth/calcPositi
 })
 
 describe('detectGutters + applyGutterDrag round-trip against a realistic layout', () => {
-  it('dragging the gutter between the map and a chart in defaultLayout-shaped columns keeps both above their minimum', () => {
+  it('dragging the gutter between the map and a chart in defaultLayout-shaped columns grows the map and leaves the chart untouched (#5 — reflow is the grid\'s job, not this function\'s)', () => {
     const items: DashboardLayoutItem[] = [
       { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 },
       { i: chartItemId(1), x: 4, y: 0, w: 4, h: 10 },
     ]
     const gutters = detectGutters(items)
     expect(gutters).toHaveLength(1)
-    const next = applyGutterDrag(items, gutters[0], 1)
+    const next = applyGutterDrag(items, gutters[0], 1, 12)
     const map = next.find((it) => it.i === STATIC_CARD_IDS.map)!
     const chart = next.find((it) => it.i === chartItemId(1))!
     expect(map.w).toBe(5)
-    expect(chart.x).toBe(5)
-    expect(chart.w).toBe(3)
+    expect(chart).toEqual(items[1])
   })
 })
