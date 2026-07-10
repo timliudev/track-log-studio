@@ -165,7 +165,7 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
     expect(target.addEventListener).not.toHaveBeenCalled()
   })
 
-  it('drags a vertical gutter: growing a.w / shrinking+shifting b, via a single onChange call per move', async () => {
+  it('drags a vertical gutter: grows a.w only, via a single onChange call per move; b (#5) is left untouched here', async () => {
     const items: DashboardLayoutItem[] = [
       { i: 'a', x: 0, y: 0, w: 4, h: 6 },
       { i: 'b', x: 4, y: 0, w: 4, h: 6 },
@@ -196,7 +196,10 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
     expect(onChange).toHaveBeenCalledTimes(1)
     const next = onChange.mock.calls[0][0] as DashboardLayoutItem[]
     expect(next.find((it) => it.i === 'a')).toMatchObject({ w: 5 })
-    expect(next.find((it) => it.i === 'b')).toMatchObject({ x: 5, w: 3 })
+    // b is byte-for-byte unchanged — reflow (pushing b out of the way, if
+    // needed) is left to grid-layout-plus's own compaction once this flows
+    // back through AnalyzerView's `layout` prop, not this composable.
+    expect(next.find((it) => it.i === 'b')).toEqual(items[1])
 
     target.listeners['pointerup']({ pointerId: 5 })
     expect(target.releasePointerCapture).toHaveBeenCalledWith(5)
@@ -204,7 +207,7 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
     expect(result.draggingKey.value).toBeNull()
   })
 
-  it('drags a horizontal gutter symmetrically (top/bottom)', async () => {
+  it('drags a horizontal gutter: grows/shrinks ONLY the top card (a), bottom (b) untouched', async () => {
     const items: DashboardLayoutItem[] = [
       { i: 'top', x: 0, y: 0, w: 4, h: 6 },
       { i: 'bottom', x: 0, y: 6, w: 4, h: 6 },
@@ -223,12 +226,14 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
       clientY: 0,
     } as unknown as PointerEvent)
 
-    target.listeners['pointermove']({ clientX: 0, clientY: -rowStep() * 2, pointerId: 2 })
+    // Dragging the gutter DOWN (positive clientY delta) grows the card ABOVE
+    // it (top) — the #5 "resize the side you grabbed" model.
+    target.listeners['pointermove']({ clientX: 0, clientY: rowStep() * 2, pointerId: 2 })
 
     expect(onChange).toHaveBeenCalledTimes(1)
     const next = onChange.mock.calls[0][0] as DashboardLayoutItem[]
-    expect(next.find((it) => it.i === 'top')).toMatchObject({ h: 4 })
-    expect(next.find((it) => it.i === 'bottom')).toMatchObject({ y: 4, h: 8 })
+    expect(next.find((it) => it.i === 'top')).toMatchObject({ h: 8 })
+    expect(next.find((it) => it.i === 'bottom')).toEqual(items[1])
   })
 
   it('does not call onChange for a sub-threshold move (rounds to 0 grid units)', async () => {
@@ -254,8 +259,8 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('clamps the drag at the min-size floor (same as applyGutterDrag/clampGutterDeltaUnits)', async () => {
-    // map minW 3, gear minW 3 — same fixtures as gridGutter.test.ts.
+  it('clamps a shrink-drag at a\'s OWN min-size floor (#5 — b\'s floor no longer applies, it never shrinks here)', async () => {
+    // map minW 3 — same fixture as gridGutter.test.ts.
     const items: DashboardLayoutItem[] = [
       { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 },
       { i: STATIC_CARD_IDS.gear, x: 5, y: 0, w: 5, h: 10 },
@@ -274,14 +279,117 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
       clientY: 0,
     } as unknown as PointerEvent)
 
-    // Drag far past what either card's min size allows.
+    // Drag far past what a's own min size allows.
     const step = colStepFor(mockWidth)
-    target.listeners['pointermove']({ clientX: step * 10, clientY: 0, pointerId: 4 })
+    target.listeners['pointermove']({ clientX: -step * 10, clientY: 0, pointerId: 4 })
 
     expect(onChange).toHaveBeenCalledTimes(1)
     const next = onChange.mock.calls[0][0] as DashboardLayoutItem[]
-    // b (gear) can only shrink to its minW (3): 5 -> 3, so a grows by 2 -> 7.
-    expect(next.find((it) => it.i === STATIC_CARD_IDS.gear)).toMatchObject({ w: 3 })
-    expect(next.find((it) => it.i === STATIC_CARD_IDS.map)).toMatchObject({ w: 7 })
+    // map (a) can only shrink to its own minW (3): 5 -> 3.
+    expect(next.find((it) => it.i === STATIC_CARD_IDS.map)).toMatchObject({ w: 3 })
+    // gear (b) is completely untouched — it no longer grows to compensate.
+    expect(next.find((it) => it.i === STATIC_CARD_IDS.gear)).toEqual(items[1])
+  })
+
+  it('caps a vertical gutter\'s growth at the grid column count (cols=12, passed through from AnalyzerView\'s metrics)', async () => {
+    const items: DashboardLayoutItem[] = [
+      { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 },
+      { i: STATIC_CARD_IDS.gear, x: 5, y: 0, w: 7, h: 10 },
+    ]
+    const { result, onChange } = mountHarness(items)
+    result.containerRef.value = document.createElement('div')
+    await nextTick()
+    const gutter = result.gutters.value[0]
+
+    const target = fakeTarget()
+    result.onGutterPointerDown(gutter, {
+      preventDefault: vi.fn(),
+      currentTarget: target,
+      pointerId: 6,
+      clientX: 0,
+      clientY: 0,
+    } as unknown as PointerEvent)
+
+    // Drag far past the grid's own 12-column width.
+    const step = colStepFor(mockWidth)
+    target.listeners['pointermove']({ clientX: step * 20, clientY: 0, pointerId: 6 })
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const next = onChange.mock.calls[0][0] as DashboardLayoutItem[]
+    // map (a) grows to fill exactly to column 12 (x:0 + w:12 = 12), no further.
+    expect(next.find((it) => it.i === STATIC_CARD_IDS.map)).toMatchObject({ w: 12 })
+    expect(next.find((it) => it.i === STATIC_CARD_IDS.gear)).toEqual(items[1])
+  })
+
+  // #1 fix — "the pink gutter block stays stuck on screen after the drag
+  // ends". Root cause: `gutters`' v-for is keyed by `orientation:aId:bId`
+  // and re-derives on every `onChange` (a moved edge can change which cards
+  // are adjacent), so the SPECIFIC DOM node a drag started on can get
+  // swapped out by Vue mid-drag — events aimed at that (now-detached)
+  // element, including its own pointerup/pointercancel listeners, never
+  // arrive again. A target-only listener would leave `draggingKey` (and the
+  // highlight it drives) stuck forever in that case. The fix adds a
+  // WINDOW-level pointerup/pointercancel listener that doesn't depend on any
+  // particular element still being mounted.
+  it('ends the drag (clears draggingKey) via a WINDOW-level pointerup even when the original target never receives its own pointerup', async () => {
+    const items: DashboardLayoutItem[] = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 6 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 6 },
+    ]
+    const { result } = mountHarness(items)
+    result.containerRef.value = document.createElement('div')
+    await nextTick()
+    const gutter = result.gutters.value[0]
+
+    // A target whose addEventListener silently drops the callback — stands
+    // in for "the DOM node this drag started on got removed/replaced mid-
+    // drag", so it can never itself dispatch pointerup/pointercancel again.
+    const deadTarget = {
+      setPointerCapture: vi.fn(),
+      releasePointerCapture: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }
+    result.onGutterPointerDown(gutter, {
+      preventDefault: vi.fn(),
+      currentTarget: deadTarget,
+      pointerId: 7,
+      clientX: 0,
+      clientY: 0,
+    } as unknown as PointerEvent)
+    expect(result.draggingKey.value).toBe('vertical:a:b')
+
+    // Simulate the browser delivering pointerup to the window instead (the
+    // safety-net registration) — e.g. the real target is already gone.
+    const evt = new Event('pointerup') as unknown as PointerEvent
+    Object.defineProperty(evt, 'pointerId', { value: 7 })
+    window.dispatchEvent(evt)
+
+    expect(result.draggingKey.value).toBeNull()
+  })
+
+  it('force-ends an in-progress drag when the component unmounts mid-drag', async () => {
+    const items: DashboardLayoutItem[] = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 6 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 6 },
+    ]
+    const { wrapper, result } = mountHarness(items)
+    result.containerRef.value = document.createElement('div')
+    await nextTick()
+    const gutter = result.gutters.value[0]
+
+    const target = fakeTarget()
+    result.onGutterPointerDown(gutter, {
+      preventDefault: vi.fn(),
+      currentTarget: target,
+      pointerId: 9,
+      clientX: 0,
+      clientY: 0,
+    } as unknown as PointerEvent)
+    expect(result.draggingKey.value).toBe('vertical:a:b')
+
+    wrapper.unmount()
+
+    expect(result.draggingKey.value).toBeNull()
   })
 })

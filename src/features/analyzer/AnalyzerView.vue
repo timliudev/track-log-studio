@@ -516,15 +516,17 @@ function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): vo
   activeLayout.value = next
 }
 
-// --- #2: draggable gutters between adjacent cards (IDE-style split-pane
-// resize) — see gridGutter.ts's module doc for the domain math and
-// useGridGutters.ts for the DOM/pointer wiring this just calls into. Desktop-
-// only (isMobile has no side-by-side pairs) and disabled while the dashboard
-// is locked, same two conditions that already gate the grid's own drag/
-// resize (isDraggable/isResizable in useDashboardLayout). The currently-
-// pinned card is excluded from `gutterItems` — its grid slot is an inert
-// Teleport placeholder (see the template's pin-placeholder note), so a
-// gutter touching it would visibly do nothing.
+// --- #2/#5: draggable gutters between adjacent cards — dragging a gap
+// resizes the card whose edge that gap is (the OTHER side reflows, it isn't
+// traded against — see gridGutter.ts's module doc for the domain math and
+// the #5 revision note) via useGridGutters.ts for the DOM/pointer wiring
+// this just calls into. Desktop-only (isMobile has no side-by-side pairs)
+// and disabled while the dashboard is locked, same two conditions that
+// already gate the grid's own drag/resize (isDraggable/isResizable in
+// useDashboardLayout). The currently-pinned card is excluded from
+// `gutterItems` — its grid slot is an inert Teleport placeholder (see the
+// template's pin-placeholder note), so a gutter touching it would visibly do
+// nothing.
 const gutterItems = computed<DashboardLayoutItem[]>(() =>
   desktopVisibleLayout.value.filter((it) => !isPinned(it.i)),
 )
@@ -537,8 +539,16 @@ const gridGutters = useGridGutters({
   marginX: GRID_MARGIN[0],
   marginY: GRID_MARGIN[1],
   // Same persistence path as onLayoutUpdated above (#1's fix) — a gutter drag
-  // is just another source of new coordinates, merged back into the full
-  // layout the identical way a corner-resize's `layout-updated` is.
+  // is just another source of new coordinates for the ONE resized card,
+  // merged back into the full layout the identical way a corner-resize's
+  // `layout-updated` is. Everything ELSE that needs to reflow around it
+  // (#5) arrives here too, but via a SEPARATE round trip: this writes
+  // `layout.value`, which flows out through `activeLayout` to
+  // `<GridLayout>`'s `layout` prop, whose own vertical-compaction reacts and
+  // re-emits `layout-updated` with the reflowed positions, which
+  // `onLayoutUpdated` merges back in — see gridGutter.ts's module doc for
+  // why this round trip is safe (doesn't loop) rather than a hand-rolled
+  // reflow living here.
   onChange: (next) => {
     layout.value = mergeLayoutPositions(layout.value, next)
   },
