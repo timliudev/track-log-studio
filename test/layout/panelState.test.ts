@@ -286,4 +286,20 @@ describe('setMobileOrder', () => {
     expect(next.collapsed).toEqual(['x'])
     expect(next.pinnedId).toBe('x')
   })
+
+  // #11 — same-reference guard breaks the breakpoint-switch recursion loop.
+  it('returns the SAME state reference when the order is unchanged', () => {
+    const state: PanelState = { collapsed: ['x'], pinnedId: 'x', mobileOrder: ['a', 'b'] }
+    expect(setMobileOrder(state, ['a', 'b'])).toBe(state)
+  })
+
+  it('treats a de-dup that yields the current order as unchanged (same ref)', () => {
+    const state: PanelState = { collapsed: [], pinnedId: null, mobileOrder: ['a', 'b'] }
+    expect(setMobileOrder(state, ['a', 'b', 'a'])).toBe(state)
+  })
+
+  it('returns a NEW reference when the order actually changes', () => {
+    const state: PanelState = { collapsed: [], pinnedId: null, mobileOrder: ['a', 'b'] }
+    expect(setMobileOrder(state, ['b', 'a'])).not.toBe(state)
+  })
 })
