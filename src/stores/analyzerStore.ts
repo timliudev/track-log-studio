@@ -187,6 +187,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         xChannel,
         yChannel,
         equalAspect: looksLikeForcePair(xChannel, yChannel),
+        colorChannel: null,
       })
     } else {
       charts.value.push({ kind: 'timeseries', id: nextId++, channels: [], mode: 'timeline' })
@@ -226,6 +227,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     chart.equalAspect = equalAspect
   }
 
+  /** Set (or clear, via `null`) a scatter chart's colour-axis channel — same
+   *  "one field, one setter, no-op on the wrong chart kind" contract as
+   *  `setChartXY`/`setChartEqualAspect`. */
+  function setChartColorChannel(id: number, channel: string | null): void {
+    const chart = charts.value.find((c) => c.id === id)
+    if (!chart || chart.kind !== 'scatter') return
+    chart.colorChannel = channel
+  }
+
   return {
     activeFileId,
     xAxis,
@@ -257,5 +267,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     setChartMode,
     setChartXY,
     setChartEqualAspect,
+    setChartColorChannel,
   }
 })

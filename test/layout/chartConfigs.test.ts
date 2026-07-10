@@ -36,7 +36,21 @@ describe('chartConfigs — parseCharts (T5)', () => {
   it('round-trips a mixed timeseries + scatter list', () => {
     const charts: ChartConfig[] = [
       { kind: 'timeseries', id: 1, channels: ['RPM', 'TPS_Percent'], mode: 'overlay' },
-      { kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: null, equalAspect: false },
+      { kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: null, equalAspect: false, colorChannel: null },
+    ]
+    expect(parseCharts(JSON.stringify(charts))).toEqual(charts)
+  })
+
+  it('round-trips a picked colour-axis channel', () => {
+    const charts: ChartConfig[] = [
+      {
+        kind: 'scatter',
+        id: 2,
+        xChannel: 'TC_Xforce',
+        yChannel: 'TC_Yforce',
+        equalAspect: true,
+        colorChannel: 'Vehicle_Speed',
+      },
     ]
     expect(parseCharts(JSON.stringify(charts))).toEqual(charts)
   })
@@ -47,21 +61,32 @@ describe('chartConfigs — parseCharts (T5)', () => {
     // (true only for a force/acceleration pair), not a blanket true.
     const raw = JSON.stringify([{ kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed' }])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: false },
+      { kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: false, colorChannel: null },
     ])
   })
 
   it('backfills equalAspect: true on pre-feature payloads whose channel pair IS a force pair', () => {
     const raw = JSON.stringify([{ kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' }])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true },
+      { kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true, colorChannel: null },
     ])
   })
 
   it('coerces a non-boolean equalAspect back to the channel-pair default (false — no channels picked)', () => {
     const raw = JSON.stringify([{ kind: 'scatter', id: 2, xChannel: null, yChannel: null, equalAspect: 'yes' }])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'scatter', id: 2, xChannel: null, yChannel: null, equalAspect: false },
+      { kind: 'scatter', id: 2, xChannel: null, yChannel: null, equalAspect: false, colorChannel: null },
+    ])
+  })
+
+  it('backfills colorChannel to null on pre-feature payloads (no such field) and coerces a non-string value', () => {
+    const raw = JSON.stringify([
+      { kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: false },
+      { kind: 'scatter', id: 3, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: false, colorChannel: 42 },
+    ])
+    expect(parseCharts(raw)).toEqual([
+      { kind: 'scatter', id: 2, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: false, colorChannel: null },
+      { kind: 'scatter', id: 3, xChannel: 'RPM', yChannel: 'Vehicle_Speed', equalAspect: false, colorChannel: null },
     ])
   })
 
@@ -85,7 +110,7 @@ describe('chartConfigs — parseCharts (T5)', () => {
       { kind: 'timeseries', id: 4, channels: ['RPM', 5], mode: 'weird' }, // bad channels/mode
     ])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'scatter', id: 3, xChannel: null, yChannel: 'RPM', equalAspect: false },
+      { kind: 'scatter', id: 3, xChannel: null, yChannel: 'RPM', equalAspect: false, colorChannel: null },
       { kind: 'timeseries', id: 4, channels: [], mode: 'timeline' },
     ])
   })
@@ -110,7 +135,7 @@ describe('chartConfigs — load/save (T5)', () => {
     const charts: ChartConfig[] = [
       { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
       { kind: 'timeseries', id: 2, channels: ['RPM'], mode: 'overlay' },
-      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: false },
+      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: false, colorChannel: null },
     ]
     saveCharts(charts)
     expect(loadCharts()).toEqual(charts)
@@ -146,7 +171,7 @@ describe('chartConfigs — nextChartId (T5)', () => {
     expect(
       nextChartId([
         { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
-        { kind: 'scatter', id: 7, xChannel: null, yChannel: null, equalAspect: true },
+        { kind: 'scatter', id: 7, xChannel: null, yChannel: null, equalAspect: true, colorChannel: null },
       ]),
     ).toBe(8)
   })
