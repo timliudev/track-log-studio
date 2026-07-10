@@ -9,6 +9,7 @@ const { t } = useI18n()
 const buildSha = __BUILD_SHA__
 const buildDate = __BUILD_DATE__
 
+const siteUrl = 'https://tracklogstudio.timliudev.com/'
 const repoUrl = 'https://github.com/timliudev/track-log-studio'
 const authorUrl = 'https://github.com/timliudev'
 const licenseUrl = `${repoUrl}/blob/main/LICENSE`
@@ -25,6 +26,12 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
           <dt>{{ t('about.project.author') }}</dt>
           <dd>
             <a :href="authorUrl" target="_blank" rel="noopener noreferrer">timliudev</a>
+          </dd>
+        </div>
+        <div class="info-row">
+          <dt>{{ t('about.project.website') }}</dt>
+          <dd>
+            <a :href="siteUrl" target="_blank" rel="noopener noreferrer">{{ siteUrl }}</a>
           </dd>
         </div>
         <div class="info-row">

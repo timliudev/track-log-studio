@@ -28,6 +28,7 @@ export default {
     project: {
       heading: '專案資訊',
       author: '開發者',
+      website: '官方網站',
       repo: '原始碼',
       version: '版本',
       versionValue: '{sha}（{date} 建置）',
