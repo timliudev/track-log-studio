@@ -53,6 +53,147 @@ export function measuredSize(
     height: fillHeight && clientHeight > 0 ? clientHeight : fixedHeight,
   }
 }
+
+/**
+ * XY-aspect feature — the raw [min,max] data extent across every series'
+ * points, per axis. `Infinity`/`-Infinity` fields when there are no points
+ * (caller falls back to a default range via {@link paddedAxisRange}, which
+ * treats non-finite input as "no data yet").
+ */
+export function dataExtent(series: GgSeries[]): { xMin: number; xMax: number; yMin: number; yMax: number } {
+  let xMin = Infinity
+  let xMax = -Infinity
+  let yMin = Infinity
+  let yMax = -Infinity
+  for (const s of series) {
+    for (const [x, y] of s.points) {
+      if (x < xMin) xMin = x
+      if (x > xMax) xMax = x
+      if (y < yMin) yMin = y
+      if (y > yMax) yMax = y
+    }
+  }
+  return { xMin, xMax, yMin, yMax }
+}
+
+/**
+ * Pad a raw [min,max] extent by a fraction of its span for headroom, so
+ * points don't sit flush against the plot edge — same spirit as
+ * `computeMaxAbs`'s "round up to the nearest 0.5g" headroom for the G-G
+ * square axes, generalised to any (possibly unsigned/asymmetric) channel
+ * pair. A constant channel (min === max) pads by a fraction of its
+ * magnitude instead (falling back to ±1 around zero); a non-finite extent
+ * (no points yet) falls back to a fixed 0..1 range so callers always get a
+ * usable range to size a grid from.
+ */
+export function paddedAxisRange(min: number, max: number, padFrac = 0.08): { min: number; max: number } {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 1 }
+  if (min === max) {
+    const pad = Math.abs(min) * padFrac || 1
+    return { min: min - pad, max: max + pad }
+  }
+  const span = max - min
+  const pad = span * padFrac
+  return { min: min - pad, max: max + pad }
+}
+
+/**
+ * #6 — force both axes to the SAME numeric span (the larger of the two,
+ * centred on each axis's own original centre) so that, combined with a
+ * literal square grid box (see {@link squareGridBox}), X and Y end up with
+ * IDENTICAL pixels-per-data-unit. This is the piece the earlier "equal
+ * pixels-per-unit via grid-inset letterboxing" attempt was missing: that
+ * approach (kept the raw, possibly very different, per-axis ranges and only
+ * padded the GRID INSETS to equalise scale) produced a grid box whose outer
+ * pixel width/height were themselves unequal whenever the two channels'
+ * data spans differed a lot (e.g. RPM 0..8000 vs speed 0..200) — the plot
+ * area came out as a wide sliver, not a square, which is exactly the "Y軸被
+ * 拍扁" (Y axis squashed flat) symptom reported against that version.
+ * Widening the SMALLER axis's numeric range instead (rather than padding
+ * grid pixels) means the grid box itself can always be sized as a literal
+ * square (equal width AND height in pixels) — see `squareGridBox` — while
+ * the actual data (still centred) occupies a smaller, but honestly-scaled,
+ * region within that square. For the classic G-G friction-circle case (both
+ * axes already forced to the same symmetric-about-0 bound by
+ * `computeMaxAbs`) the spans are already equal, so this is a no-op there.
+ */
+export function squareAxisRanges(
+  xRange: { min: number; max: number },
+  yRange: { min: number; max: number },
+): { xRange: { min: number; max: number }; yRange: { min: number; max: number } } {
+  const xSpan = Math.max(xRange.max - xRange.min, 1e-9)
+  const ySpan = Math.max(yRange.max - yRange.min, 1e-9)
+  const span = Math.max(xSpan, ySpan)
+  const xMid = (xRange.min + xRange.max) / 2
+  const yMid = (yRange.min + yRange.max) / 2
+  return {
+    xRange: { min: xMid - span / 2, max: xMid + span / 2 },
+    yRange: { min: yMid - span / 2, max: yMid + span / 2 },
+  }
+}
+
+/**
+ * #6 — a LITERAL square grid pixel box (equal width AND height, not just
+ * equal units-per-pixel): side = the smaller of the container's two
+ * available-plotting dimensions (container size minus `chrome`, the space
+ * reserved for axis labels/names), centred in whichever dimension has spare
+ * room — the same "background-size: contain, centred" idea the old
+ * grid-inset letterbox used, just applied to the OUTER box shape instead of
+ * to per-axis scale. Paired with {@link squareAxisRanges} (equal numeric
+ * spans on both axes), this guarantees symmetric data (e.g. a circle) plots
+ * as a visually square/round shape on ANY container shape, and holds after a
+ * window/card resize (the caller recomputes this on every resize — see
+ * GgChart's `resize()` — since it depends on the CURRENT container size).
+ */
+export function squareGridBox(
+  containerW: number,
+  containerH: number,
+  chrome: { left: number; right: number; top: number; bottom: number },
+): { left: number; top: number; width: number; height: number } {
+  const availW = Math.max(containerW - chrome.left - chrome.right, 1)
+  const availH = Math.max(containerH - chrome.top - chrome.bottom, 1)
+  const side = Math.max(Math.min(availW, availH), 1)
+  const extraW = Math.max(availW - side, 0)
+  const extraH = Math.max(availH - side, 0)
+  return {
+    left: chrome.left + extraW / 2,
+    top: chrome.top + extraH / 2,
+    width: side,
+    height: side,
+  }
+}
+
+/**
+ * #5 fix — decimal precision for an axis whose range was pinned explicitly
+ * (the 1:1 `square`/`equal` modes — see `squareAxisRanges`): widening the
+ * smaller-span axis to match the larger one usually produces a NON-"nice"
+ * min/max (e.g. widening a 0..2 span to match an 8 span centres it at
+ * -3..5... but the more common case is a fractional widen like -0.333..),
+ * unlike echarts' own auto-ranging (which always picks nice round ticks) —
+ * so its default label formatting could print long floats (e.g.
+ * `-0.3333333`), and since the grid box is drawn at a fixed pixel chrome
+ * (`containLabel: false`), an unexpectedly wide label pushes into — and
+ * visually squeezes — the plotting area, breaking the square aspect (the
+ * reported bug). Chosen from the axis's overall SPAN (not the individual
+ * tick value) so every tick on the same axis renders at the same precision.
+ */
+export function axisLabelDecimals(span: number): number {
+  if (!Number.isFinite(span) || span <= 0) return 2
+  if (span >= 100) return 0
+  if (span >= 10) return 1
+  if (span >= 1) return 2
+  if (span >= 0.1) return 3
+  return 4
+}
+
+/** Formats one axis tick at `axisLabelDecimals(span)` precision, trimming
+ *  trailing zeros (and normalising `-0` to `0`) for a compact label that
+ *  doesn't squeeze the plotting area (see `axisLabelDecimals`). */
+export function formatAxisTick(value: number, span: number): string {
+  const decimals = axisLabelDecimals(span)
+  const rounded = Number(value.toFixed(decimals))
+  return String(rounded === 0 ? 0 : rounded)
+}
 </script>
 
 <script setup lang="ts">
@@ -86,6 +227,14 @@ const props = defineProps<{
    *  CSS instead of the fixed `height` prop — see UPlotChart's `fillHeight`
    *  for the same pattern; `resize()` reads the host's own clientHeight. */
   fillHeight?: boolean
+  /** XY-aspect feature — true (default) scales X/Y at the SAME pixels-per-
+   *  data-unit (a circle plots as a circle), false lets each axis auto-range
+   *  independently to fill the card. Defaults to true when omitted so the
+   *  G-G force chart (axisMode 'square') gets a TRUE circle, not just a
+   *  symmetric-about-0 numeric range that only looked square by coincidence
+   *  of the card happening to be roughly square — see `squareAxisRanges`/
+   *  `squareGridBox`. */
+  equalAspect?: boolean
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -118,11 +267,46 @@ function buildOption(): echarts.EChartsCoreOption {
   const axisStroke = themeColor('--color-text-muted', '#888')
   const gridStroke = themeColor('--color-border', '#ccc')
   const square = (props.axisMode ?? 'auto') === 'square'
-  const bound = square ? computeMaxAbs(props.series) : undefined
+  const equal = props.equalAspect ?? true
+
+  // Explicit per-axis ranges. Needed for BOTH 1:1 flavours: echarts' own
+  // auto-ranging applies nice-tick rounding per axis independently, which
+  // would silently change each axis's data span and break any pixel ratio
+  // computed from it — so when `equal` is on, the ranges are pinned here and
+  // the grid box below does the rest. `square` keeps its historic
+  // symmetric-about-0 range even when `equal` is toggled off (that numeric
+  // symmetry predates the 1:1 feature and is a property of the friction-
+  // circle reading, not of pixel scaling).
+  let xRange: { min: number; max: number } | null = null
+  let yRange: { min: number; max: number } | null = null
+  if (square) {
+    const bound = computeMaxAbs(props.series)
+    xRange = { min: -bound, max: bound }
+    yRange = { min: -bound, max: bound }
+  } else if (equal) {
+    const ext = dataExtent(props.series)
+    xRange = paddedAxisRange(ext.xMin, ext.xMax)
+    yRange = paddedAxisRange(ext.yMin, ext.yMax)
+  }
+  // #6 — when 1:1 is on, widen whichever axis has the smaller span so BOTH
+  // axes cover the SAME numeric span (see `squareAxisRanges`) — this is what
+  // lets the grid box below be a literal square while still giving both axes
+  // identical pixels-per-data-unit. No-op for `square` axisMode (its bound is
+  // already symmetric/equal on both axes).
+  if (equal && xRange && yRange) {
+    const squared = squareAxisRanges(xRange, yRange)
+    xRange = squared.xRange
+    yRange = squared.yRange
+  }
+  // #5 fix — snapshot each pinned axis's span as a plain `const` number (not
+  // a closure over the mutable `let xRange`/`yRange` above) so the axisLabel
+  // `formatter` below captures a stable value; unused (NaN) when the axis
+  // isn't pinned, since the formatter is only wired in for that case.
+  const xSpan = xRange ? xRange.max - xRange.min : NaN
+  const ySpan = yRange ? yRange.max - yRange.min : NaN
 
   const sharedAxis = {
     type: 'value' as const,
-    ...(square ? { min: -bound!, max: bound! } : {}),
     axisLine: { lineStyle: { color: axisStroke } },
     axisLabel: { color: axisStroke },
     splitLine: { lineStyle: { color: gridStroke } },
@@ -133,26 +317,72 @@ function buildOption(): echarts.EChartsCoreOption {
   // axis's tick labels) has room without being clipped by the chart edge.
   const hasXName = Boolean(props.xName)
   const hasYName = Boolean(props.yName)
+  const chrome = {
+    left: hasYName ? 64 : 48,
+    right: 16,
+    top: 16,
+    bottom: hasXName ? 56 : 40,
+  }
+  // #6 — 1:1 mode: measure the CURRENT container and force a literal SQUARE
+  // grid box (equal pixel width/height — see `squareGridBox`), combined with
+  // the equal-span axis ranges above — recomputed on every render/resize (see
+  // `resize()`), which is what keeps the square shape true after a window or
+  // dashboard-card resize.
+  const grid =
+    equal && xRange && yRange ? squareGridBox(hostSize().width, hostSize().height, chrome) : chrome
 
   return {
     animation: false,
-    grid: {
-      left: hasYName ? 64 : 48,
-      right: 16,
-      top: 16,
-      bottom: hasXName ? 56 : 40,
-      containLabel: false,
-    },
+    grid: { ...grid, containLabel: false },
     tooltip: {
       trigger: 'item',
+      // Themed to match the shared v-tooltip bubble (src/directives/tooltip.ts)
+      // instead of echarts' default square, always-dark box — rounded corners
+      // + surface/border/text colours that follow light/dark (buildOption()
+      // re-reads these on every theme change via the MutationObserver below).
+      backgroundColor: themeColor('--color-surface', '#fff'),
+      borderColor: themeColor('--color-border', '#ccc'),
+      borderWidth: 1,
+      borderRadius: parseFloat(themeColor('--radius', '8')) || 8,
+      textStyle: { color: themeColor('--color-text', '#1a1c20') },
+      extraCssText: 'box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);',
       formatter: (p: { seriesName?: string; value?: number[] }) => {
         const v = p.value ?? [0, 0]
         const unit = square ? ' g' : ''
         return `${p.seriesName ?? ''}<br/>X: ${v[0].toFixed(2)}${unit}<br/>Y: ${v[1].toFixed(2)}${unit}`
       },
     },
-    xAxis: { ...sharedAxis, ...axisNameFields(props.xName) },
-    yAxis: { ...sharedAxis, ...axisNameFields(props.yName) },
+    xAxis: {
+      ...sharedAxis,
+      ...(xRange
+        ? {
+            min: xRange.min,
+            max: xRange.max,
+            // #5 fix — pinned 1:1 ranges aren't "nice" numbers; cap decimals
+            // from the axis's own span so long floats don't widen the label
+            // column and squeeze the square plotting area.
+            axisLabel: {
+              ...sharedAxis.axisLabel,
+              formatter: (v: number) => formatAxisTick(v, xSpan),
+            },
+          }
+        : {}),
+      ...axisNameFields(props.xName),
+    },
+    yAxis: {
+      ...sharedAxis,
+      ...(yRange
+        ? {
+            min: yRange.min,
+            max: yRange.max,
+            axisLabel: {
+              ...sharedAxis.axisLabel,
+              formatter: (v: number) => formatAxisTick(v, ySpan),
+            },
+          }
+        : {}),
+      ...axisNameFields(props.yName),
+    },
     series: props.series.map((s) => ({
       name: s.name,
       type: 'scatter',
@@ -195,7 +425,12 @@ function resize(): void {
   // T3 — MUST pass the measured size: an argument-less resize() would reuse
   // the init-time explicit width/height stored by zrender and never follow
   // the container. See measuredSize's doc.
-  if (chart) chart.resize(hostSize())
+  if (!chart) return
+  chart.resize(hostSize())
+  // 1:1 mode sizes the square grid box from the CONTAINER size (see
+  // squareGridBox), so a resize invalidates the current box — rebuild the
+  // option at the new size to keep the square shape true.
+  if (props.equalAspect ?? true) render()
 }
 
 onMounted(() => {
@@ -220,7 +455,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.series, props.axisMode, props.xName, props.yName],
+  () => [props.series, props.axisMode, props.xName, props.yName, props.equalAspect],
   () => render(),
   { deep: false },
 )

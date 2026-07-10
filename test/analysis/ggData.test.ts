@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildGgPoints } from '@/domain/analysis/ggData'
+import { buildGgPoints, looksLikeForce, looksLikeForcePair } from '@/domain/analysis/ggData'
 
 describe('buildGgPoints', () => {
   it('scales x/y by the given factor (e.g. milli-g -> g)', () => {
@@ -69,5 +69,31 @@ describe('buildGgPoints', () => {
 
   it('returns an empty array for empty input', () => {
     expect(buildGgPoints([], [])).toEqual([])
+  })
+})
+
+// #5 equal-aspect fix — shared "is this a force/acceleration channel" rule,
+// used both for the milli-g scale (ScatterChart) and the equal-aspect
+// default (analyzerStore/chartConfigs): 1:1 axis scaling only makes sense
+// when both sides of an XY pair share the same physical unit/magnitude.
+describe('looksLikeForce / looksLikeForcePair', () => {
+  it('matches any channel name containing "force" (case-insensitive)', () => {
+    expect(looksLikeForce('TC_Xforce')).toBe(true)
+    expect(looksLikeForce('TC_Yforce')).toBe(true)
+    expect(looksLikeForce('Some_FORCE_channel')).toBe(true)
+  })
+
+  it('does not match unrelated channel names, null, or undefined', () => {
+    expect(looksLikeForce('RPM')).toBe(false)
+    expect(looksLikeForce('Vehicle_Speed')).toBe(false)
+    expect(looksLikeForce(null)).toBe(false)
+    expect(looksLikeForce(undefined)).toBe(false)
+  })
+
+  it('looksLikeForcePair requires BOTH sides to look like force channels', () => {
+    expect(looksLikeForcePair('TC_Xforce', 'TC_Yforce')).toBe(true)
+    expect(looksLikeForcePair('TC_Xforce', 'RPM')).toBe(false)
+    expect(looksLikeForcePair('RPM', 'Vehicle_Speed')).toBe(false)
+    expect(looksLikeForcePair(null, null)).toBe(false)
   })
 })

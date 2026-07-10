@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { parseLoga } from '@/domain/parsing/LogaParser'
+import { LogSession } from '@/domain/model/LogSession'
 import {
   adToTravelMm,
   applyDerivedChannels,
   defaultSuspensionConfig,
   deriveSuspensionChannels,
   fitLinear,
+  legacyAdChannelName,
   suggestConfig,
   type SuspensionChannelConfig,
   type SuspensionConfig,
@@ -14,14 +16,14 @@ import { loadFixture } from '../fixtures'
 
 function frontEnabled(patch: Partial<SuspensionChannelConfig> = {}): SuspensionConfig {
   const cfg = defaultSuspensionConfig()
-  cfg.front = { ...cfg.front, enabled: true, source: 'AD1', maxMm: 120, ...patch }
+  cfg.front = { ...cfg.front, enabled: true, sourceChannel: 'SuspensionAD1', maxMm: 120, ...patch }
   return cfg
 }
 
 describe('adToTravelMm', () => {
   const cfg: SuspensionChannelConfig = {
     enabled: true,
-    source: 'AD1',
+    sourceChannel: 'SuspensionAD1',
     minMv: 0,
     maxMv: 5000,
     zeroMv: 0,
@@ -71,6 +73,34 @@ describe('derived suspension channels', () => {
     // calibrated value differs from the ECU's original
     expect(augmented.get('Front Suspension')?.data[0]).not.toBe(ecuValue)
   })
+
+  it('is format-agnostic: derives from ANY channel name, not just SuspensionAD1/2 (e.g. a non-.loga import)', () => {
+    // Simulate a non-.loga session (e.g. VBO/RCZ) that happens to carry an
+    // analog suspension-pot channel under an arbitrary name — sourceChannel
+    // is a free channel name, so calibration must work identically here.
+    const session = parseLoga(loadFixture('raceAmp.loga'))
+    const raw = session.get('SuspensionAD1')!.data
+    const renamed = new LogSession(
+      session.channels.map((c) => (c.name === 'SuspensionAD1' ? { ...c, name: 'Analog_Channel_7' } : c)),
+      session.meta,
+    )
+    const cfg = frontEnabled({ sourceChannel: 'Analog_Channel_7' })
+    const channels = deriveSuspensionChannels(renamed, cfg)
+    expect(channels).toHaveLength(1)
+    expect(channels[0].data.length).toBe(raw.length)
+  })
+
+  it('produces nothing when sourceChannel is empty (unset)', () => {
+    const session = parseLoga(loadFixture('raceAmp.loga'))
+    expect(deriveSuspensionChannels(session, frontEnabled({ sourceChannel: '' }))).toHaveLength(0)
+  })
+})
+
+describe('legacyAdChannelName (v1 -> v2 migration helper)', () => {
+  it('maps the two hardcoded v1 sources to their .loga channel names', () => {
+    expect(legacyAdChannelName('AD1')).toBe('SuspensionAD1')
+    expect(legacyAdChannelName('AD2')).toBe('SuspensionAD2')
+  })
 })
 
 describe('reverse-calc', () => {
@@ -101,7 +131,7 @@ describe('reverse-calc', () => {
 
   it('suggestConfig reproduces the fitted line via adToTravelMm', () => {
     const sug = suggestConfig({ k: 0.02, c: -30, r2: 1, n: 200 })
-    const cfg: SuspensionChannelConfig = { enabled: true, source: 'AD1', ...sug }
+    const cfg: SuspensionChannelConfig = { enabled: true, sourceChannel: 'SuspensionAD1', ...sug }
     expect(adToTravelMm(2500, cfg)).toBeCloseTo(0.02 * 2500 - 30, 4)
     expect(adToTravelMm(4000, cfg)).toBeCloseTo(0.02 * 4000 - 30, 4)
   })

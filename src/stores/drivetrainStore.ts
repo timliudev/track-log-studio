@@ -31,8 +31,12 @@ export interface FinalDriveFormInput {
   rearTeeth: number
 }
 
-/** How the rear wheel circumference is being entered: from a tire size
- *  spec string (e.g. `120/70-17`) or a direct millimetre override. */
+/** How the rear wheel circumference is being entered. Since the tire-spec
+ *  LIVE conversion (2026-07-08, see `setTireSpec`) this is always 'direct' in
+ *  practice — the spec field auto-applies into the mm field instead of being
+ *  a separate authoritative mode. 'tire' remains in the type so old persisted
+ *  payloads still parse (they're migrated to 'direct' at store init) and so
+ *  `toMtDrivetrainSpec`'s tire-resolution branch stays exercised/testable. */
 export type CircumferenceInputMode = 'tire' | 'direct'
 
 /** Manually-entered MT (chain-drive) spec inputs — mirrors {@link
@@ -65,6 +69,14 @@ export interface CvtFormState {
   /** Wheel circumference used for the CVT's own log-inversion view (kept
    *  separate from MT's so switching kind doesn't clobber either). */
   wheelCircumferenceMm: number
+  /** #7/#12 — tire-spec string (e.g. "120/70-17") that LIVE-converts into
+   *  `wheelCircumferenceMm`, same mechanism as MT's `tireSpec`/`setTireSpec`
+   *  (see `setCvtTireSpec`). The wheel is the SAME physical tire regardless
+   *  of drivetrain kind, so CVT riders need the same spec-to-mm converter MT
+   *  has — CVT previously only exposed a bare mm number with no conversion
+   *  helper. Kept as a separate field from MT's `tireSpec` (not shared) so
+   *  switching `kind` doesn't clobber either bike's spec entry. */
+  tireSpec: string
   /** Free-form tuning notes, e.g. 前普利尺寸/珠重/彈簧硬度/開閉盤規格/終傳比. */
   notes: CvtNoteField[]
 }
@@ -79,7 +91,12 @@ const DEFAULT_MT: MtFormState = {
   finalDrive: { mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 },
   circumferenceMode: 'direct',
   tireSpec: '120/70-17',
-  wheelCircumferenceMm: 1870,
+  // Matches the default tireSpec's own conversion (round(π * 599.8mm) — see
+  // tireSpecToCircumferenceMm). The old arbitrary 1870 disagreed with the
+  // spec sitting right next to it, which under live conversion (setTireSpec
+  // compares against the PREVIOUS spec's resolution) would make retyping the
+  // default spec into a fresh panel look like a dead control.
+  wheelCircumferenceMm: 1884,
   redlineRpm: 10000,
 }
 
@@ -103,6 +120,12 @@ function defaultCvtNotes(): CvtNoteField[] {
 
 const DEFAULT_CVT: CvtFormState = {
   wheelCircumferenceMm: 1400,
+  // Blank, not a guessed spec string: unlike MT (whose default spec/mm pair
+  // are chosen to agree with each other — see DEFAULT_MT's doc), CVT scooter
+  // tire sizes vary too widely to pick one sane default that matches 1400mm,
+  // and an unset spec is already handled cleanly (no "invalid spec" hint,
+  // no auto-apply) by the same live-conversion logic MT uses.
+  tireSpec: '',
   notes: defaultCvtNotes(),
 }
 
@@ -144,7 +167,16 @@ export function toMtDrivetrainSpec(mt: MtFormState): MtDrivetrainSpec {
   }
 }
 
-const MAX_GEARS = 6
+// #7/#12 — was a hardcoded 6 (the common sportbike/scooter gearbox size);
+// off-road/CUB (彎樑車) bikes often have FEWER gears (as low as 1-2 for some
+// mini/pit bikes), and some other vehicles run more, so the ceiling is raised
+// to 8 and the gear-count control (GearPanel's <select>, driven by this
+// constant) lets the user pick anywhere in 1..MAX_GEARS — the default seed
+// (DEFAULT_MT.gearRatios, 6 entries) is unchanged, only the ADJUSTABLE range
+// widens. Persisted gearRatios arrays keep whatever length they already had
+// on load (setGearCount only resizes on explicit user action — see below) —
+// no forced backfill/truncation migration needed for this bump.
+const MAX_GEARS = 8
 
 // v1 -> v2: MT's gearRatios/finalDrive/circumference shape changed from
 // plain numbers to either/or ratio-or-teeth objects (decisions #12/#13), and
@@ -229,6 +261,23 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     ...persisted.cvt,
     notes: persisted.cvt?.notes ? persisted.cvt.notes.map((n) => ({ ...n })) : defaultCvtNotes(),
   })
+  // Tire-spec live conversion (user decision, 2026-07-08): the spec field now
+  // converts + auto-applies into the circumference field AS YOU TYPE (see
+  // `setTireSpec`), so the old tire/direct mode toggle is gone from the UI
+  // and 'direct' is the only live mode. A payload persisted while 'tire'
+  // mode was still active resolves its spec into the mm field once here —
+  // the same math that mode applied on every recompute — so the effective
+  // circumference stays identical (up to the whole-mm rounding the apply
+  // flow always did). `circumferenceMode` stays in the persisted shape for
+  // compatibility; it is simply always 'direct' from here on.
+  if (mt.value.circumferenceMode === 'tire') {
+    const circ = tireSpecToCircumferenceMm(mt.value.tireSpec)
+    mt.value = {
+      ...mt.value,
+      circumferenceMode: 'direct',
+      ...(Number.isFinite(circ) && circ > 0 ? { wheelCircumferenceMm: Math.round(circ) } : {}),
+    }
+  }
   // Wheel circumference used for LOG INVERSION (Layer 2) — separate from the
   // calculator spec's circumference above since a user may want to invert a
   // log without having filled in a full calculator spec (or vice versa).
@@ -305,18 +354,59 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
   }
 
   /**
-   * Parse the current MT tire spec and, when it's valid, copy the resolved
-   * circumference (rounded to whole mm) into the direct-entry field and
-   * switch to 'direct' mode so the user can fine-tune the number afterwards —
-   * a spec is only an estimate (same size varies between pointy/round
-   * profiles), so the workflow is "convert, then tweak". No-op returning
-   * false when the spec doesn't parse.
+   * Tire-spec LIVE conversion (replaces the old "套用為周長" button flow):
+   * store the new spec string and, when it constitutes an EFFECTIVE change,
+   * auto-apply its resolved circumference (rounded to whole mm) into the
+   * direct-entry field. Returns true when the circumference was applied (the
+   * panel uses this for its visual feedback flash).
+   *
+   * "Effective change" rule (user decision, 2026-07-08): a spec edit
+   * overwrites the circumference when it parses AND resolves to a DIFFERENT
+   * whole-mm value than the previous spec did. Manual fine-tuning of the mm
+   * field never touches the spec; a cosmetic spec edit that resolves to the
+   * same geometry (`120/70-17` -> `120/70ZR17`, added whitespace, load-index
+   * suffix...) doesn't stomp a manual tweak, but any real size change does —
+   * the spec field is authoritative whenever it actually says something new.
+   * A spec that stops parsing leaves the circumference alone (the mm field
+   * keeps working standalone, same as before).
    */
-  function applyTireSpecCircumference(): boolean {
-    const circ = tireSpecToCircumferenceMm(mt.value.tireSpec)
-    if (!Number.isFinite(circ) || !(circ > 0)) return false
-    mt.value = { ...mt.value, wheelCircumferenceMm: Math.round(circ), circumferenceMode: 'direct' }
-    return true
+  function setTireSpec(spec: string): boolean {
+    const prevCirc = tireSpecToCircumferenceMm(mt.value.tireSpec)
+    const nextCirc = tireSpecToCircumferenceMm(spec)
+    const nextValid = Number.isFinite(nextCirc) && nextCirc > 0
+    const prevValid = Number.isFinite(prevCirc) && prevCirc > 0
+    const apply = nextValid && (!prevValid || Math.round(nextCirc) !== Math.round(prevCirc))
+    mt.value = {
+      ...mt.value,
+      tireSpec: spec,
+      ...(apply ? { wheelCircumferenceMm: Math.round(nextCirc), circumferenceMode: 'direct' as const } : {}),
+    }
+    return apply
+  }
+
+  /**
+   * #7/#12 — CVT counterpart of `setTireSpec`: same "effective change"
+   * auto-apply rule (a spec edit that resolves to a different whole-mm value
+   * overwrites `cvt.wheelCircumferenceMm`; a cosmetic edit or a still-typing/
+   * unparsable spec doesn't touch it), just against the CVT form's own
+   * `tireSpec`/`wheelCircumferenceMm` fields instead of MT's. CVT has no
+   * `circumferenceMode` (that field only exists for MT's now-vestigial
+   * tire/direct toggle — see `CircumferenceInputMode`'s doc) since CVT's mm
+   * field was always "direct" to begin with; the spec here is purely a
+   * convenience converter feeding the same one field, not a second mode.
+   */
+  function setCvtTireSpec(spec: string): boolean {
+    const prevCirc = tireSpecToCircumferenceMm(cvt.value.tireSpec)
+    const nextCirc = tireSpecToCircumferenceMm(spec)
+    const nextValid = Number.isFinite(nextCirc) && nextCirc > 0
+    const prevValid = Number.isFinite(prevCirc) && prevCirc > 0
+    const apply = nextValid && (!prevValid || Math.round(nextCirc) !== Math.round(prevCirc))
+    cvt.value = {
+      ...cvt.value,
+      tireSpec: spec,
+      ...(apply ? { wheelCircumferenceMm: Math.round(nextCirc) } : {}),
+    }
+    return apply
   }
 
   return {
@@ -328,13 +418,14 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     setMt,
     setFinalDrive,
     setCvtWheelCircumferenceMm,
+    setCvtTireSpec,
     setCvtNote,
     addCvtNote,
     removeCvtNote,
     setGearRatio,
     setGearCount,
     setInversionWheelCircumferenceMm,
-    applyTireSpecCircumference,
+    setTireSpec,
   }
 })
 

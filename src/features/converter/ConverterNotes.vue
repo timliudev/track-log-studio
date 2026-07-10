@@ -28,7 +28,7 @@ const IMPORT_GUIDE_URL = 'https://racechrono.com/article/2572'
         {{ t('converter.notes.importGuide') }} ↗
       </a>
     </p>
-    <p v-if="outputFormat !== 'loga'" class="note muted">⚠ {{ t('converter.notes.raceModule') }}</p>
+    <p v-if="outputFormat !== 'loga'" class="note muted">ⓘ {{ t('converter.notes.gpsNote') }}</p>
   </section>
 </template>
 

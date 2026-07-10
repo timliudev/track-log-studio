@@ -22,7 +22,7 @@
  *   altitude → GPS_Altitude (m), Gx/Gy/Gz (g), distance (km, cumulative).
  * There is no satellite-count column, so no Satellites channel.
  *
- * If the matching `sana_N.db` has a `lap` table (see docs/RCNX-FORMAT-SPEC.md
+ * If the matching `sana_N.db` has a `lap` table (see docs/specs/RCNX-FORMAT-SPEC.md
  * §5), lap boundaries are exposed as an `IR_LapNumber`-style counter channel
  * (see `buildLapNumberChannel`) so the existing `detectLapsByChannel` path
  * (src/domain/analysis/laps.ts) picks them up with no analyzer changes.

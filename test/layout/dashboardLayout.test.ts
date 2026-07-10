@@ -14,6 +14,10 @@ import {
   minSizeFor,
   clampToMinSize,
   resolveOverlaps,
+  isItemDraggable,
+  isItemResizable,
+  mergeLayoutPositions,
+  STATIC_CARD_TITLE_KEYS,
 } from '@/domain/layout/dashboardLayout'
 
 /** Node's test environment has no real localStorage (Vitest runs with
@@ -140,6 +144,47 @@ describe('defaultLayout', () => {
     const layout = defaultLayout()
     const map = layout.find((it) => it.i === STATIC_CARD_IDS.map)
     expect(map).toMatchObject({ x: 0, y: 0 })
+  })
+
+  it('uses the FULL grid width across its columns (no default item extends past GRID_COLS, columns partition 0..GRID_COLS)', () => {
+    const layout = defaultLayout()
+    const xs = [...new Set(layout.map((it) => it.x))].sort((a, b) => a - b)
+    // Every distinct column start, plus GRID_COLS itself, are evenly spaced —
+    // i.e. the columns tile the full width with no left/right margin gap.
+    expect(xs[0]).toBe(0)
+    for (const it of layout) {
+      expect(it.x + it.w).toBeLessThanOrEqual(GRID_COLS)
+    }
+  })
+
+  it('has no overlapping items (a sane starting arrangement, independent of resolveOverlaps)', () => {
+    const layout = defaultLayout()
+    for (let i = 0; i < layout.length; i++) {
+      for (let j = i + 1; j < layout.length; j++) {
+        const a = layout[i]
+        const b = layout[j]
+        const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+        expect(overlap).toBe(false)
+      }
+    }
+  })
+
+  it('balances column heights so no column leaves a large blank gap versus the others (T3 — fills the page)', () => {
+    // Regression for the old 5/7-split layout, whose right column (with the
+    // align panels in their default-hidden state) bottomed out ~35 rows
+    // above the left column's bottom, reading as a big empty area on wide
+    // screens. Compare the ALWAYS-VISIBLE cards per column (excluding
+    // mapAlign/lapAlign, which only appear once ≥2 laps are selected).
+    const layout = defaultLayout()
+    const alwaysVisible = layout.filter(
+      (it) => it.i !== STATIC_CARD_IDS.mapAlign && it.i !== STATIC_CARD_IDS.lapAlign,
+    )
+    const columns = [...new Set(alwaysVisible.map((it) => it.x))]
+    const bottoms = columns.map((x) =>
+      Math.max(...alwaysVisible.filter((it) => it.x === x).map((it) => it.y + it.h)),
+    )
+    const spread = Math.max(...bottoms) - Math.min(...bottoms)
+    expect(spread).toBeLessThanOrEqual(10)
   })
 })
 
@@ -344,6 +389,22 @@ describe('reconcileLayout', () => {
     expect(next).toEqual(layout)
   })
 
+  // #4 crash fix — useDashboardLayout's `chartIds` watcher writes
+  // `layout.value = reconcileLayout(layout.value, ids)` on every change to
+  // the id SET, even ones that add/remove nothing here. If that always
+  // produced a fresh-but-equal array, the assignment would never be a true
+  // Vue no-op (a `ref` only skips notifying watchers when the new value is
+  // the SAME object as the old one) and could feed the exact "layout ref
+  // reassigned -> GridLayout re-renders -> emits layout-updated -> writes
+  // back -> ..." cycle reported as the "load two files -> infinite recursive
+  // updates" crash. See mergeLayoutPositions's matching test below for the
+  // other half of the write-back path.
+  it('returns the SAME array reference (not just equal) on a true no-op call', () => {
+    const layout = defaultLayout()
+    const next = reconcileLayout(layout, [1])
+    expect(next).toBe(layout)
+  })
+
   it('preserves an existing chart item position instead of resetting it', () => {
     const layout = defaultLayout().map((it) =>
       it.i === chartItemId(1) ? { ...it, x: 9, y: 99, w: 3, h: 3 } : it,
@@ -370,6 +431,153 @@ describe('reconcileLayout', () => {
     const next = reconcileLayout(layout, [1])
     const added = next.find((it) => it.i === chartItemId(1))!
     expect(added.y).toBeGreaterThanOrEqual(10)
+  })
+})
+
+describe('isItemDraggable / isItemResizable (lock + pin interplay)', () => {
+  it('is draggable/resizable when the grid-wide toggle allows it and the card is not pinned', () => {
+    expect(isItemDraggable(true, false)).toBe(true)
+    expect(isItemResizable(true, false)).toBe(true)
+  })
+
+  it('is never draggable/resizable when the grid-wide toggle is off (鎖定布局 locked)', () => {
+    expect(isItemDraggable(false, false)).toBe(false)
+    expect(isItemResizable(false, false)).toBe(false)
+    expect(isItemDraggable(false, true)).toBe(false)
+    expect(isItemResizable(false, true)).toBe(false)
+  })
+
+  it('is never draggable/resizable when the card itself is pinned, even if the grid allows it', () => {
+    expect(isItemDraggable(true, true)).toBe(false)
+    expect(isItemResizable(true, true)).toBe(false)
+  })
+})
+
+describe('STATIC_CARD_TITLE_KEYS', () => {
+  it('has an i18n key entry for every static card id', () => {
+    for (const id of Object.values(STATIC_CARD_IDS)) {
+      expect(typeof STATIC_CARD_TITLE_KEYS[id]).toBe('string')
+      expect(STATIC_CARD_TITLE_KEYS[id].length).toBeGreaterThan(0)
+    }
+  })
+
+  it('every key lives under the analyzer.layout namespace', () => {
+    for (const key of Object.values(STATIC_CARD_TITLE_KEYS)) {
+      expect(key.startsWith('analyzer.layout.')).toBe(true)
+    }
+  })
+})
+
+describe('mergeLayoutPositions (#1 fix — layout-updated write-back)', () => {
+  it('overwrites only the coordinate fields of a matching item, dropping decoration fields', () => {
+    const base = [{ i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 }]
+    const updated = [
+      {
+        i: STATIC_CARD_IDS.map,
+        x: 2,
+        y: 3,
+        w: 5,
+        h: 6,
+        // Decoration fields AnalyzerView's decorateForGrid spreads onto
+        // items before handing them to grid-layout-plus — must NOT leak
+        // into the merged/persisted result.
+        dragAllowFrom: '.drag-handle',
+        dragIgnoreFrom: '.actions',
+        isDraggable: true,
+        isResizable: true,
+        minW: 3,
+        minH: 5,
+      },
+    ]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged).toEqual([{ i: STATIC_CARD_IDS.map, x: 2, y: 3, w: 5, h: 6 }])
+  })
+
+  it('leaves an item present in base but absent from updated completely unchanged', () => {
+    const base = [
+      { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 },
+      { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 19, w: 4, h: 5 }, // hidden align card
+    ]
+    const updated = [{ i: STATIC_CARD_IDS.map, x: 1, y: 1, w: 4, h: 10 }]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged.find((it) => it.i === STATIC_CARD_IDS.mapAlign)).toEqual(base[1])
+  })
+
+  it('preserves the original array order regardless of updated item order', () => {
+    const base = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 4 },
+    ]
+    const updated = [
+      { i: 'b', x: 5, y: 1, w: 4, h: 4 },
+      { i: 'a', x: 1, y: 1, w: 4, h: 4 },
+    ]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged.map((it) => it.i)).toEqual(['a', 'b'])
+  })
+
+  it('keeps the SAME object reference for an item whose coordinates did not change (no-op detection)', () => {
+    const base = [{ i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 }]
+    const updated = [{ i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10, isDraggable: true }]
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged[0]).toBe(base[0])
+  })
+
+  it('is a no-op (returns items equal to base) when updated is empty', () => {
+    const base = defaultLayout()
+    expect(mergeLayoutPositions(base, [])).toEqual(base)
+  })
+
+  // #4 crash fix — AnalyzerView's `activeLayout` setter / `onLayoutUpdated`
+  // write straight into `layout.value` via `layout.value =
+  // mergeLayoutPositions(layout.value, next)`. Vue's `ref` setter only skips
+  // notifying dependents when the assigned value is the SAME object
+  // (`Object.is`) as the current one — a structurally-equal-but-freshly-
+  // allocated array (what plain `.map()` always returns) would still trigger
+  // every downstream computed/watcher, including re-rendering
+  // `<GridLayout>`'s `:layout` prop, which can itself re-emit `layout-
+  // updated` (its own compaction pass runs on prop changes, not only drags)
+  // and call back into `onLayoutUpdated` — an unbounded loop ("Maximum
+  // recursive updates exceeded"), reported after loading a second file.
+  // Returning `base` itself when NOTHING's coordinates changed makes that
+  // assignment a genuine no-op and breaks the cycle once positions converge.
+  it('returns the SAME array reference (not just equal) as base when nothing changed', () => {
+    const base = defaultLayout()
+    // Same coordinates, only decoration fields differ (as decorateForGrid
+    // would produce) — a real "nothing actually moved" payload.
+    const updated = base.map((it) => ({ ...it, isDraggable: true, isResizable: true }))
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged).toBe(base)
+  })
+
+  it('returns a NEW array reference when at least one item genuinely moved', () => {
+    const base = defaultLayout()
+    const updated = base.map((it) =>
+      it.i === STATIC_CARD_IDS.gear ? { ...it, x: 9, y: 20 } : it,
+    )
+    const merged = mergeLayoutPositions(base, updated)
+    expect(merged).not.toBe(base)
+  })
+
+  it('simulates a drag: only the dragged item moves, everything else is untouched', () => {
+    const base = defaultLayout()
+    const dragged = base.find((it) => it.i === STATIC_CARD_IDS.gear)!
+    // grid-layout-plus's layout-updated payload is the FULL visible array
+    // (every item, not just the one that moved) — with only the dragged
+    // item's x/y actually different.
+    const payload = base.map((it) =>
+      it.i === STATIC_CARD_IDS.gear ? { ...it, x: 9, y: 20 } : it,
+    )
+    const merged = mergeLayoutPositions(base, payload)
+    expect(merged.find((it) => it.i === STATIC_CARD_IDS.gear)).toEqual({
+      ...dragged,
+      x: 9,
+      y: 20,
+    })
+    for (const it of merged) {
+      if (it.i === STATIC_CARD_IDS.gear) continue
+      expect(it).toEqual(base.find((b) => b.i === it.i))
+    }
   })
 })
 

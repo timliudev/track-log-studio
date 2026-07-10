@@ -4,7 +4,7 @@
  * `.xrk` is a FLAT little-endian message stream from offset 0 — there is no
  * header index. A linear scanner dispatches on each message's 2-byte opcode and
  * tolerates corruption by backing up one byte ("bad bytes") rather than
- * aborting. See docs/XRK-FORMAT-SPEC.md for the full reverse-engineered spec.
+ * aborting. See docs/specs/XRK-FORMAT-SPEC.md for the full reverse-engineered spec.
  *
  * Message families (opcode = first 2 bytes, little-endian u16):
  *  - `<h` (0x6863) H-message: header(12B) + payload(hlen) + footer(8B). Carries

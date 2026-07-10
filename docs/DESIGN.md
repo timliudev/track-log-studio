@@ -405,7 +405,7 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 > **格式對稱補強**：**VBO 已可匯入**（feature/vbo-import，`parseVbo` + `VboImporter`），
 > 與既有 VBO 匯出形成對稱，**分析器可直接開啟 `.vbo`**。匯入 / 匯出 / `LogSession` 的整體
 > 格式轉換架構與擴充計畫見 [`ARCHITECTURE-FORMATS.md`](./ARCHITECTURE-FORMATS.md)；
-> 二進位 / ZIP 格式（XRK / RCZ / Qstarz）研究見 [`FORMAT-SUPPORT-RESEARCH.md`](./FORMAT-SUPPORT-RESEARCH.md)。
+> 二進位 / ZIP 格式（XRK / RCZ / Qstarz）研究見 [`FORMAT-SUPPORT-RESEARCH.md`](./specs/FORMAT-SUPPORT-RESEARCH.md)。
 
 ### 新增點子（2026-06-23 實機回饋，待細化）
 - ~~**快速篩選無用圈（時間帶過濾）**：設一個有效圈速區間，超出者自動標記無用圈剔除。
@@ -427,6 +427,60 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - 無頭預覽（preview 工具）下 track `<canvas>` 寬度為 0、`preview_screenshot` 逾時 →
   **canvas 視覺無法自動驗證**,只能驗 load/console/DOM 文字,像素由使用者目視。
 - 可灌小型合成 `.nmea` 進 file input 測載入路徑（50MB 真檔會觸發重整）。
+
+---
+
+## 11c. 待辦與已完成總表（彙整自 `docs/journal/*`，2026-07-08）
+
+> 實作日誌已歸檔至 [`docs/journal/`](./journal/)、格式規格研究至 [`docs/specs/`](./specs/)。
+> 本節是跨日誌的**單一彙整入口**：目前待辦一覽 + 已完成大項各一行（細節指向對應日誌）。
+> 進行中的日誌 [`EVENING-WORK-2026-07-07.md`](./EVENING-WORK-2026-07-07.md) 仍在 docs/ 根目錄
+> （主 session 還在寫，收工後再歸檔進 journal/）。
+
+### 目前待辦
+
+**2026-07-07 的 22 項回饋 triage**（完整表與拍板紀錄見
+[`EVENING-WORK-2026-07-07.md`](./EVENING-WORK-2026-07-07.md)）尚未完成的項目：
+
+| # | 項目 | 狀態 |
+|---|------|------|
+| 1+21 | 鎖定兩功能分離（📌 每卡 sticky + 🔒 工具列布局鎖） | ✅ `feature/dashboard-lock-and-mobile` 已合併（386b7a2），待實機驗收 |
+| 3 | 手機不能調 grid 大小 | ✅ 同上合併，待實機驗收 |
+| 6 | grid 預設填滿頁面 | ✅ 同上合併（三欄平衡預設布局），待實機驗收 |
+| 2 | 地圖疊多檔案軌跡 | 🔄 `feature/trackmap-multi-overlay`（W2） |
+| 4 | XY 散佈圖 1:1 等比（可調） | 🔄 `feature/xy-aspect-and-tire-live`（W2） |
+| 10 | 輪胎規格即時換算自動套用 | 🔄 同上分支（W2） |
+| 5 | 拖動 grid 縫隙調整整頁布局 | ⏳ 依賴項 #1+21 已合併，可開工 |
+| 16 | 賽道庫方案比較報告 | ✅ 本輪 → [`TRACK-LIBRARY-OPTIONS.md`](./TRACK-LIBRARY-OPTIONS.md)，**等使用者二次拍板** |
+| 20 | docs 分類整理（journal/ + specs/ + 本總表） | ✅ 本輪 |
+| 18+19 | UX 載入 + 計算效能審計（先量測後行動） | ✅ 已完成並合併（f87ff56），結論**暫無需優化** → [`journal/PERF-AUDIT-2026-07-08.md`](./journal/PERF-AUDIT-2026-07-08.md) |
+| 22 | 推一版到 main | ⛔ 被 GH007（GitHub email privacy）擋住 push，待使用者處理 |
+
+**較長期 / 跨日誌的待辦**：
+
+- **雲端賽道庫第三階段（開放社群貢獻）**：原 §8 拍板 GitHub+jsDelivr 後暫緩，
+  改等 [`TRACK-LIBRARY-OPTIONS.md`](./TRACK-LIBRARY-OPTIONS.md) 的二次拍板
+  （報告建議：GitHub PR 審核層不變、分發層改 Cloudflare Worker + KV）。
+- **個人雲端備份（第四階段）**：Drive vs Gist 屆時再選（CLOUD-TRACK-DESIGN.md §5/§8 決策 6/7）。
+- **重視覺驗收積欠**：canvas 類（軌跡/熱力/起終點線把手/時鐘第二軸對位）無法自動驗證，
+  需使用者目視——各日誌的「驗收清單」章節（尤其 [`journal/NIGHT-WORK-2026-07-05.md`](./journal/NIGHT-WORK-2026-07-05.md)、
+  [`journal/EVENING-WORK-2026-07-06.md`](./journal/EVENING-WORK-2026-07-06.md)）逐項列出。
+- **§11b 待辦佇列殘項**：#9 單圈 GNSS 偏移微調、F 行動裝置真機驗收（診斷面板已備 `?debug=1`）。
+- **AnalyzerView 持續拆分**：[`journal/ARCH-AUDIT-2026-07-02.md`](./journal/ARCH-AUDIT-2026-07-02.md)
+  點名的架構壓力點，已抽 useTrackExtrema/useTrackHeatmap/useSectors 等；剩餘耦合
+  （lap-select↔zoom）**刻意保留**在 AnalyzerView 作為唯一決策點，非待辦、僅列監控。
+
+### 已完成大項（一行一項，細節見對應日誌）
+
+- **Testing backlog 10 項 + B7 架構稽核（B+）** → [`journal/EVENING-WORK-2026-07-02.md`](./journal/EVENING-WORK-2026-07-02.md)、[`journal/ARCH-AUDIT-2026-07-02.md`](./journal/ARCH-AUDIT-2026-07-02.md)
+- **Phase5 核心（sessionAlign/sessionMerge）+ G-G 圖（echarts）+ RCNX lap 表** → [`journal/NIGHT-WORK-2026-07-01.md`](./journal/NIGHT-WORK-2026-07-01.md)
+- **composables 抽取、G-G lazy-load、RS3 CSV 相容驗證、傳動設定持久化、CLOUD-TRACK-DESIGN 設計** → [`journal/NIGHT-WORK-2026-07-03.md`](./journal/NIGHT-WORK-2026-07-03.md)
+- **儀表板拖曳 grid、手機摺疊/釘選、傳動重做（MT 幾何+CVT 曲線）、tracks schema v1、距離帶、轉換頁整併** → [`journal/EVENING-WORK-2026-07-03.md`](./journal/EVENING-WORK-2026-07-03.md)
+- **T6 場次合併 UI、T8 卡片縮放下限、PWA precache -64%、A2/A3 第二階段（seed library）、釋出 main `742a97b`** → [`journal/NIGHT-WORK-2026-07-05.md`](./journal/NIGHT-WORK-2026-07-05.md)
+- **T1–T5 使用者回饋修正（含動態圖表持久化）、輪胎三來源周長、合併預覽查證** → [`journal/EVENING-WORK-2026-07-06.md`](./journal/EVENING-WORK-2026-07-06.md)
+- **2026-07-07 W1：tooltip 主題化+文案多格式化+star 按鈕（#7/12/13/14）、避震校正全格式通用（#8/9）、Web Analytics（#11）、儀表板鎖定/釘選/手機縮放（#1/3/6/21）** → [`EVENING-WORK-2026-07-07.md`](./EVENING-WORK-2026-07-07.md)（進行中日誌）
+- **效能稽核（#18/19）：載入/解析/計算/渲染/記憶體實測，結論暫無需優化** → [`journal/PERF-AUDIT-2026-07-08.md`](./journal/PERF-AUDIT-2026-07-08.md)
+- **匯入格式矩陣（loga/nmea/vbo/rcz/xrk/rcnx）+ 可插拔 Importer 架構** → 狀態見 [`IMPORT-FORMATS-STATUS.md`](./IMPORT-FORMATS-STATUS.md)，規格研究見 [`specs/`](./specs/)
 
 ---
 

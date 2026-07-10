@@ -29,6 +29,16 @@ export const STORAGE_KEY = 'aracer-loga.dashboardLayout.v1'
 /** Total column count of the wide (desktop) grid — see AnalyzerView's GridLayout `cols`. */
 export const GRID_COLS = 12
 
+/** Row height (px) and [x,y] margin (px) passed to `<GridLayout>` — exported
+ *  (rather than left as literals in AnalyzerView.vue's template) so
+ *  useGridGutters.ts's pixel math (gridGutter.ts's `GridMetrics`) can use the
+ *  EXACT same numbers grid-layout-plus itself lays cards out with; two
+ *  independent copies of "24" and "[12, 12]" would silently drift if either
+ *  one were ever tuned without remembering the other (#2 — gutter overlay
+ *  must line up pixel-for-pixel with the real card edges). */
+export const GRID_ROW_HEIGHT = 24
+export const GRID_MARGIN: [number, number] = [12, 12]
+
 /** Static (always-present) card ids, in the same order as the default layout below. */
 export const STATIC_CARD_IDS = {
   map: 'map',
@@ -41,6 +51,7 @@ export const STATIC_CARD_IDS = {
   mapAlign: 'mapalign',
   lapAlign: 'lapalign',
   sessionMerge: 'sessionmerge',
+  suspension: 'suspension',
 } as const
 
 /** Prefix for dynamic chart-card ids — see {@link chartItemId}. */
@@ -70,6 +81,7 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.mapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.sessionMerge]: { minW: 2, minH: 3 },
+  [STATIC_CARD_IDS.suspension]: { minW: 2, minH: 3 },
 }
 
 /** Chart cards (uPlot/echarts) need more room than a small control panel to
@@ -84,6 +96,48 @@ const CHART_MIN_SIZE = { minW: 3, minH: 5 } as const
 export function minSizeFor(id: string): { minW: number; minH: number } {
   if (isChartItemId(id)) return CHART_MIN_SIZE
   return STATIC_MIN_SIZE[id] ?? DEFAULT_MIN_SIZE
+}
+
+/**
+ * Per-item drag/resize eligibility — pure decision functions so AnalyzerView
+ * only needs to CALL these rather than encode the rule itself (logic lives in
+ * the domain layer per this project's "component stays thin" convention).
+ *
+ * A card is draggable/resizable when the GRID-WIDE toggle allows it (the
+ * global 鎖定布局 lock — see layoutLock.ts — combined with whatever the
+ * current breakpoint already permits) AND the card itself isn't the
+ * currently-pinned one: a pinned card's real content has been Teleported out
+ * of the grid into the sticky pinned anchor (see AnalyzerView's module doc),
+ * so its grid slot is just an empty placeholder — dragging/resizing that
+ * placeholder would be meaningless (nothing visibly moves) and would desync
+ * the placeholder's size from the card's actual position it returns to on
+ * unpin.
+ */
+export function isItemDraggable(globalDraggable: boolean, pinned: boolean): boolean {
+  return globalDraggable && !pinned
+}
+export function isItemResizable(globalResizable: boolean, pinned: boolean): boolean {
+  return globalResizable && !pinned
+}
+
+/** i18n message key (under `analyzer.layout`) for each STATIC card's title —
+ *  a plain data table so AnalyzerView's pinned-placeholder label (rendered
+ *  OUTSIDE the big per-card template branch — see its module doc) can look up
+ *  a title without duplicating that branch's own per-card `t(...)` calls.
+ *  Dynamic chart cards aren't in this table — their title is numbered by
+ *  position (see chartTitle in AnalyzerView) rather than a fixed key. */
+export const STATIC_CARD_TITLE_KEYS: Record<string, string> = {
+  [STATIC_CARD_IDS.map]: 'analyzer.layout.cardMap',
+  [STATIC_CARD_IDS.lapTable]: 'analyzer.layout.cardLapTable',
+  [STATIC_CARD_IDS.sectors]: 'analyzer.layout.cardSectors',
+  [STATIC_CARD_IDS.trackChannel]: 'analyzer.layout.cardTrackChannel',
+  [STATIC_CARD_IDS.accelTest]: 'analyzer.layout.cardAccelTest',
+  [STATIC_CARD_IDS.gear]: 'analyzer.layout.cardGear',
+  [STATIC_CARD_IDS.trackFile]: 'analyzer.layout.cardTrackFile',
+  [STATIC_CARD_IDS.mapAlign]: 'analyzer.layout.cardMapAlign',
+  [STATIC_CARD_IDS.lapAlign]: 'analyzer.layout.cardLapAlign',
+  [STATIC_CARD_IDS.sessionMerge]: 'analyzer.layout.cardSessionMerge',
+  [STATIC_CARD_IDS.suspension]: 'analyzer.layout.cardSuspension',
 }
 
 /** Returns `item` unchanged if it already meets its minimum size, otherwise a
@@ -150,6 +204,77 @@ export function resolveOverlaps(layout: DashboardLayoutItem[]): DashboardLayoutI
   return layout.map((it) => byId.get(it.i)!)
 }
 
+/**
+ * #1 fix — merge a grid-layout-plus callback payload (from `update:layout`,
+ * `layout-updated`, `resized`, or `moved`; the library emits the SAME shape
+ * for all of them: an array of every VISIBLE item's CURRENT x/y/w/h/i,
+ * carrying whatever extra per-item props the caller decorated the layout
+ * with, e.g. AnalyzerView's `dragAllowFrom`/`isDraggable`/`minW` —
+ * see `decorateForGrid`) back into the full persisted layout array.
+ *
+ * Three things this guards against:
+ *  - Only the COORDINATE fields (`x`/`y`/`w`/`h`) are copied from `updated` —
+ *    every other field on a decorated item is UI-only (drag config, min-size)
+ *    and must never leak into the persisted array / localStorage.
+ *  - An item present in `base` but ABSENT from `updated` (e.g. a hidden
+ *    align card that isn't part of the currently-visible slice passed to
+ *    the grid) is kept UNCHANGED, at its original array position — this is
+ *    a merge, not a replace.
+ *  - #4 crash fix — when NO item's coordinates actually changed, the exact
+ *    same `base` ARRAY reference is returned (not a same-content-but-new
+ *    array). This matters because the caller assigns the result straight
+ *    into a `ref` (`layout.value = mergeLayoutPositions(...)`, see
+ *    AnalyzerView's `onLayoutUpdated`/`activeLayout` setter): Vue's ref
+ *    setter only triggers reactivity when the new value is NOT the same
+ *    object as the old one, so handing back the identical `base` reference
+ *    on a no-op merge makes that assignment a true no-op — it doesn't
+ *    re-trigger any computed/watcher, and in particular doesn't re-render
+ *    `<GridLayout>`'s `:layout` prop with a "new" (but equal) array. Without
+ *    this, EVERY call — including one whose payload changed nothing —
+ *    produced a fresh array via `.map()`, which re-triggered the whole
+ *    reactive chain (layout ref -> activeLayout computed -> GridLayout's own
+ *    `layout` prop watcher), which could itself re-emit `layout-updated`
+ *    (grid-layout-plus's compaction pass runs on prop changes, not just
+ *    drag) and call back in here — an unbounded `onLayoutUpdated` ->
+ *    `layout.value = ...` -> re-render -> `layout-updated` -> ... cycle
+ *    ("Maximum recursive updates exceeded"). Reported repro: loading a
+ *    SECOND file caused `reconcileLayout` to reassign `layout.value` (see
+ *    useDashboardLayout's `chartIds` watcher) which kicked off exactly this
+ *    cycle. Returning the SAME reference once coordinates converge breaks
+ *    it regardless of how many upstream reassignments kick it off.
+ *
+ * Pure; returns a NEW array only when at least one item's coordinates
+ * actually changed, and even then keeps the exact same object reference for
+ * any INDIVIDUAL item whose coordinates didn't change (cheap no-op
+ * detection, same pattern as {@link clampToMinSize}).
+ *
+ * This exists because grid-layout-plus's `update:layout` (the v-model event)
+ * only fires on initial mount and on a responsive breakpoint change — a
+ * drag or resize ending instead fires `layout-updated` (and, per-item,
+ * `resized`/`moved`), which a v-model-only binding never observes. Callers
+ * must wire ALL of those events into this same merge so a card's new
+ * position is written back into the persisted `layout` ref regardless of
+ * which one fired (see AnalyzerView's `activeLayout` setter / `onLayoutUpdated`).
+ */
+export function mergeLayoutPositions<T extends DashboardLayoutItem>(
+  base: DashboardLayoutItem[],
+  updated: T[],
+): DashboardLayoutItem[] {
+  const byId = new Map(updated.map((it) => [it.i, it]))
+  let changed = false
+  const merged = base.map((it) => {
+    const next = byId.get(it.i)
+    if (!next) return it
+    if (next.x === it.x && next.y === it.y && next.w === it.w && next.h === it.h) return it
+    changed = true
+    return { i: it.i, x: next.x, y: next.y, w: next.w, h: next.h }
+  })
+  // No item's coordinates changed -> hand back `base` ITSELF (not `merged`,
+  // which is a structurally-equal but freshly-allocated array from `.map`)
+  // so the caller's `layout.value = ...` assignment is a genuine no-op.
+  return changed ? merged : base
+}
+
 /** The grid item id for a chart, keyed by the chart's OWN store id (stable
  *  across add/remove/reorder) — never its index in `analyzerStore.charts`. */
 export function chartItemId(chartId: number): string {
@@ -162,42 +287,55 @@ export function isChartItemId(id: string): boolean {
 }
 
 /**
- * Default (wide/desktop) layout: map + lap table anchor a left column (map on
- * top, lap table below it), tool panels (sectors/track-channel/accel/gear/
- * track-file) continue that left column further down, and the right column —
- * wider, since charts benefit most from horizontal space — starts with the
- * two align panels (only relevant once laps are selected, so they sit right
- * above where charts appear) followed by chart cards (appended dynamically,
- * see {@link reconcileLayout}). This keeps the map+lap-table "at a glance"
- * priority from the old single-column flow while actually using a wide
- * screen's side space, per the task's design goal.
+ * Default (wide/desktop) layout: THREE equal (GRID_COLS/3 = 4-unit-wide)
+ * columns rather than the old lopsided 5/7 two-column split — the old split
+ * crammed all 8 control-panel cards into ONE narrow left column (~54 rows
+ * tall) against a right column that (with the align panels hidden, their
+ * normal default-state) bottomed out around row ~10, leaving a large blank
+ * swath of background below the chart on wide screens. Spreading the same
+ * cards across three columns keeps each column's bottom within a handful of
+ * rows of the others (see dashboardLayout.test.ts's "balances column
+ * heights" regression test), which is what actually reads as "the dashboard
+ * fills the page" rather than any specific pixel-height target (unknowable
+ * here — this is a fixed grid-unit array, not something that measures the
+ * user's real viewport).
+ *
+ * Column A (x:0..4): map + lap table + sectors — the "at a glance" cards.
+ * Column B (x:4..8): the remaining control panels (channel/accel/gear/file).
+ * Column C (x:8..12): session-merge + the first chart, with the align panels
+ * (hidden until ≥2 laps are selected — see AnalyzerView's isVisibleId) placed
+ * BELOW the chart rather than above it, so their default hidden state never
+ * leaves a gap above visible content in this column.
  */
 export function defaultLayout(): DashboardLayoutItem[] {
   return [
-    { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 5, h: 10 },
-    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 10, w: 5, h: 8 },
-    { i: STATIC_CARD_IDS.sectors, x: 0, y: 18, w: 5, h: 6 },
-    { i: STATIC_CARD_IDS.trackChannel, x: 0, y: 24, w: 5, h: 5 },
-    { i: STATIC_CARD_IDS.accelTest, x: 0, y: 29, w: 5, h: 5 },
-    { i: STATIC_CARD_IDS.gear, x: 0, y: 34, w: 5, h: 7 },
-    { i: STATIC_CARD_IDS.trackFile, x: 0, y: 41, w: 5, h: 5 },
-    { i: STATIC_CARD_IDS.sessionMerge, x: 0, y: 46, w: 5, h: 8 },
-    { i: STATIC_CARD_IDS.mapAlign, x: 5, y: 0, w: 7, h: 5 },
-    { i: STATIC_CARD_IDS.lapAlign, x: 5, y: 5, w: 7, h: 5 },
-    // First chart (the store's initial default chart) starts the right
-    // column's chart stack; further charts are appended below it by
-    // reconcileLayout's "new item" path.
-    { i: chartItemId(1), x: 5, y: 10, w: 7, h: 9 },
+    // Column A
+    { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 },
+    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 10, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.sectors, x: 0, y: 18, w: 4, h: 6 },
+    // Column B
+    { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 5, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.gear, x: 4, y: 10, w: 4, h: 7 },
+    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 17, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.suspension, x: 4, y: 22, w: 4, h: 5 },
+    // Column C — first chart (the store's initial default chart) sits right
+    // under session-merge; further charts are appended below by
+    // reconcileLayout's "new item" path (see defaultChartItem).
+    { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 8 },
+    { i: chartItemId(1), x: 8, y: 8, w: 4, h: 11 },
+    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 19, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.lapAlign, x: 8, y: 24, w: 4, h: 5 },
   ]
 }
 
 /** Default size for a chart card appended after the initial layout (e.g. via
- *  "add chart"), placed at the bottom of the right (wide) column so it
- *  doesn't overlap existing cards — grid-layout-plus's vertical compaction
- *  then settles it upward if there's room. */
+ *  "add chart"), placed at the bottom of column C (x:8..12) so it doesn't
+ *  overlap existing cards — grid-layout-plus's vertical compaction then
+ *  settles it upward if there's room. */
 function defaultChartItem(id: string, layout: DashboardLayoutItem[]): DashboardLayoutItem {
   const maxY = layout.reduce((m, it) => Math.max(m, it.y + it.h), 0)
-  return { i: id, x: 5, y: maxY, w: 7, h: 9 }
+  return { i: id, x: 8, y: maxY, w: 4, h: 9 }
 }
 
 /** Parse persisted JSON into a layout array, or null if missing/invalid
@@ -309,17 +447,29 @@ export function reconcileLayout(
   chartIds: number[],
 ): DashboardLayoutItem[] {
   const wantedChartItemIds = new Set(chartIds.map(chartItemId))
+  const present = new Set(layout.map((it) => it.i))
+  const missingChartIds = chartIds.filter((chartId) => !present.has(chartItemId(chartId)))
+  const hasStaleChartEntries = layout.some((it) => isChartItemId(it.i) && !wantedChartItemIds.has(it.i))
+
+  // True no-op (nothing to drop, nothing to add) -> hand back the SAME array
+  // reference. This is called from useDashboardLayout's `chartIds` watcher
+  // (`layout.value = reconcileLayout(layout.value, ids)`) on every change to
+  // the chart-id SET, including ones that don't actually add/remove a chart
+  // card here — without this short-circuit, `.filter()`/`[...kept]` below
+  // always manufacture a structurally-identical-but-new array, and assigning
+  // THAT into the `layout` ref re-triggers every downstream computed/watcher
+  // exactly like a real change would (see mergeLayoutPositions's doc for why
+  // that identity matters — #4 crash fix: this is the OTHER write path into
+  // `layout.value`, alongside the drag/gutter write-back).
+  if (!hasStaleChartEntries && missingChartIds.length === 0) return layout
+
   // Drop chart-card entries for charts that no longer exist; keep every
   // static-card entry (and any not-yet-recognised id) untouched.
   const kept = layout.filter((it) => !isChartItemId(it.i) || wantedChartItemIds.has(it.i))
 
-  const present = new Set(kept.map((it) => it.i))
   const result = [...kept]
-  for (const chartId of chartIds) {
-    const id = chartItemId(chartId)
-    if (!present.has(id)) {
-      result.push(defaultChartItem(id, result))
-    }
+  for (const chartId of missingChartIds) {
+    result.push(defaultChartItem(chartItemId(chartId), result))
   }
   return result
 }

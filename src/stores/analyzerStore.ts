@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { COLORMAP_IDS, type ColormapId } from '@/domain/analysis/colormap'
+import { looksLikeForcePair } from '@/domain/analysis/ggData'
 import {
   loadCharts,
   saveCharts,
@@ -81,6 +82,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     distanceM: 100,
     minEntrySpeedKmh: null,
   })
+  // Track-map multi-file overlay: fileStore ids of OTHER loaded sessions whose
+  // racing line is drawn (faint, alongside the active session's own
+  // full-opacity track) on TrackMap — see useTrackOverlay.ts, which derives
+  // the actual drawable entries (name/color/decimated track) from this id set
+  // + fileStore. Transient like the other analyzer toggles above (not
+  // persisted); a stale id (its file got removed) is harmless — the
+  // composable simply drops it when building the drawable list, and toggling
+  // it again re-adds a fresh one.
+  const overlayFileIds = ref<number[]>([])
   // One past the highest restored id — ids are never reused, so a restored
   // layout/panel-state entry can't collide with a newly added chart's card id.
   let nextId = nextChartId(charts.value)
@@ -136,11 +146,32 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     accelCondition.value = condition
   }
 
+  /** Toggle whether `id` (a fileStore file id) is drawn as a track-map
+   *  overlay — on if it was off, off if it was on. */
+  function toggleOverlayFile(id: number): void {
+    const i = overlayFileIds.value.indexOf(id)
+    if (i === -1) overlayFileIds.value = [...overlayFileIds.value, id]
+    else overlayFileIds.value = overlayFileIds.value.filter((x) => x !== id)
+  }
+
+  /** Drop every overlaid file (e.g. a "clear overlays" affordance). */
+  function clearOverlayFiles(): void {
+    overlayFileIds.value = []
+  }
+
   /** Add a new chart. `kind` defaults to 'timeseries' (existing behaviour,
    *  unchanged call sites keep working). For 'scatter', callers may pass an
    *  initial X/Y pick (e.g. AnalyzerView defaulting to TC_Xforce/TC_Yforce
    *  for the friction-circle convenience when those channels exist) — the
-   *  store itself doesn't know about sessions/channels. */
+   *  store itself doesn't know about sessions/channels.
+   *
+   *  `equalAspect` defaults to true ONLY when the initial pick is a
+   *  force/acceleration pair (see `looksLikeForcePair`) — the classic G-G
+   *  friction-circle case, where a true 1:1 data-unit scale is meaningful.
+   *  Any other pair (including no pick yet) defaults to auto-ranged axes:
+   *  forcing 1:1 on an arbitrary pair (e.g. RPM vs a small-range channel)
+   *  squashes the smaller-magnitude axis into a sliver (#5 in the
+   *  equal-aspect fix) — the user can still flip it on manually. */
   function addChart(kind?: 'timeseries'): void
   function addChart(kind: 'scatter', initial?: { xChannel?: string | null; yChannel?: string | null }): void
   function addChart(
@@ -148,11 +179,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     initial?: { xChannel?: string | null; yChannel?: string | null },
   ): void {
     if (kind === 'scatter') {
+      const xChannel = initial?.xChannel ?? null
+      const yChannel = initial?.yChannel ?? null
       charts.value.push({
         kind: 'scatter',
         id: nextId++,
-        xChannel: initial?.xChannel ?? null,
-        yChannel: initial?.yChannel ?? null,
+        xChannel,
+        yChannel,
+        equalAspect: looksLikeForcePair(xChannel, yChannel),
       })
     } else {
       charts.value.push({ kind: 'timeseries', id: nextId++, channels: [], mode: 'timeline' })
@@ -183,6 +217,15 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     else chart.yChannel = channel
   }
 
+  /** Toggle a scatter chart's 1:1 axis-scaling setting — persisted alongside
+   *  its X/Y channel picks (same "one field, one setter, no-op on the wrong
+   *  chart kind" contract as `setChartXY`). */
+  function setChartEqualAspect(id: number, equalAspect: boolean): void {
+    const chart = charts.value.find((c) => c.id === id)
+    if (!chart || chart.kind !== 'scatter') return
+    chart.equalAspect = equalAspect
+  }
+
   return {
     activeFileId,
     xAxis,
@@ -196,6 +239,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     markMinima,
     markMaxima,
     accelCondition,
+    overlayFileIds,
     setXRange,
     setCursor,
     setOverlayCursor,
@@ -205,10 +249,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     setMarkMinima,
     setMarkMaxima,
     setAccelCondition,
+    toggleOverlayFile,
+    clearOverlayFiles,
     addChart,
     removeChart,
     setChartChannels,
     setChartMode,
     setChartXY,
+    setChartEqualAspect,
   }
 })

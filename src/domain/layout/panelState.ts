@@ -112,9 +112,26 @@ export function togglePinned(state: PanelState, id: string): PanelState {
 
 /** Returns a NEW state with the mobile card order replaced — pure, caller
  *  re-assigns + persists. De-dups defensively (the grid should never emit
- *  duplicate ids, but a stray double never wedges the order). */
+ *  duplicate ids, but a stray double never wedges the order).
+ *
+ *  #11 — same-reference guard: when the (de-duped) order is IDENTICAL to the
+ *  current one, return the existing `state` object unchanged rather than a
+ *  fresh `{ ...state }`. `usePanelState` does `state.value = setMobileOrder(...)`,
+ *  and a Vue ref triggers on reference inequality; without this guard, a
+ *  breakpoint switch to mobile makes `activeLayout`'s getter emit the mobile
+ *  layout, grid-layout-plus echoes it back (it re-emits `update:layout` even
+ *  when nothing moved), the setter calls `setMobileOrder` with the SAME order,
+ *  a new object is assigned, the ref re-triggers, and the whole chain loops
+ *  until Vue throws "Maximum recursive updates exceeded" (see AnalyzerView's
+ *  `activeLayout`). Mirrors `reconcilePanelState`'s `sameOrder` short-circuit
+ *  and the desktop branch's `mergeLayoutPositions` same-ref guard (#4). */
 export function setMobileOrder(state: PanelState, order: string[]): PanelState {
-  return { ...state, mobileOrder: [...new Set(order)] }
+  const deduped = [...new Set(order)]
+  const sameOrder =
+    deduped.length === state.mobileOrder.length &&
+    deduped.every((id, i) => id === state.mobileOrder[i])
+  if (sameOrder) return state
+  return { ...state, mobileOrder: deduped }
 }
 
 /**

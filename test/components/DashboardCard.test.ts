@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import DashboardCard from '@/components/DashboardCard.vue'
+import { vTooltip } from '@/directives/tooltip'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 
@@ -28,7 +29,7 @@ function mountCard(props: Partial<InstanceType<typeof DashboardCard>['$props']> 
   return mount(DashboardCard, {
     props: { title: '測試卡片', ...props },
     slots: { default: '<p>body content</p>' },
-    global: { plugins: [i18n] },
+    global: { plugins: [i18n], directives: { tooltip: vTooltip } },
   })
 }
 
@@ -51,14 +52,97 @@ describe('DashboardCard (scaffold smoke test)', () => {
     expect(wrapper.emitted('update:collapsed')).toEqual([[true]])
   })
 
-  it('only shows the pin button when showPin is true', () => {
-    expect(mountCard({ showPin: false }).find('.pin-btn').exists()).toBe(false)
-    expect(mountCard({ showPin: true }).find('.pin-btn').exists()).toBe(true)
+  it('always shows the pin button (釘選 now works at every breakpoint, not just mobile)', () => {
+    expect(mountCard().find('.pin-btn').exists()).toBe(true)
   })
 
   it('emits update:pinned when the pin button is clicked', async () => {
-    const wrapper = mountCard({ showPin: true, pinned: false })
+    const wrapper = mountCard({ pinned: false })
     await wrapper.find('.pin-btn').trigger('click')
     expect(wrapper.emitted('update:pinned')).toEqual([[true]])
+  })
+
+  describe('pin/unpin FLIP transition (#19 — see src/domain/layout/flip.ts for the pure math)', () => {
+    it('still emits update:pinned immediately (synchronously, before the FLIP animation) even when the card actually moved', async () => {
+      const wrapper = mountCard({ pinned: false })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      let call = 0
+      // First call (inside onTogglePinned, before emit) reports the OLD spot;
+      // every call after (inside playPinFlip, post-nextTick) reports the NEW
+      // spot — exercises the translate branch of the FLIP math for real.
+      vi.spyOn(el, 'getBoundingClientRect').mockImplementation(
+        () =>
+          ({
+            left: 0,
+            top: call++ === 0 ? 400 : 0,
+            width: 300,
+            height: 150,
+            right: 300,
+            bottom: 0,
+            x: 0,
+            y: 0,
+            toJSON() {
+              return this
+            },
+          }) as DOMRect,
+      )
+
+      await wrapper.find('.pin-btn').trigger('click')
+      // The emit happens synchronously inside the click handler, well before
+      // the FLIP's nextTick/rAF/transitionend chain settles.
+      expect(wrapper.emitted('update:pinned')).toEqual([[true]])
+
+      // Let the nextTick -> requestAnimationFrame chain run without throwing
+      // (happy-dom's rAF is timer-backed, not vitest fake-timer driven here).
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(el.style.transform).toBe('')
+    })
+
+    it('skips measuring/animating under prefers-reduced-motion, but still emits the toggle', async () => {
+      const wrapper = mountCard({ pinned: false })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      const rectSpy = vi.spyOn(el, 'getBoundingClientRect')
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query.includes('reduce'),
+        addEventListener() {},
+        removeEventListener() {},
+      }))
+
+      await wrapper.find('.pin-btn').trigger('click')
+      expect(wrapper.emitted('update:pinned')).toEqual([[true]])
+      expect(rectSpy).not.toHaveBeenCalled()
+
+      vi.unstubAllGlobals()
+    })
+  })
+
+  describe('aspectRatio (#18 fix — pinned card keeps its original grid shape)', () => {
+    it('applies aspect-ratio inline style when pinned with a valid ratio', () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 10 })
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.4')
+    })
+
+    it('does NOT apply aspect-ratio when the card is not pinned, even if a ratio is given', () => {
+      const wrapper = mountCard({ pinned: false, aspectRatio: 4 / 10 })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('does NOT apply aspect-ratio when pinned but no ratio is given (falls back to fixed max-height)', () => {
+      const wrapper = mountCard({ pinned: true })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('ignores a non-finite/zero/negative ratio rather than emitting an invalid style', () => {
+      for (const bad of [0, -1, NaN, Infinity]) {
+        const wrapper = mountCard({ pinned: true, aspectRatio: bad })
+        expect(wrapper.attributes('style')).toBeUndefined()
+      }
+    })
+
+    it('a wide/short card (e.g. a control panel, w:h=4:5) gets a different ratio than a tall/narrow one (e.g. a chart, w:h=4:11)', () => {
+      const wide = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const tall = mountCard({ pinned: true, aspectRatio: 4 / 11 })
+      expect(wide.attributes('style')).not.toBe(tall.attributes('style'))
+    })
   })
 })

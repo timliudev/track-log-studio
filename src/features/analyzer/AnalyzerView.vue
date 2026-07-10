@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { GridLayout } from 'grid-layout-plus'
@@ -10,8 +10,11 @@ import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
 import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
+import { useTrackOverlay } from '@/composables/useTrackOverlay'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { usePanelState } from '@/composables/usePanelState'
+import { useLayoutLock } from '@/composables/useLayoutLock'
+import { useGridGutters } from '@/composables/useGridGutters'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { LapLine } from '@/domain/analysis/laps'
@@ -22,9 +25,16 @@ import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import {
   STATIC_CARD_IDS,
+  STATIC_CARD_TITLE_KEYS,
+  GRID_COLS,
+  GRID_ROW_HEIGHT,
+  GRID_MARGIN,
   chartItemId,
   mobileLayout,
   minSizeFor,
+  isItemDraggable,
+  isItemResizable,
+  mergeLayoutPositions,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -39,6 +49,7 @@ import AccelTestPanel from './AccelTestPanel.vue'
 import GearPanel from './GearPanel.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
 import SessionMergePanel from './SessionMergePanel.vue'
+import SuspensionCard from './SuspensionCard.vue'
 import ScatterChart from './ScatterChart.vue'
 
 const { t } = useI18n()
@@ -62,6 +73,19 @@ const { ambiguousMatches, chooseTrack, dismissAmbiguous, appliedSharedTrack, det
   useCircuitPersistence()
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
+
+// Track-map multi-file overlay (賽道地圖多檔疊圖): other loaded sessions'
+// racing lines drawn faint under the active session's own track. The
+// candidate list doubles as the on-map legend (color swatch = the drawn
+// line's color); state lives in analyzerStore.overlayFileIds — see
+// useTrackOverlay.ts.
+const {
+  candidates: overlayCandidates,
+  overlayTracks,
+  toggle: toggleOverlay,
+  clear: clearOverlays,
+} = useTrackOverlay()
+const anyOverlayOn = computed(() => overlayCandidates.value.some((c) => c.active))
 
 const hasEcuLaps = computed(() => session.value?.has('IR_LapNumber') ?? false)
 
@@ -346,13 +370,19 @@ const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.lengt
 // confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
 const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
 
+// --- 鎖定布局: a single global toggle disabling drag+resize for every card,
+// independent of per-card pin (see usePanelState below) — folded into
+// useDashboardLayout so its isDraggable/isResizable already reflect it. ---
+const { isLocked, toggleLocked } = useLayoutLock()
+
 // --- #8: draggable/resizable dashboard grid (grid-layout-plus) ---
 const chartIds = computed(() => charts.value.map((c) => c.id))
 const { layout, colNum, isMobile, isDraggable, isResizable, resetLayout } =
-  useDashboardLayout(chartIds)
+  useDashboardLayout(chartIds, isLocked)
 
-// --- #9: per-card collapse (all breakpoints) + single mobile pin + mobile
-// drag-to-reorder order ---
+// --- #9: per-card collapse (all breakpoints) + single cross-breakpoint pin
+// (釘選 — see DashboardCard's module doc for the Teleport-based redesign) +
+// mobile drag-to-reorder order ---
 const { isCollapsed, isPinned, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
   usePanelState(chartIds)
 
@@ -398,21 +428,28 @@ const mobileVisibleLayout = computed<typeof layout.value>(() =>
 // GridItem ourselves — see the `#item` slot note). grid-layout-plus spreads
 // each layout entry as props onto the GridItem it wraps around the slot, so
 // carrying these on the item is how the drag handle / ignore region / the
-// mobile-pin non-draggable exception reach that internal GridItem.
+// pinned-card non-draggable-non-resizable exception reach that internal
+// GridItem.
 interface GridItemDecoration {
   dragAllowFrom: string
   dragIgnoreFrom: string
   isDraggable: boolean
+  isResizable: boolean
   minW: number
   minH: number
 }
 // B6 — per-card minimum size (see dashboardLayout.ts's minSizeFor) is carried
 // on the layout item the same way drag config is, so grid-layout-plus's OWN
 // resize handle refuses to shrink a card past the point a chart/map/table
-// stops being usable. Only applied on DESKTOP (isResizable is already false
-// on mobile — see useDashboardLayout — so minW/minH there is inert, but
-// passing it unconditionally keeps this function breakpoint-agnostic like the
-// rest of the decoration).
+// stops being usable.
+//
+// isDraggable/isResizable per item fold in BOTH the grid-wide toggle (isDraggable/
+// isResizable from useDashboardLayout, which already account for 鎖定布局 and
+// the current breakpoint — mobile resize is now allowed too, see that
+// composable's doc) AND the pinned-card exception (isItemDraggable/
+// isItemResizable, dashboardLayout.ts): a pinned card's real content has been
+// Teleported out of the grid (see the template's pinned-anchor note), so its
+// slot is just an empty placeholder that shouldn't be draggable or resizable.
 function decorateForGrid(
   items: DashboardLayoutItem[],
 ): (DashboardLayoutItem & GridItemDecoration)[] {
@@ -420,7 +457,8 @@ function decorateForGrid(
     ...it,
     dragAllowFrom: '.drag-handle',
     dragIgnoreFrom: '.actions',
-    isDraggable: itemDraggable(it.i),
+    isDraggable: isItemDraggable(isDraggable.value, isPinned(it.i)),
+    isResizable: isItemResizable(isResizable.value, isPinned(it.i)),
     ...minSizeFor(it.i),
   }))
 }
@@ -450,22 +488,84 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
       return
     }
     // Desktop: merge visible items' new positions back into the full layout,
-    // preserving hidden items untouched.
-    const nextById = new Map(next.map((it) => [it.i, it]))
-    layout.value = layout.value.map((it) => nextById.get(it.i) ?? it)
+    // preserving hidden items untouched (pure function — only coordinates
+    // are copied, decoration fields like dragAllowFrom/minW never leak into
+    // the persisted array — see mergeLayoutPositions's doc).
+    layout.value = mergeLayoutPositions(layout.value, next)
   },
 })
 
-// Pin/drag interplay (mobile): a PINNED card is NOT draggable while pinned —
-// dragging a sticky card makes no sense, and it keeps the pinned card anchored
-// at the top of the column. The user unpins first (its own header button),
-// then it becomes draggable again. Documented here + on the per-item
-// `:is-draggable` binding in the template.
-function itemDraggable(id: string | number): boolean {
-  if (!isDraggable.value) return false
-  if (isMobile.value && isPinned(String(id))) return false
-  return true
+// #1 fix — grid-layout-plus's `update:layout` (our v-model, handled by
+// activeLayout's setter above) only fires on initial MOUNT and on a
+// responsive BREAKPOINT change. A drag or resize ENDING instead fires
+// `layout-updated` (confirmed by reading grid-layout-plus's own source:
+// dragend/resizeend call `emit("layout-updated", ...)`, never
+// `emit("update:layout", ...)`) — so without this listener, a drag/resize's
+// new position was rendered by the library's OWN internal state but never
+// written back into `layout.value` (and so never persisted to
+// localStorage). The very next action that makes `activeLayout`'s getter
+// re-run (鎖定布局/釘選/收合/新增圖表/斷點切換all change SOMETHING that
+// activeLayout's getter reads) would then re-derive `:layout` from that
+// STALE `layout.value`, and grid-layout-plus's own `watch(() => [a.layout,
+// ...])` would forcibly reset its internal state back to it — the "layout
+// resets itself" bug. Routing this event through the SAME writable
+// `activeLayout` computed as the v-model reuses its existing merge/mobile-
+// order logic, so there's exactly one code path deciding how a raw
+// grid-layout-plus payload gets persisted, regardless of which event fired.
+function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): void {
+  activeLayout.value = next
 }
+
+// --- #2/#5: draggable gutters between adjacent cards — dragging a gap
+// resizes the card whose edge that gap is (the OTHER side reflows, it isn't
+// traded against — see gridGutter.ts's module doc for the domain math and
+// the #5 revision note) via useGridGutters.ts for the DOM/pointer wiring
+// this just calls into. Desktop-only (isMobile has no side-by-side pairs)
+// and disabled while the dashboard is locked, same two conditions that
+// already gate the grid's own drag/resize (isDraggable/isResizable in
+// useDashboardLayout). The currently-pinned card is excluded from
+// `gutterItems` — its grid slot is an inert Teleport placeholder (see the
+// template's pin-placeholder note), so a gutter touching it would visibly do
+// nothing.
+const gutterItems = computed<DashboardLayoutItem[]>(() =>
+  desktopVisibleLayout.value.filter((it) => !isPinned(it.i)),
+)
+const gutterEnabled = computed(() => !isMobile.value && !isLocked.value)
+const gridGutters = useGridGutters({
+  items: gutterItems,
+  enabled: gutterEnabled,
+  cols: GRID_COLS,
+  rowHeight: GRID_ROW_HEIGHT,
+  marginX: GRID_MARGIN[0],
+  marginY: GRID_MARGIN[1],
+  // Same persistence path as onLayoutUpdated above (#1's fix) — a gutter drag
+  // is just another source of new coordinates for the ONE resized card,
+  // merged back into the full layout the identical way a corner-resize's
+  // `layout-updated` is. Everything ELSE that needs to reflow around it
+  // (#5) arrives here too, but via a SEPARATE round trip: this writes
+  // `layout.value`, which flows out through `activeLayout` to
+  // `<GridLayout>`'s `layout` prop, whose own vertical-compaction reacts and
+  // re-emits `layout-updated` with the reflowed positions, which
+  // `onLayoutUpdated` merges back in — see gridGutter.ts's module doc for
+  // why this round trip is safe (doesn't loop) rather than a hand-rolled
+  // reflow living here.
+  onChange: (next) => {
+    layout.value = mergeLayoutPositions(layout.value, next)
+  },
+})
+const gutters = gridGutters.gutters
+const draggingKey = gridGutters.draggingKey
+const onGutterPointerDown = gridGutters.onGutterPointerDown
+// A plain local template ref, forwarded into the composable's own
+// containerRef via watch — kept as a separate binding (rather than the
+// template pointing `ref="..."` straight at `gridGutters.containerRef`)
+// because a template ref attribute must name a binding vue-tsc can see
+// genuinely READ somewhere in this component's own <script>; the watch
+// below is that read.
+const gridWrapRef = ref<HTMLElement | null>(null)
+watch(gridWrapRef, (el) => {
+  gridGutters.containerRef.value = el
+})
 
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
@@ -481,6 +581,19 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   return chart.kind === 'scatter'
     ? t('analyzer.layout.cardScatterChart', { n })
     : t('analyzer.layout.cardChart', { n })
+}
+
+/** Title for ANY card id (static or chart), used by the pinned-card
+ *  placeholder (see template) which renders OUTSIDE the big per-card
+ *  v-if/else-if chain and so can't just read whichever branch's own `title`
+ *  prop happened to fire. Static ids look up their i18n key in
+ *  STATIC_CARD_TITLE_KEYS; a chart id falls back to the same numbered
+ *  chartTitle() the card itself uses. */
+function titleForItemId(id: string): string {
+  const key = STATIC_CARD_TITLE_KEYS[id]
+  if (key) return t(key)
+  const chart = charts.value.find((c) => chartItemId(c.id) === id)
+  return chart ? chartTitle(chart) : ''
 }
 </script>
 
@@ -509,18 +622,54 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
              arrangement) sits in one toolbar cluster instead of the add
              buttons floating below the grid. -->
         <div class="layout-tools">
-          <span v-if="!isMobile" class="drag-hint">{{ t('analyzer.layout.dragHint') }}</span>
+          <span class="drag-hint">{{ isMobile ? t('analyzer.layout.dragHintMobile') : t('analyzer.layout.dragHint') }}</span>
           <button type="button" class="add" @click="onAddTimeseries">
             ＋ {{ t('analyzer.addChart') }}
           </button>
           <button type="button" class="add" @click="onAddScatter">
             ＋ {{ t('analyzer.addScatterChart') }}
           </button>
+          <!-- 鎖定布局: global drag+resize toggle for every card — distinct
+               icon (padlock) and wording from the per-card 📌 pin button so
+               the two features never read as "the same thing". -->
+          <button
+            type="button"
+            class="lock-layout"
+            :class="{ active: isLocked }"
+            :title="isLocked ? t('analyzer.layout.unlockLayoutHint') : t('analyzer.layout.lockLayoutHint')"
+            :aria-label="isLocked ? t('analyzer.layout.unlockLayout') : t('analyzer.layout.lockLayout')"
+            :aria-pressed="isLocked"
+            @click="toggleLocked"
+          >
+            <svg v-if="isLocked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="11" width="16" height="9" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="11" width="16" height="9" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 7.65-1.65" />
+            </svg>
+            <span>{{ isLocked ? t('analyzer.layout.unlockLayout') : t('analyzer.layout.lockLayout') }}</span>
+          </button>
           <button type="button" class="reset-layout" @click="onResetLayout">
             {{ t('analyzer.layout.resetLayout') }}
           </button>
         </div>
       </div>
+
+      <!-- 釘選 (pin) anchor: a single sticky slot that a pinned card's markup
+           is Teleported into (see the #item slot below and DashboardCard's
+           module doc). Placed here — right after the toolbar, before the
+           grid — so at scroll position 0 it just sits inline (no visual
+           jump), then sticks to the viewport top once the page scrolls past
+           it, exactly like the card's own former mobile-only sticky trick,
+           generalised to work regardless of the grid's absolute-positioned
+           desktop items. `:empty` hides it when nothing is pinned so it never
+           reserves space or shows a stray border. Works identically at both
+           breakpoints — this IS the mobile pin mechanism now, not a
+           duplicate of it (see DashboardCard's module doc for the
+           consolidation rationale). -->
+      <div id="dashboard-pinned-anchor" class="pinned-anchor" />
 
       <!-- #8/#9: draggable dashboard grid (grid-layout-plus). Drag is restricted
            to each card's own `.drag-handle` header (DashboardCard's title bar)
@@ -531,19 +680,27 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
            desktop 2-D layout and the mobile 1-column layout ourselves (see
            activeLayout), so the library's own `responsive` reflow is off and
            can never write a 1-column arrangement back into dashboardLayout.v1.
-           Desktop: free 2-D drag + resize. Mobile: vertical drag-to-REORDER
-           only (resize off — a full-width card has nothing to resize), a
-           pinned card excepted (itemDraggable). -->
+           Desktop: free 2-D drag + resize. Mobile: vertical drag-to-REORDER +
+           resize (height only — a full-width card can't usefully resize its
+           width). A pinned card's own slot is always non-draggable/
+           non-resizable regardless of breakpoint (decorateForGrid). -->
+      <!-- #2 縫隙拖動: gridWrapRef is the positioning context (`position:
+           relative`) the gutter overlay's absolutely-positioned hit-boxes
+           are placed relative to — it must wrap `<GridLayout>` exactly (no
+           extra padding/border) so its measured width matches the library's
+           own colWidth math (see useGridGutters.ts's `containerRef` doc). -->
+      <div ref="gridWrapRef" class="grid-wrap">
       <GridLayout
         v-model:layout="activeLayout"
         :col-num="colNum"
         :is-draggable="isDraggable"
         :is-resizable="isResizable"
         :responsive="false"
-        :row-height="24"
-        :margin="[12, 12]"
+        :row-height="GRID_ROW_HEIGHT"
+        :margin="GRID_MARGIN"
         :vertical-compact="true"
         :use-css-transforms="true"
+        @layout-updated="onLayoutUpdated"
       >
         <template #item="{ item }">
           <!-- IMPORTANT: the `#item` slot renders ONLY the card content —
@@ -554,16 +711,31 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
                cards land at ~2× their slot offset while the (single) library
                placeholder stays at the correct slot — the "placeholder wildly
                offset from the card" bug. Per-item drag config
-               (drag-allow-from/-ignore-from + the mobile-pin isDraggable
-               exception) is carried on each layout item instead (see
-               `activeLayout` getter's decoration), which the library spreads
-               onto the GridItem it creates. -->
+               (drag-allow-from/-ignore-from + the pinned non-draggable/
+               non-resizable exception) is carried on each layout item instead
+               (see `activeLayout` getter's decoration), which the library
+               spreads onto the GridItem it creates. -->
+
+          <!-- 釘選 placeholder: when THIS item is the pinned one, its real
+               DashboardCard below is Teleported out into #dashboard-pinned-
+               anchor (see that div's doc, above the grid) — this placeholder
+               fills the vacated grid slot so the layout doesn't jump, and
+               tells the user where the card went. Unpinning removes the
+               Teleport's `disabled` override and the card simply re-renders
+               here on the next tick. -->
+          <div v-if="isPinned(String(item.i))" class="pin-placeholder">
+            <span class="pin-placeholder-icon" aria-hidden="true">📌</span>
+            <span class="pin-placeholder-title">{{ titleForItemId(String(item.i)) }}</span>
+            <span class="pin-placeholder-text">{{ t('analyzer.layout.pinnedPlaceholder') }}</span>
+          </div>
+
+          <Teleport to="#dashboard-pinned-anchor" :disabled="!isPinned(String(item.i))" defer>
           <DashboardCard
               v-if="item.i === 'map'"
               :title="t('analyzer.layout.cardMap')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -578,10 +750,34 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
                 :colormap="trackColormap"
                 :gates="mapGates"
                 :extrema-markers="mapExtremaMarkers"
+                :overlay-tracks="overlayTracks"
                 @cursor="analyzer.setCursor"
                 @update:line="lapStore.setLine($event)"
                 @update:gate="onUpdateGate"
               />
+              <!-- Multi-file overlay picker + legend: one checkbox row per
+                   OTHER loaded GPS session; the swatch is the exact color its
+                   faint line is drawn with on the map, so the list doubles as
+                   the legend. Hidden entirely when there's nothing to overlay
+                   (only one file loaded / no other file has GPS). -->
+              <div
+                v-if="overlayCandidates.length > 0"
+                class="overlay-files"
+                role="group"
+                :aria-label="t('analyzer.trackOverlayTitle')"
+              >
+                <span class="overlay-label" v-tooltip="t('analyzer.trackOverlayHint')">
+                  {{ t('analyzer.trackOverlayTitle') }}
+                </span>
+                <label v-for="c in overlayCandidates" :key="c.id" class="overlay-item">
+                  <input type="checkbox" :checked="c.active" @change="toggleOverlay(c.id)" />
+                  <span class="overlay-swatch" :style="{ background: c.color }" />
+                  <span class="overlay-name" :title="c.name">{{ c.name }}</span>
+                </label>
+                <button v-if="anyOverlayOn" type="button" class="overlay-clear" @click="clearOverlays">
+                  {{ t('analyzer.trackOverlayClear') }}
+                </button>
+              </div>
               <div v-if="heatNorm" class="tc-legend">
                 <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
                 <span class="tc-bar" :style="{ background: legendGradient }" />
@@ -680,7 +876,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardLapTable')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -699,7 +895,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardSectors')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -717,7 +913,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardTrackChannel')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -733,7 +929,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardAccelTest')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -745,7 +941,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardGear')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -757,7 +953,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardTrackFile')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -776,7 +972,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardSessionMerge')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -784,11 +980,24 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
             </DashboardCard>
 
             <DashboardCard
+              v-else-if="item.i === 'suspension'"
+              :title="t('analyzer.layout.cardSuspension')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
+              :show-pin="isMobile"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <SuspensionCard :session="session" />
+            </DashboardCard>
+
+            <DashboardCard
               v-else-if="item.i === 'mapalign' && showMapAlign"
               :title="t('analyzer.layout.cardMapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -800,7 +1009,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
               :title="t('analyzer.layout.cardLapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
-              :show-pin="isMobile"
+              :aspect-ratio="item.w / item.h"
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
@@ -814,7 +1023,7 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
                   :title="chartTitle(c)"
                   :collapsed="isCollapsed(item.i)"
                   :pinned="isPinned(item.i)"
-                  :show-pin="isMobile"
+                  :aspect-ratio="item.w / item.h"
                   @update:collapsed="toggleCollapsed(item.i)"
                   @update:pinned="togglePinned(item.i)"
                 >
@@ -840,8 +1049,24 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
                 </DashboardCard>
               </template>
             </template>
+          </Teleport>
         </template>
       </GridLayout>
+      <!-- #2 縫隙拖動 overlay: one thin hit-box per shared card edge, drawn
+           exactly over the margin gap between two adjacent cards (see
+           gridGutter.ts's `gutterRect`) — never over any card's own content,
+           so it can't intercept clicks meant for the dashboard. Empty
+           (nothing rendered) on mobile / while locked / while nothing is
+           adjacent — see useGridGutters's `enabled` gate. -->
+      <div
+        v-for="g in gutters"
+        :key="g.key"
+        class="grid-gutter"
+        :class="[g.orientation, { dragging: draggingKey === g.key }]"
+        :style="{ left: `${g.rect.left}px`, top: `${g.rect.top}px`, width: `${g.rect.width}px`, height: `${g.rect.height}px` }"
+        @pointerdown="onGutterPointerDown(g, $event)"
+      />
+      </div>
     </template>
   </div>
 </template>
@@ -920,6 +1145,39 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+/* 鎖定布局 — deliberately styled like reset-layout (same neutral pill) rather
+   than DashboardCard's small icon-only pin button: this is a toolbar-level,
+   text+icon action, not a per-card header affordance, so it should read as
+   "a different kind of control" even before the padlock-vs-pushpin icon
+   registers. `.active` (locked) gets the accent treatment other toggled
+   states in this file use (e.g. .xaxis button.active) for a consistent
+   "this is currently on" language. */
+.lock-layout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.lock-layout svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+.lock-layout:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.lock-layout.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border-color: var(--color-accent);
+}
 .tc-legend {
   display: flex;
   align-items: center;
@@ -941,6 +1199,60 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   margin: calc(var(--space) * 1.5) 0 0;
   font-size: 0.8rem;
   color: var(--color-text-muted);
+}
+/* Multi-file overlay picker/legend under the map — same compact text-row
+   styling as the heatmap legend (.tc-legend) so the map card's footer rows
+   read as one family. */
+.overlay-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: var(--space);
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+.overlay-label {
+  flex: 0 0 auto;
+}
+.overlay-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--color-text);
+  max-width: 100%;
+}
+.overlay-item input {
+  accent-color: var(--color-accent);
+  margin: 0;
+}
+.overlay-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 1px var(--color-surface);
+}
+.overlay-name {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overlay-clear {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.overlay-clear:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 .laps {
   display: flex;
@@ -1021,6 +1333,52 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   color: var(--color-accent);
 }
 
+/* #2 縫隙拖動 — the positioning context the gutter overlay's absolutely-
+   positioned hit-boxes are placed relative to (see the template's doc on
+   gridWrapRef). Must wrap `<GridLayout>` with zero extra box (no padding/
+   border) so ITS measured width is exactly what grid-layout-plus itself
+   lays cards out against. */
+.grid-wrap {
+  position: relative;
+}
+/* One draggable hit-box per shared card edge, sized/positioned to exactly
+   fill the margin gap between two touching cards (gridGutter.ts's
+   `gutterRect`) — invisible by default (a visible line there all the time
+   would read as a stray grid rule), with a themed highlight only on
+   hover/active so the affordance discovers itself without adding permanent
+   visual noise to the dashboard.
+
+   #2 fix — `border-radius` now matches DashboardCard's own corner rounding
+   (`calc(var(--radius) * 1.5)`, see DashboardCard.vue's `.dashboard-card`)
+   instead of a near-square 2px, so the highlight reads as "part of the same
+   rounded-card visual language" rather than a stray right-angle box; on the
+   gutter's own thin strip this naturally rounds into a soft pill shape.
+   The highlight itself uses `color-mix(..., transparent)` — the same
+   translucent-accent pattern already used elsewhere in this app (see
+   FileBar.vue/GearPanel.vue/VboChannelMap.vue) — instead of a flat
+   `background: var(--color-accent); opacity: 0.45`, which read as a harsh,
+   overly-saturated "pink block" (the opacity also dims anything else drawn
+   on the element, not just the fill). color-mix blends the accent directly
+   into a transparent layer over the page, landing as a much softer tint. */
+.grid-gutter {
+  position: absolute;
+  z-index: 25;
+  touch-action: none;
+  background: transparent;
+  border-radius: calc(var(--radius) * 1.5);
+  transition: background-color 0.1s ease;
+}
+.grid-gutter.vertical {
+  cursor: col-resize;
+}
+.grid-gutter.horizontal {
+  cursor: row-resize;
+}
+.grid-gutter:hover,
+.grid-gutter.dragging {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
 /* #8 — snap grid items to position instead of easing the library's default
    200ms `transform: translate3d(…)` transition on `.vgl-item`.
 
@@ -1039,5 +1397,98 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
    anyway. `:deep` because .vgl-item is the library's element, out of scope. */
 .analyzer :deep(.vgl-item) {
   transition: none;
+}
+
+/* 釘選 (pin) anchor + placeholder — see the template's doc comments above the
+   anchor div and the #item slot's Teleport for the full mechanism. */
+.pinned-anchor {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.pinned-anchor:empty {
+  display: none;
+}
+/* Bound the Teleported card so a tall body (e.g. an overlay chart) can't grow
+   to dominate the screen once it's floating above the grid — matches
+   DashboardCard's own `.pinned` max-height so the two agree on how big a
+   pinned card is allowed to get. `width: min(560px, 100%)` is a DESKTOP-only
+   choice (a floating centered card looks intentional on a wide screen); on
+   mobile (#9 fix) the 560px cap left dead space on either side of the card
+   on any viewport wider than 560px — including exactly 768px, the phone
+   breakpoint itself — so the mobile media query below overrides back to a
+   full-width card, matching every other card's edge-to-edge mobile layout. */
+.pinned-anchor :deep(.dashboard-card) {
+  width: min(560px, 100%);
+  margin: 0 auto calc(var(--space) * 1.5);
+}
+@media (max-width: 768px) {
+  .pinned-anchor :deep(.dashboard-card) {
+    width: 100%;
+  }
+}
+.pin-placeholder {
+  height: 100%;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: var(--space);
+  border: 1px dashed var(--color-border);
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+.pin-placeholder-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.pin-placeholder-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.pin-placeholder-text {
+  font-size: 0.75rem;
+}
+
+/* #3 — theme the resize handle (grid-layout-plus's `.vgl-item__resizer`,
+   bottom-right corner of every card). The library draws it as a plain
+   right-angle "⌐" made of two straight border edges (`border-right-width` +
+   `border-bottom-width` on its `:before`, see grid-layout-plus's built-in
+   CSS) in a hardcoded dark grey (`--vgl-resizer-border-color: #444`) — this
+   reads as an abrupt, unstyled corner against the rest of the app's rounded,
+   theme-colored chrome (same mismatch the tooltip directive fixed for the
+   native `title` box). Recolor to the theme accent and round the corner
+   where the two border edges meet (`border-radius` on the bottom-right,
+   matching the card's own `--radius`) so it reads as a deliberate grab
+   affordance rather than a stray box corner. */
+.analyzer :deep(.vgl-layout) {
+  --vgl-resizer-border-color: var(--color-accent);
+  --vgl-resizer-border-width: 2px;
+}
+.analyzer :deep(.vgl-item__resizer)::before {
+  border-radius: 0 0 var(--radius) 0;
+}
+
+/* Touch resize (mobile task): the resize handle is grid-layout-plus's own
+   `.vgl-item__resizer` (bottom-right corner), sized via its `--vgl-resizer-
+   size` CSS var (10px default — comfortable with a mouse, far too small a
+   touch target on a phone). Mobile resize is now enabled (see
+   useDashboardLayout's isResizable), so the handle needs to actually be
+   tappable there; `touch-action: none` stops the browser's own scroll
+   gesture from hijacking the drag before interactjs sees it (grid-layout-plus
+   only sets this at the ITEM level for Android — see grid-item.vue's
+   `no-touch` class — not on the resizer itself, and not for iOS at all). */
+@media (max-width: 768px) {
+  .analyzer :deep(.vgl-layout) {
+    --vgl-resizer-size: 30px;
+  }
+  .analyzer :deep(.vgl-item__resizer) {
+    touch-action: none;
+  }
 }
 </style>

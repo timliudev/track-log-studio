@@ -22,7 +22,7 @@ export function fillPlotHeight(
 </script>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { panRange, pinchRange, type XRange } from '@/features/analyzer/xRangeGesture'
@@ -181,7 +181,25 @@ function create(): void {
   // the DOM so canvas + legend fit the host exactly (fillHeight mode only —
   // fixed-height callers size the canvas to the `height` prop and let the
   // page flow around the legend, unchanged).
-  if (props.fillHeight) resize()
+  if (props.fillHeight) {
+    resize()
+    // #4 fix — a channel add/remove changes the series shape, which forces
+    // THIS create() to run again (see the `[data, series]` watcher below).
+    // That recreate happens inside the same reactive flush that may still be
+    // settling the surrounding layout — e.g. the toolbar's chip list gaining
+    // or losing a wrapped line shifts how much height is actually left for
+    // this chart within its card. The synchronous resize() above reads
+    // whatever the host reports AT THAT INSTANT, which can be a transitional
+    // value; nothing else re-measures afterwards (unlike the ResizeObserver
+    // below, which keeps firing on every later layout change — e.g. a manual
+    // card drag, which is why that "fixes" it) — so the chart could get
+    // stuck at a stale height. Scheduling one more resize() via `nextTick`
+    // re-measures again once Vue has fully flushed EVERY pending reactive
+    // update (not just this component's own), self-healing without requiring
+    // a manual drag. See uplotChartFillHeightResize.test.ts for the
+    // regression this closes.
+    void nextTick(resize)
+  }
 }
 
 function destroy(): void {
@@ -347,8 +365,16 @@ function resize(): void {
   }
 }
 
+// Data-only change → fast setData. Series structure change → recreate. Seeded
+// from onMounted's initial create() (not left at '') so the very next
+// `[data, series]` firing — even a plain data refresh with the SAME
+// channels — doesn't mismatch against an unset baseline and force an
+// unnecessary extra recreate.
+let lastKey = ''
+
 onMounted(() => {
   create()
+  lastKey = seriesKey()
   ro = new ResizeObserver(() => resize())
   if (host.value) ro.observe(host.value)
   // dpr / viewport changes (e.g. devtools device-mode toggle) don't trigger the
@@ -369,8 +395,6 @@ onBeforeUnmount(() => {
   destroy()
 })
 
-// Data-only change → fast setData. Series structure change → recreate.
-let lastKey = ''
 watch(
   () => [props.data, props.series],
   () => {

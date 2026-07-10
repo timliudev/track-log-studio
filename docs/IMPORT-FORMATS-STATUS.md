@@ -2,8 +2,8 @@
 
 本檔追蹤多格式匯入／匯出的進度。詳細架構見
 [ARCHITECTURE-FORMATS.md](ARCHITECTURE-FORMATS.md)；格式研究與接入評估見
-[FORMAT-SUPPORT-RESEARCH.md](FORMAT-SUPPORT-RESEARCH.md)；AiM XRK 二進位規格見
-[XRK-FORMAT-SPEC.md](XRK-FORMAT-SPEC.md)。
+[FORMAT-SUPPORT-RESEARCH.md](specs/FORMAT-SUPPORT-RESEARCH.md)；AiM XRK 二進位規格見
+[XRK-FORMAT-SPEC.md](specs/XRK-FORMAT-SPEC.md)。
 
 ## ✅ 已完成
 - **可插拔 Importer 架構**：`Importer` 介面（`id` / `extensions` / `detect` / `parse`）+ registry，對稱於既有 `Exporter`；`detect`/`parse` 支援文字與二進位（`headBytes` + `parseBinary`）。parse worker 依 `importerId` 路由，所有格式走同一條 worker 路徑。

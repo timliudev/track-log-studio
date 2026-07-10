@@ -5,6 +5,7 @@ import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
+import GithubStarButton from '@/components/GithubStarButton.vue'
 
 // Lazy tab views: async imports keep each top-level view in its own chunk so
 // heavy per-tab dependencies (notably grid-layout-plus + interactjs pulled in
@@ -16,6 +17,7 @@ import BottomNav from '@/components/BottomNav.vue'
 const ConverterView = defineAsyncComponent(() => import('@/features/converter/ConverterView.vue'))
 const AnalyzerView = defineAsyncComponent(() => import('@/features/analyzer/AnalyzerView.vue'))
 const SettingsView = defineAsyncComponent(() => import('@/features/settings/SettingsView.vue'))
+const AboutView = defineAsyncComponent(() => import('@/features/about/AboutView.vue'))
 
 const { t } = useI18n()
 
@@ -24,8 +26,8 @@ const { t } = useI18n()
 useTheme()
 useLocale()
 
-type Tab = 'converter' | 'analyzer' | 'settings'
-const tabOrder: Tab[] = ['converter', 'analyzer', 'settings']
+type Tab = 'converter' | 'analyzer' | 'settings' | 'about'
+const tabOrder: Tab[] = ['converter', 'analyzer', 'settings', 'about']
 const tab = ref<Tab>('converter')
 
 // Direction-aware slide: figure out whether the newly selected tab sits to
@@ -53,6 +55,9 @@ const buildDate = __BUILD_DATE__
         <h1 class="brand-title">{{ t('app.title') }}</h1>
         <span class="brand-subtitle">{{ t('app.subtitle') }}</span>
       </div>
+      <div class="topbar-actions">
+        <GithubStarButton />
+      </div>
     </header>
 
     <nav class="tabs" :aria-label="t('nav.mainLabel')">
@@ -76,22 +81,32 @@ const buildDate = __BUILD_DATE__
       </button>
       <button
         type="button"
-        class="tab tab--right"
+        class="tab"
         :class="{ active: tab === 'settings' }"
         :aria-current="tab === 'settings' ? 'page' : undefined"
         @click="selectTab('settings')"
       >
         {{ t('nav.settings') }}
       </button>
+      <button
+        type="button"
+        class="tab tab--right"
+        :class="{ active: tab === 'about' }"
+        :aria-current="tab === 'about' ? 'page' : undefined"
+        @click="selectTab('about')"
+      >
+        {{ t('nav.about') }}
+      </button>
     </nav>
 
-    <FileBar v-if="tab !== 'settings'" />
+    <FileBar v-if="tab === 'converter' || tab === 'analyzer'" />
 
     <main class="content">
       <Transition :name="transitionName" mode="out-in">
         <ConverterView v-if="activeView === 'converter'" key="converter" />
         <AnalyzerView v-else-if="activeView === 'analyzer'" key="analyzer" />
         <SettingsView v-else-if="activeView === 'settings'" key="settings" />
+        <AboutView v-else-if="activeView === 'about'" key="about" />
       </Transition>
     </main>
 
@@ -147,6 +162,11 @@ const buildDate = __BUILD_DATE__
   font-size: 0.78rem;
   color: var(--color-text-muted);
 }
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
 .tabs {
   display: flex;
   gap: 4px;
@@ -189,12 +209,21 @@ const buildDate = __BUILD_DATE__
 
 /* Below 768px the top tab row gives way to the iOS-style bottom bar
    (BottomNav.vue mirrors this breakpoint), and the content area reserves
-   room at the bottom so the fixed bar never overlaps scrolled content. */
+   room at the bottom so the fixed bar never overlaps scrolled content.
+   #13 fix: `<footer class="site-footer">` is `<main>`'s SIBLING (after both
+   it and BottomNav in the template), not inside `.content` — so it never
+   got this same protection. BottomNav is `position: fixed; z-index: 40`
+   (see BottomNav.vue), so whenever a page's content is short enough that
+   the footer lands at the very bottom of the viewport, the fixed bar covers
+   part or all of it. Give the footer the SAME reserved space as `.content`. */
 @media (max-width: 768px) {
   .tabs {
     display: none;
   }
   .content {
+    padding-bottom: calc(var(--space) * 2 + 56px + env(safe-area-inset-bottom, 0px));
+  }
+  .site-footer {
     padding-bottom: calc(var(--space) * 2 + 56px + env(safe-area-inset-bottom, 0px));
   }
 }
