@@ -5,6 +5,14 @@ export interface GgSeries {
   color: string
   /** Legend/tooltip label. */
   name: string
+  /** Colour-axis feature — a THIRD channel's value per point, aligned 1:1
+   *  with `points` (same length/order — see `buildGgPointsWithColor`).
+   *  Present only when a colour-axis channel is picked; when set on ANY
+   *  series in the chart, every point across every series is coloured by
+   *  this value via a continuous colormap instead of `color` (see
+   *  `colorExtent`/`buildOption`'s `visualMap`) — the flat per-lap `color`
+   *  is then only used as a fallback border/legend swatch. */
+  colorValues?: number[]
 }
 
 /** Axis `name`/`nameLocation`/`nameGap` fields for an echarts axis (#10 — the
@@ -74,6 +82,38 @@ export function dataExtent(series: GgSeries[]): { xMin: number; xMax: number; yM
     }
   }
   return { xMin, xMax, yMin, yMax }
+}
+
+/**
+ * Colour-axis feature — the raw [min,max] extent of every series'
+ * `colorValues`, across ALL series (so lap-split scatters share ONE colour
+ * scale, letting laps be compared by colour). Returns `null` when no series
+ * carries `colorValues` (feature off) — the caller's cue to skip the
+ * `visualMap`/per-point colouring path entirely and fall back to each
+ * series' flat `color`. A degenerate (min === max, e.g. a constant channel
+ * or a single point) extent is widened by a small fraction (or ±1 around 0)
+ * so `visualMap` always gets a genuine, non-zero span — same fallback shape
+ * as `paddedAxisRange`.
+ */
+export function colorExtent(series: GgSeries[]): { min: number; max: number } | null {
+  let min = Infinity
+  let max = -Infinity
+  let any = false
+  for (const s of series) {
+    if (!s.colorValues) continue
+    for (const v of s.colorValues) {
+      if (!Number.isFinite(v)) continue
+      any = true
+      if (v < min) min = v
+      if (v > max) max = v
+    }
+  }
+  if (!any) return null
+  if (min === max) {
+    const pad = Math.abs(min) * 0.05 || 1
+    return { min: min - pad, max: max + pad }
+  }
+  return { min, max }
 }
 
 /**
@@ -200,10 +240,20 @@ export function formatAxisTick(value: number, span: number): string {
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { ScatterChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import { colormapSwatches } from '@/domain/analysis/colormap'
 
-echarts.use([ScatterChart, GridComponent, TooltipComponent, CanvasRenderer])
+echarts.use([ScatterChart, GridComponent, TooltipComponent, VisualMapComponent, CanvasRenderer])
+
+// Colour-axis feature — fixed to viridis: perceptually uniform (equal data
+// steps read as equal visual steps, unlike e.g. jet/rainbow) and
+// colour-blind-friendly (purple->teal->yellow avoids the red/green axis) —
+// see colormap.ts's doc. Not user-selectable (unlike the track heatmap's
+// picker): one fewer control for what's meant to be a lightweight "3D plot
+// alternative", and viridis alone already satisfies the legibility bar in
+// both themes.
+const COLOR_AXIS_MAP = 'viridis' as const
 
 const props = defineProps<{
   series: GgSeries[]
@@ -235,6 +285,13 @@ const props = defineProps<{
    *  of the card happening to be roughly square — see `squareAxisRanges`/
    *  `squareGridBox`. */
   equalAspect?: boolean
+  /** Colour-axis feature — the picked third channel's NAME, shown as the
+   *  colorbar's top label and in the tooltip; `undefined`/`null` when no
+   *  colour axis is picked. Purely a label — whether colouring is actually
+   *  active is driven by `series[].colorValues` being present (see
+   *  `colorExtent`), not this prop, so a stale name never turns coloring on
+   *  by itself. */
+  colorChannel?: string | null
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -268,6 +325,14 @@ function buildOption(): echarts.EChartsCoreOption {
   const gridStroke = themeColor('--color-border', '#ccc')
   const square = (props.axisMode ?? 'auto') === 'square'
   const equal = props.equalAspect ?? true
+  // Colour-axis feature — `null` when no series carries `colorValues` (no
+  // channel picked, or the picked channel had no finite samples in range),
+  // the cue to fall back to each series' flat `color` entirely (see
+  // `colorExtent`'s doc).
+  const colorRange = colorExtent(props.series)
+  const hasColor = colorRange !== null
+  const colorSpan = colorRange ? colorRange.max - colorRange.min : NaN
+  const colorDecimals = axisLabelDecimals(colorSpan)
 
   // Explicit per-axis ranges. Needed for BOTH 1:1 flavours: echarts' own
   // auto-ranging applies nice-tick rounding per axis independently, which
@@ -319,7 +384,10 @@ function buildOption(): echarts.EChartsCoreOption {
   const hasYName = Boolean(props.yName)
   const chrome = {
     left: hasYName ? 64 : 48,
-    right: 16,
+    // Colour-axis feature — reserve room on the right for the visualMap
+    // colorbar (a floating component, not part of the grid box itself) so it
+    // doesn't overlap the plotted points.
+    right: hasColor ? 96 : 16,
     top: 16,
     bottom: hasXName ? 56 : 40,
   }
@@ -349,7 +417,14 @@ function buildOption(): echarts.EChartsCoreOption {
       formatter: (p: { seriesName?: string; value?: number[] }) => {
         const v = p.value ?? [0, 0]
         const unit = square ? ' g' : ''
-        return `${p.seriesName ?? ''}<br/>X: ${v[0].toFixed(2)}${unit}<br/>Y: ${v[1].toFixed(2)}${unit}`
+        let s = `${p.seriesName ?? ''}<br/>X: ${v[0].toFixed(2)}${unit}<br/>Y: ${v[1].toFixed(2)}${unit}`
+        // Colour-axis feature — append the third channel's value when this
+        // point carries one (see the `series` data mapping below, which adds
+        // it as `value[2]` only when `hasColor`).
+        if (hasColor && v.length > 2 && props.colorChannel) {
+          s += `<br/>${props.colorChannel}: ${v[2].toFixed(colorDecimals)}`
+        }
+        return s
       },
     },
     xAxis: {
@@ -383,12 +458,51 @@ function buildOption(): echarts.EChartsCoreOption {
         : {}),
       ...axisNameFields(props.yName),
     },
+    // Colour-axis feature — a continuous colorbar legend (min/max labelled)
+    // driving each point's colour off `data[2]` (see the `series` mapping
+    // below). `undefined` when `!hasColor`: `chart.setOption(option, true)`
+    // (see `render()`) is a full replace (`notMerge: true`), so an omitted
+    // key here correctly clears any visualMap left over from a previous
+    // render where a colour axis WAS picked.
+    visualMap: colorRange
+      ? {
+          type: 'continuous',
+          dimension: 2,
+          min: colorRange.min,
+          max: colorRange.max,
+          orient: 'vertical',
+          right: 8,
+          top: 'middle',
+          itemWidth: 14,
+          itemHeight: 120,
+          hoverLink: true,
+          calculable: false,
+          inRange: { color: colormapSwatches(COLOR_AXIS_MAP, 12) },
+          text: [
+            [props.colorChannel, formatAxisTick(colorRange.max, colorSpan)].filter(Boolean).join(' '),
+            formatAxisTick(colorRange.min, colorSpan),
+          ],
+          textStyle: { color: axisStroke },
+          formatter: (v: number) => formatAxisTick(v, colorSpan),
+        }
+      : undefined,
     series: props.series.map((s) => ({
       name: s.name,
       type: 'scatter',
-      data: s.points,
+      // Colour-axis feature — when active, every point across every series
+      // carries its colour value as a 3rd tuple element (visualMap's
+      // `dimension: 2` reads it); when inactive, points stay plain [x, y]
+      // (unchanged from before this feature).
+      data:
+        hasColor && s.colorValues
+          ? s.points.map((p, i) => [p[0], p[1], s.colorValues![i]])
+          : s.points,
       symbolSize: 4,
-      itemStyle: { color: s.color, opacity: 0.5 },
+      // visualMap owns `itemStyle.color` once active — setting it here too
+      // would just be overridden, so only `opacity` (a touch higher than the
+      // flat-color 0.5 default: the colormap already carries most of the
+      // per-point distinction, so a lighter opacity would wash it out) is set.
+      itemStyle: hasColor ? { opacity: 0.8 } : { color: s.color, opacity: 0.5 },
     })),
   }
 }
@@ -455,7 +569,7 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => [props.series, props.axisMode, props.xName, props.yName, props.equalAspect],
+  () => [props.series, props.axisMode, props.xName, props.yName, props.equalAspect, props.colorChannel],
   () => render(),
   { deep: false },
 )
