@@ -28,6 +28,7 @@ export default {
     project: {
       heading: 'Project info',
       author: 'Author',
+      website: 'Website',
       repo: 'Source code',
       version: 'Version',
       versionValue: '{sha} (built {date})',

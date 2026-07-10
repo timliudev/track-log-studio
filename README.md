@@ -5,14 +5,16 @@
 1. **轉檔器** — 把記錄檔轉成 [RaceChrono](https://racechrono.com/) DIY `.nmea`（NMEA 0183 `$GPRMC` + `$RC3`）、`.loga` 或 RaceLogic `.vbo` 供下載。
 2. **分析器** — 在賽道底圖上顯示軌跡、切圈，繪製遙測圖表做賽道分析。
 
-可匯入格式：**`.loga`、`.nmea`、`.vbo`**（外加 aRacer x Tune App 分享出的 `.zip`，自動解壓）；
-可匯出格式：**RaceChrono `.nmea`、`.loga`、`.vbo`**。匯入採**可插拔的 Importer 架構**——每種格式是一個註冊在
+可匯入格式：**`.loga`、`.nmea`、`.vbo`、`.rcz`、`.rcnx`、`.xrk`**（外加 aRacer x Tune App 分享出的 `.zip`，自動解壓）；
+可匯出格式：**RaceChrono `.nmea`、`.loga`、`.vbo`、`.csv`**。匯入採**可插拔的 Importer 架構**——每種格式是一個註冊在
 registry 的 Importer（副檔名 + 內容嗅探偵測，解析在 Web Worker），新增文字格式只需註冊一個 Importer。
 詳見 [`docs/ARCHITECTURE-FORMATS.md`](docs/ARCHITECTURE-FORMATS.md)。
 
+正式站：**<https://tracklogstudio.timliudev.com/>**
+
 **Track Log Studio** is a browser-based, **fully client-side** tool to parse
-racing data logs: it **imports `.loga` / `.nmea` / `.vbo`** (plus aRacer x Tune
-`.zip`) and **exports RaceChrono `.nmea`, `.loga` and `.vbo`**, then analyses laps
+racing data logs: it **imports `.loga` / `.nmea` / `.vbo` / `.rcz` / `.rcnx` / `.xrk`** (plus aRacer x Tune
+`.zip`) and **exports RaceChrono `.nmea`, `.loga`, `.vbo` and `.csv`**, then analyses laps
 & telemetry. Import uses a pluggable Importer architecture (one registered
 importer per format). No backend — all processing happens locally in your
 browser. Installable as a PWA on iOS / Android.
