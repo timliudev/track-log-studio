@@ -15,7 +15,6 @@ export default {
     analyzer: 'Analyzer',
     analyzerSoon: '(Phase 4)',
     settings: 'Settings',
-    about: 'About',
     mainLabel: 'Main navigation',
   },
   settings: {

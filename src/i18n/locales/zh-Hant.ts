@@ -15,7 +15,6 @@ export default {
     analyzer: '分析',
     analyzerSoon: '（Phase 4）',
     settings: '設定',
-    about: '關於',
     mainLabel: '主導覽',
   },
   settings: {
