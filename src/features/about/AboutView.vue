@@ -21,6 +21,7 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
       <h2 class="card-heading">{{ t('about.project.heading') }}</h2>
       <p class="app-name">{{ t('app.title') }}</p>
       <p class="app-subtitle">{{ t('app.subtitle') }}</p>
+      <p class="app-description">{{ t('about.project.description') }}</p>
       <dl class="info-list">
         <div class="info-row">
           <dt>{{ t('about.project.author') }}</dt>
@@ -124,6 +125,12 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
   margin: 0;
   font-size: 0.85rem;
   color: var(--color-text-muted);
+}
+.app-description {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--color-text);
 }
 .info-list {
   margin: 0;
