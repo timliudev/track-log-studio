@@ -27,6 +27,8 @@ export default {
   about: {
     project: {
       heading: '專案資訊',
+      description:
+        '純前端的賽道遙測工具：把 ECU（aRacer .loga）與多款 GPS 記錄器格式（RaceChrono、RaceLogic VBOX、AiM、Qstarz）轉成 RaceChrono .nmea／.loga／.vbo／.csv，並在賽道底圖上做切圈、分段與遙測分析。所有處理都在你的瀏覽器本機完成，資料不上傳。',
       author: '開發者',
       website: '官方網站',
       repo: '原始碼',

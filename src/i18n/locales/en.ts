@@ -27,6 +27,8 @@ export default {
   about: {
     project: {
       heading: 'Project info',
+      description:
+        'A fully client-side track-telemetry tool: convert ECU logs (aRacer .loga) and several GPS logger formats (RaceChrono, RaceLogic VBOX, AiM, Qstarz) into RaceChrono .nmea / .loga / .vbo / .csv, and analyse laps, sectors and telemetry on a track map. Everything runs locally in your browser — no data is uploaded.',
       author: 'Author',
       website: 'Website',
       repo: 'Source code',

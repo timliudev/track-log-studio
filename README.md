@@ -1,9 +1,9 @@
 # Track Log Studio
 
-純前端工具，用於解析 aRacer ECU 的 `.loga` 記錄檔。兩大功能：
+純前端工具，用於**轉檔與分析賽道遙測記錄**——同時支援 ECU 記錄（aRacer `.loga`）與多款 GPS 資料記錄器格式。兩大功能：
 
-1. **轉檔器** — 把記錄檔轉成 [RaceChrono](https://racechrono.com/) DIY `.nmea`（NMEA 0183 `$GPRMC` + `$RC3`）、`.loga` 或 RaceLogic `.vbo` 供下載。
-2. **分析器** — 在賽道底圖上顯示軌跡、切圈，繪製遙測圖表做賽道分析。
+1. **轉檔器** — 把記錄檔轉成 [RaceChrono](https://racechrono.com/) DIY `.nmea`（NMEA 0183 `$GPRMC` + `$RC3`）、`.loga`、RaceLogic `.vbo` 或 `.csv` 供下載。
+2. **分析器** — 在賽道底圖上顯示軌跡、切圈、分段（sector），繪製遙測圖表與 G-G 圖，並可用可拖曳的儀表板同時比對多個圖表與多場次。
 
 可匯入格式：**`.loga`、`.nmea`、`.vbo`、`.rcz`、`.rcnx`、`.xrk`**（外加 aRacer x Tune App 分享出的 `.zip`，自動解壓）；
 可匯出格式：**RaceChrono `.nmea`、`.loga`、`.vbo`、`.csv`**。匯入採**可插拔的 Importer 架構**——每種格式是一個註冊在
@@ -12,12 +12,14 @@ registry 的 Importer（副檔名 + 內容嗅探偵測，解析在 Web Worker）
 
 正式站：**<https://tracklogstudio.timliudev.com/>**
 
-**Track Log Studio** is a browser-based, **fully client-side** tool to parse
-racing data logs: it **imports `.loga` / `.nmea` / `.vbo` / `.rcz` / `.rcnx` / `.xrk`** (plus aRacer x Tune
-`.zip`) and **exports RaceChrono `.nmea`, `.loga`, `.vbo` and `.csv`**, then analyses laps
-& telemetry. Import uses a pluggable Importer architecture (one registered
-importer per format). No backend — all processing happens locally in your
-browser. Installable as a PWA on iOS / Android.
+**Track Log Studio** is a browser-based, **fully client-side** tool to convert
+and analyse racing data logs — from ECU logs (aRacer `.loga`) as well as several
+GPS data loggers. It **imports `.loga` / `.nmea` / `.vbo` / `.rcz` / `.rcnx` / `.xrk`** (plus aRacer x Tune
+`.zip`) and **exports RaceChrono `.nmea`, `.loga`, `.vbo` and `.csv`**, then analyses laps,
+sectors, telemetry and a G-G diagram on a drag-and-drop dashboard that can compare
+multiple charts and sessions. Import uses a pluggable Importer architecture (one
+registered importer per format). No backend — all processing happens locally in
+your browser. Installable as a PWA on iOS / Android.
 
 ## 特色 Highlights
 
@@ -27,13 +29,15 @@ browser. Installable as a PWA on iOS / Android.
 - 🌗 **日夜模式**：跟隨系統或手動
 - 🌐 **多語系**：繁體中文 / English（自動偵測 + 手動）
 - 🧩 自動相容多種 `.loga` 檔頭（Super2 / SuperX / RaceAMP / aRacer X tune App）
-- 📥 可直接上傳 `.loga`、`.nmea`、`.vbo`，或 aRacer x Tune App 分享出的 `.zip`（自動解壓）
-- 🔄 可匯出 RaceChrono `.nmea`、`.loga`、RaceLogic `.vbo`
+- 📥 匯入 `.loga`、`.nmea`、`.vbo`、`.rcz`、`.rcnx`、`.xrk`，或 aRacer x Tune App 分享出的 `.zip`（自動解壓）
+- 🔄 可匯出 RaceChrono `.nmea`、`.loga`、RaceLogic `.vbo`、`.csv`
+- 📊 分析器：軌跡底圖、切圈與分段（sector）、遙測圖表、G-G 圖、可拖曳的多圖表儀表板
+- 🧵 多場次載入、合併與比較（RaceChrono GPS ＋ ECU log 對齊）
 - 💾 設定本地永久化，可匯出 JSON 轉移
 
 ## 支援來源 Supported sources
 
-**經測試 Tested：**
+**ECU 記錄（aRacer `.loga`）— 經測試 Tested：**
 
 1. RC super2 — 透過 SpeedTuning 2 回讀
 2. RC superX — 透過 SpeedTuningX 回讀
@@ -42,19 +46,36 @@ browser. Installable as a PWA on iOS / Android.
 
 **理論上支援但尚未測試 Expected to work, untested：** RC super、RC superXX、RC mini X、RC mini XX、aRacer Race Module 3
 
+**GPS / 資料記錄器格式 GPS / data-logger formats（皆以真檔驗證 verified against real files）：**
+
+| 格式 Format | 來源 Source | 說明 Notes |
+|---|---|---|
+| `.nmea` | RaceChrono DIY | NMEA 0183 `$GPRMC` + `$RC3`（本工具亦可匯出） |
+| `.vbo` | RaceLogic VBOX | VBO 匯出的逆運算，round-trip 驗證 |
+| `.rcz` | RaceChrono | ZIP + `session.json` + 逐通道二進位 |
+| `.xrk` | AiM Solo 2 DL / MyChron5 | 訊息流二進位，GPS 為 ECEF→WGS84 |
+| `.rcnx` | Qstarz LT-Q6000 / Q6000S（QRacing） | ZIP 內含 SQLite（`sql.js` 讀取） |
+
+各格式接入細節見 [`docs/IMPORT-FORMATS-STATUS.md`](docs/IMPORT-FORMATS-STATUS.md) 與 [`docs/specs/`](docs/specs/)。
+
 ## 開發狀態 Status
 
-🚧 開發中 / Under construction。詳見 [`docs/DESIGN.md`](docs/DESIGN.md)。
+線上運作中、持續開發 / Live and under active development。設計與階段規劃見 [`docs/DESIGN.md`](docs/DESIGN.md)。
 
-| 階段 | 內容 | 狀態 |
-|---|---|---|
-| Phase 0 | 專案骨架 + 三種 `.loga` parser + NMEA 輸出 + 測試 + PWA/i18n/主題殼 | ✅ |
-| Phase 1 | 轉檔器（`.loga` → `.nmea`，可設定欄位對應 + preset + 批次） | ✅ |
-| Phase 2 | 分析器（軌跡 / 圖表 / 切圈 / FFT…） | ⬜ |
+| 功能 Feature | 狀態 Status |
+|---|---|
+| 轉檔器（欄位對應 + preset + 批次，輸出 `.nmea` / `.loga` / `.vbo` / `.csv`） | ✅ |
+| 衍生通道與避震校正（5 參數，全格式通用） | ✅ |
+| 多格式匯入（`.loga` / `.nmea` / `.vbo` / `.rcz` / `.xrk` / `.rcnx`，可插拔 Importer） | ✅ |
+| 分析器：軌跡底圖、切圈、遙測圖表、圈速時間帶／距離帶過濾 | ✅ |
+| 賽道分段（sector）自動偵測與分段計時、最佳理論圈 | ✅ |
+| G-G 圖、可拖曳／縮放的多圖表儀表板（手機摺疊／釘選／布局鎖定） | ✅ |
+| 多場次載入、合併與比較（RaceChrono GPS ＋ ECU log 對齊） | ✅ |
+| 雲端賽道庫、多檔（multi-session）分析、齒比圖併入主時序圖 | 🚧 規劃／進行中 |
 
 ## 技術 Stack
 
-TypeScript · Vue 3 · Vite · Pinia · vite-plugin-pwa · uPlot · ECharts · vue-i18n
+TypeScript · Vue 3 · Vite · Pinia · vite-plugin-pwa · uPlot · ECharts · grid-layout-plus · sql.js · fflate · vue-i18n
 
 完整技術決策與理由見 [`docs/DESIGN.md`](docs/DESIGN.md)。
 
@@ -94,12 +115,15 @@ MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 timliudev.
 
 ## 第三方相依 Third-party
 
-執行時相依套件及其授權（皆為 MIT，詳見 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)）：
+執行時相依套件及其授權（完整清單見應用內「關於」頁與 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)）：
 
 - [vue](https://github.com/vuejs/core) — MIT
 - [vue-i18n](https://github.com/intlify/vue-i18n) — MIT
 - [pinia](https://github.com/vuejs/pinia) — MIT
+- [echarts](https://github.com/apache/echarts) — Apache-2.0
 - [uplot](https://github.com/leeoniya/uPlot) — MIT
+- [grid-layout-plus](https://github.com/qmhc/grid-layout-plus) — MIT
+- [sql.js](https://github.com/sql-js/sql.js) — MIT
 - [fflate](https://github.com/101arrowz/fflate) — MIT
 - [idb](https://github.com/jakearchibald/idb) — ISC
 - [vite-plugin-pwa](https://github.com/vite-pwa/vite-plugin-pwa) — MIT
