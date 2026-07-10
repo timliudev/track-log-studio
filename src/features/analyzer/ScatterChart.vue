@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAnalyzerStore, type ScatterChartConfig } from '@/stores/analyzerStore'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
-import { buildGgPoints, looksLikeForce } from '@/domain/analysis/ggData'
+import { buildGgPoints, buildGgPointsWithColor, looksLikeForce } from '@/domain/analysis/ggData'
 import { lapColor } from './lapColors'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GgSeries } from './GgChart.vue'
@@ -72,6 +72,15 @@ function setEqualAspect(on: boolean): void {
   analyzer.setChartEqualAspect(props.chart.id, on)
 }
 
+// Colour-axis feature — an optional THIRD channel mapped to point colour via
+// a continuous colormap (a 3D-plot alternative — see GgChart.vue's
+// visualMap). Persisted alongside X/Y/equalAspect (same "one field, one
+// setter" contract) — see analyzerStore's setChartColorChannel.
+const colorChannel = computed(() => props.chart.colorChannel)
+function setColorChannel(name: string | null): void {
+  analyzer.setChartColorChannel(props.chart.id, name)
+}
+
 // Scale is only meaningful for aRacer's milli-g force channels; any other
 // channel pair plots in its native units (raw scale = 1). `looksLikeForce`
 // is shared with analyzerStore's addChart/chartConfigs' backfill — see
@@ -87,22 +96,47 @@ const ggSeries = computed<GgSeries[]>(() => {
   const yCh = s.get(yName)
   if (!xCh || !yCh) return []
   const scale = useMilliG.value ? MILLI_G_SCALE : 1
+  // Colour-axis feature — resolved once here (not per-lap below) so a stale
+  // colorChannel pick from a previously loaded session (channel no longer
+  // exists) degrades to "no colour axis" for every series, same as
+  // x/yChannel's existing "renders empty until valid" degrade.
+  const colorCh = colorChannel.value ? s.get(colorChannel.value) : null
 
   if (props.selectedLaps.length === 0) {
+    if (colorCh) {
+      const { points, colorValues } = buildGgPointsWithColor(xCh.data, yCh.data, colorCh.data, {
+        scale,
+        maxPoints: MAX_POINTS,
+      })
+      return [{ points, colorValues, color: '#4363d8', name: t('analyzer.gg.session') }]
+    }
     const points = buildGgPoints(xCh.data, yCh.data, { scale, maxPoints: MAX_POINTS })
     return [{ points, color: '#4363d8', name: t('analyzer.gg.session') }]
   }
 
-  return props.selectedLaps.map((lap, order) => ({
-    points: buildGgPoints(xCh.data, yCh.data, {
-      scale,
-      start: lap.startIdx,
-      end: lap.endIdx,
-      maxPoints: MAX_POINTS,
-    }),
-    color: lapColor(order),
-    name: t('analyzer.gg.lapSeries', { n: lap.index + 1 }),
-  }))
+  return props.selectedLaps.map((lap, order) => {
+    const name = t('analyzer.gg.lapSeries', { n: lap.index + 1 })
+    const color = lapColor(order)
+    if (colorCh) {
+      const { points, colorValues } = buildGgPointsWithColor(xCh.data, yCh.data, colorCh.data, {
+        scale,
+        start: lap.startIdx,
+        end: lap.endIdx,
+        maxPoints: MAX_POINTS,
+      })
+      return { points, colorValues, color, name }
+    }
+    return {
+      points: buildGgPoints(xCh.data, yCh.data, {
+        scale,
+        start: lap.startIdx,
+        end: lap.endIdx,
+        maxPoints: MAX_POINTS,
+      }),
+      color,
+      name,
+    }
+  })
 })
 
 // Adaptive axis rule (documented on GgChart.vue too): symmetric-about-0
@@ -143,6 +177,14 @@ const axisMode = computed<'square' | 'auto'>(() => {
         <span class="picker-label">{{ t('analyzer.gg.yAxis') }}</span>
         <SearchableSelect :model-value="yChannel" :options="allChannels" @update:model-value="setY" />
       </div>
+      <div class="picker">
+        <span class="picker-label">{{ t('analyzer.gg.colorAxis') }}</span>
+        <SearchableSelect
+          :model-value="colorChannel"
+          :options="allChannels"
+          @update:model-value="setColorChannel"
+        />
+      </div>
       <div class="aspect" role="group" :aria-label="t('analyzer.gg.aspectLabel')">
         <button
           type="button"
@@ -176,6 +218,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
       :y-name="yChannel"
       :fill-height="fillHeight"
       :equal-aspect="equalAspect"
+      :color-channel="colorChannel"
     />
   </section>
 </template>

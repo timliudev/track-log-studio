@@ -56,6 +56,13 @@ export interface ScatterChartConfig {
    *  `squareGridBox` for how the ON state survives a non-square card and
    *  window/card resizes. */
   equalAspect: boolean
+  /** Colour-axis feature — an optional THIRD channel whose value maps each
+   *  point's colour via a continuous colormap (a 3D-plot alternative — see
+   *  ScatterChart.vue's colour-axis picker / GgChart.vue's visualMap). `null`
+   *  (default, including pre-feature persisted charts — see `parseCharts`'s
+   *  backfill below) means "no colour axis", i.e. the existing flat per-lap
+   *  `GgSeries.color` styling. */
+  colorChannel: string | null
 }
 
 /** One chart on the analyzer dashboard, discriminated on `kind`. */
@@ -122,6 +129,10 @@ export function parseCharts(raw: string | null): ChartConfig[] | null {
           // fix).
           equalAspect:
             typeof it.equalAspect === 'boolean' ? it.equalAspect : looksLikeForcePair(xChannel, yChannel),
+          // Colour-axis feature — missing/invalid (any chart persisted before
+          // this field existed) backfills to null ("no colour axis"), same
+          // "degrade to off" spirit as the other optional scatter fields.
+          colorChannel: typeof it.colorChannel === 'string' ? it.colorChannel : null,
         })
         seen.add(id)
       }

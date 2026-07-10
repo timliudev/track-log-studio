@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { buildGgPoints, looksLikeForce, looksLikeForcePair } from '@/domain/analysis/ggData'
+import {
+  buildGgPoints,
+  buildGgPointsWithColor,
+  looksLikeForce,
+  looksLikeForcePair,
+} from '@/domain/analysis/ggData'
 
 describe('buildGgPoints', () => {
   it('scales x/y by the given factor (e.g. milli-g -> g)', () => {
@@ -69,6 +74,69 @@ describe('buildGgPoints', () => {
 
   it('returns an empty array for empty input', () => {
     expect(buildGgPoints([], [])).toEqual([])
+  })
+})
+
+// Colour-axis feature — a 3rd channel's value carried alongside each [x, y]
+// point (ScatterChart.vue's colour-axis picker / GgChart.vue's visualMap).
+describe('buildGgPointsWithColor', () => {
+  it('carries the colour channel value alongside each scaled x/y point', () => {
+    const x = [1000, -500, 250]
+    const y = [200, -1000, 0]
+    const c = [10, 20, 30]
+    const { points, colorValues } = buildGgPointsWithColor(x, y, c, { scale: 0.001 })
+    expect(points).toEqual([
+      [1, 0.2],
+      [-0.5, -1],
+      [0.25, 0],
+    ])
+    expect(colorValues).toEqual([10, 20, 30])
+  })
+
+  it('does NOT scale colour values (only x/y use the milli-g scale)', () => {
+    const { colorValues } = buildGgPointsWithColor([1, 2], [1, 2], [1000, 2000], { scale: 0.001 })
+    expect(colorValues).toEqual([1000, 2000])
+  })
+
+  it('drops a sample if x, y, OR the colour value is non-finite', () => {
+    const x = [1, 2, 3, 4]
+    const y = [1, 2, 3, 4]
+    const c = [1, NaN, 3, Infinity]
+    const { points, colorValues } = buildGgPointsWithColor(x, y, c)
+    expect(points).toEqual([
+      [1, 1],
+      [3, 3],
+    ])
+    expect(colorValues).toEqual([1, 3])
+  })
+
+  it('keeps colorValues aligned with points through stride-decimation', () => {
+    const n = 100
+    const x = Array.from({ length: n }, (_, i) => i)
+    const y = Array.from({ length: n }, (_, i) => i)
+    const c = Array.from({ length: n }, (_, i) => i * 10)
+    const { points, colorValues } = buildGgPointsWithColor(x, y, c, { maxPoints: 10 })
+    expect(colorValues).toHaveLength(points.length)
+    for (let i = 0; i < points.length; i++) expect(colorValues[i]).toBe(points[i][0] * 10)
+    // Last sample always kept (same rule as buildGgPoints).
+    expect(points[points.length - 1]).toEqual([99, 99])
+    expect(colorValues[colorValues.length - 1]).toBe(990)
+  })
+
+  it('respects the [start, end) range for all three arrays', () => {
+    const x = [0, 1, 2, 3, 4]
+    const y = [0, 10, 20, 30, 40]
+    const c = [0, 100, 200, 300, 400]
+    const { points, colorValues } = buildGgPointsWithColor(x, y, c, { start: 1, end: 3 })
+    expect(points).toEqual([
+      [1, 10],
+      [2, 20],
+    ])
+    expect(colorValues).toEqual([100, 200])
+  })
+
+  it('returns empty arrays for empty input', () => {
+    expect(buildGgPointsWithColor([], [], [])).toEqual({ points: [], colorValues: [] })
   })
 })
 
