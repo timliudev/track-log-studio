@@ -60,6 +60,9 @@ export default {
     unsupported: 'Unsupported file format: {name}',
     remove: 'Remove',
     clearAll: 'Clear all',
+    includeInAnalysis: 'Show {name} in analysis',
+    makePrimary: 'Make {name} the primary recording',
+    primary: 'Primary',
     sources: {
       title: 'Supported formats',
       ecuGroup: 'ECU logs ({ext})',
@@ -110,6 +113,8 @@ export default {
     comparisonLapSummary: 'Fastest laps in compared recordings',
     comparisonLapCount: '{n} laps',
     comparisonSelectLaps: 'Select laps for cross-recording overlay',
+    comparisonChartAlign: 'Chart alignment',
+    comparisonMapAlign: 'Compared recording map offset',
     comparisonClear: 'Clear comparisons',
     pickChannel: 'Pick channels to plot from above',
     addChart: 'Add chart',

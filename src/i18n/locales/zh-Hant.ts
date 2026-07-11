@@ -59,6 +59,9 @@ export default {
     unsupported: '不支援的檔案格式：{name}',
     remove: '移除',
     clearAll: '全部清除',
+    includeInAnalysis: '在分析中顯示 {name}',
+    makePrimary: '將 {name} 設為主要記錄',
+    primary: '主要',
     sources: {
       title: '支援格式',
       ecuGroup: 'ECU 記錄（{ext}）',
@@ -109,6 +112,8 @@ export default {
     comparisonLapSummary: '比較記錄最快圈',
     comparisonLapCount: '{n} 圈',
     comparisonSelectLaps: '選取要跨檔疊圖的圈次',
+    comparisonChartAlign: '圖表對齊',
+    comparisonMapAlign: '比較記錄地圖偏移',
     comparisonClear: '清除比較',
     pickChannel: '從上方選擇要繪製的通道',
     addChart: '新增圖表',
