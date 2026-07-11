@@ -107,6 +107,8 @@ export default {
     comparisonReset: 'Reset offset',
     comparisonMapEast: 'Map east',
     comparisonMapNorth: 'Map north',
+    comparisonLapSummary: 'Fastest laps in compared recordings',
+    comparisonLapCount: '{n} laps',
     comparisonClear: 'Clear comparisons',
     pickChannel: 'Pick channels to plot from above',
     addChart: 'Add chart',

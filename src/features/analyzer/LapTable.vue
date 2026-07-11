@@ -14,6 +14,8 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LogSession } from '@/domain/model/LogSession'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
+import SessionLapComparison from './SessionLapComparison.vue'
 
 const props = defineProps<{
   laps: Lap[]
@@ -23,6 +25,7 @@ const props = defineProps<{
   session: LogSession | null
   /** Whether the ECU lap channel (IR_LapNumber) is available in this session. */
   hasEcuLaps: boolean
+  comparisonSessions?: ComparisonSession[]
 }>()
 
 const { t } = useI18n()
@@ -353,6 +356,11 @@ const rows = computed<Row[]>(() => {
       </tbody>
     </table>
     </div>
+    <SessionLapComparison
+      :primary-laps="laps"
+      :primary-excluded="lapStore.excluded"
+      :comparisons="comparisonSessions ?? []"
+    />
   </div>
 </template>
 

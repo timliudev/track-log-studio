@@ -966,6 +966,7 @@ function titleForItemId(id: string): string {
                 :time-ms="timeMs"
                 :session="session"
                 :has-ecu-laps="hasEcuLaps"
+                :comparison-sessions="comparisonSessions"
                 @select="onLapSelect"
               />
             </DashboardCard>
@@ -985,6 +986,7 @@ function titleForItemId(id: string): string {
                 :track="track"
                 :time-ms="timeMs"
                 :cursor-idx="cursorIdx"
+                :comparison-sessions="comparisonSessions"
               />
             </DashboardCard>
 
