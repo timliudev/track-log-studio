@@ -6,6 +6,7 @@ import type { LapLine } from '@/domain/analysis/laps'
 import { colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import type { TrackOverlayEntry } from '@/domain/analysis/trackOverlay'
 import { fitProjection, type MapProjection } from './projection'
+import { nearestSample } from './trackNearestSample'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -908,25 +909,13 @@ function onPointerMove(e: PointerEvent): void {
   }
 
   // Idle hover (mouse, no button): scrub the nearest sample for chart sync.
+  // Only selects when the pointer is actually near the track line (HIT radius),
+  // so the whitespace around it doesn't snap to the outermost point.
   if (!px || !py) return
   const pos = clientPos(e)
   if (!pos) return
-  let best = -1
-  let bestD = Infinity
-  for (let i = 0; i < px.length; i++) {
-    if (Number.isNaN(px[i])) continue
-    const dx = px[i] - pos.x
-    const dy = py[i] - pos.y
-    const d = dx * dx + dy * dy
-    if (d < bestD) {
-      bestD = d
-      best = i
-    }
-  }
-  // Only select when the pointer is actually near the track line, so the
-  // whitespace around it doesn't snap to the outermost point.
   const HIT = 24
-  emit('cursor', best >= 0 && bestD <= HIT * HIT ? best : null)
+  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT))
 }
 
 function onPointerUp(e: PointerEvent): void {
