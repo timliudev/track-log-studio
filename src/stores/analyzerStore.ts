@@ -34,7 +34,7 @@ const ZERO_SESSION_OFFSET: Readonly<SessionOffset> = {
  *  the panel/store only ever hold ONE condition's params at a time (switching
  *  type doesn't require clearing unrelated fields — see `setAccelCondition`). */
 export type AccelCondition =
-  | { kind: 'distance'; distanceM: number; minEntrySpeedKmh: number | null }
+  | { kind: 'distance'; distanceM: number; entrySpeedKmh: number }
   | { kind: 'speed'; fromKmh: number; toKmh: number }
 
 /**
@@ -97,7 +97,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const accelCondition = ref<AccelCondition>({
     kind: 'distance',
     distanceM: 100,
-    minEntrySpeedKmh: null,
+    entrySpeedKmh: 0,
   })
   // Global multi-session comparison selection. The active file remains the
   // primary session for laps/sectors/deep-dive panels; these ids are OTHER

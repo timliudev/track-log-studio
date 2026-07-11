@@ -30,7 +30,7 @@ function setKind(kind: AccelCondition['kind']): void {
   if (kind === condition.value.kind) return
   analyzer.setAccelCondition(
     kind === 'distance'
-      ? { kind: 'distance', distanceM: 100, minEntrySpeedKmh: null }
+      ? { kind: 'distance', distanceM: 100, entrySpeedKmh: 0 }
       : { kind: 'speed', fromKmh: 0, toKmh: 100 },
   )
 }
@@ -41,14 +41,10 @@ function onDistanceInput(e: Event): void {
   analyzer.setAccelCondition({ ...condition.value, distanceM: Number.isFinite(v) && v > 0 ? v : 0 })
 }
 
-function onMinEntryInput(e: Event): void {
-  const raw = (e.target as HTMLInputElement).value.trim()
+function onEntrySpeedInput(e: Event): void {
+  const v = Number((e.target as HTMLInputElement).value)
   if (condition.value.kind !== 'distance') return
-  const v = raw === '' ? null : Number(raw)
-  analyzer.setAccelCondition({
-    ...condition.value,
-    minEntrySpeedKmh: v != null && Number.isFinite(v) ? v : null,
-  })
+  analyzer.setAccelCondition({ ...condition.value, entrySpeedKmh: Number.isFinite(v) && v >= 0 ? v : 0 })
 }
 
 function onFromInput(e: Event): void {
@@ -104,20 +100,17 @@ function fmtDist(v: number): string {
         />
       </label>
       <label class="field">
-        <span>{{ t('analyzer.accelMinEntry') }}</span>
+        <span>{{ t('analyzer.accelEntrySpeed') }}</span>
         <input
           type="number"
           inputmode="decimal"
           min="0"
           step="1"
-          :value="condition.minEntrySpeedKmh ?? ''"
-          :placeholder="t('analyzer.accelMinEntryPlaceholder')"
-          @input="onMinEntryInput"
+          :value="condition.entrySpeedKmh"
+          @input="onEntrySpeedInput"
         />
       </label>
-      <p v-if="props.result != null" class="hint min-entry-hint">
-        {{ t('analyzer.accelMinEntryHint', { entry: fmtSpeed(props.result.entrySpeedKmh) }) }}
-      </p>
+      <p class="hint entry-speed-hint">{{ t('analyzer.accelEntrySpeedHint') }}</p>
     </div>
 
     <div v-else class="row params">
@@ -219,7 +212,7 @@ function fmtDist(v: number): string {
   font-size: 0.85rem;
   color: var(--color-text-muted);
 }
-.min-entry-hint {
+.entry-speed-hint {
   flex-basis: 100%;
   font-size: 0.78rem;
   opacity: 0.8;

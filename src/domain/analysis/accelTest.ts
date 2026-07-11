@@ -27,61 +27,137 @@ export interface AccelSegment {
   exitSpeedKmh: number
 }
 
-export interface FastestDistanceOptions {
+export interface FastestDistanceFromLaunchOptions {
   /** Distance to cover (metres), e.g. 100 for a "fastest 100 m" search. */
   distanceM: number
   /**
-   * Optional rolling-start gate: the window's start sample must have speed
-   * >= this (km/h). Omit for a standing/any-speed start (window can begin
-   * anywhere, e.g. from a dead stop).
+   * The launch speed (km/h) to time FROM — e.g. 0 for a standing start, or a
+   * rolling-launch speed like 40. A "launch" is a crossing where speed rises
+   * THROUGH this value (from <= entrySpeedKmh to > entrySpeedKmh); the clock
+   * starts at that crossing, not at some globally-fastest window that merely
+   * happens to satisfy a floor.
    */
-  minEntrySpeedKmh?: number
+  entrySpeedKmh: number
 }
 
 /**
- * Two-pointer sliding window over the whole session: for every possible
- * window START, advance the END pointer until cumulative distance covers
- * `distanceM` (cumDistM is monotonically non-decreasing, so both pointers
- * only ever move forward — O(n) total, not O(n^2)). Among all windows that
- * cover exactly `distanceM` (interpolated to the exact distance at the
- * fractional end sample) and whose start sample satisfies
- * `minEntrySpeedKmh` (if given), keep the one with the smallest elapsed time.
+ * Times "from a launch at `entrySpeedKmh`, how long to cover `distanceM`" —
+ * mirroring what the user actually means by e.g. "0 km/h start, 100 m: how
+ * many seconds to cover it" (a standing-start drag time), NOT "anywhere in
+ * the session where entry speed happens to be >= a floor, find the
+ * fastest-covering window" (that's what the old floor-filter search did, and
+ * why entry=0 used to return a near-top-speed window instead of a genuine
+ * standing start — see the module doc history / accelTest.test.ts).
  *
- * Time/distance at the window edges are linearly interpolated between
- * samples so the reported segment always covers exactly `distanceM` (not
- * "whichever sample happened to be sampled around there") — matching a real
- * drag timer's trap-distance semantics.
+ * Launch detection reuses {@link fastestSpeedSegment}'s `lastLowIdx` idea:
+ * scan the whole session tracking the most recent sample at/below
+ * `entrySpeedKmh` (a candidate launch base); the first time speed
+ * subsequently rises strictly above it, that's a launch, interpolated to the
+ * exact instant speed crosses `entrySpeedKmh` (same trap-timer semantics as
+ * the other accel-test functions — a threshold crossed mid-sample doesn't
+ * bias the result by up to one sample interval). For `entrySpeedKmh = 0`
+ * this is exactly a standing start: the launch is where speed leaves zero.
  *
- * Returns null when: fewer than 2 samples, `distanceM <= 0`, no window in the
- * session covers that much distance, or no window satisfies
- * `minEntrySpeedKmh`.
+ * From each launch's interpolated start (time + distance), a two-pointer
+ * scan advances an END cursor until cumulative distance covers `distanceM`
+ * from that start (interpolated to the exact end at the trap distance, same
+ * as {@link fastestSpeedSegment}/the old distance search). Because launch
+ * starts and their target distances are both monotonically non-decreasing
+ * across the session (cumDistM never decreases), the END cursor is shared
+ * and only ever advances across ALL launches — still O(n) total, not
+ * O(n * launches). Once a launch's remaining distance can't reach
+ * `distanceM`, every later launch (starting even further along, with even
+ * less track left) can't either, so the scan stops there.
+ *
+ * Among ALL launches found in the session, the one with the smallest elapsed
+ * time wins. After a launch is resolved (whether or not it covered the
+ * distance), a fresh dip back to/below `entrySpeedKmh` is required before
+ * another launch can start — so a noisy plateau right at the threshold
+ * doesn't spawn many overlapping "launches" from the same run.
+ *
+ * Returns null when: fewer than 2 samples, `distanceM <= 0`,
+ * `entrySpeedKmh` isn't finite, no sample ever crosses UP through
+ * `entrySpeedKmh` (no launch at all), or no launch's remaining track covers
+ * `distanceM`.
  */
-export function fastestDistanceSegment(
+export function fastestDistanceFromLaunch(
   cumDistM: Float64Array,
   timeMs: Float64Array,
   speedKmh: ArrayLike<number>,
-  opts: FastestDistanceOptions,
+  opts: FastestDistanceFromLaunchOptions,
 ): AccelSegment | null {
   const n = cumDistM.length
-  const { distanceM, minEntrySpeedKmh } = opts
-  if (n < 2 || n !== timeMs.length || !(distanceM > 0)) return null
+  const { distanceM, entrySpeedKmh } = opts
+  if (n < 2 || n !== timeMs.length || !(distanceM > 0) || !Number.isFinite(entrySpeedKmh)) {
+    return null
+  }
+
+  /** Interpolate the fraction along (i-1 -> i) where speed crosses `target`,
+   *  assuming speed[i-1] and speed[i] bracket it (one at/below, one above). */
+  function crossingFrac(i: number, target: number): number {
+    const v0 = speedKmh[i - 1]
+    const v1 = speedKmh[i]
+    const span = v1 - v0
+    if (!Number.isFinite(span) || Math.abs(span) < 1e-9) return 0
+    return Math.min(1, Math.max(0, (target - v0) / span))
+  }
+
+  function lerp(i: number, frac: number, arr: Float64Array): number {
+    return arr[i - 1] + frac * (arr[i] - arr[i - 1])
+  }
 
   let best: AccelSegment | null = null
+  // Most recent sample index seen at/below entrySpeedKmh — a candidate
+  // launch base — or -1 when none has been seen yet. See fastestSpeedSegment
+  // for why the LATEST such index (not the earliest) is kept.
+  let lastLowIdx = -1
+  // Two-pointer END cursor shared across launches (see doc above for why
+  // this stays valid across the whole scan without restarting from 0).
   let end = 0
 
-  for (let start = 0; start < n - 1; start++) {
-    if (!Number.isFinite(cumDistM[start]) || !Number.isFinite(timeMs[start])) continue
-    if (minEntrySpeedKmh != null) {
-      const v0 = speedKmh[start]
-      if (!Number.isFinite(v0) || v0 < minEntrySpeedKmh) continue
+  for (let i = 0; i < n; i++) {
+    const v = speedKmh[i]
+    if (!Number.isFinite(v)) continue
+
+    if (v <= entrySpeedKmh) {
+      lastLowIdx = i
+      continue
     }
 
-    const targetDist = cumDistM[start] + distanceM
-    if (end < start + 1) end = start + 1
-    while (end < n - 1 && cumDistM[end] < targetDist) end++
-    if (cumDistM[end] < targetDist) break // remainder of the session is too short
+    if (lastLowIdx < 0) continue // still waiting for a qualifying low point to launch from
 
-    // Interpolate the exact end time at targetDist between samples end-1..end.
+    // v > entrySpeedKmh and we have a launch base: interpolate the exact
+    // launch instant (crossing entrySpeedKmh between lastLowIdx and i).
+    const startI = lastLowIdx
+    let startTimeMs: number
+    let startDistM: number
+    let startSpeedKmh: number
+    if (startI + 1 < n && Number.isFinite(speedKmh[startI + 1]) && (speedKmh[startI + 1] as number) > entrySpeedKmh) {
+      const f = crossingFrac(startI + 1, entrySpeedKmh)
+      startTimeMs = lerp(startI + 1, f, timeMs)
+      startDistM = lerp(startI + 1, f, cumDistM)
+      startSpeedKmh = entrySpeedKmh
+    } else {
+      startTimeMs = timeMs[startI]
+      startDistM = cumDistM[startI]
+      startSpeedKmh = speedKmh[startI] as number
+    }
+
+    // This launch is resolved; require a fresh dip back to entrySpeedKmh
+    // before another one can start (see doc above).
+    lastLowIdx = -1
+
+    if (!Number.isFinite(startTimeMs) || !Number.isFinite(startDistM)) continue
+
+    const targetDist = startDistM + distanceM
+    // Floor the shared END cursor at startI+1 (not the current loop index
+    // `i`) — they can differ when invalid/NaN speed samples sit between the
+    // launch and its detection, and the window's end may legitimately fall
+    // in that gap (cumDistM/timeMs there can still be valid).
+    if (end < startI + 1) end = startI + 1
+    while (end < n - 1 && cumDistM[end] < targetDist) end++
+    if (cumDistM[end] < targetDist) break // remaining track too short — later launches fare no better
+
     const d0 = cumDistM[end - 1]
     const d1 = cumDistM[end]
     const t0 = timeMs[end - 1]
@@ -92,7 +168,7 @@ export function fastestDistanceSegment(
     const span = d1 - d0
     const frac = span > 1e-9 ? Math.min(1, Math.max(0, (targetDist - d0) / span)) : 0
     const endTimeMs = t0 + frac * (t1 - t0)
-    const elapsed = endTimeMs - timeMs[start]
+    const elapsed = endTimeMs - startTimeMs
     if (!(elapsed > 0)) continue
 
     if (best == null || elapsed < best.timeMs) {
@@ -103,11 +179,11 @@ export function fastestDistanceSegment(
           ? exitV0 + frac * (exitV1 - exitV0)
           : (speedKmh[end] as number)
       best = {
-        startIdx: start,
+        startIdx: startI,
         endIdx: end,
         timeMs: elapsed,
         distanceM,
-        entrySpeedKmh: speedKmh[start] as number,
+        entrySpeedKmh: startSpeedKmh,
         exitSpeedKmh,
       }
     }
@@ -142,7 +218,7 @@ export interface FastestSpeedOptions {
  * runs in the same log each produce their own candidate; the faster wins.
  *
  * Time/distance are interpolated at the crossing points (same trap-timer
- * semantics as {@link fastestDistanceSegment}) so a threshold crossed
+ * semantics as {@link fastestDistanceFromLaunch}) so a threshold crossed
  * mid-sample doesn't bias the result by up to one sample interval.
  *
  * Returns null when: fewer than 2 samples, `toKmh <= fromKmh`, or no
