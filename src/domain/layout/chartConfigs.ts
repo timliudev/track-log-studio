@@ -36,6 +36,15 @@ export interface TimeSeriesChartConfig {
   mode: ChartMode
 }
 
+/** A drivetrain-ratio trace derived from RPM + road speed. Its source series
+ * is fixed (there is no channel picker), but it shares the timeline/lap-
+ * overlay mode with ordinary time-series charts. */
+export interface GearRatioChartConfig {
+  kind: 'gearRatio'
+  id: number
+  mode: ChartMode
+}
+
 /** An XY scatter chart: any two channels plotted against each other. */
 export interface ScatterChartConfig {
   kind: 'scatter'
@@ -66,7 +75,7 @@ export interface ScatterChartConfig {
 }
 
 /** One chart on the analyzer dashboard, discriminated on `kind`. */
-export type ChartConfig = TimeSeriesChartConfig | ScatterChartConfig
+export type ChartConfig = TimeSeriesChartConfig | ScatterChartConfig | GearRatioChartConfig
 
 export const STORAGE_KEY = 'aracer-loga.analyzerCharts.v1'
 
@@ -111,6 +120,13 @@ export function parseCharts(raw: string | null): ChartConfig[] | null {
           kind: 'timeseries',
           id,
           channels: isStringArray(it.channels) ? it.channels : [],
+          mode: it.mode === 'overlay' ? 'overlay' : 'timeline',
+        })
+        seen.add(id)
+      } else if (it.kind === 'gearRatio') {
+        charts.push({
+          kind: 'gearRatio',
+          id,
           mode: it.mode === 'overlay' ? 'overlay' : 'timeline',
         })
         seen.add(id)

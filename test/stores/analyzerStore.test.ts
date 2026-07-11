@@ -38,6 +38,14 @@ describe('analyzerStore', () => {
     }
   })
 
+  it('addChart("gearRatio") appends a timeline gear-ratio chart', () => {
+    const s = useAnalyzerStore()
+    s.addChart('gearRatio')
+    expect(s.charts[1]).toEqual({ kind: 'gearRatio', id: 2, mode: 'timeline' })
+    s.setChartMode(2, 'overlay')
+    expect(s.charts[1]).toEqual({ kind: 'gearRatio', id: 2, mode: 'overlay' })
+  })
+
   it('addChart("scatter", initial) defaults equalAspect true for a force/acceleration pair', () => {
     const s = useAnalyzerStore()
     s.addChart('scatter', { xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' })
@@ -238,6 +246,8 @@ describe('analyzerStore — chart persistence (T5)', () => {
     s.setChartChannels(s.charts[1].id, ['RPM', 'T_Eng'])
     s.setChartMode(s.charts[1].id, 'overlay')
     s.addChart('scatter', { xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' })
+    s.addChart('gearRatio')
+    s.setChartMode(s.charts[3].id, 'overlay')
     await nextTick() // deep watch persists on the next flush
 
     // Simulated reload: a fresh pinia re-runs the store setup -> loadCharts().
@@ -247,6 +257,7 @@ describe('analyzerStore — chart persistence (T5)', () => {
       { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
       { kind: 'timeseries', id: 2, channels: ['RPM', 'T_Eng'], mode: 'overlay' },
       { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true, colorChannel: null },
+      { kind: 'gearRatio', id: 4, mode: 'overlay' },
     ])
   })
 
