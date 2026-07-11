@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildSessionLapSummaries, fastestLapTime } from '@/domain/analysis/sessionLapSummary'
+import {
+  buildComparisonLapRows,
+  buildSessionLapSummaries,
+  fastestLapTime,
+} from '@/domain/analysis/sessionLapSummary'
 import type { Lap } from '@/domain/model/Lap'
 
 const lap = (index: number, lapTimeMs: number): Lap => ({ index, lapTimeMs, startIdx: index * 10, endIdx: index * 10 + 9 })
@@ -14,5 +18,32 @@ describe('session lap summaries', () => {
     expect(fastestLapTime(primary, [0])).toBe(61000)
     expect(result[0]).toMatchObject({ fastestMs: 60500, deltaMs: -500, lapCount: 2 })
     expect(result[1]).toMatchObject({ fastestMs: null, deltaMs: null, lapCount: 0 })
+  })
+})
+
+describe('comparison lap rows', () => {
+  it('flags fastest/slowest and derives per-lap distance from the track', () => {
+    // cum distance grows 100 m per sample; each lap spans 9 samples ⇒ 900 m.
+    const cumDistM = Float64Array.from({ length: 30 }, (_v, i) => i * 100)
+    const rows = buildComparisonLapRows(
+      [lap(0, 62000), lap(1, 60000), lap(2, 64000)],
+      cumDistM,
+    )
+    expect(rows).toHaveLength(3)
+    expect(rows[1]).toMatchObject({ index: 1, isFastest: true, isSlowest: false })
+    expect(rows[2]).toMatchObject({ index: 2, isFastest: false, isSlowest: true })
+    expect(rows[0]).toMatchObject({ isFastest: false, isSlowest: false })
+    expect(rows[0].distanceM).toBeCloseTo(900)
+  })
+
+  it('suppresses the slowest marker when a single lap is both fastest and slowest', () => {
+    const rows = buildComparisonLapRows([lap(0, 61000)], null)
+    expect(rows[0]).toMatchObject({ isFastest: true, isSlowest: false })
+    expect(Number.isNaN(rows[0].distanceM)).toBe(true)
+  })
+
+  it('marks no lap when none has a valid time', () => {
+    const rows = buildComparisonLapRows([lap(0, 0), lap(1, NaN)], null)
+    expect(rows.every((r) => !r.isFastest && !r.isSlowest)).toBe(true)
   })
 })
