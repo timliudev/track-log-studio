@@ -123,7 +123,8 @@ const gearRatioMode = ref<ChartMode>('timeline')
 const showAlign = computed(
   () =>
     selectedLaps.value.length >= 2 &&
-    (gearRatioMode.value === 'overlay' || charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay')),
+    (gearRatioMode.value === 'overlay' ||
+      charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay')),
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
