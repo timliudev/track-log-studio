@@ -303,7 +303,12 @@ function draw(): void {
   // folds into bMinX/Y..bMaxX/Y above, keeping panning clamped to whatever's
   // actually drawn) but STROKE it later — right before the active track's own
   // polyline below — so painter's-order keeps the active session on top.
-  const overlayPixels: { color: string; xs: Float64Array; ys: Float64Array }[] = []
+  const overlayPixels: {
+    color: string
+    xs: Float64Array
+    ys: Float64Array
+    offset?: { x: number; y: number }
+  }[] = []
   for (const entry of overlayTracks) {
     const ot = entry.track
     const on = ot.lat.length
@@ -323,7 +328,7 @@ function draw(): void {
       oxs[i] = p.x * z + tx
       oys[i] = p.y * z + ty
     }
-    overlayPixels.push({ color: entry.color, xs: oxs, ys: oys })
+    overlayPixels.push({ color: entry.color, xs: oxs, ys: oys, offset: entry.offset })
   }
   // Re-derive the pan-clamp bbox now that overlay tracks may have widened it
   // (the assignment above already ran before overlays were folded in).
@@ -416,7 +421,8 @@ function draw(): void {
   // active session below — painter's-order keeps the active track (and its
   // heatmap/highlight/start-finish/gates/extrema/cursor) drawn on top, so it
   // always reads as the prominent one regardless of how many overlays are on.
-  for (const { color, xs, ys } of overlayPixels) {
+  for (const { color, xs, ys, offset } of overlayPixels) {
+    const [dx, dy] = pixelShift(offset)
     ctx.save()
     ctx.globalAlpha = OVERLAY_ALPHA
     ctx.strokeStyle = color
@@ -429,10 +435,10 @@ function draw(): void {
         continue
       }
       if (!onSeg) {
-        ctx.moveTo(xs[i], ys[i])
+        ctx.moveTo(xs[i] + dx, ys[i] + dy)
         onSeg = true
       } else {
-        ctx.lineTo(xs[i], ys[i])
+        ctx.lineTo(xs[i] + dx, ys[i] + dy)
       }
     }
     ctx.stroke()

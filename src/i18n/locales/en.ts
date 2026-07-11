@@ -105,6 +105,8 @@ export default {
     comparisonHint: 'Selected recordings are shared by timeline charts and the track map. The offset applies only to the current time/distance axis.',
     comparisonOffset: 'Comparison recording offset',
     comparisonReset: 'Reset offset',
+    comparisonMapEast: 'Map east',
+    comparisonMapNorth: 'Map north',
     comparisonClear: 'Clear comparisons',
     pickChannel: 'Pick channels to plot from above',
     addChart: 'Add chart',

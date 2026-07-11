@@ -80,6 +80,10 @@ export function useTrackOverlay(): {
         label: file.name,
         color: categoricalColor(id),
         track: decimateGpsTrack(track, OVERLAY_MAX_POINTS),
+        offset: {
+          x: analyzer.sessionOffsetOf(id).mapX,
+          y: analyzer.sessionOffsetOf(id).mapY,
+        },
       })
     }
     return out

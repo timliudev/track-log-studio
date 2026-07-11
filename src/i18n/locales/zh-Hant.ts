@@ -104,6 +104,8 @@ export default {
     comparisonHint: '選取其他記錄後，時序圖與賽道地圖會共用同一組比較清單；偏移只影響目前的時間／距離軸。',
     comparisonOffset: '比較記錄偏移',
     comparisonReset: '重設偏移',
+    comparisonMapEast: '地圖向東',
+    comparisonMapNorth: '地圖向北',
     comparisonClear: '清除比較',
     pickChannel: '從上方選擇要繪製的通道',
     addChart: '新增圖表',
