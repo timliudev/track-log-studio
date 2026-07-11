@@ -171,6 +171,8 @@ export default {
     extremumMax: 'Max',
     resetView: 'Reset view',
     zoomHint: 'Scroll to zoom, drag to pan, pinch to zoom, double-click to reset',
+    maximizeMap: 'Maximize track map',
+    minimizeMap: 'Restore track map',
     trackOverlayTitle: 'Overlay tracks',
     trackOverlayHint:
       'Tick other loaded logs to draw their racing lines faintly on the map for comparison; the active log stays on top at full opacity.',

@@ -169,6 +169,8 @@ export default {
     extremumMax: '最大',
     resetView: '重設視角',
     zoomHint: '滾輪縮放、拖曳平移、雙指縮放、雙擊重設',
+    maximizeMap: '放大賽道地圖',
+    minimizeMap: '還原賽道地圖',
     trackOverlayTitle: '疊加軌跡',
     trackOverlayHint: '勾選其他已載入的記錄，把它們的軌跡半透明疊在地圖上比較；作用中記錄維持原樣顯示在最上層。',
     trackOverlayClear: '全部關閉',
