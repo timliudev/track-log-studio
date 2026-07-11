@@ -152,7 +152,7 @@ export default {
     excludedBySector: '未通過 sector 檢查自動排除',
     bestLap: '最快圈',
     slowestLap: '最慢圈',
-    modeTimeline: '時間軸',
+    modeTimeline: '時序',
     modeOverlay: '疊圈',
     overlayHint: '在下方圈次表選取要疊比的圈（色＝圈、線型＝通道，X 從 0 對齊）',
     alignTitle: '疊圈對位微調',

@@ -9,7 +9,8 @@ import {
   type ComparisonLapRow,
 } from '@/domain/analysis/sessionLapSummary'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
-import { formatLapTime } from '@/domain/analysis/format'
+import { formatLapTime, formatMetricValue, formatMsColumn } from '@/domain/analysis/format'
+import { columnHeader } from './lapColumnHeader'
 import { useLapStore } from '@/stores/lapStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 
@@ -36,9 +37,16 @@ interface ComparisonTable {
 // comparison's fastest lap (same definition as buildSessionLapSummaries).
 const primaryBest = computed(() => fastestLapTime(props.primaryLaps, props.primaryExcluded))
 
-// One per-lap table per comparison recording. Distances come from each
-// recording's OWN cumulative-distance array so every displayed number is sourced
-// through the same computeMetric path as the primary LapTable.
+// One per-lap table per comparison recording, with the SAME configured
+// columns (lapStore.columns) as the primary LapTable for full parity. Each
+// comparison gets its OWN LapContext: cumDistM/session come from its own
+// track/session so channel + distance columns are sourced through the same
+// computeMetric path as the primary; bestLapTimeMs is the comparison's OWN
+// fastest lap (not the primary's) so its `delta` column reads the same way
+// the primary table's does — "how far off THIS recording's best lap". Sector
+// gates are only defined on the primary track, so sectorTimings is left
+// empty here and sectorTime columns simply render '—' (computeMetric already
+// degrades a missing lookup to NaN).
 const tables = computed<ComparisonTable[]>(() =>
   props.comparisons.map((c) => {
     const cumDistM = c.track
@@ -52,10 +60,24 @@ const tables = computed<ComparisonTable[]>(() =>
       fastestMs,
       deltaMs: fastestMs != null && primaryBest.value != null ? fastestMs - primaryBest.value : null,
       lapCount: c.laps.length,
-      rows: buildComparisonLapRows(c.laps, cumDistM),
+      rows: buildComparisonLapRows(
+        c.laps,
+        { session: c.session, cumDistM, sectorTimings: [], bestLapTimeMs: fastestMs },
+        lapStore.columns.map((col) => col.metric),
+      ),
     }
   }),
 )
+
+/** Format one row's per-column cell, matching the primary LapTable's idiom:
+ *  sectorTime unsigned seconds, delta signed seconds, everything else the
+ *  generic metric formatter — all '—' for NaN. */
+function formatCell(metricIndex: number, value: number): string {
+  const metric = lapStore.columns[metricIndex]?.metric
+  if (metric?.kind === 'sectorTime') return formatMsColumn(value, false)
+  if (metric?.kind === 'delta') return formatMsColumn(value, true)
+  return formatMetricValue(value)
+}
 
 function delta(value: number | null): string {
   if (value == null) return '—'
@@ -122,6 +144,7 @@ function resetChartOffset(id: number): void {
               <th>{{ t('analyzer.lap') }}</th>
               <th>{{ t('analyzer.lapTime') }}</th>
               <th>{{ t('analyzer.lapDistance') }}</th>
+              <th v-for="col in lapStore.columns" :key="col.id">{{ columnHeader(t, col.metric) }}</th>
               <th class="offset-col"><span class="sr-only">{{ t('analyzer.comparisonOffset') }}</span></th>
             </tr>
           </thead>
@@ -148,6 +171,7 @@ function resetChartOffset(id: number): void {
                 {{ formatLapTime(row.lapTimeMs) }}
               </td>
               <td>{{ distanceLabel(row.distanceM) }}</td>
+              <td v-for="(cell, i) in row.cells" :key="lapStore.columns[i].id">{{ formatCell(i, cell) }}</td>
               <td class="offset-col">
                 <div
                   v-if="lapStore.isSessionLapSelected(table.id, row.index)"

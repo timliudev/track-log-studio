@@ -27,23 +27,40 @@ describe('comparison lap rows', () => {
     const cumDistM = Float64Array.from({ length: 30 }, (_v, i) => i * 100)
     const rows = buildComparisonLapRows(
       [lap(0, 62000), lap(1, 60000), lap(2, 64000)],
-      cumDistM,
+      { session: null, cumDistM },
     )
     expect(rows).toHaveLength(3)
     expect(rows[1]).toMatchObject({ index: 1, isFastest: true, isSlowest: false })
     expect(rows[2]).toMatchObject({ index: 2, isFastest: false, isSlowest: true })
     expect(rows[0]).toMatchObject({ isFastest: false, isSlowest: false })
     expect(rows[0].distanceM).toBeCloseTo(900)
+    expect(rows[0].cells).toEqual([])
   })
 
   it('suppresses the slowest marker when a single lap is both fastest and slowest', () => {
-    const rows = buildComparisonLapRows([lap(0, 61000)], null)
+    const rows = buildComparisonLapRows([lap(0, 61000)], { session: null, cumDistM: null })
     expect(rows[0]).toMatchObject({ isFastest: true, isSlowest: false })
     expect(Number.isNaN(rows[0].distanceM)).toBe(true)
   })
 
   it('marks no lap when none has a valid time', () => {
-    const rows = buildComparisonLapRows([lap(0, 0), lap(1, NaN)], null)
+    const rows = buildComparisonLapRows([lap(0, 0), lap(1, NaN)], { session: null, cumDistM: null })
     expect(rows.every((r) => !r.isFastest && !r.isSlowest)).toBe(true)
+  })
+
+  it('computes one cell per configured metric via computeMetric, aligned to the metrics list', () => {
+    const cumDistM = Float64Array.from({ length: 20 }, (_v, i) => i * 100)
+    const rows = buildComparisonLapRows(
+      [lap(0, 62000), lap(1, 60000)],
+      { session: null, cumDistM, bestLapTimeMs: 60000 },
+      [{ kind: 'distance' }, { kind: 'delta' }, { kind: 'sectorTime', sector: 0 }],
+    )
+    // distance cell matches the row's own distanceM (same computeMetric path).
+    expect(rows[0].cells[0]).toBeCloseTo(rows[0].distanceM)
+    // delta cell: lap 0 is 2000ms slower than the 60000ms best.
+    expect(rows[0].cells[1]).toBe(2000)
+    expect(rows[1].cells[1]).toBe(0)
+    // sectorTime cell: no sectorTimings supplied ⇒ NaN (degrades to '—' in the UI).
+    expect(Number.isNaN(rows[0].cells[2])).toBe(true)
   })
 })
