@@ -23,8 +23,17 @@ const { stars } = useGithubStars(REPO)
  * `target="_blank"` correctly all keep working via native browser
  * behaviour), but drive the navigation ourselves via `window.open` so it
  * also works in standalone-PWA contexts that don't act on the anchor's own
- * default action. If `window.open` itself is blocked (e.g. a popup
- * blocker), fall back to same-tab navigation so the click always does
+ * default action.
+ *
+ * IMPORTANT: do NOT pass `noopener`/`noreferrer` in the `window.open`
+ * FEATURES string. Per the HTML spec, `noopener` makes `window.open`
+ * return `null` even when the new tab DID open — which would make the
+ * `!win` fallback below fire on every click and navigate THIS tab (the
+ * whole app) away to GitHub. Instead we open normally (so we get a real
+ * window reference back) and sever the opener link ourselves via
+ * `win.opener = null`, which gives the same reverse-tabnabbing protection
+ * as `noopener`. Only a genuine `null` (a popup blocker actually blocking
+ * it) falls back to same-tab navigation, so the click always does
  * *something* instead of silently failing.
  *
  * We deliberately do NOT attempt to star the repo without leaving the app
@@ -33,8 +42,13 @@ const { stars } = useGithubStars(REPO)
  */
 function openRepo(event: MouseEvent): void {
   event.preventDefault()
-  const win = window.open(REPO_URL, '_blank', 'noopener,noreferrer')
-  if (!win) {
+  const win = window.open(REPO_URL, '_blank')
+  if (win) {
+    // Reverse-tabnabbing protection, equivalent to `noopener`, without the
+    // spec-mandated null return that `noopener` in the features string forces.
+    win.opener = null
+  } else {
+    // window.open returned null ⇒ a popup blocker actually blocked it.
     window.location.href = REPO_URL
   }
 }

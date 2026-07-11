@@ -68,25 +68,36 @@ describe('GithubStarButton', () => {
     expect(link.attributes('rel')).toBe('noopener noreferrer')
   })
 
-  it('drives navigation via window.open on click instead of relying on the anchor default action', async () => {
-    const fakeWindow = {} as Window
+  it('opens a new tab via window.open WITHOUT noopener in the features string (which would force a null return) and never navigates the current tab away', async () => {
+    // A real window reference so opener-severing runs; features must NOT
+    // contain noopener/noreferrer (that is exactly what makes window.open
+    // return null and would wrongly trigger the same-tab fallback).
+    const fakeWindow = { opener: {} } as unknown as Window
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(fakeWindow)
+    const location = { href: 'http://localhost/' }
+    vi.stubGlobal('location', location)
 
     const wrapper = mountButton()
     await wrapper.get('a').trigger('click')
 
-    expect(openSpy).toHaveBeenCalledWith(
-      'https://github.com/timliudev/track-log-studio',
-      '_blank',
-      'noopener,noreferrer',
-    )
+    // Called with just URL + '_blank' — no noopener/noreferrer features arg.
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    const args = openSpy.mock.calls[0]
+    expect(args[0]).toBe('https://github.com/timliudev/track-log-studio')
+    expect(args[1]).toBe('_blank')
+    expect(args[2]).toBeUndefined()
+    // Reverse-tabnabbing protection applied manually (equivalent to noopener).
+    expect(fakeWindow.opener).toBeNull()
+    // The whole point of the regression: the current tab (the app) must NOT
+    // be navigated away when the new tab opened successfully.
+    expect(location.href).toBe('http://localhost/')
   })
 
-  it('falls back to same-tab navigation when window.open is blocked (e.g. a standalone PWA swallowing it)', async () => {
+  it('falls back to same-tab navigation ONLY when window.open genuinely returns null (popup blocked)', async () => {
     vi.spyOn(window, 'open').mockReturnValue(null)
     // happy-dom throws "Not implemented: navigation" if we actually assign
     // location.href; stub a plain object so we can just assert the intent.
-    const location = { href: '' }
+    const location = { href: 'http://localhost/' }
     vi.stubGlobal('location', location)
 
     const wrapper = mountButton()
