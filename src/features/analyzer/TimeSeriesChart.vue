@@ -158,7 +158,10 @@ const overlay = computed(() =>
   }),
 )
 const crossLapSources = computed<CrossSessionLapSource[]>(() => {
-  if (props.chart.kind !== 'timeseries' || lapStore.selectedAcrossSessions.length === 0) return []
+  // Fixed derived consumers such as the embedded gear-ratio chart omit a
+  // persisted chart config and remain primary-only. Cross-session lap
+  // overlays apply only to ordinary user-configured time-series charts.
+  if (!props.chart || lapStore.selectedAcrossSessions.length === 0) return []
   const sources: CrossSessionLapSource[] = []
   const primaryId = props.primaryFileId ?? -1
   const primaryColor = categoricalColor(primaryId)
