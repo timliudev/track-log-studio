@@ -37,6 +37,10 @@ import {
   isItemResizable,
   mergeLayoutPositions,
   compactLayoutTopLeft,
+  resolveOverlaps,
+  applyCollapsedHeights,
+  sameLayoutPositions,
+  COLLAPSED_ROWS,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -395,8 +399,14 @@ const { layout, colNum, isMobile, isDraggable, isResizable, resetLayout } =
 // --- #9: per-card collapse (all breakpoints) + single cross-breakpoint pin
 // (釘選 — see DashboardCard's module doc for the Teleport-based redesign) +
 // mobile drag-to-reorder order ---
-const { isCollapsed, isPinned, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
+const { state: panelState, isCollapsed, isPinned, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
   usePanelState(chartIds)
+
+// The set of currently-collapsed card ids, fed into the collapse-reflow overlay
+// (applyCollapsedHeights) so a collapsed card shrinks its grid slot and its
+// neighbours pack up into the reclaimed rows (補位). Canonical (expanded)
+// heights stay in `layout` untouched — expanding just drops the id from here.
+const collapsedIds = computed(() => new Set(panelState.value.collapsed))
 
 // The align panels (mapalign/lapalign) only render when their "≥2 laps
 // selected" condition holds (showMapAlign/showAlign, unchanged rules from
@@ -465,14 +475,23 @@ interface GridItemDecoration {
 function decorateForGrid(
   items: DashboardLayoutItem[],
 ): (DashboardLayoutItem & GridItemDecoration)[] {
-  return items.map((it) => ({
-    ...it,
-    dragAllowFrom: '.drag-handle',
-    dragIgnoreFrom: '.actions',
-    isDraggable: isItemDraggable(isDraggable.value, isPinned(it.i)),
-    isResizable: isItemResizable(isResizable.value, isPinned(it.i)),
-    ...minSizeFor(it.i),
-  }))
+  return items.map((it) => {
+    const collapsed = isCollapsed(it.i)
+    const min = minSizeFor(it.i)
+    return {
+      ...it,
+      dragAllowFrom: '.drag-handle',
+      dragIgnoreFrom: '.actions',
+      isDraggable: isItemDraggable(isDraggable.value, isPinned(it.i)),
+      // A collapsed card is header-only: resizing a headerbar is meaningless,
+      // and (more importantly) letting the grid clamp its height back up to the
+      // card's normal minH would defeat the reflow — so collapsed cards are not
+      // resizable and their minH drops to the collapsed row count.
+      isResizable: isItemResizable(isResizable.value, isPinned(it.i)) && !collapsed,
+      minW: min.minW,
+      minH: collapsed ? COLLAPSED_ROWS : min.minH,
+    }
+  })
 }
 
 // The single array bound to GridLayout via v-model: desktop 2-D on wide
@@ -483,7 +502,15 @@ function decorateForGrid(
 // current breakpoint so the other one is never touched.
 const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
   get: () =>
-    decorateForGrid(isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value),
+    // Collapse-reflow overlay: collapsed cards shrink to COLLAPSED_ROWS and the
+    // layout re-packs top-left so neighbours fill the reclaimed rows (補位). The
+    // canonical (expanded) heights stay in `layout` — this is display-only.
+    decorateForGrid(
+      applyCollapsedHeights(
+        isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value,
+        collapsedIds.value,
+      ),
+    ),
   set: (next) => {
     if (isMobile.value) {
       // Mobile drag-to-reorder: derive the new top-to-bottom order from the
@@ -515,7 +542,28 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
     // an already-compacted layout makes compactLayoutTopLeft hand back the
     // exact same array it was given, so a `layout.value` assignment that
     // changed nothing never re-triggers GridLayout's own prop watcher.
-    layout.value = compactLayoutTopLeft(mergeLayoutPositions(layout.value, next))
+    //
+    // Collapse-reflow: `next` carries collapsed cards at their DISPLAY height
+    // (COLLAPSED_ROWS). Revert those to the canonical (expanded) height held in
+    // `layout` before persisting, so dragging while a card is collapsed never
+    // freezes its header-only height into the saved arrangement — expanding
+    // still restores the full height. resolveOverlaps then re-seats the
+    // just-restored full-height cards below their neighbours before the
+    // top-left compaction closes any gap.
+    const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
+    const restored = collapsedIds.value.size
+      ? next.map((it) =>
+          collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it,
+        )
+      : next
+    const packed = compactLayoutTopLeft(resolveOverlaps(mergeLayoutPositions(layout.value, restored)))
+    // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
+    // display we fed it, which `packed` reconstructs back into the current
+    // canonical layout — assigning a fresh-but-equal array would re-run the
+    // getter and spin the update→compact→update loop DashboardCard's #9 warns
+    // of. resolveOverlaps always allocates, so this value comparison (not a
+    // reference check) is what actually breaks the cycle.
+    if (!sameLayoutPositions(packed, layout.value)) layout.value = packed
   },
 })
 
