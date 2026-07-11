@@ -8,6 +8,17 @@
 --oneline -1` 可驗證）。本文件只回答「現況是什麼、目標模型是什麼、怎麼分階段
 做」，不做任何 store/component 的實作變更。
 
+> **實作現況更新**：本文件規劃的 Phase 1–4 之後都已實作並合併——
+> `analyzerStore.selectedSessions` + `useSessionComparison`（Phase 1，時序圖
+> 多檔疊線）、`TrackMap`/`ScatterChart`/`GgChart` 的 comparison-session 疊圖
+> 與 offset（Phase 2）、圈次表跨檔比較（Phase 3——最終採用**逐圈完整併列表格**
+> `SessionLapComparison.vue` / `buildComparisonLapRows`，比本文件 §7 Phase 3
+> 當時建議的「唯讀摘要行」更完整，屬於後續拍板的產品決策更新）、以及跨檔選圈
+> 疊圖＋疊圖↔地圖游標連動（Phase 4，`crossSessionLapOverlay.ts` /
+> `crossSessionLapHighlight.ts` / `overlayCursor.ts`）。本文件以下內容保留作為
+> **設計理由與資料模型的歷史紀錄**，各節描述的「現況」多半已是「當時的現況」
+> 而非目前程式碼現況，請以 §7 對照上述已完成項目閱讀。
+
 ---
 
 ## 0. 一句話結論

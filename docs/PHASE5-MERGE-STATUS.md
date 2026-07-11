@@ -1,7 +1,11 @@
 # Phase 5 原型 — GPS 合併 (.loga + .nmea time-align merge)
 
-Status: domain core done + tested; UI wired (T6, branch `feature/phase5-merge-ui`,
-see below — "UI wired" section).
+Status: **shipped and live** — `SessionMergePanel.vue` is a permanent Analyzer
+card (see [`manual/zh-Hant.md`](./manual/zh-Hant.md) / [`manual/en.md`](./manual/en.md),
+§4.11 "GPS 場次合併 / GPS session merge", for the current user-facing
+description). The sections below are the original build log — domain core
+done + tested; UI wired (T6, branch `feature/phase5-merge-ui`, see below —
+"UI wired" section) — kept as historical design rationale.
 
 ## Built (this session, branch `feature/phase5-merge`)
 

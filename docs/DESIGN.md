@@ -291,14 +291,14 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **6b 完整收尾（待做）**：內部資料夾 / 程式碼大改名、`docs/DESIGN.md` 標題改名、
     關於我頁、SEO（meta/OG、robots.txt、sitemap、structured data）、Logo / favicon
     （PWA icon 換點陣 PNG 192/512 + maskable）、使用說明外部文件連結。
-- **Phase 7 — 直線加速測試（idea，不急，先記錄）**：在整段軌跡中**掃描出符合條件的最速區段**並列出，
-  常見於速可達/機車玩家。設計為一個**可調項目**（搜尋整條 log）：
-  - **距離型**：例如「0~400m 最速」——找出跑完 400m 花時間最短的區段。但若要求「從靜止 0 起跑」會限制太死，
-    故傾向**複合條件**：從車速 `v0`（可為 0）起、再跑 `d` 公尺的最短秒數。
+- **Phase 7 — 直線加速測試（✅ 完成）**：在整段軌跡中**掃描出符合條件的最速區段**並列出，
+  常見於速可達/機車玩家。實作為 `domain/analysis/accelTest.ts`（`fastestDistanceFromLaunch` /
+  `fastestSpeedSegment`，滑動視窗找最佳區段）+ `AccelTestPanel.vue` 顯示結果、可點擊聚焦到軌跡：
+  - **距離型**：從設定的起跑車速 `v0`（**預設 0 ＝靜止起步**）開始計時，找出跑完 `d` 公尺的最短秒數
+    （例如「0~400m 最速」）。
   - **車速型**：例如「0~100 km/h」最短秒數 / 距離（標準加速指標）。
-  - **歸屬**：本質上和分析器的「圈/區段」是同一類東西——一段被選出的軌跡片段配一個衍生數值，
-    因此**併入 lap/segment 架構**：視為 `LapMetric` 的新 variant + `computeMetric` 的新 case（見 §11 Phase 4 E、
-    架構鐵則），不另起爐灶。掃描演算法（滑動視窗找最佳區段）為唯一新增的計算。
+  - **歸屬**：與分析器的「圈/區段」同一類東西，未併入 `LapMetric`，改以獨立的 `AccelSegment` 結果
+    型別 + 面板呈現（掃描演算法與圈統計解耦，互不影響既有 `LapMetric` union）。
 - **`.vbo` 輸出格式（Phase 1 轉檔器延伸；✅ 已實作 2026-06-23）**：轉檔除了 `.nmea`，再加
   **Racelogic VBOX `.vbo`**，讓 log 直接在 **Circuit Tools 3**（Racelogic 官方、免費、賽道分析等級）
   與 **RaceChrono** 開啟。**相對 RC3 `.nmea` 的關鍵價值**：NMEA 只有 15 個固定類比槽（要槽位對應、
@@ -444,10 +444,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 | 1+21 | 鎖定兩功能分離（📌 每卡 sticky + 🔒 工具列布局鎖） | ✅ 已合併（386b7a2），待實機驗收 |
 | 3 | 手機不能調 grid 大小 | ✅ 同上合併，待實機驗收 |
 | 6 | grid 預設填滿頁面 | ✅ 同上合併（三欄平衡預設布局），待實機驗收 |
-| 2 | 地圖疊多檔案軌跡 | 🔄 進行中 |
-| 4 | XY 散佈圖 1:1 等比（可調） | 🔄 進行中 |
-| 10 | 輪胎規格即時換算自動套用 | 🔄 進行中 |
-| 5 | 拖動 grid 縫隙調整整頁布局 | ⏳ 依賴項 #1+21 已合併，可開工 |
+| 2 | 地圖疊多檔案軌跡 | ✅ 已完成（`useTrackOverlay` + 跨檔選圈疊圖 + 疊圖↔地圖游標連動） |
+| 4 | XY 散佈圖 1:1 等比（可調） | ✅ 已完成 |
+| 10 | 輪胎規格即時換算自動套用 | ✅ 已完成 |
+| 5 | 拖動 grid 縫隙調整整頁布局 | ✅ 已完成（推擠式重排 + 連續拖動修正） |
 | 16 | 賽道庫方案比較報告 | ✅ → [`TRACK-LIBRARY-OPTIONS.md`](./TRACK-LIBRARY-OPTIONS.md)，**等使用者二次拍板** |
 | 20 | docs 分類整理 | ✅ |
 | 18+19 | UX 載入 + 計算效能審計（先量測後行動） | ✅ 已完成並合併（f87ff56），結論**暫無需優化** |
@@ -475,7 +475,8 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - 使用者回饋修正（含動態圖表持久化）、輪胎三來源周長、合併預覽查證
 - tooltip 主題化 + 文案多格式化 + star 按鈕、避震校正全格式通用、Web Analytics、儀表板鎖定/釘選/手機縮放
 - 效能稽核：載入/解析/計算/渲染/記憶體實測，結論暫無需優化
-- 匯入格式矩陣（loga/nmea/vbo/rcz/xrk/rcnx）+ 可插拔 Importer 架構 → 狀態見 [`IMPORT-FORMATS-STATUS.md`](./IMPORT-FORMATS-STATUS.md)，規格研究見 [`specs/`](./specs/)
+- 匯入格式矩陣（loga/nmea/vbo/rcz/xrk/rcnx，含 `.xrz` 壓縮包）+ 可插拔 Importer 架構 → 狀態見 [`IMPORT-FORMATS-STATUS.md`](./IMPORT-FORMATS-STATUS.md)，規格研究見 [`specs/`](./specs/)
+- 多檔（multi-session）同時分析比較（見 [`MULTI-SESSION-ANALYSIS-DESIGN.md`](./MULTI-SESSION-ANALYSIS-DESIGN.md) Phase 1–4 全數完成：時序圖/XY 散佈圖/圈次表跨檔比較、地圖疊圖與偏移對位、跨檔選圈疊圖、疊圖↔地圖游標連動）、齒比併入主時序圖（`@derived/drivetrain/measured-total-ratio` 衍生通道）、卡片收折縮小格位＋鄰卡補位（FLIP 平滑）
 
 ---
 
