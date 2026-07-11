@@ -34,6 +34,8 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
+import type { Lap } from '@/domain/model/Lap'
+import type { ChartMode } from '@/stores/analyzerStore'
 import {
   useDrivetrainStore,
   toMtDrivetrainSpec,
@@ -43,6 +45,7 @@ import {
 } from '@/stores/drivetrainStore'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import UPlotChart from '@/components/UPlotChart.vue'
+import GearRatioChart from './GearRatioChart.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
@@ -63,6 +66,19 @@ const props = defineProps<{
   /** The active session, for the log-inversion (由記錄反推) section — null when
    *  no file is loaded (that section shows an i18n hint instead). */
   session: LogSession | null
+  /** Main analyzer X values/range/cursor are forwarded to the embedded ratio
+   * trace so this STATIC calculator card participates in chart sync. */
+  xValues?: Float64Array | null
+  xRange?: { min: number; max: number } | null
+  externalCursor?: number | null
+  selectedLaps?: Lap[]
+  gearRatioMode?: ChartMode
+}>()
+
+const emit = defineEmits<{
+  cursor: [number | null]
+  xZoom: [{ min: number; max: number }]
+  updateGearRatioMode: [ChartMode]
 }>()
 
 const { t } = useI18n()
@@ -484,6 +500,25 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
       </button>
     </div>
 
+    <!-- The measured ratio trace belongs to this calculator card, but uses
+         the exact same TimeSeriesChart/UPlot pipeline as the dashboard:
+         global time/distance axis, zoom, cursor and selected-lap overlay. -->
+    <h4 class="sub-heading">{{ t('analyzer.gear.ratioTimelineHeading') }}</h4>
+    <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
+    <p v-else-if="!props.xValues" class="hint">{{ t('analyzer.gear.noRatioAxis') }}</p>
+    <GearRatioChart
+      v-else
+      :mode="gearRatioMode ?? 'timeline'"
+      :session="props.session"
+      :x-values="props.xValues"
+      :x-range="props.xRange"
+      :external-cursor="props.externalCursor"
+      :selected-laps="props.selectedLaps"
+      @cursor="emit('cursor', $event)"
+      @x-zoom="emit('xZoom', $event)"
+      @update-mode="emit('updateGearRatioMode', $event)"
+    />
+
     <!-- ════════════════════════ MT ════════════════════════ -->
     <template v-if="isMt">
       <h4 class="sub-heading">{{ t('analyzer.gear.specHeading') }}</h4>
@@ -863,8 +898,6 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
             {{ t('analyzer.gear.clutchEngagementRpm', { rpm: fmtRpm(cvtClutchRpm) }) }}
           </span>
         </div>
-
-        <p class="hint">{{ t('analyzer.gear.timelineMovedHint') }}</p>
 
         <h5 class="sub-sub-heading">{{ t('analyzer.gear.cvtSweepHeading') }}</h5>
         <p v-if="cvtSweep.length === 0" class="hint">{{ t('analyzer.gear.noPlateaus') }}</p>

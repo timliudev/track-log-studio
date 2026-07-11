@@ -6,7 +6,6 @@ import type uPlot from 'uplot'
 import {
   useAnalyzerStore,
   type TimeSeriesChartConfig,
-  type GearRatioChartConfig,
   type ChartMode,
 } from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -24,7 +23,11 @@ import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const props = defineProps<{
-  chart: TimeSeriesChartConfig | GearRatioChartConfig
+  /** Persisted dashboard config for a user-added ordinary time-series card.
+   * Fixed derived consumers (the gear calculator) omit this and supply mode. */
+  chart?: TimeSeriesChartConfig
+  /** Transient mode for a fixed derived series embedded in a static card. */
+  mode?: ChartMode
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
@@ -46,6 +49,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   cursor: [number | null]
   xZoom: [{ min: number; max: number }]
+  updateMode: [ChartMode]
 }>()
 
 const { t } = useI18n()
@@ -61,7 +65,7 @@ const color = (i: number): string => PALETTE[i % PALETTE.length]
 const DASHES: number[][] = [[], [6, 4], [2, 3], [8, 3, 2, 3], [12, 4]]
 const dash = (i: number): number[] => DASHES[i % DASHES.length]
 
-const mode = computed<ChartMode>(() => props.chart.mode)
+const mode = computed<ChartMode>(() => props.mode ?? props.chart?.mode ?? 'timeline')
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
 const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
@@ -73,12 +77,12 @@ const allChannels = computed(() =>
 )
 const pickerOptions = computed(() =>
   allChannels.value.filter(
-    (c) => props.chart.kind === 'timeseries' && !props.chart.channels.includes(c.name),
+    (c) => !props.chart?.channels.includes(c.name),
   ),
 )
 const presentSources = computed<Array<{ name: string; data: ArrayLike<number> }>>(() => {
   if (props.fixedSeries) return [...props.fixedSeries]
-  if (props.chart.kind !== 'timeseries') return []
+  if (!props.chart) return []
   const sources: Array<{ name: string; data: ArrayLike<number> }> = []
   for (const name of props.chart.channels) {
     const data = props.session.get(name)?.data
@@ -284,16 +288,17 @@ function onXZoom(r: { min: number; max: number }): void {
 }
 
 function setMode(m: ChartMode): void {
-  analyzer.setChartMode(props.chart.id, m)
+  if (props.chart) analyzer.setChartMode(props.chart.id, m)
+  else emit('updateMode', m)
 }
 
 function addChannel(name: string | null): void {
-  if (props.chart.kind === 'timeseries' && name && !props.chart.channels.includes(name)) {
+  if (props.chart && name && !props.chart.channels.includes(name)) {
     analyzer.setChartChannels(props.chart.id, [...props.chart.channels, name])
   }
 }
 function removeChannel(name: string): void {
-  if (props.chart.kind !== 'timeseries') return
+  if (!props.chart) return
   analyzer.setChartChannels(
     props.chart.id,
     props.chart.channels.filter((n) => n !== name),
@@ -304,7 +309,7 @@ function removeChannel(name: string): void {
 <template>
   <section class="chart" :class="{ fill: fillHeight }">
     <div class="toolbar">
-      <div v-if="chart.kind === 'timeseries'" class="picker">
+      <div v-if="chart" class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
       </div>
       <div class="mode">
@@ -315,7 +320,7 @@ function removeChannel(name: string): void {
           {{ t('analyzer.modeOverlay') }}
         </button>
       </div>
-      <button type="button" class="remove" @click="analyzer.removeChart(chart.id)">
+      <button v-if="chart" type="button" class="remove" @click="analyzer.removeChart(chart.id)">
         {{ t('analyzer.removeChart') }}
       </button>
     </div>
@@ -328,7 +333,7 @@ function removeChannel(name: string): void {
           :style="mode === 'overlay' || comparisonActive ? {} : { background: color(i) }"
         />
         {{ name }}
-        <button v-if="chart.kind === 'timeseries'" type="button" class="x" @click="removeChannel(name)">×</button>
+        <button v-if="chart" type="button" class="x" @click="removeChannel(name)">×</button>
       </span>
       <span v-if="present.length === 0" class="muted">{{ emptyMessage ?? t('analyzer.pickChannel') }}</span>
     </div>

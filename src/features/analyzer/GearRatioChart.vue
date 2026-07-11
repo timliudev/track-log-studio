@@ -3,13 +3,13 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
-import type { GearRatioChartConfig } from '@/stores/analyzerStore'
+import type { ChartMode } from '@/stores/analyzerStore'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import { buildGearRatioTrace } from '@/domain/analysis/gearRatioTrace'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 
 const props = defineProps<{
-  chart: GearRatioChartConfig
+  mode: ChartMode
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
@@ -21,6 +21,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   cursor: [number | null]
   xZoom: [{ min: number; max: number }]
+  updateMode: [ChartMode]
 }>()
 
 const { t } = useI18n()
@@ -58,7 +59,7 @@ const emptyMessage = computed(() => {
 
 <template>
   <TimeSeriesChart
-    :chart="chart"
+    :mode="mode"
     :session="session"
     :x-values="xValues"
     :x-range="xRange"
@@ -69,5 +70,6 @@ const emptyMessage = computed(() => {
     :fill-height="fillHeight"
     @cursor="emit('cursor', $event)"
     @x-zoom="emit('xZoom', $event)"
+    @update-mode="emit('updateMode', $event)"
   />
 </template>
