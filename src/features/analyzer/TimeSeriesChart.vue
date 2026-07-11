@@ -14,6 +14,7 @@ import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
 import { buildCrossSessionLapOverlay, type CrossSessionLapSource } from '@/domain/analysis/crossSessionLapOverlay'
+import { sampleIndexAtGridX, gridIndexAtSampleIndex, lapContaining } from '@/domain/analysis/overlayCursor'
 import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
 import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { lapColor } from './lapColors'
@@ -255,6 +256,11 @@ const crossLapSources = computed<CrossSessionLapSource[]>(() => {
 })
 const crossOverlay = computed(() => buildCrossSessionLapOverlay(crossLapSources.value))
 const useCrossOverlay = computed(() => crossLapSources.value.some((source) => source.fileId !== (props.primaryFileId ?? -1)))
+// The shared lap-relative X grid the overlay plots against — same array whether
+// cross-session or single-session. Backs the overlay↔map cursor conversion.
+const overlayGridX = computed<Float64Array>(() =>
+  useCrossOverlay.value ? crossOverlay.value.x : overlay.value.x,
+)
 // uPlot seeds a scale's range from a series' first in-range sample and treats
 // only `null` (not NaN) as a gap. Once a lap is nudged off grid-0 its trace
 // starts with a NaN, which would poison the shared channel scale to
@@ -379,25 +385,60 @@ const axes = computed<uPlot.Axis[]>(() => {
   ]
 })
 
-// Overlay's X is a lap-relative grid index space, unrelated to the session-wide
-// cursor/zoom. Overlay charts share a SEPARATE cursor (overlayCursorIdx) — all
-// overlay charts build the same grid so the index aligns across them — while
-// timeline charts (and the track map) stay on the session-index cursor/zoom.
+// Overlay's X is a lap-relative grid space, unrelated to the session-wide
+// cursor/zoom. Overlay charts share `overlayCursorIdx` (a grid index) so their
+// cursor aligns across charts even when there's no primary lap to anchor on
+// (a comparison-only overlay). On TOP of that, the grid index is now bridged to
+// the primary session's SAMPLE index (overlayCursor.ts) so a hover also drives
+// the track map / timeline cursor, and a map/timeline hover drives the overlay
+// cursor back — the "共同 X ↔ 各圈樣本 index" linking.
 const canRender = computed(() =>
   mode.value === 'overlay'
     ? present.value.length > 0 && (laps.value.length > 0 || crossLapSources.value.length > 0)
     : present.value.length > 0,
 )
-const effectiveCursor = computed<number | null>(() =>
-  mode.value === 'overlay'
-    ? analyzer.overlayCursorIdx
-    : props.externalCursor == null
+const effectiveCursor = computed<number | null>(() => {
+  if (mode.value !== 'overlay') {
+    return props.externalCursor == null
       ? null
-      : nearestXIndex(timeline.value.data[0], props.xValues[props.externalCursor]),
-)
+      : nearestXIndex(timeline.value.data[0], props.xValues[props.externalCursor])
+  }
+  // Reverse link (map/timeline → overlay): map the shared session cursor onto
+  // this overlay's grid via whichever selected primary lap contains it, so the
+  // overlay follows a hover made elsewhere. Falls back to the overlay's own
+  // shared cursor when the session cursor isn't over a selected primary lap
+  // (e.g. a comparison-only overlay, where there's no primary sample to map).
+  const ci = props.externalCursor
+  const grid = overlayGridX.value
+  if (ci != null && grid.length > 0) {
+    const lap = lapContaining(laps.value, ci)
+    if (lap) {
+      const g = gridIndexAtSampleIndex(props.xValues, lap, lapStore.offsetOf(lap.index, xAxis.value), grid, ci)
+      if (g != null) return g
+    }
+  }
+  return analyzer.overlayCursorIdx
+})
 function onCursor(idx: number | null): void {
-  if (mode.value === 'overlay') analyzer.setOverlayCursor(idx)
-  else if (idx == null) emit('cursor', null)
+  if (mode.value === 'overlay') {
+    // Keep the overlay charts' shared cursor in sync (works with no primary lap
+    // too), and forward-link it to the map/timeline by converting the grid
+    // index to a primary-session sample index via the first selected primary
+    // lap. No primary lap ⇒ emit null so a stale map marker doesn't linger.
+    analyzer.setOverlayCursor(idx)
+    if (idx == null) {
+      emit('cursor', null)
+      return
+    }
+    const primaryLap = laps.value[0] ?? null
+    const gx = overlayGridX.value[idx]
+    const mapped = primaryLap != null && gx != null
+      ? sampleIndexAtGridX(props.xValues, primaryLap, lapStore.offsetOf(primaryLap.index, xAxis.value), gx)
+      : null
+    emit('cursor', mapped)
+    return
+  }
+  if (idx == null) emit('cursor', null)
   else emit('cursor', nearestXIndex(props.xValues, timeline.value.data[0][idx]))
 }
 function onXZoom(r: { min: number; max: number }): void {
