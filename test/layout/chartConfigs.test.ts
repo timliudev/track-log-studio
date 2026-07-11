@@ -33,11 +33,10 @@ beforeEach(() => {
 })
 
 describe('chartConfigs — parseCharts (T5)', () => {
-  it('round-trips a mixed timeseries + scatter + gear-ratio list', () => {
+  it('round-trips a mixed timeseries + scatter list', () => {
     const charts: ChartConfig[] = [
       { kind: 'timeseries', id: 1, channels: ['RPM', 'TPS_Percent'], mode: 'overlay' },
       { kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: null, equalAspect: false, colorChannel: null },
-      { kind: 'gearRatio', id: 3, mode: 'overlay' },
     ]
     expect(parseCharts(JSON.stringify(charts))).toEqual(charts)
   })
@@ -91,10 +90,8 @@ describe('chartConfigs — parseCharts (T5)', () => {
     ])
   })
 
-  it('restores a gear-ratio chart and backfills an invalid mode to timeline', () => {
-    expect(parseCharts(JSON.stringify([{ kind: 'gearRatio', id: 4, mode: 'weird' }]))).toEqual([
-      { kind: 'gearRatio', id: 4, mode: 'timeline' },
-    ])
+  it('drops a legacy standalone gear-ratio chart now embedded in GearPanel', () => {
+    expect(parseCharts(JSON.stringify([{ kind: 'gearRatio', id: 4, mode: 'overlay' }]))).toEqual([])
   })
 
   it('returns null for missing/corrupt/non-array JSON', () => {
@@ -143,7 +140,6 @@ describe('chartConfigs — load/save (T5)', () => {
       { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
       { kind: 'timeseries', id: 2, channels: ['RPM'], mode: 'overlay' },
       { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: false, colorChannel: null },
-      { kind: 'gearRatio', id: 4, mode: 'overlay' },
     ]
     saveCharts(charts)
     expect(loadCharts()).toEqual(charts)

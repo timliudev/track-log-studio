@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { GridLayout } from 'grid-layout-plus'
 import { useFileStore } from '@/stores/fileStore'
-import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useAnalyzerStore, type ChartMode } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
@@ -42,7 +42,6 @@ import {
 import DashboardCard from '@/components/DashboardCard.vue'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
-import GearRatioChart from './GearRatioChart.vue'
 import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
@@ -114,14 +113,18 @@ const selectedLaps = computed(() =>
     .filter((l): l is NonNullable<typeof l> => l != null),
 )
 
+// The synchronized ratio trace now lives inside the static GearPanel card,
+// so its timeline/overlay mode is transient view state rather than another
+// persisted/dynamically removable dashboard chart config.
+const gearRatioMode = ref<ChartMode>('timeline')
+
 // The alignment panel only makes sense when laps are being overlaid: at least
 // one chart in overlay mode and ≥2 laps selected to compare/align.
 const showAlign = computed(
   () =>
     selectedLaps.value.length >= 2 &&
-    charts.value.some(
-      (c) => (c.kind === 'timeseries' || c.kind === 'gearRatio') && c.mode === 'overlay',
-    ),
+    (gearRatioMode.value === 'overlay' ||
+      charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay')),
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
@@ -307,10 +310,6 @@ function onSelect(e: Event): void {
 // A10+A12 — add-chart is now a two-option affordance (時序圖 / XY 散佈圖).
 function onAddTimeseries(): void {
   analyzer.addChart('timeseries')
-}
-
-function onAddGearRatio(): void {
-  analyzer.addChart('gearRatio')
 }
 
 // New scatter charts default to TC_Xforce/TC_Yforce when present (the
@@ -614,7 +613,6 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   const sameKind = charts.value.filter((c) => c.kind === chart.kind)
   const n = sameKind.indexOf(chart) + 1
   if (chart.kind === 'scatter') return t('analyzer.layout.cardScatterChart', { n })
-  if (chart.kind === 'gearRatio') return t('analyzer.layout.cardGearRatioChart', { n })
   return t('analyzer.layout.cardChart', { n })
 }
 
@@ -696,9 +694,6 @@ function titleForItemId(id: string): string {
           </button>
           <button type="button" class="add" @click="onAddScatter">
             ＋ {{ t('analyzer.addScatterChart') }}
-          </button>
-          <button type="button" class="add" @click="onAddGearRatio">
-            ＋ {{ t('analyzer.addGearRatioChart') }}
           </button>
           <!-- 鎖定布局: global drag+resize toggle for every card — distinct
                icon (padlock) and wording from the per-card 📌 pin button so
@@ -993,7 +988,17 @@ function titleForItemId(id: string): string {
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
-              <GearPanel :session="session" />
+              <GearPanel
+                :session="session"
+                :x-values="xValues"
+                :x-range="xRange"
+                :external-cursor="cursorIdx"
+                :selected-laps="selectedLaps"
+                :gear-ratio-mode="gearRatioMode"
+                @cursor="analyzer.setCursor"
+                @x-zoom="onXZoom"
+                @update-gear-ratio-mode="gearRatioMode = $event"
+              />
             </DashboardCard>
 
             <DashboardCard
@@ -1096,18 +1101,6 @@ function titleForItemId(id: string): string {
                     :chart="c"
                     :session="session"
                     :selected-laps="selectedLaps"
-                  />
-                  <GearRatioChart
-                    v-else-if="c.kind === 'gearRatio' && session && xValues"
-                    fill-height
-                    :chart="c"
-                    :session="session"
-                    :x-values="xValues"
-                    :x-range="xRange"
-                    :external-cursor="cursorIdx"
-                    :selected-laps="selectedLaps"
-                    @cursor="analyzer.setCursor"
-                    @x-zoom="onXZoom"
                   />
                 </DashboardCard>
               </template>

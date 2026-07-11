@@ -4,7 +4,9 @@ import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import GearPanel from '@/features/analyzer/GearPanel.vue'
+import GearRatioChart from '@/features/analyzer/GearRatioChart.vue'
 import UPlotChart from '@/components/UPlotChart.vue'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { vTooltip } from '@/directives/tooltip'
@@ -107,7 +109,10 @@ function installMemoryLocalStorage(): void {
   })
 }
 
-function mountPanel(session: LogSession | null) {
+function mountPanel(
+  session: LogSession | null,
+  extra: Record<string, unknown> = {},
+) {
   const i18n = createI18n({
     legacy: false,
     locale: 'zh-Hant',
@@ -115,7 +120,7 @@ function mountPanel(session: LogSession | null) {
     messages: { 'zh-Hant': zhHant, en },
   })
   return mount(GearPanel, {
-    props: { session },
+    props: { session, ...extra },
     global: { plugins: [i18n], directives: { tooltip: vTooltip } },
   })
 }
@@ -170,5 +175,49 @@ describe('GearPanel — MT gear-ratio chart lines actually render (#8)', () => {
     // samples are merged in.
     expect(nonNullCount).toBeLessThanOrEqual(41)
     expect(xs.length).toBeGreaterThan(nonNullCount * 3)
+  })
+
+  it('renders the CVT ratio-vs-speed sweep with a visible line and points', async () => {
+    const wrapper = mountPanel(denseMtSession())
+    useDrivetrainStore().setKind('cvt')
+    await wrapper.vm.$nextTick()
+
+    const charts = wrapper.findAllComponents(UPlotChart)
+    expect(charts).toHaveLength(1)
+    const sweep = charts[0].props('series')[1]
+
+    // Regression: stroke was `transparent` and the points inherited that
+    // transparent colour. Data and hover values existed, but no pixels were
+    // visible in the chart.
+    expect(sweep.stroke).not.toBe('transparent')
+    expect(sweep.width).toBeGreaterThan(0)
+    expect(sweep.points?.show).toBe(true)
+    expect(sweep.points?.stroke).not.toBe('transparent')
+    expect(sweep.points?.fill).not.toBe('transparent')
+  })
+
+  it('embeds the synchronized ratio trace in the calculator card and forwards chart sync events', () => {
+    const xValues = new Float64Array([0, 0.1, 0.2])
+    const wrapper = mountPanel(denseMtSession(3), {
+      xValues,
+      xRange: { min: 0, max: 0.2 },
+      externalCursor: 1,
+      selectedLaps: [],
+      gearRatioMode: 'overlay',
+    })
+    const ratio = wrapper.findComponent(GearRatioChart)
+
+    expect(ratio.exists()).toBe(true)
+    expect(ratio.props('mode')).toBe('overlay')
+    expect(ratio.props('xValues')).toBe(xValues)
+    expect(ratio.props('xRange')).toEqual({ min: 0, max: 0.2 })
+    expect(ratio.props('externalCursor')).toBe(1)
+
+    ratio.vm.$emit('cursor', 2)
+    ratio.vm.$emit('xZoom', { min: 0.05, max: 0.15 })
+    ratio.vm.$emit('updateMode', 'timeline')
+    expect(wrapper.emitted('cursor')).toEqual([[2]])
+    expect(wrapper.emitted('xZoom')).toEqual([[{ min: 0.05, max: 0.15 }]])
+    expect(wrapper.emitted('updateGearRatioMode')).toEqual([['timeline']])
   })
 })
