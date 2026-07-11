@@ -54,6 +54,7 @@ const dash = (i: number): number[] => DASHES[i % DASHES.length]
 const mode = computed<ChartMode>(() => props.chart.mode)
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
+const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
 
 const allChannels = computed(() =>
   props.session.channels
@@ -229,7 +230,7 @@ const axes = computed<uPlot.Axis[]>(() => {
     ...present.value.slice(0, 2).map((n, i) => ({
       scale: n,
       side: i === 0 ? 3 : 1,
-      ...(mode.value === 'overlay' ? { label: n } : { stroke: color(i) }),
+      ...(mode.value === 'overlay' || comparisonActive.value ? { label: n } : { stroke: color(i) }),
     })),
   ]
 })
@@ -297,8 +298,8 @@ function removeChannel(name: string): void {
       <span v-for="(name, i) in present" :key="name" class="chip">
         <span
           class="dot"
-          :class="{ line: mode === 'overlay' }"
-          :style="mode === 'overlay' ? {} : { background: color(i) }"
+          :class="{ line: mode === 'overlay' || comparisonActive }"
+          :style="mode === 'overlay' || comparisonActive ? {} : { background: color(i) }"
         />
         {{ name }}
         <button type="button" class="x" @click="removeChannel(name)">×</button>
