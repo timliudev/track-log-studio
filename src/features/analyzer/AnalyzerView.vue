@@ -260,7 +260,7 @@ const { heatNorm, colorValues, legendGradient, fmtVal } = useTrackHeatmap(
 function onLapSelect(index: number | null): void {
   // Explicit clear (clear button) → empty selection + full view.
   if (index == null) {
-    lapStore.clearSelection()
+    lapStore.clearAllLapSelections()
     analyzer.setXRange(null)
     return
   }
