@@ -8,6 +8,26 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
     <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry. Fully client-side, installable as a PWA."
+    />
+    <!-- Static fallback for browsers that read HTML meta instead of the
+         manifest's theme_color; kept in sync with src/theme/theme.css's
+         --color-bg for :root (light) and [data-theme='dark']. Only reacts to
+         OS-level prefers-color-scheme, not the in-app manual theme toggle
+         (that needs a JS-driven update, out of scope for this static file). -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f8fa" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f1115" />
+    <!-- iOS/Safari "Add to Home Screen" PWA metadata (Chrome/Android read the
+         Web App Manifest instead; Safari still needs these explicitly). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Track Log Studio" />
+    <!-- SVG placeholder — iOS Safari's apple-touch-icon support for SVG is
+         inconsistent across versions; replace with a real 180x180 PNG for
+         reliable home-screen icon rendering (see docs recommendation). -->
+    <link rel="apple-touch-icon" href="/app-icon.svg" />
     <title>Track Log Studio</title>
     <!-- Cloudflare Web Analytics -->
     <script

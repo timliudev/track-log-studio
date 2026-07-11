@@ -327,7 +327,7 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 - **Auto-saved**: the layout (every card's position and size) is automatically saved in the browser (localStorage) and persists across reloads and closed tabs.
 - **Reset layout**: the "Reset layout" button in the toolbar restores the default arrangement (map and lap table in the left column, charts and tool panels in the right column). "Add chart," "Add XY scatter chart," and "Reset layout" all live in the same toolbar button cluster (next to each other), since adding chart cards and resetting the overall arrangement are related layout actions.
 - **Adding chart cards**: a chart added via the toolbar's "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
-- **Collapsing a card**: every card's title bar has a collapse/expand button (chevron) on the right — click it to hide the card's content and keep just the title bar, useful for tidying up cards you don't need right now. Works on both desktop and mobile; the collapsed state is saved automatically.
+- **Collapsing a card**: every card's title bar has a collapse/expand button (chevron) on the right — click it to hide the card's content and keep just the title bar. On desktop, collapsing also shrinks that card's grid slot down to a fixed two-row height, and neighbouring cards automatically **reflow** to pack into the freed-up space; expanding restores the original height and neighbours make room again, with no manual rearranging needed. Works on both desktop and mobile; the collapsed state is saved automatically.
 
 #### Mobile: single column + collapse + pin
 
@@ -355,6 +355,18 @@ This requires **at least two recordings already loaded** in the Analyzer (e.g. a
    - If the selected recordings are missing a usable speed or time channel, or there isn't enough overlapping time range/speed signal between them, a matching error message is shown and you can't proceed.
 4. **Fine-tune the offset**: auto-align isn't always perfect — use the "−100ms" / "+100ms" buttons next to the time offset to nudge it by hand in 100ms steps, without re-running auto-align.
 5. **Merge and add to recordings**: once you're happy with the offset, click this to splice the GPS/speed/course channels onto the base recording's own time axis at that offset, producing a new recording (named `<original name>_merged.loga`) and showing `Merged into a new recording "<name>" — pick it from the record menu above.` The merged recording then appears in the record picker above like any other — switch to it, use any Analyzer feature, or export it from the Converter.
+
+### 4.12 Multi-session comparison
+
+Beyond comparing laps within a single recording (see 4.4), the Analyzer also supports loading **several different recording files at once** and comparing them against each other — for example a few runs from the same day, or a friend's recording.
+
+1. **Select recordings to compare**: once multiple recordings are loaded, each file name in the record bar gets a checkbox — check it to add that recording to the current comparison set. Clicking a file name makes it the "primary" recording (the one the track map, lap table, and the rest of the dashboard are built around).
+2. **Compared-recording lap table**: the Analyzer shows a "Compare recordings" card with one per-lap table per checked-in recording, using the **same configured columns** as the primary lap table (columns you add/remove there apply here too), plus each one's fastest lap and its gap to the primary recording's fastest lap.
+3. **Cross-recording lap overlay**: check laps in a compared recording's lap table to draw those laps' tracks **overlaid on the track map**, just like overlaying laps within a single recording — handy for comparing the same corner's line across recordings.
+4. **Track overlay**: any recording checked into the comparison set also has its full track drawn faintly on the track map (each recording keeps a stable identity color shared by its checkbox, lap table, and track); the primary recording is drawn normally on top.
+5. **Map offset**: if GPS drift leaves two recordings' tracks slightly misaligned on the map, the "Compared recording map offset" panel below the map lets you nudge each compared recording's overlay east/north (in metres) without touching the underlying data — each one can be reset individually.
+6. **Cursor linking**: hovering over an overlaid compared-recording track (or a cross-recording lap-overlay chart) moves the track map's and timeline charts' cursor to the matching position on the primary recording, so you can compare both recordings at the same instant.
+7. **Clear comparisons**: clears the whole comparison set at once, back to viewing just the primary recording.
 
 ---
 

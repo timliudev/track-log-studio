@@ -85,23 +85,37 @@ export default defineConfig(({ mode }) => {
           ],
         },
         manifest: {
+          id: '/',
           name: 'Track Log Studio',
           short_name: 'TrackLogStudio',
           description:
             'Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry.',
           lang: 'zh-Hant',
           start_url: '/',
+          scope: '/',
           display: 'standalone',
           background_color: '#0f1115',
           theme_color: '#0f1115',
-          // SVG icon for Phase 0 — replace with rasterised PNG (192/512 +
-          // maskable) before production for the broadest install support.
+          categories: ['utilities', 'sports'],
+          // SVG icons for Phase 0 — replace with rasterised PNG (192/512 +
+          // a padded maskable variant) before production for the broadest
+          // install support (some installers/stores still expect concrete
+          // PNG sizes rather than a scalable "any" icon). Split into two
+          // entries (rather than one "any maskable" icon) so a maskable-aware
+          // installer doesn't apply an OS icon mask to art that has no
+          // maskable safe-zone padding baked in.
           icons: [
             {
               src: 'app-icon.svg',
               sizes: 'any',
               type: 'image/svg+xml',
-              purpose: 'any maskable',
+              purpose: 'any',
+            },
+            {
+              src: 'app-icon.svg',
+              sizes: 'any',
+              type: 'image/svg+xml',
+              purpose: 'maskable',
             },
           ],
         },

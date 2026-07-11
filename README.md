@@ -71,7 +71,8 @@ your browser. Installable as a PWA on iOS / Android.
 | 賽道分段（sector）自動偵測與分段計時、最佳理論圈 | ✅ |
 | G-G 圖、可拖曳／縮放的多圖表儀表板（手機摺疊／釘選／布局鎖定） | ✅ |
 | 多場次載入、合併與比較（RaceChrono GPS ＋ ECU log 對齊） | ✅ |
-| 雲端賽道庫、多檔（multi-session）分析、齒比圖併入主時序圖 | 🚧 規劃／進行中 |
+| 多檔（multi-session）同時分析比較（跨檔疊圈、地圖疊圖與偏移對位、游標連動）、齒比併入主時序圖（衍生通道） | ✅ |
+| 雲端賽道庫（公開賽道庫已內建種子資料並自動套用；社群 PR／CDN 分發層仍規劃中） | 🚧 規劃／進行中 |
 
 ## 技術 Stack
 

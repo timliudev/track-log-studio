@@ -14,7 +14,7 @@
   - `xrk`（AiM Solo 2 DL / MyChron5）—— 訊息流(H-訊息含 checksum + sample 訊息);CNF/CHS channel 表;decoder(int16/float16/int32/gear);各通道取樣率以 MCLK 主時鐘重採樣;GPS 為 ECEF X/Y/Z → Bowring 轉 WGS84 經緯度。真檔驗證 95890 列/座標正確/圈時合理。**`.xrz`（zlib 壓縮的 `.xrk`）已支援** —— `parseXrk` 偵測 RFC 1950 zlib magic 後用 `fflate` 的 `Unzlib` 串流 inflate（含解壓炸彈防護,512 MB 上限,同 `zip.ts` 的作法）,還原成 `.xrk` bytes 再走同一 parser。
   - `rcnx`（Qstarz LT-Q6000 / Q6000S，QRacing）—— ZIP 內含**標準 SQLite**（每場 `sess_N.db` 的 `WayPoints` 表）。用 `sql.js`（WASM，動態載入、PWA 預快取）讀取；一檔多 session 時取 `WayPoints` 列數最多者；lat/lon 為十進位度（無縮放）、speed km/h、Gx/Gy/Gz g。真檔驗證 22402 列／座標正確（TWN-ARK）／速度 ~84 km/h／model LT-Q6000。
 - **圈速時間帶過濾**：設有效圈速區間，區間外圈自動排除；`excluded` 為「手動排除 ∪ 區間外」之聯集，無區間時與舊行為一致。
-- 248 單元測試、production build 通過、`npm audit` 0 漏洞。
+- 248 單元測試（格式匯入完成當下的快照數字；目前全專案測試數已隨後續功能持續增加，見 README/`npm test` 的即時結果）、production build 通過、`npm audit` 0 漏洞。
 
 ## 🔧 已修正
 - VBO 匯入穩健性：超大 grid 配置上限（防 OOM）、超大 `[column names]` 行的堆疊溢位。
@@ -23,11 +23,10 @@
 
 ## 🛠️ 待修 / 已知限制
 - RCZ 同名通道後綴為 cosmetic 差異（AFR 第二份命名為 `rc_air_fuel_ratio_3`，與 VBO 端 `_2` 不一致）；不影響資料。
-- 匯出側尚未 registry 化：`Rc3NmeaExporter`、VBO 匯出各有不同呼叫慣例（見 ARCHITECTURE-FORMATS §7）。
 - VBO 匯入的時間為相對重建（VBO 僅存 time-of-day，屬格式本身的有損特性）。
 
 ## 📋 待完成
-- **任意格式互轉**：讓匯入的 `vbo` / `rcz` / `xrk` / `rcnx` 也能再匯出／轉檔 —— 需把 `fileStore` 目前 `fileType === 'loga'` 的過濾改為「能力旗標」。
 - **RCNX 多 session 展開**：目前一檔多 session 只取最大那場；若要全部展開需擴充 worker 協定（一檔多 LogSession）。
 - **RCNX 圈資料**：`sana_N.db` 內有官方圈/分段（lap/split），目前未讀；之後可接進 analyzer 圈資料。
-- **Sector 完整性判定有效圈**：需先定義「彎是否真的跑過」的準則（彎速？逐 sector 通過閘門？），可用與時間帶過濾相同的 union 方式接進排除機制。
+
+> 以下項目已完成，從舊版待辦移出：**任意格式互轉**（`converterStore.convertAll()` 對任何已載入格式 loga/nmea/vbo/rcz/xrk/rcnx 一視同仁跑 export registry，見該檔函式註解）；**匯出側 registry 化**（`src/domain/export/registry.ts` 的 `EXPORT_FORMATS`，見 ARCHITECTURE-FORMATS.md §4 附註）；**Sector 完整性判定有效圈**（`useSectors`/`SectorPanel.vue`，「N 圈未通過 sector 檢查」已併入排除邏輯，見使用手冊 §4.5）。
