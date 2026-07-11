@@ -5,6 +5,7 @@ import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import GearPanel from '@/features/analyzer/GearPanel.vue'
 import UPlotChart from '@/components/UPlotChart.vue'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { vTooltip } from '@/directives/tooltip'
@@ -170,5 +171,24 @@ describe('GearPanel — MT gear-ratio chart lines actually render (#8)', () => {
     // samples are merged in.
     expect(nonNullCount).toBeLessThanOrEqual(41)
     expect(xs.length).toBeGreaterThan(nonNullCount * 3)
+  })
+
+  it('renders the CVT ratio-vs-speed sweep with a visible line and points', async () => {
+    const wrapper = mountPanel(denseMtSession())
+    useDrivetrainStore().setKind('cvt')
+    await wrapper.vm.$nextTick()
+
+    const charts = wrapper.findAllComponents(UPlotChart)
+    expect(charts).toHaveLength(1)
+    const sweep = charts[0].props('series')[1]
+
+    // Regression: stroke was `transparent` and the points inherited that
+    // transparent colour. Data and hover values existed, but no pixels were
+    // visible in the chart.
+    expect(sweep.stroke).not.toBe('transparent')
+    expect(sweep.width).toBeGreaterThan(0)
+    expect(sweep.points?.show).toBe(true)
+    expect(sweep.points?.stroke).not.toBe('transparent')
+    expect(sweep.points?.fill).not.toBe('transparent')
   })
 })

@@ -423,9 +423,15 @@ const cvtSweepSeries: uPlot.Series[] = [
   {},
   {
     label: '',
-    stroke: 'transparent',
-    points: { show: true, size: 4 },
-    paths: (): null => null,
+    // This used to be a transparent, points-only series. uPlot inherits a
+    // point's colour from the series stroke when no explicit point colour is
+    // supplied, so both the path AND its points became transparent: hover
+    // could still read the values, but the plot looked empty. Keep the
+    // speed-sorted sweep as a real visible curve and give its points an
+    // explicit colour so neither rendering path can silently disappear.
+    stroke: '#e23b3b',
+    width: 2,
+    points: { show: true, size: 4, stroke: '#e23b3b', fill: '#e23b3b' },
   },
 ]
 const cvtSweepAxes: uPlot.Axis[] = [
