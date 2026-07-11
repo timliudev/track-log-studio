@@ -25,8 +25,8 @@
  *   measured RPM/speed scatter recovered from the log. Detected plateaus
  *   (Layer 2 clustering) are listed against the configured ratios.
  * - CVT: measured-curve presentation only (no geometry sim — see
- *   `drivetrain.ts`). Ratio-vs-time and ratio-vs-speed charts, launch/top
- *   ratio + clutch-engagement RPM summary, plus free-form tuning notes
+ *   `drivetrain.ts`). Ratio-vs-speed chart, launch/top ratio + clutch-
+ *   engagement RPM summary, plus free-form tuning notes
  *   (前普利尺寸/珠重/彈簧硬度/開閉盤規格/套管長度/終傳比 etc.) persisted with the
  *   drivetrain settings for setup comparison.
  */
@@ -34,6 +34,9 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
+import type { Lap } from '@/domain/model/Lap'
+import type { ChartMode } from '@/stores/analyzerStore'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
 import {
   useDrivetrainStore,
   toMtDrivetrainSpec,
@@ -43,6 +46,7 @@ import {
 } from '@/stores/drivetrainStore'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import UPlotChart from '@/components/UPlotChart.vue'
+import GearRatioChart from './GearRatioChart.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
@@ -53,7 +57,6 @@ import {
   computeRatioSeries,
   detectGearPlateaus,
   buildCvtRatioSweep,
-  buildCvtRatioTimeSeries,
   cvtRatioSummary,
   estimateClutchEngagementRpm,
   estimateCircumferenceFromLog,
@@ -64,6 +67,22 @@ const props = defineProps<{
   /** The active session, for the log-inversion (由記錄反推) section — null when
    *  no file is loaded (that section shows an i18n hint instead). */
   session: LogSession | null
+  /** Main analyzer X values/range/cursor are forwarded to the embedded ratio
+   * trace so this STATIC calculator card participates in chart sync. */
+  xValues?: Float64Array | null
+  xRange?: { min: number; max: number } | null
+  externalCursor?: number | null
+  selectedLaps?: Lap[]
+  gearRatioMode?: ChartMode
+  comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
+}>()
+
+const emit = defineEmits<{
+  cursor: [number | null]
+  xZoom: [{ min: number; max: number }]
+  updateGearRatioMode: [ChartMode]
 }>()
 
 const { t } = useI18n()
@@ -262,17 +281,6 @@ const speedData = computed(() => {
   return s.get(speedName)?.data ?? null
 })
 
-const timeSData = computed(() => {
-  const s = props.session
-  const time = s?.timeChannel?.data
-  if (!time) return null
-  // session time is stored in ms (see LogSession/Channel doc) — the CVT
-  // ratio-vs-time chart's x-axis is seconds, matching other analyzer charts.
-  const out = new Float64Array(time.length)
-  for (let i = 0; i < time.length; i++) out[i] = time[i] / 1000
-  return out
-})
-
 // ── MT: measured scatter + theoretical line overlay ──────────────────────
 const MAX_SCATTER_POINTS = 4000
 
@@ -419,14 +427,6 @@ const cvtSweep = computed(() => {
   return strideFilter(points, 2000)
 })
 
-const cvtTimeSeries = computed(() => {
-  const series = ratioSeries.value
-  const time = timeSData.value
-  if (!series || !time || isMt.value) return []
-  const points = buildCvtRatioTimeSeries(series, time)
-  return strideFilter(points, 2000)
-})
-
 const cvtSummary = computed(() => (ratioSeries.value ? cvtRatioSummary(ratioSeries.value) : null))
 const cvtClutchRpm = computed(() => {
   const rpm = rpmData.value
@@ -443,31 +443,19 @@ const cvtSweepSeries: uPlot.Series[] = [
   {},
   {
     label: '',
-    stroke: 'transparent',
-    points: { show: true, size: 4 },
-    paths: (): null => null,
+    // This used to be a transparent, points-only series. uPlot inherits a
+    // point's colour from the series stroke when no explicit point colour is
+    // supplied, so both the path AND its points became transparent: hover
+    // could still read the values, but the plot looked empty. Keep the
+    // speed-sorted sweep as a real visible curve and give its points an
+    // explicit colour so neither rendering path can silently disappear.
+    stroke: '#e23b3b',
+    width: 2,
+    points: { show: true, size: 4, stroke: '#e23b3b', fill: '#e23b3b' },
   },
 ]
 const cvtSweepAxes: uPlot.Axis[] = [
   { label: 'km/h' },
-  { label: t('analyzer.gear.cvtSweepAxisRatio') as string },
-]
-
-const cvtTimeChartData = computed<uPlot.AlignedData>(() => [
-  cvtTimeSeries.value.map((p) => p.timeS),
-  cvtTimeSeries.value.map((p) => p.ratio),
-])
-const cvtTimeSeriesOpts: uPlot.Series[] = [
-  {},
-  {
-    label: t('analyzer.gear.cvtSweepAxisRatio') as string,
-    stroke: '#2a9d8f',
-    width: 2,
-    points: { show: false },
-  },
-]
-const cvtTimeAxes: uPlot.Axis[] = [
-  { label: 's' },
   { label: t('analyzer.gear.cvtSweepAxisRatio') as string },
 ]
 
@@ -515,6 +503,28 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         {{ t('analyzer.gear.kindCvt') }}
       </button>
     </div>
+
+    <!-- The measured ratio trace belongs to this calculator card, but uses
+         the exact same TimeSeriesChart/UPlot pipeline as the dashboard:
+         global time/distance axis, zoom, cursor and selected-lap overlay. -->
+    <h4 class="sub-heading">{{ t('analyzer.gear.ratioTimelineHeading') }}</h4>
+    <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
+    <p v-else-if="!props.xValues" class="hint">{{ t('analyzer.gear.noRatioAxis') }}</p>
+    <GearRatioChart
+      v-else
+      :mode="gearRatioMode ?? 'timeline'"
+      :session="props.session"
+      :x-values="props.xValues"
+      :x-range="props.xRange"
+      :external-cursor="props.externalCursor"
+      :selected-laps="props.selectedLaps"
+      :comparison-sessions="props.comparisonSessions"
+      :primary-file-id="props.primaryFileId"
+      :primary-file-name="props.primaryFileName"
+      @cursor="emit('cursor', $event)"
+      @x-zoom="emit('xZoom', $event)"
+      @update-mode="emit('updateGearRatioMode', $event)"
+    />
 
     <!-- ════════════════════════ MT ════════════════════════ -->
     <template v-if="isMt">
@@ -895,16 +905,6 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
             {{ t('analyzer.gear.clutchEngagementRpm', { rpm: fmtRpm(cvtClutchRpm) }) }}
           </span>
         </div>
-
-        <h5 class="sub-sub-heading">{{ t('analyzer.gear.cvtTimeHeading') }}</h5>
-        <p v-if="cvtTimeSeries.length === 0" class="hint">{{ t('analyzer.gear.noPlateaus') }}</p>
-        <UPlotChart
-          v-else
-          :data="cvtTimeChartData"
-          :series="cvtTimeSeriesOpts"
-          :axes="cvtTimeAxes"
-          :height="200"
-        />
 
         <h5 class="sub-sub-heading">{{ t('analyzer.gear.cvtSweepHeading') }}</h5>
         <p v-if="cvtSweep.length === 0" class="hint">{{ t('analyzer.gear.noPlateaus') }}</p>

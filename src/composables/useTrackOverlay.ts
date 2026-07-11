@@ -20,7 +20,7 @@ export interface OverlayCandidate {
  * toggle-able overlay candidate, and derives the actual drawable entries
  * (decimated track + stable identity color) for whichever candidates are
  * currently on. The on/off SET itself lives in analyzerStore
- * (`overlayFileIds`) alongside the page's other transient view toggles;
+ * (`selectedSessions`) alongside the page's other transient view toggles;
  * this composable just derives everything else from it + fileStore.
  *
  * Color is keyed by fileStore id (not by selection/toggle order), so a
@@ -43,7 +43,7 @@ export function useTrackOverlay(): {
   // disabled (there's no useful action to take on it here).
   const candidates = computed<OverlayCandidate[]>(() => {
     const activeId = analyzer.activeFileId
-    const activeSet = new Set(analyzer.overlayFileIds)
+    const activeSet = new Set(analyzer.selectedSessions)
     return fileStore.readyFiles
       .filter((f) => f.id !== activeId)
       .filter((f) => {
@@ -61,14 +61,14 @@ export function useTrackOverlay(): {
   // The actual drawable overlays: only currently-toggled-on candidates,
   // decimated for cheap rendering (see decimateGpsTrack's doc — the active
   // session's own track, drawn separately by TrackMap, is never decimated).
-  // Built straight from analyzerStore.overlayFileIds (not `candidates`) so a
+  // Built straight from analyzerStore.selectedSessions (not `candidates`) so a
   // toggled-on session that later BECOMES the active one is transparently
   // dropped (it's already drawn, at full opacity, as the active track) without
-  // needing to also mutate overlayFileIds.
+  // needing to also mutate selectedSessions.
   const overlayTracks = computed<TrackOverlayEntry[]>(() => {
     const activeId = analyzer.activeFileId
     const out: TrackOverlayEntry[] = []
-    for (const id of analyzer.overlayFileIds) {
+    for (const id of analyzer.selectedSessions) {
       if (id === activeId) continue
       const file = fileStore.files.find((f) => f.id === id)
       const session = fileStore.getSession(id)
@@ -80,17 +80,21 @@ export function useTrackOverlay(): {
         label: file.name,
         color: categoricalColor(id),
         track: decimateGpsTrack(track, OVERLAY_MAX_POINTS),
+        offset: {
+          x: analyzer.sessionOffsetOf(id).mapX,
+          y: analyzer.sessionOffsetOf(id).mapY,
+        },
       })
     }
     return out
   })
 
   function toggle(id: number): void {
-    analyzer.toggleOverlayFile(id)
+    analyzer.toggleSessionComparison(id)
   }
 
   function clear(): void {
-    analyzer.clearOverlayFiles()
+    analyzer.clearSessionComparisons()
   }
 
   return { candidates, overlayTracks, toggle, clear }

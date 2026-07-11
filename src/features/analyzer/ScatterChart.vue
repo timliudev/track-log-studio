@@ -8,6 +8,9 @@ import { buildGgPoints, buildGgPointsWithColor, looksLikeForce } from '@/domain/
 import { lapColor } from './lapColors'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GgSeries } from './GgChart.vue'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
+import { categoricalColor } from '@/domain/analysis/colorPalette'
+import { buildMultiSessionScatter } from '@/domain/analysis/multiSessionScatter'
 
 // A10+A12 — XY scatter chart TYPE: any two channels, managed exactly like
 // timeseries charts (multiple instances, per-chart config, remove button).
@@ -38,6 +41,9 @@ const props = defineProps<{
   /** Selected laps in selection order (for per-lap coloring), or empty for
    *  whole-session single-color plotting. */
   selectedLaps: Lap[]
+  comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
   /** #8 — forwarded to GgChart: fill the dashboard grid item's height instead
    *  of a fixed pixel height. See GgChart's `fillHeight` prop. */
   fillHeight?: boolean
@@ -96,6 +102,22 @@ const ggSeries = computed<GgSeries[]>(() => {
   const yCh = s.get(yName)
   if (!xCh || !yCh) return []
   const scale = useMilliG.value ? MILLI_G_SCALE : 1
+  const comparisons = props.comparisonSessions ?? []
+  // Session identity owns hue while multi-session comparison is active. A
+  // continuous colour-axis would erase that encoding, so it remains available
+  // only in the existing single-session path.
+  if (comparisons.length > 0) {
+    return buildMultiSessionScatter([
+      {
+        id: props.primaryFileId ?? 0,
+        name: props.primaryFileName ?? t('analyzer.gg.session'),
+        color: categoricalColor(props.primaryFileId ?? 0),
+        session: s,
+      },
+      ...comparisons,
+    ], xName, yName, MAX_POINTS, colorChannel.value)
+  }
+
   // Colour-axis feature — resolved once here (not per-lap below) so a stale
   // colorChannel pick from a previously loaded session (channel no longer
   // exists) degrades to "no colour axis" for every series, same as

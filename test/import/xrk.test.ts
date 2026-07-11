@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import { zlibSync } from 'fflate'
 import { parseXrk, float16ToFloat32, parseChsRecord } from '@/domain/import/xrk/parseXrk'
 import { ecefToLla } from '@/domain/import/xrk/ecef'
+import { isZlibMagic, inflateXrz } from '@/domain/import/xrk/inflateXrz'
+import { xrkImporter } from '@/domain/import/xrk/XrkImporter'
 
 // --- pure helper: float16 → float32 ---
 describe('float16ToFloat32', () => {
@@ -193,5 +196,67 @@ describe('parseXrk — synthetic message stream', () => {
   it('throws a clear error when no channel table is present', () => {
     const garbage = new Uint8Array([0x00, 0x01, 0x02, 0x03, 0x04, 0x05])
     expect(() => parseXrk(garbage)).toThrow(/no channel definitions/)
+  })
+
+  it('transparently inflates a zlib-wrapped .xrz stream (same result as raw .xrk)', () => {
+    const raw = buildSyntheticXrk()
+    const zrx = zlibSync(raw)
+    expect(isZlibMagic(zrx)).toBe(true)
+    expect(isZlibMagic(raw)).toBe(false) // '<h' magic (0x3c) is not a zlib CMF byte
+
+    const session = parseXrk(zrx)
+    expect(session.get('RPM')!.data[0]).toBeCloseTo(2500, 0)
+    expect(session.meta.headerInfo.driver).toBe('CHENG')
+  })
+})
+
+// --- zlib magic sniffing + inflate bomb guard ---
+describe('isZlibMagic / inflateXrz', () => {
+  it('recognises common zlib header byte pairs, rejects non-zlib data', () => {
+    expect(isZlibMagic(new Uint8Array([0x78, 0x9c]))).toBe(true) // default compression
+    expect(isZlibMagic(new Uint8Array([0x78, 0x01]))).toBe(true) // no/low compression
+    expect(isZlibMagic(new Uint8Array([0x78, 0xda]))).toBe(true) // best compression
+    expect(isZlibMagic(new Uint8Array([0x3c, 0x68]))).toBe(false) // '<h' xrk magic
+    expect(isZlibMagic(new Uint8Array([0x50, 0x4b]))).toBe(false) // 'PK' zip magic
+    expect(isZlibMagic(new Uint8Array([0x78]))).toBe(false) // too short
+  })
+
+  it('rejects a stream whose inflated size exceeds the safety cap', () => {
+    const bomb = zlibSync(new Uint8Array(1024 * 1024).fill(0x41)) // highly compressible
+    expect(() => inflateXrz(bomb, 1024)).toThrow(/decompression bomb/)
+  })
+})
+
+// --- importer registration: extension + magic detection, .xrz included ---
+describe('xrkImporter.detect', () => {
+  const headBytes = (bytes: number[]): Uint8Array => Uint8Array.from(bytes)
+
+  it('matches by .xrk / .xrz extension regardless of content', () => {
+    expect(
+      xrkImporter.detect({ fileName: 'run.xrk', headText: '', headBytes: headBytes([0, 0]) }),
+    ).toBe(true)
+    expect(
+      xrkImporter.detect({ fileName: 'run.xrz', headText: '', headBytes: headBytes([0, 0]) }),
+    ).toBe(true)
+  })
+
+  it('matches an unrecognised-extension file by zlib magic', () => {
+    expect(
+      xrkImporter.detect({
+        fileName: 'run.bin',
+        headText: '',
+        headBytes: headBytes([0x78, 0x9c, 0, 0, 0]),
+      }),
+    ).toBe(true)
+  })
+
+  it('does not match unrelated content', () => {
+    expect(
+      xrkImporter.detect({
+        fileName: 'run.bin',
+        headText: '',
+        headBytes: headBytes([0x50, 0x4b, 0x03, 0x04, 0]),
+      }),
+    ).toBe(false)
   })
 })

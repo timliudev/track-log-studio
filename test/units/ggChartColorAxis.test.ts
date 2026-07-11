@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { colorExtent, type GgSeries } from '@/features/analyzer/GgChart.vue'
+import {
+  colorExtent,
+  formatScatterTooltip,
+  thirdValueExtent,
+  type GgSeries,
+} from '@/features/analyzer/GgChart.vue'
 
 // Colour-axis feature — the [min,max] domain visualMap needs to build the
 // colorbar, derived from every series' colorValues (see ScatterChart.vue's
@@ -46,5 +51,33 @@ describe('colorExtent (colour-axis feature)', () => {
       { points: [[0, 0]], color: '#4363d8', name: 'session', colorValues: [0, 0] },
     ]
     expect(colorExtent(series)).toEqual({ min: -1, max: 1 })
+  })
+})
+
+describe('third-channel scatter tooltip', () => {
+  it('shows the actual third value and keeps the session identity label', () => {
+    expect(formatScatterTooltip('session B', [1.25, -0.5, 6423.75], false, 'RPM', 1)).toBe(
+      'session B<br/>X: 1.25<br/>Y: -0.50<br/>RPM: 6423.8',
+    )
+  })
+
+  it('keeps the old two-value tooltip when no third channel is available', () => {
+    expect(formatScatterTooltip('lap 1', [0.1, -0.2], true, 'RPM', 2)).toBe(
+      'lap 1<br/>X: 0.10 g<br/>Y: -0.20 g',
+    )
+  })
+
+  it('escapes file and channel labels before ECharts inserts tooltip HTML', () => {
+    expect(formatScatterTooltip('<file>', [1, 2, 3], false, 'A&B', 0)).toContain(
+      '&lt;file&gt;<br/>X: 1.00<br/>Y: 2.00<br/>A&amp;B: 3',
+    )
+  })
+
+  it('derives precision from tooltip-only multi-session values', () => {
+    const series: GgSeries[] = [
+      { points: [[0, 0], [1, 1]], color: '#a00', name: 'A', tooltipValues: [10, 10.25] },
+    ]
+    expect(colorExtent(series)).toBeNull()
+    expect(thirdValueExtent(series)).toEqual({ min: 10, max: 10.25 })
   })
 })

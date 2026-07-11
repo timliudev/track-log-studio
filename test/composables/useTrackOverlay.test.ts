@@ -72,6 +72,9 @@ describe('useTrackOverlay', () => {
     expect(overlayTracks.value.map((o) => o.id)).toEqual([bId])
     expect(overlayTracks.value[0].label).toBe('b.nmea')
     expect(overlayTracks.value[0].color).toBe(categoricalColor(bId))
+    analyzer.nudgeSessionOffset(bId, 'mapX', 2.5)
+    analyzer.nudgeSessionOffset(bId, 'mapY', -1)
+    expect(overlayTracks.value[0].offset).toEqual({ x: 2.5, y: -1 })
 
     toggle(bId)
     expect(overlayTracks.value).toHaveLength(0)

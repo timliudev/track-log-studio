@@ -12,12 +12,29 @@ import {
 
 export type XAxis = 'time' | 'distance'
 
+/** Manual comparison alignment, keyed by fileStore id. Timeline offsets use
+ * the active X-axis' native unit; map offsets are reserved for Phase 2's map
+ * alignment consumer but live in the shared model from Phase 1 onward. */
+export interface SessionOffset {
+  timeSec: number
+  distM: number
+  mapX: number
+  mapY: number
+}
+
+const ZERO_SESSION_OFFSET: Readonly<SessionOffset> = {
+  timeSec: 0,
+  distM: 0,
+  mapX: 0,
+  mapY: 0,
+}
+
 /** Phase 7 — acceleration/drag test condition: which of the two
  *  `accelTest.ts` searches to run and its parameters. Discriminated union so
  *  the panel/store only ever hold ONE condition's params at a time (switching
  *  type doesn't require clearing unrelated fields — see `setAccelCondition`). */
 export type AccelCondition =
-  | { kind: 'distance'; distanceM: number; minEntrySpeedKmh: number | null }
+  | { kind: 'distance'; distanceM: number; entrySpeedKmh: number }
   | { kind: 'speed'; fromKmh: number; toKmh: number }
 
 /**
@@ -80,17 +97,14 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const accelCondition = ref<AccelCondition>({
     kind: 'distance',
     distanceM: 100,
-    minEntrySpeedKmh: null,
+    entrySpeedKmh: 0,
   })
-  // Track-map multi-file overlay: fileStore ids of OTHER loaded sessions whose
-  // racing line is drawn (faint, alongside the active session's own
-  // full-opacity track) on TrackMap — see useTrackOverlay.ts, which derives
-  // the actual drawable entries (name/color/decimated track) from this id set
-  // + fileStore. Transient like the other analyzer toggles above (not
-  // persisted); a stale id (its file got removed) is harmless — the
-  // composable simply drops it when building the drawable list, and toggling
-  // it again re-adds a fresh one.
-  const overlayFileIds = ref<number[]>([])
+  // Global multi-session comparison selection. The active file remains the
+  // primary session for laps/sectors/deep-dive panels; these ids are OTHER
+  // sessions consumed by timeline charts and the existing track overlay.
+  // File ids are per-page/transient, so neither this nor offsets are persisted.
+  const selectedSessions = ref<number[]>([])
+  const sessionOffsets = ref<Record<number, SessionOffset>>({})
   // One past the highest restored id — ids are never reused, so a restored
   // layout/panel-state entry can't collide with a newly added chart's card id.
   let nextId = nextChartId(charts.value)
@@ -146,17 +160,51 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     accelCondition.value = condition
   }
 
-  /** Toggle whether `id` (a fileStore file id) is drawn as a track-map
-   *  overlay — on if it was off, off if it was on. */
-  function toggleOverlayFile(id: number): void {
-    const i = overlayFileIds.value.indexOf(id)
-    if (i === -1) overlayFileIds.value = [...overlayFileIds.value, id]
-    else overlayFileIds.value = overlayFileIds.value.filter((x) => x !== id)
+  /** Add/remove a file from the global comparison set. */
+  function toggleSessionComparison(id: number): void {
+    const i = selectedSessions.value.indexOf(id)
+    if (i === -1) selectedSessions.value = [...selectedSessions.value, id]
+    else selectedSessions.value = selectedSessions.value.filter((x) => x !== id)
   }
 
-  /** Drop every overlaid file (e.g. a "clear overlays" affordance). */
-  function clearOverlayFiles(): void {
-    overlayFileIds.value = []
+  function clearSessionComparisons(): void {
+    selectedSessions.value = []
+  }
+
+  function sessionOffsetOf(id: number): Readonly<SessionOffset> {
+    return sessionOffsets.value[id] ?? ZERO_SESSION_OFFSET
+  }
+
+  function nudgeSessionOffset(id: number, axis: keyof SessionOffset, delta: number): void {
+    if (!Number.isFinite(delta) || delta === 0) return
+    const current = sessionOffsetOf(id)
+    sessionOffsets.value = {
+      ...sessionOffsets.value,
+      [id]: { ...current, [axis]: current[axis] + delta },
+    }
+  }
+
+  function setSessionOffset(id: number, axis: keyof SessionOffset, value: number): void {
+    if (!Number.isFinite(value)) return
+    const current = sessionOffsetOf(id)
+    sessionOffsets.value = {
+      ...sessionOffsets.value,
+      [id]: { ...current, [axis]: value },
+    }
+  }
+
+  function resetSessionOffset(id: number, axis?: keyof SessionOffset): void {
+    if (axis) {
+      setSessionOffset(id, axis, 0)
+      return
+    }
+    const next = { ...sessionOffsets.value }
+    delete next[id]
+    sessionOffsets.value = next
+  }
+
+  function clearSessionOffsets(): void {
+    sessionOffsets.value = {}
   }
 
   /** Add a new chart. `kind` defaults to 'timeseries' (existing behaviour,
@@ -249,7 +297,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     markMinima,
     markMaxima,
     accelCondition,
-    overlayFileIds,
+    selectedSessions,
+    sessionOffsets,
     setXRange,
     setCursor,
     setOverlayCursor,
@@ -259,8 +308,13 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     setMarkMinima,
     setMarkMaxima,
     setAccelCondition,
-    toggleOverlayFile,
-    clearOverlayFiles,
+    toggleSessionComparison,
+    clearSessionComparisons,
+    sessionOffsetOf,
+    nudgeSessionOffset,
+    setSessionOffset,
+    resetSessionOffset,
+    clearSessionOffsets,
     addChart,
     removeChart,
     setChartChannels,

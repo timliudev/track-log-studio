@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fastestDistanceSegment, fastestSpeedSegment } from '@/domain/analysis/accelTest'
+import { fastestDistanceFromLaunch, fastestSpeedSegment } from '@/domain/analysis/accelTest'
 
 /**
  * Build synthetic time/distance/speed arrays for a constant-acceleration ramp
@@ -33,34 +33,59 @@ function rampSession(
   return { timeMs, speedKmh: new Float64Array(speeds), cumDistM }
 }
 
-describe('fastestDistanceSegment', () => {
-  it('finds the min-time 100 m window on a clean 0->100 km/h ramp', () => {
+describe('fastestDistanceFromLaunch', () => {
+  it('times a standing start (entrySpeedKmh=0) over the set distance', () => {
     // 0 -> 200 km/h over 10s (100 samples @ 100ms) then hold at 200 for 2s.
     const { timeMs, speedKmh, cumDistM } = rampSession([
       { v0: 0, v1: 200, n: 101 },
       { v0: 200, v1: 200, n: 20 },
     ])
-    const result = fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 100 })
+    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 100,
+      entrySpeedKmh: 0,
+    })
     expect(result).not.toBeNull()
     expect(result!.distanceM).toBeCloseTo(100, 6)
-    // Because speed is monotonic increasing, the fastest 100m must be found
-    // at higher speed (later in the ramp), not at the very start.
-    expect(result!.entrySpeedKmh).toBeGreaterThan(50)
+    // A standing start must be timed from (very close to) 0 km/h — NOT from
+    // some near-top-speed window elsewhere in the ramp (the old floor-filter
+    // bug this function replaces).
+    expect(result!.entrySpeedKmh).toBeCloseTo(0, 0)
+    expect(result!.startIdx).toBe(0)
     expect(result!.timeMs).toBeGreaterThan(0)
   })
 
-  it('picks the faster of two constant-speed sprint sections', () => {
-    // Two flat (constant-speed) plateaus separated by a slow section: a
-    // 60 km/h plateau (long enough to cover 200m: 12s @ 100ms steps = 120
-    // samples), a 20 km/h "traffic" dip, then a 120 km/h plateau (only needs
-    // 6s = 60 samples to cover the same 200m). The fastest way to cover 200m
-    // is unambiguously the 120 km/h plateau (half the time), regardless of
-    // entry-speed gating.
-    const slowPlateau = rampSession([{ v0: 60, v1: 60, n: 130 }], 100)
-    const dip = rampSession([{ v0: 20, v1: 20, n: 20 }], 100)
-    const fastPlateau = rampSession([{ v0: 120, v1: 120, n: 70 }], 100)
+  it('times a rolling launch at a non-zero entry speed', () => {
+    // Monotonic 0 -> 200 km/h ramp: launching from 100 km/h should measure
+    // the time to cover 100m starting from where speed crosses 100, not from
+    // the standing start.
+    const { timeMs, speedKmh, cumDistM } = rampSession([
+      { v0: 0, v1: 200, n: 101 },
+      { v0: 200, v1: 200, n: 20 },
+    ])
+    const rolling = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 100,
+      entrySpeedKmh: 100,
+    })
+    const standing = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 100,
+      entrySpeedKmh: 0,
+    })
+    expect(rolling).not.toBeNull()
+    expect(standing).not.toBeNull()
+    expect(rolling!.entrySpeedKmh).toBeCloseTo(100, 0)
+    // Launching from a higher speed and covering the same distance takes
+    // strictly less time than a standing start on an accelerating ramp.
+    expect(rolling!.timeMs).toBeLessThan(standing!.timeMs)
+  })
 
-    const segs = [slowPlateau, dip, fastPlateau]
+  it('picks the fastest of multiple launches in the same session', () => {
+    // Two separate standing-start launches: a slow one (long time to cover
+    // 100m) and a fast one (short time), separated by a return to 0.
+    const slowLaunch = rampSession([{ v0: 0, v1: 60, n: 121 }], 100) // gentle ramp
+    const backToZero = rampSession([{ v0: 60, v1: 0, n: 30 }], 100)
+    const fastLaunch = rampSession([{ v0: 0, v1: 200, n: 61 }], 100) // steep ramp
+
+    const segs = [slowLaunch, backToZero, fastLaunch]
     const totalN = segs.reduce((s, x) => s + x.speedKmh.length, 0)
     const speedKmh = new Float64Array(totalN)
     const timeMs = new Float64Array(totalN)
@@ -79,87 +104,73 @@ describe('fastestDistanceSegment', () => {
       dOffset = cumDistM[offset - 1]
     }
 
-    const result = fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 200 })
+    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 50,
+      entrySpeedKmh: 0,
+    })
     expect(result).not.toBeNull()
-    // Must land inside the fast (120 km/h) plateau, not the slow one.
-    const fastStartIdx = slowPlateau.speedKmh.length + dip.speedKmh.length
+    // Must land inside the second (fast) launch, not the first (slow) one.
+    const fastStartIdx = slowLaunch.speedKmh.length + backToZero.speedKmh.length
     expect(result!.startIdx).toBeGreaterThanOrEqual(fastStartIdx)
-    expect(result!.entrySpeedKmh).toBeCloseTo(120, 0)
   })
 
-  it('honors a rolling-start minEntrySpeedKmh gate', () => {
-    // Without a gate, the fastest 50m window is naturally found near the very
-    // end of a monotonic ramp (highest speed = least time for a fixed
-    // distance) — so a gate requiring entry >= 150 km/h can only ever
-    // restrict the candidate set further, never relax it.
-    const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 200, n: 101 }])
-    const gated = fastestDistanceSegment(cumDistM, timeMs, speedKmh, {
+  it('returns null when speed never launches through entrySpeedKmh', () => {
+    // A session that never exceeds 50 km/h can't produce a launch through 100.
+    const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 50, n: 60 }])
+    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
       distanceM: 50,
-      minEntrySpeedKmh: 150,
+      entrySpeedKmh: 100,
     })
-    expect(gated).not.toBeNull()
-    // Gated entry speed must respect the floor.
-    expect(gated!.entrySpeedKmh).toBeGreaterThanOrEqual(150)
-
-    // An impossibly high gate (above the ramp's top speed) must find nothing.
-    const impossible = fastestDistanceSegment(cumDistM, timeMs, speedKmh, {
-      distanceM: 50,
-      minEntrySpeedKmh: 999,
-    })
-    expect(impossible).toBeNull()
+    expect(result).toBeNull()
   })
 
-  it('is a no-op when the gate is at/below the winning window\'s own entry speed (B1)', () => {
-    // Reproduces the user-reported "changing min-entry-speed has no effect"
-    // observation: on a monotonic ramp the ungated winner already enters at
-    // the ramp's near-top speed, so any threshold <= that entry speed can't
-    // exclude it — the result is IDENTICAL to the ungated search. This is
-    // correct trap-timer semantics (the gate only ever narrows the candidate
-    // set), not a bug — see the 'honors a rolling-start...' test above for
-    // the case where raising the gate ABOVE the winner's entry speed does
-    // change the result.
-    const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 200, n: 101 }])
-    const ungated = fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 50 })
-    expect(ungated).not.toBeNull()
-
-    // Any threshold at/below the ungated winner's entry speed must reproduce
-    // the exact same window (start/end/time/distance all unchanged).
-    for (const thresh of [0, ungated!.entrySpeedKmh / 2, ungated!.entrySpeedKmh]) {
-      const gated = fastestDistanceSegment(cumDistM, timeMs, speedKmh, {
-        distanceM: 50,
-        minEntrySpeedKmh: thresh,
-      })
-      expect(gated).toEqual(ungated)
-    }
-  })
-
-  it('returns null when no window covers the requested distance', () => {
+  it('returns null when a launch exists but no launch covers the requested distance', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 50, n: 10 }])
-    const result = fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 1_000_000 })
+    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 1_000_000,
+      entrySpeedKmh: 0,
+    })
     expect(result).toBeNull()
   })
 
   it('returns null for a very short log (< 2 samples)', () => {
-    const result = fastestDistanceSegment(
+    const result = fastestDistanceFromLaunch(
       new Float64Array([0]),
       new Float64Array([0]),
       new Float64Array([0]),
-      { distanceM: 100 },
+      { distanceM: 100, entrySpeedKmh: 0 },
     )
     expect(result).toBeNull()
   })
 
   it('returns null for non-positive distanceM', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 100, n: 20 }])
-    expect(fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 0 })).toBeNull()
-    expect(fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: -5 })).toBeNull()
+    expect(
+      fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, { distanceM: 0, entrySpeedKmh: 0 }),
+    ).toBeNull()
+    expect(
+      fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, { distanceM: -5, entrySpeedKmh: 0 }),
+    ).toBeNull()
   })
 
-  it('skips NaN samples without throwing and still finds a valid window', () => {
-    const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 200, n: 101 }])
+  it('returns null for a non-finite entrySpeedKmh', () => {
+    const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 100, n: 20 }])
+    expect(
+      fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, { distanceM: 50, entrySpeedKmh: NaN }),
+    ).toBeNull()
+  })
+
+  it('skips NaN samples without throwing and still finds a valid launch', () => {
+    const { timeMs, speedKmh, cumDistM } = rampSession([
+      { v0: 0, v1: 200, n: 101 },
+      { v0: 200, v1: 200, n: 20 },
+    ])
     // Inject a NaN speed sample mid-ramp — should not break the scan.
     speedKmh[50] = NaN
-    const result = fastestDistanceSegment(cumDistM, timeMs, speedKmh, { distanceM: 50 })
+    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 50,
+      entrySpeedKmh: 0,
+    })
     expect(result).not.toBeNull()
   })
 })

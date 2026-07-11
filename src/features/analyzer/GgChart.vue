@@ -13,6 +13,46 @@ export interface GgSeries {
    *  `colorExtent`/`buildOption`'s `visualMap`) — the flat per-lap `color`
    *  is then only used as a fallback border/legend swatch. */
   colorValues?: number[]
+  /** Third-channel values used only by the item tooltip. This is separate
+   * from `colorValues` so multi-session charts can retain session identity
+   * colours while still exposing the selected third channel on hover. */
+  tooltipValues?: number[]
+}
+
+function escapeTooltipHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[char] ?? char,
+  )
+}
+
+/** Pure formatter shared by ECharts' item tooltip and unit tests. The third
+ * row is emitted only when the hovered point actually carries a finite third
+ * value, so charts without a selected/available third channel stay unchanged. */
+export function formatScatterTooltip(
+  seriesName: string | undefined,
+  value: readonly unknown[] | undefined,
+  square: boolean,
+  thirdChannel: string | null | undefined,
+  thirdDecimals: number,
+): string {
+  const x = Number(value?.[0])
+  const y = Number(value?.[1])
+  const unit = square ? ' g' : ''
+  let text = `${escapeTooltipHtml(seriesName ?? '')}<br/>X: ${Number.isFinite(x) ? x.toFixed(2) : '—'}${unit}`
+  text += `<br/>Y: ${Number.isFinite(y) ? y.toFixed(2) : '—'}${unit}`
+  const third = Number(value?.[2])
+  if (thirdChannel && Number.isFinite(third)) {
+    text += `<br/>${escapeTooltipHtml(thirdChannel)}: ${third.toFixed(thirdDecimals)}`
+  }
+  return text
 }
 
 /** Axis `name`/`nameLocation`/`nameGap` fields for an echarts axis (#10 — the
@@ -114,6 +154,23 @@ export function colorExtent(series: GgSeries[]): { min: number; max: number } | 
     return { min: min - pad, max: max + pad }
   }
   return { min, max }
+}
+
+/** Raw extent for tooltip precision, including both continuous-colour values
+ * and tooltip-only values used by identity-coloured multi-session series. */
+export function thirdValueExtent(series: GgSeries[]): { min: number; max: number } | null {
+  let min = Infinity
+  let max = -Infinity
+  for (const s of series) {
+    const values = s.colorValues ?? s.tooltipValues
+    if (!values) continue
+    for (const value of values) {
+      if (!Number.isFinite(value)) continue
+      if (value < min) min = value
+      if (value > max) max = value
+    }
+  }
+  return Number.isFinite(min) ? { min, max } : null
 }
 
 /**
@@ -332,7 +389,9 @@ function buildOption(): echarts.EChartsCoreOption {
   const colorRange = colorExtent(props.series)
   const hasColor = colorRange !== null
   const colorSpan = colorRange ? colorRange.max - colorRange.min : NaN
-  const colorDecimals = axisLabelDecimals(colorSpan)
+  const thirdRange = thirdValueExtent(props.series)
+  const thirdSpan = thirdRange ? thirdRange.max - thirdRange.min : NaN
+  const thirdDecimals = axisLabelDecimals(thirdSpan)
 
   // Explicit per-axis ranges. Needed for BOTH 1:1 flavours: echarts' own
   // auto-ranging applies nice-tick rounding per axis independently, which
@@ -414,18 +473,8 @@ function buildOption(): echarts.EChartsCoreOption {
       borderRadius: parseFloat(themeColor('--radius', '8')) || 8,
       textStyle: { color: themeColor('--color-text', '#1a1c20') },
       extraCssText: 'box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);',
-      formatter: (p: { seriesName?: string; value?: number[] }) => {
-        const v = p.value ?? [0, 0]
-        const unit = square ? ' g' : ''
-        let s = `${p.seriesName ?? ''}<br/>X: ${v[0].toFixed(2)}${unit}<br/>Y: ${v[1].toFixed(2)}${unit}`
-        // Colour-axis feature — append the third channel's value when this
-        // point carries one (see the `series` data mapping below, which adds
-        // it as `value[2]` only when `hasColor`).
-        if (hasColor && v.length > 2 && props.colorChannel) {
-          s += `<br/>${props.colorChannel}: ${v[2].toFixed(colorDecimals)}`
-        }
-        return s
-      },
+      formatter: (p: { seriesName?: string; value?: unknown[] }) =>
+        formatScatterTooltip(p.seriesName, p.value, square, props.colorChannel, thirdDecimals),
     },
     xAxis: {
       ...sharedAxis,
@@ -496,7 +545,9 @@ function buildOption(): echarts.EChartsCoreOption {
       data:
         hasColor && s.colorValues
           ? s.points.map((p, i) => [p[0], p[1], s.colorValues![i]])
-          : s.points,
+          : s.tooltipValues
+            ? s.points.map((p, i) => [p[0], p[1], s.tooltipValues![i]])
+            : s.points,
       symbolSize: 4,
       // visualMap owns `itemStyle.color` once active — setting it here too
       // would just be overridden, so only `opacity` (a touch higher than the

@@ -4,13 +4,14 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { GridLayout } from 'grid-layout-plus'
 import { useFileStore } from '@/stores/fileStore'
-import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useAnalyzerStore, type ChartMode } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
 import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
 import { useTrackOverlay } from '@/composables/useTrackOverlay'
+import { useSessionComparison } from '@/composables/useSessionComparison'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
@@ -21,8 +22,9 @@ import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
-import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
+import { fastestDistanceFromLaunch, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
+import { buildComparisonLapHighlights } from '@/domain/analysis/crossSessionLapHighlight'
 import {
   STATIC_CARD_IDS,
   STATIC_CARD_TITLE_KEYS,
@@ -36,6 +38,11 @@ import {
   isItemResizable,
   mergeLayoutPositions,
   compactLayoutTopLeft,
+  compactVertical,
+  resolveOverlaps,
+  applyCollapsedHeights,
+  sameLayoutPositions,
+  COLLAPSED_ROWS,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -75,18 +82,16 @@ const { ambiguousMatches, chooseTrack, dismissAmbiguous, appliedSharedTrack, det
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
-// Track-map multi-file overlay (賽道地圖多檔疊圖): other loaded sessions'
-// racing lines drawn faint under the active session's own track. The
-// candidate list doubles as the on-map legend (color swatch = the drawn
-// line's color); state lives in analyzerStore.overlayFileIds — see
-// useTrackOverlay.ts.
-const {
-  candidates: overlayCandidates,
-  overlayTracks,
-  toggle: toggleOverlay,
-  clear: clearOverlays,
-} = useTrackOverlay()
-const anyOverlayOn = computed(() => overlayCandidates.value.some((c) => c.active))
+// One global comparison selection drives every comparison-aware consumer.
+// The existing map overlay and Phase 1 timeline charts now share this list;
+// primary-only panels continue to consume `session` from useActiveSession().
+const { comparisonSessions } = useSessionComparison()
+const { overlayTracks } = useTrackOverlay()
+const activeFile = computed(() => readyFiles.value.find((file) => file.id === analyzer.activeFileId) ?? null)
+
+function setComparisonMapOffset(id: number, axis: 'mapX' | 'mapY', event: Event): void {
+  analyzer.setSessionOffset(id, axis, Number((event.target as HTMLInputElement).value))
+}
 
 const hasEcuLaps = computed(() => session.value?.has('IR_LapNumber') ?? false)
 
@@ -98,12 +103,18 @@ const selectedLaps = computed(() =>
     .filter((l): l is NonNullable<typeof l> => l != null),
 )
 
+// The synchronized ratio trace now lives inside the static GearPanel card,
+// so its timeline/overlay mode is transient view state rather than another
+// persisted/dynamically removable dashboard chart config.
+const gearRatioMode = ref<ChartMode>('timeline')
+
 // The alignment panel only makes sense when laps are being overlaid: at least
 // one chart in overlay mode and ≥2 laps selected to compare/align.
 const showAlign = computed(
   () =>
     selectedLaps.value.length >= 2 &&
-    charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay'),
+    (gearRatioMode.value === 'overlay' ||
+      charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay')),
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
@@ -122,6 +133,27 @@ const highlightLaps = computed(() =>
 // shows whenever ≥2 laps are selected (independent of any overlay chart).
 const showMapAlign = computed(() => selectedLaps.value.length >= 2)
 
+// Cross-file lap selections (picked from a COMPARISON recording's own per-lap
+// table — see SessionLapComparison.vue's `toggleSessionLap`), resolved to
+// drawable track-map segments on THEIR OWN session's track. This is the
+// track-map counterpart of `highlightLaps` above: same "one bright segment
+// per selected lap" idea, but each entry carries its own track (and that
+// session's map offset) instead of indexing into the primary `track`. The
+// mapping itself is a pure function (crossSessionLapHighlight.ts, unit-
+// tested) so this computed is just the store/composable-shaped adapter.
+const comparisonLapHighlights = computed(() =>
+  buildComparisonLapHighlights(
+    lapStore.selectedAcrossSessions,
+    comparisonSessions.value.map((cs) => ({
+      id: cs.id,
+      color: cs.color,
+      track: cs.track,
+      laps: cs.laps,
+      offset: { x: analyzer.sessionOffsetOf(cs.id).mapX, y: analyzer.sessionOffsetOf(cs.id).mapY },
+    })),
+  ),
+)
+
 // #7: derive the track map's chart-zoom-follow focus from the shared xRange.
 // xRange is written ONLY by timeline-mode charts (overlay charts live in a
 // lap-relative grid and structurally never call setXRange — see
@@ -130,13 +162,16 @@ const showMapAlign = computed(() => selectedLaps.value.length >= 2)
 // so the map isn't emphasizing everything. DERIVED, not stored — no
 // state-writing watcher.
 //
-// Precedence: an explicit LAP SELECTION (highlightLaps non-empty) always wins
-// over chart-range focus — selecting laps is a deliberate, higher-intent
-// choice than an in-progress chart zoom, and the two would otherwise fight
-// over the map's single "emphasized segment" visual. Chart-range focus only
-// applies when nothing is selected.
+// Precedence: an explicit LAP SELECTION (highlightLaps OR comparisonLapHighlights
+// non-empty) always wins over chart-range focus — selecting laps is a
+// deliberate, higher-intent choice than an in-progress chart zoom, and the two
+// would otherwise fight over the map's single "emphasized segment" visual.
+// Chart-range focus only applies when nothing is selected (same-file or
+// cross-file).
 const focusRange = computed(() =>
-  highlightLaps.value.length > 0 ? null : xRangeToFocusIndices(xRange.value, xValues.value),
+  highlightLaps.value.length > 0 || comparisonLapHighlights.value.length > 0
+    ? null
+    : xRangeToFocusIndices(xRange.value, xValues.value),
 )
 
 // Sector gates for the track map: every gate is a real, working gate now (A1+A15
@@ -193,9 +228,9 @@ const accelResult = computed<AccelSegment | null>(() => {
   const cond = analyzer.accelCondition
   if (cond.kind === 'distance') {
     if (!(cond.distanceM > 0)) return null
-    return fastestDistanceSegment(cumDist, tMs, ch.data, {
+    return fastestDistanceFromLaunch(cumDist, tMs, ch.data, {
       distanceM: cond.distanceM,
-      minEntrySpeedKmh: cond.minEntrySpeedKmh ?? undefined,
+      entrySpeedKmh: cond.entrySpeedKmh,
     })
   }
   return fastestSpeedSegment(tMs, ch.data, cumDist, { fromKmh: cond.fromKmh, toKmh: cond.toKmh })
@@ -238,7 +273,7 @@ const { heatNorm, colorValues, legendGradient, fmtVal } = useTrackHeatmap(
 function onLapSelect(index: number | null): void {
   // Explicit clear (clear button) → empty selection + full view.
   if (index == null) {
-    lapStore.clearSelection()
+    lapStore.clearAllLapSelections()
     analyzer.setXRange(null)
     return
   }
@@ -266,8 +301,18 @@ watch(xAxis, () => {
 watch(
   readyFiles,
   (files) => {
-    const exists = files.some((f) => f.id === analyzer.activeFileId)
-    if (!exists) analyzer.activeFileId = files.length ? files[0].id : null
+    const readyIds = new Set(files.map((file) => file.id))
+    const comparisons = analyzer.selectedSessions.filter(
+      (id) => readyIds.has(id) && id !== analyzer.activeFileId,
+    )
+    const activeExists = analyzer.activeFileId != null && readyIds.has(analyzer.activeFileId)
+    if (!activeExists) {
+      const nextPrimary = comparisons[0] ?? files[0]?.id ?? null
+      analyzer.activeFileId = nextPrimary
+      analyzer.selectedSessions = comparisons.filter((id) => id !== nextPrimary)
+    } else if (comparisons.length !== analyzer.selectedSessions.length) {
+      analyzer.selectedSessions = comparisons
+    }
   },
   { immediate: true },
 )
@@ -280,10 +325,6 @@ function onXZoom(r: { min: number; max: number } | null): void {
   // manual zoom means the user moved off it → deselect. A multi-lap selection is
   // a track comparison that's independent of chart zoom, so leave it intact.
   if (lapStore.selected.length <= 1) lapStore.clearSelection()
-}
-
-function onSelect(e: Event): void {
-  analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
 }
 
 // A10+A12 — add-chart is now a two-option affordance (時序圖 / XY 散佈圖).
@@ -384,8 +425,14 @@ const { layout, colNum, isMobile, isDraggable, isResizable, resetLayout } =
 // --- #9: per-card collapse (all breakpoints) + single cross-breakpoint pin
 // (釘選 — see DashboardCard's module doc for the Teleport-based redesign) +
 // mobile drag-to-reorder order ---
-const { isCollapsed, isPinned, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
+const { state: panelState, isCollapsed, isPinned, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
   usePanelState(chartIds)
+
+// The set of currently-collapsed card ids, fed into the collapse-reflow overlay
+// (applyCollapsedHeights) so a collapsed card shrinks its grid slot and its
+// neighbours pack up into the reclaimed rows (補位). Canonical (expanded)
+// heights stay in `layout` untouched — expanding just drops the id from here.
+const collapsedIds = computed(() => new Set(panelState.value.collapsed))
 
 // The align panels (mapalign/lapalign) only render when their "≥2 laps
 // selected" condition holds (showMapAlign/showAlign, unchanged rules from
@@ -454,14 +501,23 @@ interface GridItemDecoration {
 function decorateForGrid(
   items: DashboardLayoutItem[],
 ): (DashboardLayoutItem & GridItemDecoration)[] {
-  return items.map((it) => ({
-    ...it,
-    dragAllowFrom: '.drag-handle',
-    dragIgnoreFrom: '.actions',
-    isDraggable: isItemDraggable(isDraggable.value, isPinned(it.i)),
-    isResizable: isItemResizable(isResizable.value, isPinned(it.i)),
-    ...minSizeFor(it.i),
-  }))
+  return items.map((it) => {
+    const collapsed = isCollapsed(it.i)
+    const min = minSizeFor(it.i)
+    return {
+      ...it,
+      dragAllowFrom: '.drag-handle',
+      dragIgnoreFrom: '.actions',
+      isDraggable: isItemDraggable(isDraggable.value, isPinned(it.i)),
+      // A collapsed card is header-only: resizing a headerbar is meaningless,
+      // and (more importantly) letting the grid clamp its height back up to the
+      // card's normal minH would defeat the reflow — so collapsed cards are not
+      // resizable and their minH drops to the collapsed row count.
+      isResizable: isItemResizable(isResizable.value, isPinned(it.i)) && !collapsed,
+      minW: min.minW,
+      minH: collapsed ? COLLAPSED_ROWS : min.minH,
+    }
+  })
 }
 
 // The single array bound to GridLayout via v-model: desktop 2-D on wide
@@ -472,7 +528,15 @@ function decorateForGrid(
 // current breakpoint so the other one is never touched.
 const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
   get: () =>
-    decorateForGrid(isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value),
+    // Collapse-reflow overlay: collapsed cards shrink to COLLAPSED_ROWS and the
+    // layout re-packs top-left so neighbours fill the reclaimed rows (補位). The
+    // canonical (expanded) heights stay in `layout` — this is display-only.
+    decorateForGrid(
+      applyCollapsedHeights(
+        isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value,
+        collapsedIds.value,
+      ),
+    ),
   set: (next) => {
     if (isMobile.value) {
       // Mobile drag-to-reorder: derive the new top-to-bottom order from the
@@ -504,7 +568,40 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
     // an already-compacted layout makes compactLayoutTopLeft hand back the
     // exact same array it was given, so a `layout.value` assignment that
     // changed nothing never re-triggers GridLayout's own prop watcher.
-    layout.value = compactLayoutTopLeft(mergeLayoutPositions(layout.value, next))
+    //
+    // Collapse-reflow: `next` carries collapsed cards at their DISPLAY height
+    // (COLLAPSED_ROWS). Revert those to the canonical (expanded) height held in
+    // `layout` before persisting, so dragging while a card is collapsed never
+    // freezes its header-only height into the saved arrangement — expanding
+    // still restores the full height. resolveOverlaps then re-seats the
+    // just-restored full-height cards below their neighbours before
+    // compaction closes any gap.
+    //
+    // Which packer runs here matters: while ANY card is collapsed, this write-
+    // back path is also where the collapse-reflow display (built by
+    // applyCollapsedHeights/compactVertical, see the getter above) echoes back
+    // through the grid's `update:layout`/`layout-updated` events — so it must
+    // use the SAME vertical-only packer, or the echo would horizontally
+    // re-pack the canonical layout with compactLayoutTopLeft and reintroduce
+    // the reported bug (collapsing a row-2 card sideways-yanking a row-3
+    // card from a different column). When nothing is collapsed this is just
+    // the ordinary drag/resize/delete write-back, which keeps the existing
+    // top-left (vertical+horizontal) compaction unchanged.
+    const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
+    const restored = collapsedIds.value.size
+      ? next.map((it) =>
+          collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it,
+        )
+      : next
+    const pack = collapsedIds.value.size > 0 ? compactVertical : compactLayoutTopLeft
+    const packed = pack(resolveOverlaps(mergeLayoutPositions(layout.value, restored)))
+    // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
+    // display we fed it, which `packed` reconstructs back into the current
+    // canonical layout — assigning a fresh-but-equal array would re-run the
+    // getter and spin the update→compact→update loop DashboardCard's #9 warns
+    // of. resolveOverlaps always allocates, so this value comparison (not a
+    // reference check) is what actually breaks the cycle.
+    if (!sameLayoutPositions(packed, layout.value)) layout.value = packed
   },
 })
 
@@ -591,9 +688,8 @@ function onResetLayout(): void {
 function chartTitle(chart: (typeof charts.value)[number]): string {
   const sameKind = charts.value.filter((c) => c.kind === chart.kind)
   const n = sameKind.indexOf(chart) + 1
-  return chart.kind === 'scatter'
-    ? t('analyzer.layout.cardScatterChart', { n })
-    : t('analyzer.layout.cardChart', { n })
+  if (chart.kind === 'scatter') return t('analyzer.layout.cardScatterChart', { n })
+  return t('analyzer.layout.cardChart', { n })
 }
 
 /** Title for ANY card id (static or chart), used by the pinned-card
@@ -616,12 +712,6 @@ function titleForItemId(id: string): string {
 
     <template v-else>
       <div class="toolbar">
-        <label class="record">
-          <span>{{ t('analyzer.record') }}</span>
-          <select name="record" :value="analyzer.activeFileId ?? ''" @change="onSelect">
-            <option v-for="f in readyFiles" :key="f.id" :value="f.id">{{ f.name }}</option>
-          </select>
-        </label>
         <div class="xaxis">
           <button type="button" :class="{ active: xAxis === 'time' }" @click="analyzer.xAxis = 'time'">
             {{ t('analyzer.time') }}
@@ -758,6 +848,7 @@ function titleForItemId(id: string): string {
                 :cursor-idx="cursorIdx"
                 :line="lapStore.line"
                 :highlight-laps="highlightLaps"
+                :comparison-lap-highlights="comparisonLapHighlights"
                 :focus-range="focusRange"
                 :color-values="colorValues"
                 :colormap="trackColormap"
@@ -768,29 +859,38 @@ function titleForItemId(id: string): string {
                 @update:line="lapStore.setLine($event)"
                 @update:gate="onUpdateGate"
               />
-              <!-- Multi-file overlay picker + legend: one checkbox row per
-                   OTHER loaded GPS session; the swatch is the exact color its
-                   faint line is drawn with on the map, so the list doubles as
-                   the legend. Hidden entirely when there's nothing to overlay
-                   (only one file loaded / no other file has GPS). -->
-              <div
-                v-if="overlayCandidates.length > 0"
-                class="overlay-files"
-                role="group"
-                :aria-label="t('analyzer.trackOverlayTitle')"
-              >
-                <span class="overlay-label" v-tooltip="t('analyzer.trackOverlayHint')">
-                  {{ t('analyzer.trackOverlayTitle') }}
-                </span>
-                <label v-for="c in overlayCandidates" :key="c.id" class="overlay-item">
-                  <input type="checkbox" :checked="c.active" @change="toggleOverlay(c.id)" />
-                  <span class="overlay-swatch" :style="{ background: c.color }" />
-                  <span class="overlay-name" :title="c.name">{{ c.name }}</span>
-                </label>
-                <button v-if="anyOverlayOn" type="button" class="overlay-clear" @click="clearOverlays">
-                  {{ t('analyzer.trackOverlayClear') }}
-                </button>
-              </div>
+              <details v-if="overlayTracks.length" class="map-comparison-align">
+                <summary>{{ t('analyzer.comparisonMapAlign') }}</summary>
+                <div v-for="entry in overlayTracks" :key="entry.id" class="map-offset-row">
+                  <span class="comparison-swatch" :style="{ background: entry.color }" />
+                  <span class="comparison-name" :title="entry.label">{{ entry.label }}</span>
+                  <label>
+                    {{ t('analyzer.comparisonMapEast') }}
+                    <input
+                      type="number"
+                      step="0.5"
+                      :value="analyzer.sessionOffsetOf(entry.id).mapX"
+                      @change="setComparisonMapOffset(entry.id, 'mapX', $event)"
+                    />
+                  </label>
+                  <label>
+                    {{ t('analyzer.comparisonMapNorth') }}
+                    <input
+                      type="number"
+                      step="0.5"
+                      :value="analyzer.sessionOffsetOf(entry.id).mapY"
+                      @change="setComparisonMapOffset(entry.id, 'mapY', $event)"
+                    />
+                  </label>
+                  <span>m</span>
+                  <button
+                    type="button"
+                    @click="analyzer.resetSessionOffset(entry.id, 'mapX'); analyzer.resetSessionOffset(entry.id, 'mapY')"
+                  >
+                    {{ t('analyzer.comparisonReset') }}
+                  </button>
+                </div>
+              </details>
               <div v-if="heatNorm" class="tc-legend">
                 <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
                 <span class="tc-bar" :style="{ background: legendGradient }" />
@@ -899,6 +999,9 @@ function titleForItemId(id: string): string {
                 :time-ms="timeMs"
                 :session="session"
                 :has-ecu-laps="hasEcuLaps"
+                :comparison-sessions="comparisonSessions"
+                :primary-file-id="activeFile?.id ?? null"
+                :primary-file-name="activeFile?.name ?? ''"
                 @select="onLapSelect"
               />
             </DashboardCard>
@@ -918,6 +1021,7 @@ function titleForItemId(id: string): string {
                 :track="track"
                 :time-ms="timeMs"
                 :cursor-idx="cursorIdx"
+                :comparison-sessions="comparisonSessions"
               />
             </DashboardCard>
 
@@ -958,7 +1062,20 @@ function titleForItemId(id: string): string {
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
-              <GearPanel :session="session" />
+              <GearPanel
+                :session="session"
+                :x-values="xValues"
+                :x-range="xRange"
+                :external-cursor="cursorIdx"
+                :selected-laps="selectedLaps"
+                :comparison-sessions="comparisonSessions"
+                :primary-file-id="activeFile?.id"
+                :primary-file-name="activeFile?.name"
+                :gear-ratio-mode="gearRatioMode"
+                @cursor="analyzer.setCursor"
+                @x-zoom="onXZoom"
+                @update-gear-ratio-mode="gearRatioMode = $event"
+              />
             </DashboardCard>
 
             <DashboardCard
@@ -1049,6 +1166,9 @@ function titleForItemId(id: string): string {
                     :x-range="xRange"
                     :external-cursor="cursorIdx"
                     :selected-laps="selectedLaps"
+                    :comparison-sessions="comparisonSessions"
+                    :primary-file-id="activeFile?.id"
+                    :primary-file-name="activeFile?.name"
                     @cursor="analyzer.setCursor"
                     @x-zoom="onXZoom"
                   />
@@ -1058,6 +1178,9 @@ function titleForItemId(id: string): string {
                     :chart="c"
                     :session="session"
                     :selected-laps="selectedLaps"
+                    :comparison-sessions="comparisonSessions"
+                    :primary-file-id="activeFile?.id"
+                    :primary-file-name="activeFile?.name"
                   />
                 </DashboardCard>
               </template>
@@ -1213,57 +1336,62 @@ function titleForItemId(id: string): string {
   font-size: 0.8rem;
   color: var(--color-text-muted);
 }
-/* Multi-file overlay picker/legend under the map — same compact text-row
-   styling as the heatmap legend (.tc-legend) so the map card's footer rows
-   read as one family. */
-.overlay-files {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  margin-top: var(--space);
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-.overlay-label {
-  flex: 0 0 auto;
-}
-.overlay-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  color: var(--color-text);
-  max-width: 100%;
-}
-.overlay-item input {
-  accent-color: var(--color-accent);
-  margin: 0;
-}
-.overlay-swatch {
+.comparison-swatch {
   width: 12px;
   height: 12px;
   border-radius: 50%;
   flex: none;
   box-shadow: 0 0 0 1px var(--color-surface);
 }
-.overlay-name {
+.comparison-name {
   max-width: 16em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.overlay-clear {
+.map-comparison-align {
+  margin-top: var(--space);
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
   background: var(--color-bg);
+  font-size: 0.8rem;
+}
+.map-comparison-align summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.map-offset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  padding-top: 7px;
+  color: var(--color-text-muted);
+}
+.map-offset-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.map-offset-row input {
+  width: 68px;
+  padding: 3px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
   color: var(--color-text);
+}
+.map-offset-row button {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 3px 8px;
   font: inherit;
-  font-size: 0.8rem;
   cursor: pointer;
 }
-.overlay-clear:hover {
+.map-offset-row button:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }

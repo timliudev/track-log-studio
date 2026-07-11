@@ -18,6 +18,10 @@ import {
   isItemResizable,
   mergeLayoutPositions,
   compactLayoutTopLeft,
+  compactVertical,
+  applyCollapsedHeights,
+  sameLayoutPositions,
+  COLLAPSED_ROWS,
   STATIC_CARD_TITLE_KEYS,
 } from '@/domain/layout/dashboardLayout'
 
@@ -472,6 +476,156 @@ describe('compactLayoutTopLeft (grid-compact fix — closes both vertical AND ho
   })
 })
 
+describe('compactVertical (collapse-reflow packer — vertical-only, never changes x)', () => {
+  it('pulls a card up into empty space above it (same as compactLayoutTopLeft for a single column)', () => {
+    const layout = [{ i: 'a', x: 0, y: 5, w: 4, h: 4 }]
+    const compacted = compactVertical(layout)
+    expect(compacted).toEqual([{ i: 'a', x: 0, y: 0, w: 4, h: 4 }])
+  })
+
+  it('does NOT slide a card left into empty space in a different column (unlike compactLayoutTopLeft)', () => {
+    // Column A (x0..4) is empty; column B (x4..8) has one card. Vertical-only
+    // packing must leave it in column B — only compactLayoutTopLeft slides it.
+    const layout = [{ i: 'b', x: 4, y: 0, w: 4, h: 4 }]
+    const compacted = compactVertical(layout)
+    expect(compacted).toEqual(layout)
+  })
+
+  it('pulls same-column cards below a freed gap upward, one at a time, without touching x', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 2 }, // shrunk from 8 down to 2 (collapsed)
+      { i: 'b', x: 0, y: 8, w: 4, h: 6 }, // directly below a in the SAME column
+    ]
+    const compacted = compactVertical(layout)
+    const a = compacted.find((it) => it.i === 'a')!
+    const b = compacted.find((it) => it.i === 'b')!
+    expect(a).toEqual(layout[0])
+    expect(b).toEqual({ i: 'b', x: 0, y: 2, w: 4, h: 6 })
+  })
+
+  it('never overlaps two items after compacting', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 6 },
+      { i: 'b', x: 8, y: 2, w: 4, h: 4 },
+      { i: 'c', x: 4, y: 10, w: 4, h: 3 },
+      { i: 'd', x: 0, y: 20, w: 8, h: 2 },
+    ]
+    const compacted = compactVertical(layout)
+    for (let i = 0; i < compacted.length; i++) {
+      for (let j = i + 1; j < compacted.length; j++) {
+        const x = compacted[i]
+        const y = compacted[j]
+        const overlap = x.x < y.x + y.w && y.x < x.x + x.w && x.y < y.y + y.h && y.y < x.y + x.h
+        expect(overlap).toBe(false)
+      }
+    }
+  })
+
+  it('preserves x for every item, even when y changes', () => {
+    const layout = [
+      { i: 'a', x: 4, y: 10, w: 4, h: 4 },
+      { i: 'b', x: 8, y: 20, w: 4, h: 4 },
+    ]
+    const compacted = compactVertical(layout)
+    expect(compacted.find((it) => it.i === 'a')!.x).toBe(4)
+    expect(compacted.find((it) => it.i === 'b')!.x).toBe(8)
+  })
+
+  it('is a no-op (returns the SAME array reference) on an already vertically-packed layout', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 4 },
+    ]
+    expect(compactVertical(layout)).toBe(layout)
+  })
+
+  it('is idempotent: compacting an already-compacted layout is a fixed point', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 5, w: 4, h: 4 },
+      { i: 'b', x: 4, y: 8, w: 4, h: 4 },
+    ]
+    const once = compactVertical(layout)
+    const twice = compactVertical(once)
+    expect(twice).toBe(once)
+  })
+
+  it('keeps the SAME object reference for an individual item that did not move', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 }, // already packed, won't move
+      { i: 'b', x: 4, y: 5, w: 4, h: 4 }, // will slide up to y=0
+    ]
+    const compacted = compactVertical(layout)
+    expect(compacted.find((it) => it.i === 'a')).toBe(layout[0])
+    expect(compacted.find((it) => it.i === 'b')).not.toBe(layout[1])
+  })
+
+  it('preserves the original array order (same ids at same indices as input)', () => {
+    const layout = [
+      { i: 'b', x: 4, y: 5, w: 4, h: 4 },
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+    ]
+    const compacted = compactVertical(layout)
+    expect(compacted.map((it) => it.i)).toEqual(['b', 'a'])
+  })
+
+  // Regression for the reported bug: collapsing a row-2 card in one column
+  // must NEVER pull a row-3 card from a DIFFERENT column sideways into the
+  // freed rows — only cards below it in the SAME column should move up.
+  it('collapsing a card only reflows cards in its OWN column, never a card from a different column', () => {
+    const layout = [
+      // Column A (x0..4): row1 (short), row2 (about to collapse), nothing below.
+      { i: 'colA-row1', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'colA-row2', x: 0, y: 4, w: 4, h: 2 }, // already shrunk to COLLAPSED_ROWS
+      // Column B (x4..8): row1, row2, row3 — row3 must stay put, NOT jump
+      // sideways into column A just because column A has free rows below.
+      { i: 'colB-row1', x: 4, y: 0, w: 4, h: 4 },
+      { i: 'colB-row2', x: 4, y: 4, w: 4, h: 4 },
+      { i: 'colB-row3', x: 4, y: 8, w: 4, h: 4 },
+    ]
+    const compacted = compactVertical(layout)
+    const colBRow3 = compacted.find((it) => it.i === 'colB-row3')!
+    expect(colBRow3.x).toBe(4) // stays in column B
+    expect(colBRow3.y).toBe(8) // nothing frees space above it in ITS OWN column
+    // Column A's freed rows (below the collapsed row2, y4..h2) stay empty —
+    // vertical-only packing has nothing in column A to pull up into them.
+    const colARow2 = compacted.find((it) => it.i === 'colA-row2')!
+    expect(colARow2).toEqual(layout[1])
+  })
+})
+
+describe('applyCollapsedHeights regression — collapsing a card never moves a different-column card (BUG#3)', () => {
+  it('collapsing a row-2 card does not move any card in a different x-column, only pulls same-column cards below it upward', () => {
+    // Mirrors the user's repro: 把第二排卡片第一個收折進來後，第三排的最後一個
+    // 卡片會移到第二排最底下 — collapsing a card in "row 2" must not yank a
+    // "row 3" card from a DIFFERENT column up into row 2's vacated space.
+    const layout = [
+      // Column A (x0..4): three stacked cards, the middle one collapses.
+      { i: 'a-top', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'a-mid', x: 0, y: 4, w: 4, h: 6 }, // this one gets collapsed
+      { i: 'a-bottom', x: 0, y: 10, w: 4, h: 5 },
+      // Column B (x4..8): unrelated cards that must stay exactly where they are.
+      { i: 'b-top', x: 4, y: 0, w: 4, h: 8 },
+      { i: 'b-bottom', x: 4, y: 8, w: 4, h: 7 },
+    ]
+    const out = applyCollapsedHeights(layout, new Set(['a-mid']))
+
+    // Column B must be COMPLETELY untouched — same x, y, h for every item.
+    const bTop = out.find((it) => it.i === 'b-top')!
+    const bBottom = out.find((it) => it.i === 'b-bottom')!
+    expect(bTop).toEqual(layout[3])
+    expect(bBottom).toEqual(layout[4])
+
+    // Column A: the collapsed card shrinks, and only the card BELOW it (in
+    // the SAME column) packs up into the reclaimed rows.
+    const aMid = out.find((it) => it.i === 'a-mid')!
+    const aBottom = out.find((it) => it.i === 'a-bottom')!
+    expect(aMid.h).toBe(COLLAPSED_ROWS)
+    expect(aMid.x).toBe(0)
+    expect(aBottom.x).toBe(0) // never slides into column B
+    expect(aBottom.y).toBe(4 + COLLAPSED_ROWS) // reflows up behind the shrunk card
+  })
+})
+
 describe('reconcileLayout', () => {
   it('appends a default-positioned item for a newly added chart', () => {
     const layout = defaultLayout()
@@ -757,5 +911,63 @@ describe('mobileLayout (single-column builder from an explicit order)', () => {
 
   it('returns an empty array for an empty order', () => {
     expect(mobileLayout([], desktop)).toEqual([])
+  })
+})
+
+describe('applyCollapsedHeights (collapse-reflow / 補位)', () => {
+  // Two stacked full-width cards; collapsing the top one should let the bottom
+  // one pack up into the reclaimed rows.
+  const stacked = () => [
+    { i: 'a', x: 0, y: 0, w: 12, h: 8 },
+    { i: 'b', x: 0, y: 8, w: 12, h: 6 },
+  ]
+
+  it('shrinks a collapsed card to COLLAPSED_ROWS and packs neighbours up', () => {
+    const out = applyCollapsedHeights(stacked(), new Set(['a']))
+    const a = out.find((it) => it.i === 'a')!
+    const b = out.find((it) => it.i === 'b')!
+    expect(a.h).toBe(COLLAPSED_ROWS)
+    expect(a.y).toBe(0)
+    // b reflows up from y:8 to sit directly below the now-short a.
+    expect(b.y).toBe(COLLAPSED_ROWS)
+    expect(b.h).toBe(6)
+  })
+
+  it('leaves canonical heights untouched when nothing is collapsed (identity)', () => {
+    const input = stacked()
+    const out = applyCollapsedHeights(input, new Set())
+    // Already top-left packed ⇒ same array reference back (fixed point).
+    expect(out).toBe(input)
+  })
+
+  it('is idempotent on an already collapsed-and-packed layout', () => {
+    const once = applyCollapsedHeights(stacked(), new Set(['a']))
+    const twice = applyCollapsedHeights(once, new Set(['a']))
+    expect(twice).toEqual(once)
+  })
+
+  it('reclaims the full column when every card is collapsed', () => {
+    const out = applyCollapsedHeights(stacked(), new Set(['a', 'b']))
+    expect(out.map((it) => it.h)).toEqual([COLLAPSED_ROWS, COLLAPSED_ROWS])
+    expect(out.find((it) => it.i === 'b')!.y).toBe(COLLAPSED_ROWS)
+  })
+})
+
+describe('sameLayoutPositions', () => {
+  const base = [
+    { i: 'a', x: 0, y: 0, w: 4, h: 8 },
+    { i: 'b', x: 4, y: 0, w: 4, h: 6 },
+  ]
+
+  it('is true for the same cards at the same coords in any order', () => {
+    expect(sameLayoutPositions(base, [base[1], base[0]])).toBe(true)
+  })
+
+  it('is false when any coordinate differs', () => {
+    expect(sameLayoutPositions(base, [{ ...base[0], y: 1 }, base[1]])).toBe(false)
+  })
+
+  it('is false on a length mismatch', () => {
+    expect(sameLayoutPositions(base, [base[0]])).toBe(false)
   })
 })

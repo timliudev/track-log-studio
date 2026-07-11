@@ -8,12 +8,16 @@ import { type Aggregation } from '@/domain/analysis/lapAggregate'
 import { computeMetric, type LapContext } from '@/domain/analysis/lapMetrics'
 import { computeSectorTimes } from '@/domain/analysis/sectorTiming'
 import { fastestLapIndex, slowestLapIndex } from '@/domain/analysis/bestLap'
-import { formatLapTime } from '@/domain/analysis/format'
+import { formatLapTime, formatMetricValue, formatMsColumn } from '@/domain/analysis/format'
 import { lapColor } from './lapColors'
+import { aggLabel as sharedAggLabel, columnHeader as sharedColumnHeader } from './lapColumnHeader'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LogSession } from '@/domain/model/LogSession'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
+import SessionLapComparison from './SessionLapComparison.vue'
+import { categoricalColor } from '@/domain/analysis/colorPalette'
 
 const props = defineProps<{
   laps: Lap[]
@@ -23,6 +27,9 @@ const props = defineProps<{
   session: LogSession | null
   /** Whether the ECU lap channel (IR_LapNumber) is available in this session. */
   hasEcuLaps: boolean
+  comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
 }>()
 
 const { t } = useI18n()
@@ -35,8 +42,7 @@ const sectorStore = useSectorStore()
 const emit = defineEmits<{ select: [number | null] }>()
 
 const AGGS: Aggregation[] = ['max', 'min', 'avg']
-const aggLabel = (agg: Aggregation): string =>
-  agg === 'max' ? t('analyzer.aggMax') : agg === 'min' ? t('analyzer.aggMin') : t('analyzer.aggAvg')
+const aggLabel = (agg: Aggregation): string => sharedAggLabel(t, agg)
 
 // Cumulative distance computed once for the active track and reused per lap row.
 const cumDistM = computed<Float64Array | null>(() =>
@@ -126,40 +132,16 @@ const worstLapIndex = computed<number | null>(() => {
 })
 
 /**
- * Localized header for a configurable column's metric. Channel kind →
- * `${channel} · ${aggLabel}` (placeholder label until a channel is picked);
- * built-in kinds map to their own header label; sectorTime shows its 1-based
- * sector number (§11 E sectors are 0-based internally, 1-based for humans).
+ * Localized header for a configurable column's metric. Delegates to the
+ * shared {@link sharedColumnHeader} so the primary table and any
+ * comparison-recording lap table format headers identically.
  */
 function columnHeader(metric: LapMetricColumn['metric']): string {
-  switch (metric.kind) {
-    case 'channel':
-      return `${metric.channel || t('analyzer.selectChannel')} · ${aggLabel(metric.agg)}`
-    case 'lapTime':
-      return t('analyzer.lapTime')
-    case 'distance':
-      return t('analyzer.lapDistance')
-    case 'sectorTime':
-      return t('analyzer.sectorTimeColumn', { n: metric.sector + 1 })
-    case 'delta':
-      return t('analyzer.deltaColumn')
-  }
+  return sharedColumnHeader(t, metric)
 }
 
 /** Format an aggregated value: '—' for NaN, finer precision for small magnitudes. */
-function formatValue(v: number): string {
-  if (Number.isNaN(v)) return '—'
-  return Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(1)
-}
-
-/** Format a sector/delta time (ms) as seconds with a sign for delta, '—' for NaN. */
-function formatMsColumn(v: number, signed: boolean): string {
-  if (Number.isNaN(v)) return '—'
-  const sec = v / 1000
-  const text = Math.abs(sec).toFixed(3)
-  if (!signed) return text
-  return sec > 0 ? `+${text}` : sec < 0 ? `-${text}` : text
-}
+const formatValue = formatMetricValue
 
 /** How many sector slots exist for the sector-column picker (gates + 1). */
 const sectorCount = computed(() => sectorStore.gates.length + 1)
@@ -200,6 +182,11 @@ const rows = computed<Row[]>(() => {
 
 <template>
   <div class="lap-table">
+    <div v-if="primaryFileId != null" class="recording-heading">
+      <span class="recording-swatch" :style="{ background: categoricalColor(primaryFileId) }" />
+      <strong :title="primaryFileName">{{ primaryFileName }}</strong>
+      <span>{{ t('fileBar.primary') }}</span>
+    </div>
     <div v-if="hasEcuLaps" class="source">
       <button
         type="button"
@@ -353,6 +340,11 @@ const rows = computed<Row[]>(() => {
       </tbody>
     </table>
     </div>
+    <SessionLapComparison
+      :primary-laps="laps"
+      :primary-excluded="lapStore.excluded"
+      :comparisons="comparisonSessions ?? []"
+    />
   </div>
 </template>
 
@@ -361,6 +353,28 @@ const rows = computed<Row[]>(() => {
   display: flex;
   flex-direction: column;
   gap: calc(var(--space) * 1.5);
+}
+.recording-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+.recording-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recording-heading > span:last-child {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+.recording-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
 }
 .source {
   display: inline-flex;

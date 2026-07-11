@@ -90,6 +90,10 @@ describe('chartConfigs — parseCharts (T5)', () => {
     ])
   })
 
+  it('drops a legacy standalone gear-ratio chart now embedded in GearPanel', () => {
+    expect(parseCharts(JSON.stringify([{ kind: 'gearRatio', id: 4, mode: 'overlay' }]))).toEqual([])
+  })
+
   it('returns null for missing/corrupt/non-array JSON', () => {
     expect(parseCharts(null)).toBeNull()
     expect(parseCharts('')).toBeNull()

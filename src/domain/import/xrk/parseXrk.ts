@@ -22,6 +22,7 @@
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel, LogMeta } from '@/domain/model/types'
 import { ecefToLla } from './ecef'
+import { inflateXrz, isZlibMagic } from './inflateXrz'
 
 // --- opcode / framing constants (little-endian u16 of the 2 ASCII bytes) ---
 // '<'=0x3c 'h'=0x68 → 0x683c. (The spec appendix's 0x6863 is byte-swapped.)
@@ -462,11 +463,16 @@ function resampleOnto(
   }
 }
 
-/** Parse a `.xrk` byte buffer into a LogSession with formatId 'xrk'. */
+/**
+ * Parse a `.xrk` byte buffer into a LogSession with formatId 'xrk'. Also
+ * accepts `.xrz` (zlib-wrapped `.xrk`, detected by its RFC 1950 magic) —
+ * it is transparently inflated first, then parsed the same way.
+ */
 export function parseXrk(bytes: Uint8Array): LogSession {
-  const scanned = scan(bytes)
+  const raw = isZlibMagic(bytes) ? inflateXrz(bytes) : bytes
+  const scanned = scan(raw)
   const { channels, samples, meta, track } = scanned
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength)
 
   if (channels.size === 0) {
     throw new Error('XRK: no channel definitions (CNF/CHS) found — not a valid .xrk')

@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFileStore } from '@/stores/fileStore'
+import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useLapStore } from '@/stores/lapStore'
 import { useLogImport } from '@/composables/useLogImport'
 import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/registry'
 import { extractLogFiles } from '@/domain/import/zip'
@@ -15,10 +17,49 @@ import { listRcnxSessions, type RcnxSessionInfo } from '@/domain/import/rcnx/par
 // a 404 — sql.js then fails to compile HTML bytes as wasm.
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 import { filesFromDataTransfer, isFileDrag } from './fileDrop'
+import { categoricalColor } from '@/domain/analysis/colorPalette'
+import {
+  promotePrimarySession,
+  toggleIncludedSession,
+  type SessionSelectionState,
+} from '@/domain/analysis/sessionSelection'
+
+const props = withDefaults(defineProps<{ analyzerMode?: boolean }>(), {
+  analyzerMode: false,
+})
 
 const { t, tm, rt } = useI18n()
 const fileStore = useFileStore()
+const analyzer = useAnalyzerStore()
+const lapStore = useLapStore()
 const { parseFile } = useLogImport()
+
+function selectionState(): SessionSelectionState {
+  return {
+    primaryId: analyzer.activeFileId,
+    comparisonIds: analyzer.selectedSessions,
+  }
+}
+
+function applySelection(next: SessionSelectionState): void {
+  analyzer.activeFileId = next.primaryId
+  analyzer.selectedSessions = next.comparisonIds
+}
+
+function isAnalysisSelected(id: number): boolean {
+  return id === analyzer.activeFileId || analyzer.selectedSessions.includes(id)
+}
+
+function toggleAnalysisFile(id: number): void {
+  const wasComparison = analyzer.selectedSessions.includes(id)
+  const next = toggleIncludedSession(selectionState(), id)
+  applySelection(next)
+  if (wasComparison && !next.comparisonIds.includes(id)) lapStore.clearSessionSelection(id)
+}
+
+function makePrimary(id: number): void {
+  applySelection(promotePrimarySession(selectionState(), id))
+}
 
 /** File input accept list, derived from the importer registry plus .zip. */
 const acceptExtensions = computed(() =>
@@ -274,7 +315,34 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
         class="pill"
         :class="{ ready: f.status === 'ready', error: f.status === 'error' }"
       >
-        <span class="pill-name">{{ f.name }}</span>
+        <input
+          v-if="props.analyzerMode && f.status === 'ready'"
+          class="analysis-check"
+          type="checkbox"
+          :checked="isAnalysisSelected(f.id)"
+          :aria-label="t('fileBar.includeInAnalysis', { name: f.name })"
+          :style="{ accentColor: categoricalColor(f.id) }"
+          @change="toggleAnalysisFile(f.id)"
+        />
+        <span
+          v-if="props.analyzerMode && f.status === 'ready'"
+          class="file-swatch"
+          :style="{ background: categoricalColor(f.id) }"
+        />
+        <button
+          v-if="props.analyzerMode && f.status === 'ready'"
+          type="button"
+          class="pill-name primary-picker"
+          :class="{ primary: analyzer.activeFileId === f.id }"
+          :title="t('fileBar.makePrimary', { name: f.name })"
+          @click="makePrimary(f.id)"
+        >
+          {{ f.name }}
+        </button>
+        <span v-else class="pill-name">{{ f.name }}</span>
+        <span v-if="props.analyzerMode && analyzer.activeFileId === f.id" class="primary-tag">
+          {{ t('fileBar.primary') }}
+        </span>
         <span v-if="f.status === 'parsing'" class="pill-meta">{{ Math.round(f.progress * 100) }}%</span>
         <span v-else-if="f.status === 'ready'" class="pill-meta">
           {{ f.formatId }} · {{ t('fileBar.rows', { n: f.rowCount }) }}
@@ -465,6 +533,37 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.analysis-check {
+  margin: 0;
+  flex: none;
+  cursor: pointer;
+}
+.file-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.primary-picker {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.primary-picker.primary {
+  font-weight: 700;
+}
+.primary-tag {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+  font-size: 0.68rem;
   white-space: nowrap;
 }
 .pill-meta {

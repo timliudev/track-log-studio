@@ -1,28 +1,61 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
-import { useAnalyzerStore, type TimeSeriesChartConfig, type ChartMode } from '@/stores/analyzerStore'
+import {
+  useAnalyzerStore,
+  type TimeSeriesChartConfig,
+  type ChartMode,
+} from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
+import { buildCrossSessionLapOverlay, type CrossSessionLapSource } from '@/domain/analysis/crossSessionLapOverlay'
+import { sampleIndexAtGridX, gridIndexAtSampleIndex, lapContaining } from '@/domain/analysis/overlayCursor'
 import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
 import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { lapColor } from './lapColors'
+import { categoricalColor } from '@/domain/analysis/colorPalette'
+import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
+import {
+  availableDerivedAnalyzerChannels,
+  isDerivedAnalyzerChannel,
+  MEASURED_TOTAL_RATIO_CHANNEL,
+  resolveAnalyzerChannel,
+} from '@/domain/analysis/analyzerChannels'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const props = defineProps<{
-  chart: TimeSeriesChartConfig
+  /** Persisted dashboard config for a user-added ordinary time-series card.
+   * Static hosts such as the gear calculator omit this and supply channelIds. */
+  chart?: TimeSeriesChartConfig
+  /** Selection owned by a static host such as GearPanel. Values are the same
+   * stable raw/virtual channel ids stored by an ordinary chart config. */
+  channelIds?: readonly string[]
+  /** Static-host channels which are always present and cannot be removed. */
+  lockedChannels?: readonly string[]
+  /** Transient mode for a time-series embedded in a static card. */
+  mode?: ChartMode
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
   externalCursor?: number | null
+  comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
   /** Selected laps (in colour order) for overlay mode. */
   selectedLaps?: Lap[]
+  /** Fixed derived series (e.g. drivetrain ratio). When supplied, the chart
+   *  uses the same plot/overlay/cursor pipeline but hides the channel picker. */
+  fixedSeries?: readonly { name: string; data: ArrayLike<number> }[]
+  /** Empty-state copy for a fixed derived chart whose prerequisites failed. */
+  emptyMessage?: string
   /** #8 — forwarded to UPlotChart: fill the dashboard grid item's height
    *  instead of a fixed pixel height. See UPlotChart's `fillHeight` prop. */
   fillHeight?: boolean
@@ -30,6 +63,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   cursor: [number | null]
   xZoom: [{ min: number; max: number }]
+  updateMode: [ChartMode]
+  updateChannels: [string[]]
 }>()
 
 const { t } = useI18n()
@@ -37,6 +72,7 @@ const analyzer = useAnalyzerStore()
 const { xAxis } = storeToRefs(analyzer)
 const lapStore = useLapStore()
 const settings = useSettingsStore()
+const drivetrain = useDrivetrainStore()
 const { tzOverride } = storeToRefs(settings)
 
 const PALETTE = ['#e23b3b', '#3b82e2', '#2ea043', '#e2a33b', '#9b3be2', '#3bd6e2']
@@ -45,31 +81,126 @@ const color = (i: number): string => PALETTE[i % PALETTE.length]
 const DASHES: number[][] = [[], [6, 4], [2, 3], [8, 3, 2, 3], [12, 4]]
 const dash = (i: number): number[] => DASHES[i % DASHES.length]
 
-const mode = computed<ChartMode>(() => props.chart.mode)
+const mode = computed<ChartMode>(() => props.mode ?? props.chart?.mode ?? 'timeline')
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
+const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
+const derivedContext = computed(() => ({
+  wheelCircumferenceMm: drivetrain.kind === 'mt'
+    ? drivetrain.inversionWheelCircumferenceMm
+    : drivetrain.cvt.wheelCircumferenceMm,
+}))
 
-const allChannels = computed(() =>
-  props.session.channels
-    .map((c) => ({ name: c.name, description: c.description }))
+function channelLabel(id: string): string {
+  return id === MEASURED_TOTAL_RATIO_CHANNEL
+    ? t('analyzer.gear.ratioSeriesLabel') as string
+    : id
+}
+
+const selectedChannelIds = computed<readonly string[]>(() => {
+  if (props.fixedSeries) return props.fixedSeries.map((series) => series.name)
+  return props.chart?.channels ?? props.channelIds ?? []
+})
+const canEditChannels = computed(() => props.chart != null || props.channelIds != null)
+
+const allChannels = computed<Array<{ name: string; value?: string; description?: string }>>(() =>
+  [
+    ...props.session.channels.map((c) => ({ name: c.name, description: c.description })),
+    ...availableDerivedAnalyzerChannels(props.session, derivedContext.value).map((id) => ({
+      name: channelLabel(id),
+      value: id,
+      description: t('analyzer.gear.measuredRatioChannelDescription') as string,
+    })),
+  ]
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 const pickerOptions = computed(() =>
-  allChannels.value.filter((c) => !props.chart.channels.includes(c.name)),
+  allChannels.value.filter(
+    (c) => !selectedChannelIds.value.includes(c.value ?? c.name),
+  ),
 )
-const present = computed(() => props.chart.channels.filter((n) => props.session.get(n)))
+const presentSources = computed<Array<{ name: string; data: ArrayLike<number> }>>(() => {
+  if (props.fixedSeries) return [...props.fixedSeries]
+  if (selectedChannelIds.value.length === 0) return []
+  const sources: Array<{ name: string; data: ArrayLike<number> }> = []
+  for (const name of selectedChannelIds.value) {
+    const data = resolveAnalyzerChannel(props.session, name, derivedContext.value).data
+    if (data) sources.push({ name, data })
+  }
+  return sources
+})
+const present = computed(() => presentSources.value.map((source) => source.name))
+const unavailableDerivedMessage = computed<string | null>(() => {
+  for (const id of selectedChannelIds.value) {
+    if (!isDerivedAnalyzerChannel(id)) continue
+    const resolution = resolveAnalyzerChannel(props.session, id, derivedContext.value)
+    if (resolution.error === 'rpm') return t('analyzer.gear.noRpmChannel') as string
+    if (resolution.error === 'speed') return t('analyzer.gear.noSpeedChannel') as string
+    if (resolution.error === 'circumference') return t('analyzer.gear.invalidCircumference') as string
+    if (resolution.data) {
+      let finite = false
+      for (let i = 0; i < resolution.data.length; i++) {
+        if (Number.isFinite(resolution.data[i])) { finite = true; break }
+      }
+      if (!finite) return t('analyzer.gear.noRatioSamples') as string
+    }
+  }
+  return null
+})
 
 // --- Timeline mode: each channel over the full session on a shared X. ---
+const plotWidth = ref(1200)
+const pointBudget = computed(() => Math.max(300, Math.ceil(plotWidth.value * 2)))
+const timelineSources = computed<TimelineSource[]>(() => {
+  const primaryId = props.primaryFileId ?? -1
+  const primaryChannels = props.fixedSeries
+    ? new Map(props.fixedSeries.map((series) => [series.name, series.data]))
+    : new Map(presentSources.value.map((source) => [source.name, source.data]))
+  const sources: TimelineSource[] = [{
+    id: primaryId,
+    label: props.primaryFileName ?? 'Primary',
+    color: categoricalColor(primaryId),
+    primary: true,
+    xValues: props.xValues,
+    channels: primaryChannels,
+  }]
+  for (const comparison of props.comparisonSessions ?? []) {
+    sources.push({
+      id: comparison.id,
+      label: comparison.name,
+      color: comparison.color,
+      primary: false,
+      xValues: comparison.xValues,
+      channels: new Map(present.value.flatMap((id) => {
+        const data = resolveAnalyzerChannel(comparison.session, id, derivedContext.value).data
+        return data ? [[id, data] as const] : []
+      })),
+    })
+  }
+  return sources
+})
+const timeline = computed(() => buildTimelineData(
+  timelineSources.value,
+  present.value,
+  props.xRange ?? null,
+  pointBudget.value,
+))
 const timelineData = computed<uPlot.AlignedData>(
-  () =>
-    [props.xValues, ...present.value.map((n) => props.session.get(n)!.data)] as unknown as uPlot.AlignedData,
+  () => timeline.value.data as unknown as uPlot.AlignedData,
 )
 
 // Each series gets its own scale key (= channel name) → independent auto-ranging,
 // so a small-range channel isn't flattened by a large-range one.
 const timelineSeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
-  ...present.value.map((n, i) => ({ label: n, stroke: color(i), width: 1, scale: n })),
+  ...timeline.value.series.map((entry) => ({
+    label: `${entry.sourceLabel} · ${channelLabel(entry.channel)}`,
+    stroke: entry.color,
+    dash: dash(entry.channelIndex),
+    width: entry.primary ? 1.5 : 1,
+    scale: entry.channel,
+    spanGaps: true,
+  })),
 ])
 
 // --- Overlay mode: selected laps re-based to a lap-relative X (from 0). ---
@@ -78,11 +209,57 @@ const timelineSeries = computed<uPlot.Series[]>(() => [
 const overlay = computed(() =>
   buildLapOverlay({
     xValues: props.xValues,
-    channels: present.value.map((n) => ({ name: n, data: props.session.get(n)!.data })),
+    channels: presentSources.value,
     laps: laps.value,
     // Per-lap alignment nudges, resolved to the current axis' units (#9).
     offsets: laps.value.map((l) => lapStore.offsetOf(l.index, xAxis.value)),
   }),
+)
+const crossLapSources = computed<CrossSessionLapSource[]>(() => {
+  // Both persisted dashboard charts and static hosts use stable channel ids,
+  // so their cross-session overlays can resolve raw and virtual channels by
+  // the exact same path.
+  if (selectedChannelIds.value.length === 0 || lapStore.selectedAcrossSessions.length === 0) return []
+  const sources: CrossSessionLapSource[] = []
+  const primaryId = props.primaryFileId ?? -1
+  const primaryColor = categoricalColor(primaryId)
+  for (const lap of laps.value) {
+    sources.push({
+      fileId: primaryId,
+      sessionName: props.primaryFileName ?? 'Primary',
+      color: primaryColor,
+      xValues: props.xValues,
+      channels: presentSources.value,
+      lap,
+      offset: lapStore.offsetOf(lap.index, xAxis.value),
+    })
+  }
+  for (const ref of lapStore.selectedAcrossSessions) {
+    const comparison = props.comparisonSessions?.find((entry) => entry.id === ref.fileId)
+    const lap = comparison?.laps.find((entry) => entry.index === ref.index)
+    if (!comparison || !lap) continue
+    const channels = present.value.map((name) => {
+      const data = resolveAnalyzerChannel(comparison.session, name, derivedContext.value).data
+      return { name, data: data ?? new Float32Array(comparison.session.rowCount).fill(NaN) }
+    })
+    sources.push({
+      fileId: comparison.id,
+      sessionName: comparison.name,
+      color: comparison.color,
+      xValues: comparison.xValues,
+      channels,
+      lap,
+      offset: lapStore.sessionLapOffsetOf(comparison.id, lap.index, xAxis.value),
+    })
+  }
+  return sources
+})
+const crossOverlay = computed(() => buildCrossSessionLapOverlay(crossLapSources.value))
+const useCrossOverlay = computed(() => crossLapSources.value.some((source) => source.fileId !== (props.primaryFileId ?? -1)))
+// The shared lap-relative X grid the overlay plots against — same array whether
+// cross-session or single-session. Backs the overlay↔map cursor conversion.
+const overlayGridX = computed<Float64Array>(() =>
+  useCrossOverlay.value ? crossOverlay.value.x : overlay.value.x,
 )
 // uPlot seeds a scale's range from a series' first in-range sample and treats
 // only `null` (not NaN) as a gap. Once a lap is nudged off grid-0 its trace
@@ -93,20 +270,35 @@ const overlay = computed(() =>
 const overlayData = computed<uPlot.AlignedData>(
   () =>
     [
-      overlay.value.x,
-      ...overlay.value.series.map((s) => Array.from(s.y, (v) => (Number.isFinite(v) ? v : null))),
+      useCrossOverlay.value ? crossOverlay.value.x : overlay.value.x,
+      ...(useCrossOverlay.value ? crossOverlay.value.series : overlay.value.series)
+        .map((s) => Array.from(s.y, (v) => (Number.isFinite(v) ? v : null))),
     ] as unknown as uPlot.AlignedData,
 )
-const overlaySeries = computed<uPlot.Series[]>(() => [
-  { label: xUnit.value },
-  ...overlay.value.series.map((s) => ({
-    label: `#${s.lap.index + 1} · ${present.value[s.channelIndex]}`,
-    stroke: lapColor(s.lapOrder),
-    dash: dash(s.channelIndex),
-    width: 1,
-    scale: present.value[s.channelIndex],
-  })),
-])
+const overlaySeries = computed<uPlot.Series[]>(() => {
+  if (useCrossOverlay.value) {
+    return [
+      { label: xUnit.value },
+      ...crossOverlay.value.series.map((s) => ({
+        label: `${s.sessionName} · #${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
+        stroke: s.color,
+        dash: dash(s.channelIndex),
+        width: 1 + (s.lapOrder % 3) * 0.35,
+        scale: present.value[s.channelIndex],
+      })),
+    ]
+  }
+  return [
+    { label: xUnit.value },
+    ...overlay.value.series.map((s) => ({
+      label: `#${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
+      stroke: lapColor(s.lapOrder),
+      dash: dash(s.channelIndex),
+      width: 1,
+      scale: present.value[s.channelIndex],
+    })),
+  ]
+})
 
 const data = computed<uPlot.AlignedData>(() =>
   mode.value === 'overlay' ? overlayData.value : timelineData.value,
@@ -139,7 +331,7 @@ const clockAxisLabel = computed<string>(() => {
   return `UTC${sign}${hours}${mins ? ':' + mins.toString().padStart(2, '0') : ''}`
 })
 
-// x axis + up to two value axes; in timeline mode they're coloured per series,
+// x axis + one value axis per selected channel; in timeline mode they're coloured per series,
 // in overlay mode colour means "lap" so the channel axes stay theme-neutral.
 // In timeline + time mode an extra bottom x-axis shows absolute clock time.
 const axes = computed<uPlot.Axis[]>(() => {
@@ -184,53 +376,99 @@ const axes = computed<uPlot.Axis[]>(() => {
   }
   return [
     ...xAxes,
-    ...present.value.slice(0, 2).map((n, i) => ({
+    ...present.value.map((n, i) => ({
       scale: n,
-      side: i === 0 ? 3 : 1,
-      ...(mode.value === 'overlay' ? { label: n } : { stroke: color(i) }),
+      side: i % 2 === 0 ? 3 : 1,
+      label: channelLabel(n),
+      ...(mode.value === 'overlay' || comparisonActive.value ? {} : { stroke: color(i) }),
     })),
   ]
 })
 
-// Overlay's X is a lap-relative grid index space, unrelated to the session-wide
-// cursor/zoom. Overlay charts share a SEPARATE cursor (overlayCursorIdx) — all
-// overlay charts build the same grid so the index aligns across them — while
-// timeline charts (and the track map) stay on the session-index cursor/zoom.
+// Overlay's X is a lap-relative grid space, unrelated to the session-wide
+// cursor/zoom. Overlay charts share `overlayCursorIdx` (a grid index) so their
+// cursor aligns across charts even when there's no primary lap to anchor on
+// (a comparison-only overlay). On TOP of that, the grid index is now bridged to
+// the primary session's SAMPLE index (overlayCursor.ts) so a hover also drives
+// the track map / timeline cursor, and a map/timeline hover drives the overlay
+// cursor back — the "共同 X ↔ 各圈樣本 index" linking.
 const canRender = computed(() =>
-  mode.value === 'overlay' ? present.value.length > 0 && laps.value.length > 0 : present.value.length > 0,
+  mode.value === 'overlay'
+    ? present.value.length > 0 && (laps.value.length > 0 || crossLapSources.value.length > 0)
+    : present.value.length > 0,
 )
-const effectiveCursor = computed<number | null>(() =>
-  mode.value === 'overlay' ? analyzer.overlayCursorIdx : (props.externalCursor ?? null),
-)
+const effectiveCursor = computed<number | null>(() => {
+  if (mode.value !== 'overlay') {
+    return props.externalCursor == null
+      ? null
+      : nearestXIndex(timeline.value.data[0], props.xValues[props.externalCursor])
+  }
+  // Reverse link (map/timeline → overlay): map the shared session cursor onto
+  // this overlay's grid via whichever selected primary lap contains it, so the
+  // overlay follows a hover made elsewhere. Falls back to the overlay's own
+  // shared cursor when the session cursor isn't over a selected primary lap
+  // (e.g. a comparison-only overlay, where there's no primary sample to map).
+  const ci = props.externalCursor
+  const grid = overlayGridX.value
+  if (ci != null && grid.length > 0) {
+    const lap = lapContaining(laps.value, ci)
+    if (lap) {
+      const g = gridIndexAtSampleIndex(props.xValues, lap, lapStore.offsetOf(lap.index, xAxis.value), grid, ci)
+      if (g != null) return g
+    }
+  }
+  return analyzer.overlayCursorIdx
+})
 function onCursor(idx: number | null): void {
-  if (mode.value === 'overlay') analyzer.setOverlayCursor(idx)
-  else emit('cursor', idx)
+  if (mode.value === 'overlay') {
+    // Keep the overlay charts' shared cursor in sync (works with no primary lap
+    // too), and forward-link it to the map/timeline by converting the grid
+    // index to a primary-session sample index via the first selected primary
+    // lap. No primary lap ⇒ emit null so a stale map marker doesn't linger.
+    analyzer.setOverlayCursor(idx)
+    if (idx == null) {
+      emit('cursor', null)
+      return
+    }
+    const primaryLap = laps.value[0] ?? null
+    const gx = overlayGridX.value[idx]
+    const mapped = primaryLap != null && gx != null
+      ? sampleIndexAtGridX(props.xValues, primaryLap, lapStore.offsetOf(primaryLap.index, xAxis.value), gx)
+      : null
+    emit('cursor', mapped)
+    return
+  }
+  if (idx == null) emit('cursor', null)
+  else emit('cursor', nearestXIndex(props.xValues, timeline.value.data[0][idx]))
 }
 function onXZoom(r: { min: number; max: number }): void {
   if (mode.value === 'timeline') emit('xZoom', r)
 }
 
 function setMode(m: ChartMode): void {
-  analyzer.setChartMode(props.chart.id, m)
+  if (props.chart) analyzer.setChartMode(props.chart.id, m)
+  else emit('updateMode', m)
 }
 
 function addChannel(name: string | null): void {
-  if (name && !props.chart.channels.includes(name)) {
-    analyzer.setChartChannels(props.chart.id, [...props.chart.channels, name])
+  if (name && !selectedChannelIds.value.includes(name)) {
+    const next = [...selectedChannelIds.value, name]
+    if (props.chart) analyzer.setChartChannels(props.chart.id, next)
+    else emit('updateChannels', next)
   }
 }
 function removeChannel(name: string): void {
-  analyzer.setChartChannels(
-    props.chart.id,
-    props.chart.channels.filter((n) => n !== name),
-  )
+  if (!canEditChannels.value || props.lockedChannels?.includes(name)) return
+  const next = selectedChannelIds.value.filter((n) => n !== name)
+  if (props.chart) analyzer.setChartChannels(props.chart.id, next)
+  else emit('updateChannels', next)
 }
 </script>
 
 <template>
   <section class="chart" :class="{ fill: fillHeight }">
     <div class="toolbar">
-      <div class="picker">
+      <div v-if="canEditChannels" class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
       </div>
       <div class="mode">
@@ -241,7 +479,7 @@ function removeChannel(name: string): void {
           {{ t('analyzer.modeOverlay') }}
         </button>
       </div>
-      <button type="button" class="remove" @click="analyzer.removeChart(chart.id)">
+      <button v-if="chart" type="button" class="remove" @click="analyzer.removeChart(chart.id)">
         {{ t('analyzer.removeChart') }}
       </button>
     </div>
@@ -250,14 +488,18 @@ function removeChannel(name: string): void {
       <span v-for="(name, i) in present" :key="name" class="chip">
         <span
           class="dot"
-          :class="{ line: mode === 'overlay' }"
-          :style="mode === 'overlay' ? {} : { background: color(i) }"
+          :class="{ line: mode === 'overlay' || comparisonActive }"
+          :style="mode === 'overlay' || comparisonActive ? {} : { background: color(i) }"
         />
-        {{ name }}
-        <button type="button" class="x" @click="removeChannel(name)">×</button>
+        {{ channelLabel(name) }}
+        <button v-if="canEditChannels && !lockedChannels?.includes(name)" type="button" class="x" @click="removeChannel(name)">×</button>
       </span>
-      <span v-if="present.length === 0" class="muted">{{ t('analyzer.pickChannel') }}</span>
+      <span v-if="present.length === 0" class="muted">{{ unavailableDerivedMessage ?? emptyMessage ?? t('analyzer.pickChannel') }}</span>
     </div>
+
+    <p v-if="present.length > 0 && unavailableDerivedMessage" class="muted derived-warning">
+      {{ unavailableDerivedMessage }}
+    </p>
 
     <UPlotChart
       v-if="canRender"
@@ -268,8 +510,10 @@ function removeChannel(name: string): void {
       :x-range="mode === 'timeline' ? xRange : null"
       :external-cursor="effectiveCursor"
       :fill-height="fillHeight"
+      :x-bounds="xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
       @cursor="onCursor"
       @x-zoom="onXZoom"
+      @plot-width="plotWidth = $event"
     />
     <p v-else-if="mode === 'overlay' && present.length > 0" class="muted overlay-hint">
       {{ t('analyzer.overlayHint') }}

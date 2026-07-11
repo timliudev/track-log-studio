@@ -265,6 +265,21 @@ onBeforeUnmount(() => cleanupPinFlip?.())
 .dashboard-card.collapsed {
   height: auto;
 }
+/* On desktop the collapsed card's GridItem slot is ALSO shrunk to
+   COLLAPSED_ROWS by the collapse-reflow overlay (see dashboardLayout.ts's
+   applyCollapsedHeights / AnalyzerView's activeLayout getter), so `height:
+   auto`'s natural (header-only) height leaves a sliver of page background
+   visible below the header within that now-small slot — the header itself
+   is a bit shorter than 2 grid rows. Filling the slot instead reads as a
+   clean, flush collapsed card. Mobile (below the app's existing 768px
+   breakpoint — see useDashboardLayout's MOBILE_BREAKPOINT_PX) has no fixed-
+   height ancestor to fill, so it keeps `height: auto` there for a real
+   shrink of the column. */
+@media (min-width: 769px) {
+  .dashboard-card.collapsed {
+    height: 100%;
+  }
+}
 .drag-handle {
   flex: 0 0 auto;
   display: flex;

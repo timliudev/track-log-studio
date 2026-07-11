@@ -89,6 +89,22 @@ describe('lapStore', () => {
     expect(s.selected).toEqual([])
   })
 
+  it('tracks cross-recording lap identities without colliding on lap index', () => {
+    const s = useLapStore()
+    s.toggleSessionLap(10, 1)
+    s.toggleSessionLap(20, 1)
+    expect(s.selectedAcrossSessions).toEqual([{ fileId: 10, index: 1 }, { fileId: 20, index: 1 }])
+    expect(s.isSessionLapSelected(10, 1)).toBe(true)
+    s.toggleSessionLap(10, 1)
+    expect(s.selectedAcrossSessions).toEqual([{ fileId: 20, index: 1 }])
+    s.clearSessionSelection(20)
+    expect(s.selectedAcrossSessions).toEqual([])
+    s.nudgeSessionLapOffset(10, 1, 'time', 0.2)
+    s.nudgeSessionLapOffset(20, 1, 'time', -0.1)
+    expect(s.sessionLapOffsetOf(10, 1, 'time')).toBeCloseTo(0.2)
+    expect(s.sessionLapOffsetOf(20, 1, 'time')).toBeCloseTo(-0.1)
+  })
+
   it('selection changes leave columns/line/source untouched', () => {
     const s = useLapStore()
     s.setLine({ a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } })
