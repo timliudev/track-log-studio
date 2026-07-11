@@ -115,7 +115,7 @@ const ggSeries = computed<GgSeries[]>(() => {
         session: s,
       },
       ...comparisons,
-    ], xName, yName, MAX_POINTS)
+    ], xName, yName, MAX_POINTS, colorChannel.value)
   }
 
   // Colour-axis feature — resolved once here (not per-lap below) so a stale
