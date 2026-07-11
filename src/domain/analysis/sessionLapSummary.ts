@@ -1,6 +1,6 @@
 import type { Lap } from '@/domain/model/Lap'
 import { fastestLapIndex, slowestLapIndex } from './bestLap'
-import { computeMetric } from './lapMetrics'
+import { computeMetric, type LapContext, type LapMetric } from './lapMetrics'
 
 export interface SessionLapSource {
   id: number
@@ -51,7 +51,9 @@ export function buildSessionLapSummaries(
 
 /** One per-lap row for a comparison recording's lap table. Mirrors the primary
  * LapTable's built-in columns (#/time/distance) plus fastest/slowest flags so the
- * two present laps in the same visual language. */
+ * two present laps in the same visual language, plus one raw value per
+ * user-configured column (same order as the caller's `metrics` list) for full
+ * column parity with the primary table. */
 export interface ComparisonLapRow {
   index: number
   lapTimeMs: number
@@ -59,6 +61,11 @@ export interface ComparisonLapRow {
   distanceM: number
   isFastest: boolean
   isSlowest: boolean
+  /** Raw per-column values (channel/sector/delta), aligned index-for-index
+   *  with the `metrics` argument. Empty when no columns are configured.
+   *  NaN (not formatted) — callers format with the same idiom as the
+   *  primary table (`formatMetricValue` / `formatMsColumn`). */
+  cells: number[]
 }
 
 /**
@@ -69,12 +76,18 @@ export interface ComparisonLapRow {
  * would land on the same lap as the fastest — with 0/1 valid laps they coincide
  * and a second marker on one row is just noise (same rule as the primary table).
  *
- * `cumDistM` is the cumulative-distance array for the recording's own track, so
- * distances come through the SAME {@link computeMetric} path as the primary.
+ * `ctx` is the comparison recording's OWN {@link LapContext} (its track's
+ * cumulative distance, its own session for channel lookups, its own fastest
+ * lap as the `delta` column's reference — sector gates are defined on the
+ * PRIMARY track only, so `ctx.sectorTimings` is expected to be empty/absent
+ * here and sector columns simply render '—'). `metrics` is the user-configured
+ * column list (`lapStore.columns.map(c => c.metric)`); every value is sourced
+ * through the SAME {@link computeMetric} path as the primary LapTable.
  */
 export function buildComparisonLapRows(
   laps: readonly Lap[],
-  cumDistM: Float64Array | null,
+  ctx: LapContext,
+  metrics: readonly LapMetric[] = [],
 ): ComparisonLapRow[] {
   const mutable = laps as Lap[]
   const fastest = fastestLapIndex(mutable, [])
@@ -83,8 +96,9 @@ export function buildComparisonLapRows(
   return laps.map((lap) => ({
     index: lap.index,
     lapTimeMs: lap.lapTimeMs,
-    distanceM: computeMetric({ kind: 'distance' }, lap, { session: null, cumDistM }),
+    distanceM: computeMetric({ kind: 'distance' }, lap, ctx),
     isFastest: lap.index === fastest,
     isSlowest: lap.index === slowest,
+    cells: metrics.map((metric) => computeMetric(metric, lap, ctx)),
   }))
 }
