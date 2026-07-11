@@ -261,6 +261,7 @@ export default {
       invalidCircumference: 'Set a valid wheel circumference in the gear ratio calculator first.',
       noRatioSamples: 'This recording has no usable ratio samples (speed must exceed 5 km/h and RPM/speed must be valid).',
       ratioSeriesLabel: 'Total ratio',
+      measuredRatioChannelDescription: 'Measured total drivetrain ratio derived from engine RPM, vehicle speed, and wheel circumference.',
       ratioTimelineHeading: 'Measured ratio (synchronized time/distance axis)',
       noRatioAxis: 'No usable time/distance axis is available. Check that the recording contains valid time or GPS distance data.',
       inversionWheelCircumference: 'Wheel circumference for inversion (mm)',

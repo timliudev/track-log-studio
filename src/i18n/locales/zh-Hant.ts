@@ -256,6 +256,7 @@ export default {
       invalidCircumference: '請先在變速齒比計算器設定有效的後輪周長。',
       noRatioSamples: '這段記錄沒有可用的齒比樣本（車速需高於 5 km/h，且 RPM／車速必須有效）。',
       ratioSeriesLabel: '總傳動比',
+      measuredRatioChannelDescription: '由引擎轉速、車速與後輪周長即時計算的實測總傳動比。',
       ratioTimelineHeading: '實測齒比（同步時間／距離軸）',
       noRatioAxis: '目前沒有可用的時間／距離軸，請確認記錄包含有效時間或 GPS 距離資料。',
       inversionWheelCircumference: '反推用後輪周長 (mm)',

@@ -19,15 +19,27 @@ import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { lapColor } from './lapColors'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
+import {
+  availableDerivedAnalyzerChannels,
+  isDerivedAnalyzerChannel,
+  MEASURED_TOTAL_RATIO_CHANNEL,
+  resolveAnalyzerChannel,
+} from '@/domain/analysis/analyzerChannels'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const props = defineProps<{
   /** Persisted dashboard config for a user-added ordinary time-series card.
-   * Fixed derived consumers (the gear calculator) omit this and supply mode. */
+   * Static hosts such as the gear calculator omit this and supply channelIds. */
   chart?: TimeSeriesChartConfig
-  /** Transient mode for a fixed derived series embedded in a static card. */
+  /** Selection owned by a static host such as GearPanel. Values are the same
+   * stable raw/virtual channel ids stored by an ordinary chart config. */
+  channelIds?: readonly string[]
+  /** Static-host channels which are always present and cannot be removed. */
+  lockedChannels?: readonly string[]
+  /** Transient mode for a time-series embedded in a static card. */
   mode?: ChartMode
   session: LogSession
   xValues: Float64Array
@@ -51,6 +63,7 @@ const emit = defineEmits<{
   cursor: [number | null]
   xZoom: [{ min: number; max: number }]
   updateMode: [ChartMode]
+  updateChannels: [string[]]
 }>()
 
 const { t } = useI18n()
@@ -58,6 +71,7 @@ const analyzer = useAnalyzerStore()
 const { xAxis } = storeToRefs(analyzer)
 const lapStore = useLapStore()
 const settings = useSettingsStore()
+const drivetrain = useDrivetrainStore()
 const { tzOverride } = storeToRefs(settings)
 
 const PALETTE = ['#e23b3b', '#3b82e2', '#2ea043', '#e2a33b', '#9b3be2', '#3bd6e2']
@@ -70,28 +84,68 @@ const mode = computed<ChartMode>(() => props.mode ?? props.chart?.mode ?? 'timel
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
 const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
+const derivedContext = computed(() => ({
+  wheelCircumferenceMm: drivetrain.kind === 'mt'
+    ? drivetrain.inversionWheelCircumferenceMm
+    : drivetrain.cvt.wheelCircumferenceMm,
+}))
 
-const allChannels = computed(() =>
-  props.session.channels
-    .map((c) => ({ name: c.name, description: c.description }))
+function channelLabel(id: string): string {
+  return id === MEASURED_TOTAL_RATIO_CHANNEL
+    ? t('analyzer.gear.ratioSeriesLabel') as string
+    : id
+}
+
+const selectedChannelIds = computed<readonly string[]>(() => {
+  if (props.fixedSeries) return props.fixedSeries.map((series) => series.name)
+  return props.chart?.channels ?? props.channelIds ?? []
+})
+const canEditChannels = computed(() => props.chart != null || props.channelIds != null)
+
+const allChannels = computed<Array<{ name: string; value?: string; description?: string }>>(() =>
+  [
+    ...props.session.channels.map((c) => ({ name: c.name, description: c.description })),
+    ...availableDerivedAnalyzerChannels(props.session, derivedContext.value).map((id) => ({
+      name: channelLabel(id),
+      value: id,
+      description: t('analyzer.gear.measuredRatioChannelDescription') as string,
+    })),
+  ]
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 const pickerOptions = computed(() =>
   allChannels.value.filter(
-    (c) => !props.chart?.channels.includes(c.name),
+    (c) => !selectedChannelIds.value.includes(c.value ?? c.name),
   ),
 )
 const presentSources = computed<Array<{ name: string; data: ArrayLike<number> }>>(() => {
   if (props.fixedSeries) return [...props.fixedSeries]
-  if (!props.chart) return []
+  if (selectedChannelIds.value.length === 0) return []
   const sources: Array<{ name: string; data: ArrayLike<number> }> = []
-  for (const name of props.chart.channels) {
-    const data = props.session.get(name)?.data
+  for (const name of selectedChannelIds.value) {
+    const data = resolveAnalyzerChannel(props.session, name, derivedContext.value).data
     if (data) sources.push({ name, data })
   }
   return sources
 })
 const present = computed(() => presentSources.value.map((source) => source.name))
+const unavailableDerivedMessage = computed<string | null>(() => {
+  for (const id of selectedChannelIds.value) {
+    if (!isDerivedAnalyzerChannel(id)) continue
+    const resolution = resolveAnalyzerChannel(props.session, id, derivedContext.value)
+    if (resolution.error === 'rpm') return t('analyzer.gear.noRpmChannel') as string
+    if (resolution.error === 'speed') return t('analyzer.gear.noSpeedChannel') as string
+    if (resolution.error === 'circumference') return t('analyzer.gear.invalidCircumference') as string
+    if (resolution.data) {
+      let finite = false
+      for (let i = 0; i < resolution.data.length; i++) {
+        if (Number.isFinite(resolution.data[i])) { finite = true; break }
+      }
+      if (!finite) return t('analyzer.gear.noRatioSamples') as string
+    }
+  }
+  return null
+})
 
 // --- Timeline mode: each channel over the full session on a shared X. ---
 const plotWidth = ref(1200)
@@ -100,7 +154,7 @@ const timelineSources = computed<TimelineSource[]>(() => {
   const primaryId = props.primaryFileId ?? -1
   const primaryChannels = props.fixedSeries
     ? new Map(props.fixedSeries.map((series) => [series.name, series.data]))
-    : new Map(props.session.channels.map((channel) => [channel.name, channel.data]))
+    : new Map(presentSources.value.map((source) => [source.name, source.data]))
   const sources: TimelineSource[] = [{
     id: primaryId,
     label: props.primaryFileName ?? 'Primary',
@@ -116,7 +170,10 @@ const timelineSources = computed<TimelineSource[]>(() => {
       color: comparison.color,
       primary: false,
       xValues: comparison.xValues,
-      channels: new Map(comparison.session.channels.map((channel) => [channel.name, channel.data])),
+      channels: new Map(present.value.flatMap((id) => {
+        const data = resolveAnalyzerChannel(comparison.session, id, derivedContext.value).data
+        return data ? [[id, data] as const] : []
+      })),
     })
   }
   return sources
@@ -136,7 +193,7 @@ const timelineData = computed<uPlot.AlignedData>(
 const timelineSeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
   ...timeline.value.series.map((entry) => ({
-    label: `${entry.sourceLabel} · ${entry.channel}`,
+    label: `${entry.sourceLabel} · ${channelLabel(entry.channel)}`,
     stroke: entry.color,
     dash: dash(entry.channelIndex),
     width: entry.primary ? 1.5 : 1,
@@ -158,10 +215,10 @@ const overlay = computed(() =>
   }),
 )
 const crossLapSources = computed<CrossSessionLapSource[]>(() => {
-  // Fixed derived consumers such as the embedded gear-ratio chart omit a
-  // persisted chart config and remain primary-only. Cross-session lap
-  // overlays apply only to ordinary user-configured time-series charts.
-  if (!props.chart || lapStore.selectedAcrossSessions.length === 0) return []
+  // Both persisted dashboard charts and static hosts use stable channel ids,
+  // so their cross-session overlays can resolve raw and virtual channels by
+  // the exact same path.
+  if (selectedChannelIds.value.length === 0 || lapStore.selectedAcrossSessions.length === 0) return []
   const sources: CrossSessionLapSource[] = []
   const primaryId = props.primaryFileId ?? -1
   const primaryColor = categoricalColor(primaryId)
@@ -181,8 +238,8 @@ const crossLapSources = computed<CrossSessionLapSource[]>(() => {
     const lap = comparison?.laps.find((entry) => entry.index === ref.index)
     if (!comparison || !lap) continue
     const channels = present.value.map((name) => {
-      const channel = comparison.session.get(name)
-      return { name, data: channel?.data ?? new Float32Array(comparison.session.rowCount).fill(NaN) }
+      const data = resolveAnalyzerChannel(comparison.session, name, derivedContext.value).data
+      return { name, data: data ?? new Float32Array(comparison.session.rowCount).fill(NaN) }
     })
     sources.push({
       fileId: comparison.id,
@@ -217,7 +274,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
     return [
       { label: xUnit.value },
       ...crossOverlay.value.series.map((s) => ({
-        label: `${s.sessionName} · #${s.lap.index + 1} · ${present.value[s.channelIndex]}`,
+        label: `${s.sessionName} · #${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
         stroke: s.color,
         dash: dash(s.channelIndex),
         width: 1 + (s.lapOrder % 3) * 0.35,
@@ -228,7 +285,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
   return [
     { label: xUnit.value },
     ...overlay.value.series.map((s) => ({
-      label: `#${s.lap.index + 1} · ${present.value[s.channelIndex]}`,
+      label: `#${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
       stroke: lapColor(s.lapOrder),
       dash: dash(s.channelIndex),
       width: 1,
@@ -268,7 +325,7 @@ const clockAxisLabel = computed<string>(() => {
   return `UTC${sign}${hours}${mins ? ':' + mins.toString().padStart(2, '0') : ''}`
 })
 
-// x axis + up to two value axes; in timeline mode they're coloured per series,
+// x axis + one value axis per selected channel; in timeline mode they're coloured per series,
 // in overlay mode colour means "lap" so the channel axes stay theme-neutral.
 // In timeline + time mode an extra bottom x-axis shows absolute clock time.
 const axes = computed<uPlot.Axis[]>(() => {
@@ -313,10 +370,11 @@ const axes = computed<uPlot.Axis[]>(() => {
   }
   return [
     ...xAxes,
-    ...present.value.slice(0, 2).map((n, i) => ({
+    ...present.value.map((n, i) => ({
       scale: n,
-      side: i === 0 ? 3 : 1,
-      ...(mode.value === 'overlay' || comparisonActive.value ? { label: n } : { stroke: color(i) }),
+      side: i % 2 === 0 ? 3 : 1,
+      label: channelLabel(n),
+      ...(mode.value === 'overlay' || comparisonActive.value ? {} : { stroke: color(i) }),
     })),
   ]
 })
@@ -352,23 +410,24 @@ function setMode(m: ChartMode): void {
 }
 
 function addChannel(name: string | null): void {
-  if (props.chart && name && !props.chart.channels.includes(name)) {
-    analyzer.setChartChannels(props.chart.id, [...props.chart.channels, name])
+  if (name && !selectedChannelIds.value.includes(name)) {
+    const next = [...selectedChannelIds.value, name]
+    if (props.chart) analyzer.setChartChannels(props.chart.id, next)
+    else emit('updateChannels', next)
   }
 }
 function removeChannel(name: string): void {
-  if (!props.chart) return
-  analyzer.setChartChannels(
-    props.chart.id,
-    props.chart.channels.filter((n) => n !== name),
-  )
+  if (!canEditChannels.value || props.lockedChannels?.includes(name)) return
+  const next = selectedChannelIds.value.filter((n) => n !== name)
+  if (props.chart) analyzer.setChartChannels(props.chart.id, next)
+  else emit('updateChannels', next)
 }
 </script>
 
 <template>
   <section class="chart" :class="{ fill: fillHeight }">
     <div class="toolbar">
-      <div v-if="chart" class="picker">
+      <div v-if="canEditChannels" class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
       </div>
       <div class="mode">
@@ -391,11 +450,15 @@ function removeChannel(name: string): void {
           :class="{ line: mode === 'overlay' || comparisonActive }"
           :style="mode === 'overlay' || comparisonActive ? {} : { background: color(i) }"
         />
-        {{ name }}
-        <button v-if="chart" type="button" class="x" @click="removeChannel(name)">×</button>
+        {{ channelLabel(name) }}
+        <button v-if="canEditChannels && !lockedChannels?.includes(name)" type="button" class="x" @click="removeChannel(name)">×</button>
       </span>
-      <span v-if="present.length === 0" class="muted">{{ emptyMessage ?? t('analyzer.pickChannel') }}</span>
+      <span v-if="present.length === 0" class="muted">{{ unavailableDerivedMessage ?? emptyMessage ?? t('analyzer.pickChannel') }}</span>
     </div>
+
+    <p v-if="present.length > 0 && unavailableDerivedMessage" class="muted derived-warning">
+      {{ unavailableDerivedMessage }}
+    </p>
 
     <UPlotChart
       v-if="canRender"

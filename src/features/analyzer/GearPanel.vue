@@ -36,6 +36,7 @@ import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import type { ChartMode } from '@/stores/analyzerStore'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
 import {
   useDrivetrainStore,
   toMtDrivetrainSpec,
@@ -73,6 +74,9 @@ const props = defineProps<{
   externalCursor?: number | null
   selectedLaps?: Lap[]
   gearRatioMode?: ChartMode
+  comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
 }>()
 
 const emit = defineEmits<{
@@ -514,6 +518,9 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
       :x-range="props.xRange"
       :external-cursor="props.externalCursor"
       :selected-laps="props.selectedLaps"
+      :comparison-sessions="props.comparisonSessions"
+      :primary-file-id="props.primaryFileId"
+      :primary-file-name="props.primaryFileName"
       @cursor="emit('cursor', $event)"
       @x-zoom="emit('xZoom', $event)"
       @update-mode="emit('updateGearRatioMode', $event)"

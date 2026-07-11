@@ -3,7 +3,11 @@ import { computed, nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 interface Option {
+  /** Display label. */
   name: string
+  /** Stable model value when it differs from the display label (virtual
+   * analyzer channels use this so translated copy never enters configs). */
+  value?: string
   description?: string
 }
 
@@ -48,7 +52,7 @@ function select(name: string | null): void {
 }
 
 function onEnter(): void {
-  if (filtered.value.length > 0) select(filtered.value[0].name)
+  if (filtered.value.length > 0) select(filtered.value[0].value ?? filtered.value[0].name)
 }
 </script>
 
@@ -85,12 +89,12 @@ function onEnter(): void {
               {{ t('converter.mapping.none') }}
             </button>
           </li>
-          <li v-for="opt in filtered" :key="opt.name">
+          <li v-for="opt in filtered" :key="opt.value ?? opt.name">
             <button
               type="button"
               class="ss-option"
-              :class="{ 'is-active': opt.name === modelValue }"
-              @click="select(opt.name)"
+              :class="{ 'is-active': (opt.value ?? opt.name) === modelValue }"
+              @click="select(opt.value ?? opt.name)"
             >
               <span class="ss-name">{{ opt.name }}</span>
               <span v-if="opt.description" class="ss-desc">{{ opt.description }}</span>

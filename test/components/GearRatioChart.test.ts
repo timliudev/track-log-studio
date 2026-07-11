@@ -10,6 +10,7 @@ import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
+import { MEASURED_TOTAL_RATIO_CHANNEL } from '@/domain/analysis/analyzerChannels'
 
 function channel(name: string, data: number[]): Channel {
   return { name, rawName: name, description: undefined, data: new Float32Array(data) }
@@ -46,14 +47,10 @@ describe('GearRatioChart', () => {
   it('feeds an index-aligned derived ratio into the shared TimeSeriesChart pipeline', () => {
     const wrapper = mountChart(makeSession())
     const plot = wrapper.findComponent(TimeSeriesChart)
-    const fixed = plot.props('fixedSeries') as Array<{ name: string; data: Float64Array }>
-
     expect(plot.props('chart')).toBeUndefined()
     expect(plot.props('mode')).toBe('timeline')
-    expect(fixed).toHaveLength(1)
-    expect(fixed[0].name).toBe('總傳動比')
-    expect(fixed[0].data).toHaveLength(3)
-    expect(Array.from(fixed[0].data).every(Number.isFinite)).toBe(true)
+    expect(plot.props('channelIds')).toEqual([MEASURED_TOTAL_RATIO_CHANNEL])
+    expect(plot.props('lockedChannels')).toEqual([MEASURED_TOTAL_RATIO_CHANNEL])
 
     plot.vm.$emit('updateMode', 'overlay')
     expect(wrapper.emitted('updateMode')).toEqual([['overlay']])
@@ -62,8 +59,20 @@ describe('GearRatioChart', () => {
   it('keeps the shared chart pipeline without a separate removable card and supplies a useful prerequisite error', () => {
     const wrapper = mountChart(makeSession(false))
     const plot = wrapper.findComponent(TimeSeriesChart)
-    expect(plot.props('fixedSeries')).toEqual([])
+    expect(plot.props('channelIds')).toEqual([MEASURED_TOTAL_RATIO_CHANNEL])
     expect(plot.props('emptyMessage')).toContain('缺少速度')
+  })
+
+  it('lets the embedded calculator chart add raw channels while retaining the measured ratio', async () => {
+    const wrapper = mountChart(makeSession())
+    const plot = wrapper.findComponent(TimeSeriesChart)
+    plot.vm.$emit('updateChannels', [MEASURED_TOTAL_RATIO_CHANNEL, 'RPM'])
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent(TimeSeriesChart).props('channelIds')).toEqual([
+      MEASURED_TOTAL_RATIO_CHANNEL,
+      'RPM',
+    ])
   })
 
   it('feeds the derived ratio through the aligned timeline builder', async () => {
