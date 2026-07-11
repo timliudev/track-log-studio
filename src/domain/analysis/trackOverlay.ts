@@ -15,6 +15,8 @@ export interface TrackOverlayEntry {
   color: string
   /** Decimated (see {@link decimateGpsTrack}) GPS track to draw. */
   track: GpsTrack
+  /** Manual map alignment in metres (east+/north+). */
+  offset?: { x: number; y: number }
 }
 
 /** Point cap applied to every OVERLAY track before it's stroked (the active

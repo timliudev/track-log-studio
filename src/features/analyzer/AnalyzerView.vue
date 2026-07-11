@@ -103,6 +103,10 @@ function resetComparisonOffset(id: number): void {
   analyzer.resetSessionOffset(id, analyzer.xAxis === 'distance' ? 'distM' : 'timeSec')
 }
 
+function setComparisonMapOffset(id: number, axis: 'mapX' | 'mapY', event: Event): void {
+  analyzer.setSessionOffset(id, axis, Number((event.target as HTMLInputElement).value))
+}
+
 const hasEcuLaps = computed(() => session.value?.has('IR_LapNumber') ?? false)
 
 // The selected laps (from the table) resolved to Lap objects, in selection
@@ -259,7 +263,7 @@ const { heatNorm, colorValues, legendGradient, fmtVal } = useTrackHeatmap(
 function onLapSelect(index: number | null): void {
   // Explicit clear (clear button) → empty selection + full view.
   if (index == null) {
-    lapStore.clearSelection()
+    lapStore.clearAllLapSelections()
     analyzer.setXRange(null)
     return
   }
@@ -678,6 +682,34 @@ function titleForItemId(id: string): string {
                 {{ t('analyzer.comparisonReset') }}
               </button>
             </div>
+            <div v-if="candidate.active" class="comparison-offset comparison-map-offset">
+              <label>
+                {{ t('analyzer.comparisonMapEast') }}
+                <input
+                  type="number"
+                  step="0.5"
+                  :value="analyzer.sessionOffsetOf(candidate.id).mapX"
+                  @change="setComparisonMapOffset(candidate.id, 'mapX', $event)"
+                />
+              </label>
+              <label>
+                {{ t('analyzer.comparisonMapNorth') }}
+                <input
+                  type="number"
+                  step="0.5"
+                  :value="analyzer.sessionOffsetOf(candidate.id).mapY"
+                  @change="setComparisonMapOffset(candidate.id, 'mapY', $event)"
+                />
+              </label>
+              <span>m</span>
+              <button
+                type="button"
+                class="comparison-reset"
+                @click="analyzer.resetSessionOffset(candidate.id, 'mapX'); analyzer.resetSessionOffset(candidate.id, 'mapY')"
+              >
+                {{ t('analyzer.comparisonReset') }}
+              </button>
+            </div>
           </div>
           <button v-if="anyComparisonOn" type="button" class="comparison-clear" @click="clearComparisons">
             {{ t('analyzer.comparisonClear') }}
@@ -929,6 +961,7 @@ function titleForItemId(id: string): string {
                 :time-ms="timeMs"
                 :session="session"
                 :has-ecu-laps="hasEcuLaps"
+                :comparison-sessions="comparisonSessions"
                 @select="onLapSelect"
               />
             </DashboardCard>
@@ -948,6 +981,7 @@ function titleForItemId(id: string): string {
                 :track="track"
                 :time-ms="timeMs"
                 :cursor-idx="cursorIdx"
+                :comparison-sessions="comparisonSessions"
               />
             </DashboardCard>
 
@@ -1101,6 +1135,9 @@ function titleForItemId(id: string): string {
                     :chart="c"
                     :session="session"
                     :selected-laps="selectedLaps"
+                    :comparison-sessions="comparisonSessions"
+                    :primary-file-id="activeFile?.id"
+                    :primary-file-name="activeFile?.name"
                   />
                 </DashboardCard>
               </template>

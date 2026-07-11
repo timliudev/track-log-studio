@@ -13,6 +13,7 @@ import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
+import { buildCrossSessionLapOverlay, type CrossSessionLapSource } from '@/domain/analysis/crossSessionLapOverlay'
 import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
 import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { lapColor } from './lapColors'
@@ -156,6 +157,44 @@ const overlay = computed(() =>
     offsets: laps.value.map((l) => lapStore.offsetOf(l.index, xAxis.value)),
   }),
 )
+const crossLapSources = computed<CrossSessionLapSource[]>(() => {
+  if (props.chart.kind !== 'timeseries' || lapStore.selectedAcrossSessions.length === 0) return []
+  const sources: CrossSessionLapSource[] = []
+  const primaryId = props.primaryFileId ?? -1
+  const primaryColor = categoricalColor(primaryId)
+  for (const lap of laps.value) {
+    sources.push({
+      fileId: primaryId,
+      sessionName: props.primaryFileName ?? 'Primary',
+      color: primaryColor,
+      xValues: props.xValues,
+      channels: presentSources.value,
+      lap,
+      offset: lapStore.offsetOf(lap.index, xAxis.value),
+    })
+  }
+  for (const ref of lapStore.selectedAcrossSessions) {
+    const comparison = props.comparisonSessions?.find((entry) => entry.id === ref.fileId)
+    const lap = comparison?.laps.find((entry) => entry.index === ref.index)
+    if (!comparison || !lap) continue
+    const channels = present.value.map((name) => {
+      const channel = comparison.session.get(name)
+      return { name, data: channel?.data ?? new Float32Array(comparison.session.rowCount).fill(NaN) }
+    })
+    sources.push({
+      fileId: comparison.id,
+      sessionName: comparison.name,
+      color: comparison.color,
+      xValues: comparison.xValues,
+      channels,
+      lap,
+      offset: lapStore.sessionLapOffsetOf(comparison.id, lap.index, xAxis.value),
+    })
+  }
+  return sources
+})
+const crossOverlay = computed(() => buildCrossSessionLapOverlay(crossLapSources.value))
+const useCrossOverlay = computed(() => crossLapSources.value.some((source) => source.fileId !== (props.primaryFileId ?? -1)))
 // uPlot seeds a scale's range from a series' first in-range sample and treats
 // only `null` (not NaN) as a gap. Once a lap is nudged off grid-0 its trace
 // starts with a NaN, which would poison the shared channel scale to
@@ -165,20 +204,35 @@ const overlay = computed(() =>
 const overlayData = computed<uPlot.AlignedData>(
   () =>
     [
-      overlay.value.x,
-      ...overlay.value.series.map((s) => Array.from(s.y, (v) => (Number.isFinite(v) ? v : null))),
+      useCrossOverlay.value ? crossOverlay.value.x : overlay.value.x,
+      ...(useCrossOverlay.value ? crossOverlay.value.series : overlay.value.series)
+        .map((s) => Array.from(s.y, (v) => (Number.isFinite(v) ? v : null))),
     ] as unknown as uPlot.AlignedData,
 )
-const overlaySeries = computed<uPlot.Series[]>(() => [
-  { label: xUnit.value },
-  ...overlay.value.series.map((s) => ({
-    label: `#${s.lap.index + 1} · ${present.value[s.channelIndex]}`,
-    stroke: lapColor(s.lapOrder),
-    dash: dash(s.channelIndex),
-    width: 1,
-    scale: present.value[s.channelIndex],
-  })),
-])
+const overlaySeries = computed<uPlot.Series[]>(() => {
+  if (useCrossOverlay.value) {
+    return [
+      { label: xUnit.value },
+      ...crossOverlay.value.series.map((s) => ({
+        label: `${s.sessionName} · #${s.lap.index + 1} · ${present.value[s.channelIndex]}`,
+        stroke: s.color,
+        dash: dash(s.channelIndex),
+        width: 1 + (s.lapOrder % 3) * 0.35,
+        scale: present.value[s.channelIndex],
+      })),
+    ]
+  }
+  return [
+    { label: xUnit.value },
+    ...overlay.value.series.map((s) => ({
+      label: `#${s.lap.index + 1} · ${present.value[s.channelIndex]}`,
+      stroke: lapColor(s.lapOrder),
+      dash: dash(s.channelIndex),
+      width: 1,
+      scale: present.value[s.channelIndex],
+    })),
+  ]
+})
 
 const data = computed<uPlot.AlignedData>(() =>
   mode.value === 'overlay' ? overlayData.value : timelineData.value,
@@ -269,7 +323,9 @@ const axes = computed<uPlot.Axis[]>(() => {
 // overlay charts build the same grid so the index aligns across them — while
 // timeline charts (and the track map) stay on the session-index cursor/zoom.
 const canRender = computed(() =>
-  mode.value === 'overlay' ? present.value.length > 0 && laps.value.length > 0 : present.value.length > 0,
+  mode.value === 'overlay'
+    ? present.value.length > 0 && (laps.value.length > 0 || crossLapSources.value.length > 0)
+    : present.value.length > 0,
 )
 const effectiveCursor = computed<number | null>(() =>
   mode.value === 'overlay'

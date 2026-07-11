@@ -10,6 +10,9 @@ import { extractGpsTrack, hasGps } from '@/domain/analysis/gpsTrack'
 import { detectLapsByChannel, detectLapsByLine } from '@/domain/analysis/laps'
 import { timeSeconds } from '@/domain/analysis/timeAxis'
 import type { LogSession } from '@/domain/model/LogSession'
+import type { GpsTrack } from '@/domain/analysis/gpsTrack'
+import type { Lap } from '@/domain/model/Lap'
+import type { LapLine } from '@/domain/analysis/laps'
 
 export interface SessionComparisonCandidate {
   id: number
@@ -27,11 +30,29 @@ export interface ComparisonSession {
   color: string
   session: LogSession
   xValues: Float64Array
+  track: GpsTrack
+  timeMs: Float64Array
+  laps: Lap[]
 }
 
-function axisValues(session: LogSession, axis: 'time' | 'distance'): Float64Array | null {
-  if (axis === 'time') return timeSeconds(session)
+function sessionLaps(
+  session: LogSession,
+  source: 'line' | 'ecu',
+  line: LapLine | null,
+): { track: GpsTrack; timeMs: Float64Array; laps: Lap[] } {
   const track = extractGpsTrack(session)
+  const timeMs = Float64Array.from(timeSeconds(session), (v) => v * 1000)
+  const laps = source === 'ecu'
+    ? detectLapsByChannel(session, timeMs)
+    : line && hasGps(track)
+      ? detectLapsByLine(track, timeMs, line)
+      : []
+  return { track, timeMs, laps }
+}
+
+function axisValues(session: LogSession, axis: 'time' | 'distance', knownTrack?: GpsTrack): Float64Array | null {
+  if (axis === 'time') return timeSeconds(session)
+  const track = knownTrack ?? extractGpsTrack(session)
   return hasGps(track)
     ? cumulativeDistanceM(track.lat, track.lon, track.valid)
     : null
@@ -42,19 +63,18 @@ function axisValues(session: LogSession, axis: 'time' | 'distance'): Float64Arra
  * no implicit alignment (origin 0), matching the design's safe fallback. */
 function firstLapOrigin(
   session: LogSession,
-  axis: 'time' | 'distance',
-  line: ReturnType<typeof useLapStore>['line'],
+  x: Float64Array | null,
+  analysis: { timeMs: Float64Array; laps: Lap[] },
 ): number | null {
-  const x = axisValues(session, axis)
   if (!x) return null
-  const seconds = timeSeconds(session)
-  const timeMs = Float64Array.from(seconds, (v) => v * 1000)
-  const track = extractGpsTrack(session)
-  const laps = line && hasGps(track)
-    ? detectLapsByLine(track, timeMs, line)
-    : session.has('IR_LapNumber')
-      ? detectLapsByChannel(session, timeMs)
-      : []
+  let laps = analysis.laps
+  // Alignment keeps the Phase-1 format-agnostic ECU fallback when the chosen
+  // line source cannot produce a complete lap (for example before a line is
+  // restored). The displayed comparison lap summary still follows the user's
+  // explicit source selection via `sessionLaps` above.
+  if (laps.length === 0 && session.has('IR_LapNumber')) {
+    laps = detectLapsByChannel(session, analysis.timeMs)
+  }
   const idx = laps[0]?.startIdx
   return idx != null && Number.isFinite(x[idx]) ? x[idx] : null
 }
@@ -94,8 +114,12 @@ export function useSessionComparison(): {
     const activeId = analyzer.activeFileId
     const primaryRaw = activeId == null ? undefined : fileStore.getSession(activeId)
     const primary = primaryRaw ? applyDerivedChannels(primaryRaw, suspension.config) : null
-    const primaryOrigin = primary
-      ? firstLapOrigin(primary, analyzer.xAxis, lapStore.line)
+    const primaryAnalysis = primary ? sessionLaps(primary, lapStore.source, lapStore.line) : null
+    const primaryX = primary
+      ? axisValues(primary, analyzer.xAxis, primaryAnalysis?.track)
+      : null
+    const primaryOrigin = primary && primaryAnalysis
+      ? firstLapOrigin(primary, primaryX, primaryAnalysis)
       : null
     const out: ComparisonSession[] = []
 
@@ -105,13 +129,14 @@ export function useSessionComparison(): {
       const raw = fileStore.getSession(id)
       if (!file || !raw) continue
       const session = applyDerivedChannels(raw, suspension.config)
-      const rawX = axisValues(session, analyzer.xAxis)
+      const analysis = sessionLaps(session, lapStore.source, lapStore.line)
+      const rawX = axisValues(session, analyzer.xAxis, analysis.track)
       if (!rawX) continue
 
       // Scheme A from the design: align each comparison's first complete lap
       // crossing to the primary's crossing. If either side has no detectable
       // lap, use zero implicit shift and retain the manual offset only.
-      const ownOrigin = firstLapOrigin(session, analyzer.xAxis, lapStore.line)
+      const ownOrigin = firstLapOrigin(session, rawX, analysis)
       const autoDelta = primaryOrigin != null && ownOrigin != null
         ? primaryOrigin - ownOrigin
         : 0
@@ -123,6 +148,7 @@ export function useSessionComparison(): {
         color: categoricalColor(id),
         session,
         xValues: shifted(rawX, autoDelta + manualDelta),
+        ...analysis,
       })
     }
     return out
@@ -131,7 +157,13 @@ export function useSessionComparison(): {
   return {
     candidates,
     comparisonSessions,
-    toggle: analyzer.toggleSessionComparison,
-    clear: analyzer.clearSessionComparisons,
+    toggle: (id: number) => {
+      if (analyzer.selectedSessions.includes(id)) lapStore.clearSessionSelection(id)
+      analyzer.toggleSessionComparison(id)
+    },
+    clear: () => {
+      lapStore.clearSessionSelection()
+      analyzer.clearSessionComparisons()
+    },
   }
 }

@@ -139,7 +139,7 @@ export function useLaps(): {
         // Lap selection, garbage exclusions and alignment offsets are keyed by
         // lap index, which is meaningless across a different recording — clear
         // them all on file change.
-        lapStore.clearSelection()
+        lapStore.clearAllLapSelections()
         lapStore.clearExcluded()
         lapStore.clearLapTimeBand()
         lapStore.clearLapDistanceBand()
