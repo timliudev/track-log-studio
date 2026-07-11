@@ -108,6 +108,7 @@ export default {
     comparisonMapNorth: '地圖向北',
     comparisonLapSummary: '比較記錄最快圈',
     comparisonLapCount: '{n} 圈',
+    comparisonSelectLaps: '選取要跨檔疊圖的圈次',
     comparisonClear: '清除比較',
     pickChannel: '從上方選擇要繪製的通道',
     addChart: '新增圖表',

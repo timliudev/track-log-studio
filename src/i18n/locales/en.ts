@@ -109,6 +109,7 @@ export default {
     comparisonMapNorth: 'Map north',
     comparisonLapSummary: 'Fastest laps in compared recordings',
     comparisonLapCount: '{n} laps',
+    comparisonSelectLaps: 'Select laps for cross-recording overlay',
     comparisonClear: 'Clear comparisons',
     pickChannel: 'Pick channels to plot from above',
     addChart: 'Add chart',

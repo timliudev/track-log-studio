@@ -18,6 +18,12 @@ import { useSectorStore } from '@/stores/sectorStore'
 /** How laps are detected: a user-placed start/finish line, or the ECU channel. */
 export type LapSource = 'line' | 'ecu'
 
+/** Stable lap identity once more than one recording is in play. */
+export interface SessionLapRef {
+  fileId: number
+  index: number
+}
+
 /**
  * A lap's manual alignment shift (#9 GNSS-offset fine-tune). Two independent
  * facets:
@@ -57,6 +63,10 @@ export const useLapStore = defineStore('lap', () => {
   // lap's color (assigned by order) stays stable as laps are added/removed.
   // Drives chart zoom and the colored segments on the track map.
   const selected = ref<number[]>([])
+  // Cross-recording selection used by overlay charts. The legacy `selected`
+  // remains the primary recording's index list so every single-file consumer
+  // keeps its established API and persistence semantics.
+  const selectedAcrossSessions = ref<SessionLapRef[]>([])
   // Indices of laps the user has MANUALLY marked as garbage (e.g. an off-track
   // "cut" lap) so they don't pollute best-lap / future optimal-time & delta
   // computations. Order is irrelevant (membership only), unlike `selected`.
@@ -125,6 +135,8 @@ export const useLapStore = defineStore('lap', () => {
   // Per-lap overlay-alignment shifts, keyed by lap index. Absent = {time:0,dist:0}.
   // The single owner of the #9 alignment nudges; the overlay derives from these.
   const offsets = ref<Record<number, LapOffset>>({})
+  const sessionLapOffsets = ref<Record<string, LapOffset>>({})
+  const sessionLapKey = (fileId: number, index: number): string => `${fileId}:${index}`
 
   function setLine(l: LapLine): void {
     line.value = l
@@ -153,6 +165,48 @@ export const useLapStore = defineStore('lap', () => {
   /** Whether lap `i` is currently selected. */
   function isSelected(i: number): boolean {
     return selected.value.includes(i)
+  }
+
+  function toggleSessionLap(fileId: number, index: number): void {
+    const found = selectedAcrossSessions.value.some((ref) => ref.fileId === fileId && ref.index === index)
+    selectedAcrossSessions.value = found
+      ? selectedAcrossSessions.value.filter((ref) => ref.fileId !== fileId || ref.index !== index)
+      : [...selectedAcrossSessions.value, { fileId, index }]
+  }
+
+  function isSessionLapSelected(fileId: number, index: number): boolean {
+    return selectedAcrossSessions.value.some((ref) => ref.fileId === fileId && ref.index === index)
+  }
+
+  function clearSessionSelection(fileId?: number): void {
+    if (fileId == null) selectedAcrossSessions.value = []
+    else selectedAcrossSessions.value = selectedAcrossSessions.value.filter((ref) => ref.fileId !== fileId)
+  }
+
+  function sessionLapOffsetOf(fileId: number, index: number, axis: XAxis): number {
+    const offset = sessionLapOffsets.value[sessionLapKey(fileId, index)] ?? ZERO_OFFSET
+    return axis === 'time' ? offset.time : offset.dist
+  }
+
+  function nudgeSessionLapOffset(fileId: number, index: number, axis: XAxis, delta: number): void {
+    if (!Number.isFinite(delta) || delta === 0) return
+    const key = sessionLapKey(fileId, index)
+    const current = sessionLapOffsets.value[key] ?? ZERO_OFFSET
+    sessionLapOffsets.value = {
+      ...sessionLapOffsets.value,
+      [key]: { ...current, [axis === 'time' ? 'time' : 'dist']: sessionLapOffsetOf(fileId, index, axis) + delta },
+    }
+  }
+
+  function resetSessionLapOffset(fileId: number, index: number): void {
+    const next = { ...sessionLapOffsets.value }
+    delete next[sessionLapKey(fileId, index)]
+    sessionLapOffsets.value = next
+  }
+
+  function clearAllLapSelections(): void {
+    selected.value = []
+    selectedAcrossSessions.value = []
   }
 
   /** Manually mark lap `i` as garbage, or un-mark it when already manually excluded. */
@@ -277,6 +331,7 @@ export const useLapStore = defineStore('lap', () => {
   /** Clear every lap's alignment shift (both facets). */
   function clearOffsets(): void {
     offsets.value = {}
+    sessionLapOffsets.value = {}
   }
 
   /** Append a column for any metric kind (channel, lapTime, distance, …). */
@@ -318,6 +373,7 @@ export const useLapStore = defineStore('lap', () => {
     line,
     source,
     selected,
+    selectedAcrossSessions,
     excluded,
     manualExcluded,
     bandExcluded,
@@ -327,12 +383,20 @@ export const useLapStore = defineStore('lap', () => {
     lapDistanceBand,
     columns,
     offsets,
+    sessionLapOffsets,
     setLine,
     clearLine,
     setSource,
     toggleLap,
     clearSelection,
     isSelected,
+    toggleSessionLap,
+    isSessionLapSelected,
+    clearSessionSelection,
+    clearAllLapSelections,
+    sessionLapOffsetOf,
+    nudgeSessionLapOffset,
+    resetSessionLapOffset,
     toggleExcluded,
     isManuallyExcluded,
     isExcluded,

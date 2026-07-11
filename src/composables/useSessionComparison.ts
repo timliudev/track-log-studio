@@ -156,7 +156,13 @@ export function useSessionComparison(): {
   return {
     candidates,
     comparisonSessions,
-    toggle: analyzer.toggleSessionComparison,
-    clear: analyzer.clearSessionComparisons,
+    toggle: (id: number) => {
+      if (analyzer.selectedSessions.includes(id)) lapStore.clearSessionSelection(id)
+      analyzer.toggleSessionComparison(id)
+    },
+    clear: () => {
+      lapStore.clearSessionSelection()
+      analyzer.clearSessionComparisons()
+    },
   }
 }
