@@ -41,6 +41,7 @@ import {
 import DashboardCard from '@/components/DashboardCard.vue'
 import TrackMap from './TrackMap.vue'
 import TimeSeriesChart from './TimeSeriesChart.vue'
+import GearRatioChart from './GearRatioChart.vue'
 import LapTable from './LapTable.vue'
 import LapAlignPanel from './LapAlignPanel.vue'
 import MapAlignPanel from './MapAlignPanel.vue'
@@ -103,7 +104,9 @@ const selectedLaps = computed(() =>
 const showAlign = computed(
   () =>
     selectedLaps.value.length >= 2 &&
-    charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay'),
+    charts.value.some(
+      (c) => (c.kind === 'timeseries' || c.kind === 'gearRatio') && c.mode === 'overlay',
+    ),
 )
 
 // One colored segment per selected lap; color is assigned by selection order.
@@ -289,6 +292,10 @@ function onSelect(e: Event): void {
 // A10+A12 — add-chart is now a two-option affordance (時序圖 / XY 散佈圖).
 function onAddTimeseries(): void {
   analyzer.addChart('timeseries')
+}
+
+function onAddGearRatio(): void {
+  analyzer.addChart('gearRatio')
 }
 
 // New scatter charts default to TC_Xforce/TC_Yforce when present (the
@@ -591,9 +598,9 @@ function onResetLayout(): void {
 function chartTitle(chart: (typeof charts.value)[number]): string {
   const sameKind = charts.value.filter((c) => c.kind === chart.kind)
   const n = sameKind.indexOf(chart) + 1
-  return chart.kind === 'scatter'
-    ? t('analyzer.layout.cardScatterChart', { n })
-    : t('analyzer.layout.cardChart', { n })
+  if (chart.kind === 'scatter') return t('analyzer.layout.cardScatterChart', { n })
+  if (chart.kind === 'gearRatio') return t('analyzer.layout.cardGearRatioChart', { n })
+  return t('analyzer.layout.cardChart', { n })
 }
 
 /** Title for ANY card id (static or chart), used by the pinned-card
@@ -641,6 +648,9 @@ function titleForItemId(id: string): string {
           </button>
           <button type="button" class="add" @click="onAddScatter">
             ＋ {{ t('analyzer.addScatterChart') }}
+          </button>
+          <button type="button" class="add" @click="onAddGearRatio">
+            ＋ {{ t('analyzer.addGearRatioChart') }}
           </button>
           <!-- 鎖定布局: global drag+resize toggle for every card — distinct
                icon (padlock) and wording from the per-card 📌 pin button so
@@ -1058,6 +1068,18 @@ function titleForItemId(id: string): string {
                     :chart="c"
                     :session="session"
                     :selected-laps="selectedLaps"
+                  />
+                  <GearRatioChart
+                    v-else-if="c.kind === 'gearRatio' && session && xValues"
+                    fill-height
+                    :chart="c"
+                    :session="session"
+                    :x-values="xValues"
+                    :x-range="xRange"
+                    :external-cursor="cursorIdx"
+                    :selected-laps="selectedLaps"
+                    @cursor="analyzer.setCursor"
+                    @x-zoom="onXZoom"
                   />
                 </DashboardCard>
               </template>

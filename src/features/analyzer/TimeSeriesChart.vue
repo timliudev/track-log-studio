@@ -3,7 +3,12 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
-import { useAnalyzerStore, type TimeSeriesChartConfig, type ChartMode } from '@/stores/analyzerStore'
+import {
+  useAnalyzerStore,
+  type TimeSeriesChartConfig,
+  type GearRatioChartConfig,
+  type ChartMode,
+} from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -16,13 +21,18 @@ import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
 const props = defineProps<{
-  chart: TimeSeriesChartConfig
+  chart: TimeSeriesChartConfig | GearRatioChartConfig
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
   externalCursor?: number | null
   /** Selected laps (in colour order) for overlay mode. */
   selectedLaps?: Lap[]
+  /** Fixed derived series (e.g. drivetrain ratio). When supplied, the chart
+   *  uses the same plot/overlay/cursor pipeline but hides the channel picker. */
+  fixedSeries?: readonly { name: string; data: ArrayLike<number> }[]
+  /** Empty-state copy for a fixed derived chart whose prerequisites failed. */
+  emptyMessage?: string
   /** #8 — forwarded to UPlotChart: fill the dashboard grid item's height
    *  instead of a fixed pixel height. See UPlotChart's `fillHeight` prop. */
   fillHeight?: boolean
@@ -55,14 +65,26 @@ const allChannels = computed(() =>
     .sort((a, b) => a.name.localeCompare(b.name)),
 )
 const pickerOptions = computed(() =>
-  allChannels.value.filter((c) => !props.chart.channels.includes(c.name)),
+  allChannels.value.filter(
+    (c) => props.chart.kind === 'timeseries' && !props.chart.channels.includes(c.name),
+  ),
 )
-const present = computed(() => props.chart.channels.filter((n) => props.session.get(n)))
+const presentSources = computed<Array<{ name: string; data: ArrayLike<number> }>>(() => {
+  if (props.fixedSeries) return [...props.fixedSeries]
+  if (props.chart.kind !== 'timeseries') return []
+  const sources: Array<{ name: string; data: ArrayLike<number> }> = []
+  for (const name of props.chart.channels) {
+    const data = props.session.get(name)?.data
+    if (data) sources.push({ name, data })
+  }
+  return sources
+})
+const present = computed(() => presentSources.value.map((source) => source.name))
 
 // --- Timeline mode: each channel over the full session on a shared X. ---
 const timelineData = computed<uPlot.AlignedData>(
   () =>
-    [props.xValues, ...present.value.map((n) => props.session.get(n)!.data)] as unknown as uPlot.AlignedData,
+    [props.xValues, ...presentSources.value.map((source) => source.data)] as unknown as uPlot.AlignedData,
 )
 
 // Each series gets its own scale key (= channel name) → independent auto-ranging,
@@ -78,7 +100,7 @@ const timelineSeries = computed<uPlot.Series[]>(() => [
 const overlay = computed(() =>
   buildLapOverlay({
     xValues: props.xValues,
-    channels: present.value.map((n) => ({ name: n, data: props.session.get(n)!.data })),
+    channels: presentSources.value,
     laps: laps.value,
     // Per-lap alignment nudges, resolved to the current axis' units (#9).
     offsets: laps.value.map((l) => lapStore.offsetOf(l.index, xAxis.value)),
@@ -215,11 +237,12 @@ function setMode(m: ChartMode): void {
 }
 
 function addChannel(name: string | null): void {
-  if (name && !props.chart.channels.includes(name)) {
+  if (props.chart.kind === 'timeseries' && name && !props.chart.channels.includes(name)) {
     analyzer.setChartChannels(props.chart.id, [...props.chart.channels, name])
   }
 }
 function removeChannel(name: string): void {
+  if (props.chart.kind !== 'timeseries') return
   analyzer.setChartChannels(
     props.chart.id,
     props.chart.channels.filter((n) => n !== name),
@@ -230,7 +253,7 @@ function removeChannel(name: string): void {
 <template>
   <section class="chart" :class="{ fill: fillHeight }">
     <div class="toolbar">
-      <div class="picker">
+      <div v-if="chart.kind === 'timeseries'" class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
       </div>
       <div class="mode">
@@ -254,9 +277,9 @@ function removeChannel(name: string): void {
           :style="mode === 'overlay' ? {} : { background: color(i) }"
         />
         {{ name }}
-        <button type="button" class="x" @click="removeChannel(name)">×</button>
+        <button v-if="chart.kind === 'timeseries'" type="button" class="x" @click="removeChannel(name)">×</button>
       </span>
-      <span v-if="present.length === 0" class="muted">{{ t('analyzer.pickChannel') }}</span>
+      <span v-if="present.length === 0" class="muted">{{ emptyMessage ?? t('analyzer.pickChannel') }}</span>
     </div>
 
     <UPlotChart

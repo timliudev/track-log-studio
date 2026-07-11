@@ -25,8 +25,8 @@
  *   measured RPM/speed scatter recovered from the log. Detected plateaus
  *   (Layer 2 clustering) are listed against the configured ratios.
  * - CVT: measured-curve presentation only (no geometry sim — see
- *   `drivetrain.ts`). Ratio-vs-time and ratio-vs-speed charts, launch/top
- *   ratio + clutch-engagement RPM summary, plus free-form tuning notes
+ *   `drivetrain.ts`). Ratio-vs-speed chart, launch/top ratio + clutch-
+ *   engagement RPM summary, plus free-form tuning notes
  *   (前普利尺寸/珠重/彈簧硬度/開閉盤規格/套管長度/終傳比 etc.) persisted with the
  *   drivetrain settings for setup comparison.
  */
@@ -53,7 +53,6 @@ import {
   computeRatioSeries,
   detectGearPlateaus,
   buildCvtRatioSweep,
-  buildCvtRatioTimeSeries,
   cvtRatioSummary,
   estimateClutchEngagementRpm,
   estimateCircumferenceFromLog,
@@ -262,17 +261,6 @@ const speedData = computed(() => {
   return s.get(speedName)?.data ?? null
 })
 
-const timeSData = computed(() => {
-  const s = props.session
-  const time = s?.timeChannel?.data
-  if (!time) return null
-  // session time is stored in ms (see LogSession/Channel doc) — the CVT
-  // ratio-vs-time chart's x-axis is seconds, matching other analyzer charts.
-  const out = new Float64Array(time.length)
-  for (let i = 0; i < time.length; i++) out[i] = time[i] / 1000
-  return out
-})
-
 // ── MT: measured scatter + theoretical line overlay ──────────────────────
 const MAX_SCATTER_POINTS = 4000
 
@@ -419,14 +407,6 @@ const cvtSweep = computed(() => {
   return strideFilter(points, 2000)
 })
 
-const cvtTimeSeries = computed(() => {
-  const series = ratioSeries.value
-  const time = timeSData.value
-  if (!series || !time || isMt.value) return []
-  const points = buildCvtRatioTimeSeries(series, time)
-  return strideFilter(points, 2000)
-})
-
 const cvtSummary = computed(() => (ratioSeries.value ? cvtRatioSummary(ratioSeries.value) : null))
 const cvtClutchRpm = computed(() => {
   const rpm = rpmData.value
@@ -450,24 +430,6 @@ const cvtSweepSeries: uPlot.Series[] = [
 ]
 const cvtSweepAxes: uPlot.Axis[] = [
   { label: 'km/h' },
-  { label: t('analyzer.gear.cvtSweepAxisRatio') as string },
-]
-
-const cvtTimeChartData = computed<uPlot.AlignedData>(() => [
-  cvtTimeSeries.value.map((p) => p.timeS),
-  cvtTimeSeries.value.map((p) => p.ratio),
-])
-const cvtTimeSeriesOpts: uPlot.Series[] = [
-  {},
-  {
-    label: t('analyzer.gear.cvtSweepAxisRatio') as string,
-    stroke: '#2a9d8f',
-    width: 2,
-    points: { show: false },
-  },
-]
-const cvtTimeAxes: uPlot.Axis[] = [
-  { label: 's' },
   { label: t('analyzer.gear.cvtSweepAxisRatio') as string },
 ]
 
@@ -896,15 +858,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
           </span>
         </div>
 
-        <h5 class="sub-sub-heading">{{ t('analyzer.gear.cvtTimeHeading') }}</h5>
-        <p v-if="cvtTimeSeries.length === 0" class="hint">{{ t('analyzer.gear.noPlateaus') }}</p>
-        <UPlotChart
-          v-else
-          :data="cvtTimeChartData"
-          :series="cvtTimeSeriesOpts"
-          :axes="cvtTimeAxes"
-          :height="200"
-        />
+        <p class="hint">{{ t('analyzer.gear.timelineMovedHint') }}</p>
 
         <h5 class="sub-sub-heading">{{ t('analyzer.gear.cvtSweepHeading') }}</h5>
         <p v-if="cvtSweep.length === 0" class="hint">{{ t('analyzer.gear.noPlateaus') }}</p>
