@@ -4,9 +4,54 @@ import { useI18n } from 'vue-i18n'
 import { useGithubStars } from '@/composables/useGithubStars'
 
 const REPO = 'timliudev/track-log-studio'
+const REPO_URL = `https://github.com/${REPO}`
 
 const { t } = useI18n()
 const { stars } = useGithubStars(REPO)
+
+/**
+ * The app is installed as a `display: 'standalone'` PWA (see
+ * `vite.config.ts`'s manifest). In that display mode, iOS Safari's
+ * "add to home screen" WebView (and some Android TWA/WebView shells)
+ * silently swallow a plain `<a target="_blank">` click for an
+ * external-origin link — no new tab, no fallback to the system browser,
+ * nothing happens. That's the reported bug: the button visually looks
+ * clickable but tapping it does nothing.
+ *
+ * We keep the real `href`/`target`/`rel` on the anchor (so hover preview,
+ * middle-click, "open in new tab", and any environment that DOES handle
+ * `target="_blank"` correctly all keep working via native browser
+ * behaviour), but drive the navigation ourselves via `window.open` so it
+ * also works in standalone-PWA contexts that don't act on the anchor's own
+ * default action.
+ *
+ * IMPORTANT: do NOT pass `noopener`/`noreferrer` in the `window.open`
+ * FEATURES string. Per the HTML spec, `noopener` makes `window.open`
+ * return `null` even when the new tab DID open — which would make the
+ * `!win` fallback below fire on every click and navigate THIS tab (the
+ * whole app) away to GitHub. Instead we open normally (so we get a real
+ * window reference back) and sever the opener link ourselves via
+ * `win.opener = null`, which gives the same reverse-tabnabbing protection
+ * as `noopener`. Only a genuine `null` (a popup blocker actually blocking
+ * it) falls back to same-tab navigation, so the click always does
+ * *something* instead of silently failing.
+ *
+ * We deliberately do NOT attempt to star the repo without leaving the app
+ * — that would require the user's GitHub OAuth token, which a static PWA
+ * has no way to obtain or hold. This stays a plain link to the repo page.
+ */
+function openRepo(event: MouseEvent): void {
+  event.preventDefault()
+  const win = window.open(REPO_URL, '_blank')
+  if (win) {
+    // Reverse-tabnabbing protection, equivalent to `noopener`, without the
+    // spec-mandated null return that `noopener` in the features string forces.
+    win.opener = null
+  } else {
+    // window.open returned null ⇒ a popup blocker actually blocked it.
+    window.location.href = REPO_URL
+  }
+}
 
 /** GitHub-button-style compact count, e.g. 1234 -> "1.2k"; null (still
  *  loading / offline / fetch failed) falls back to the literal word "Star"
@@ -25,10 +70,11 @@ const label = computed(() => {
 <template>
   <a
     class="gh-star"
-    href="https://github.com/timliudev/track-log-studio"
+    :href="REPO_URL"
     target="_blank"
     rel="noopener noreferrer"
     v-tooltip="t('header.githubTooltip')"
+    @click="openRepo"
   >
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
       <path
