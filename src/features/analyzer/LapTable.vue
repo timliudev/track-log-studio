@@ -16,6 +16,7 @@ import type { Lap } from '@/domain/model/Lap'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import SessionLapComparison from './SessionLapComparison.vue'
+import { categoricalColor } from '@/domain/analysis/colorPalette'
 
 const props = defineProps<{
   laps: Lap[]
@@ -26,6 +27,8 @@ const props = defineProps<{
   /** Whether the ECU lap channel (IR_LapNumber) is available in this session. */
   hasEcuLaps: boolean
   comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
 }>()
 
 const { t } = useI18n()
@@ -203,6 +206,11 @@ const rows = computed<Row[]>(() => {
 
 <template>
   <div class="lap-table">
+    <div v-if="primaryFileId != null" class="recording-heading">
+      <span class="recording-swatch" :style="{ background: categoricalColor(primaryFileId) }" />
+      <strong :title="primaryFileName">{{ primaryFileName }}</strong>
+      <span>{{ t('fileBar.primary') }}</span>
+    </div>
     <div v-if="hasEcuLaps" class="source">
       <button
         type="button"
@@ -369,6 +377,28 @@ const rows = computed<Row[]>(() => {
   display: flex;
   flex-direction: column;
   gap: calc(var(--space) * 1.5);
+}
+.recording-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+.recording-heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recording-heading > span:last-child {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+.recording-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
 }
 .source {
   display: inline-flex;

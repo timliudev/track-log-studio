@@ -79,29 +79,9 @@ const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 're
 // One global comparison selection drives every comparison-aware consumer.
 // The existing map overlay and Phase 1 timeline charts now share this list;
 // primary-only panels continue to consume `session` from useActiveSession().
-const { candidates: comparisonCandidates, comparisonSessions, toggle: toggleComparison, clear: clearComparisons } =
-  useSessionComparison()
+const { comparisonSessions } = useSessionComparison()
 const { overlayTracks } = useTrackOverlay()
 const activeFile = computed(() => readyFiles.value.find((file) => file.id === analyzer.activeFileId) ?? null)
-const anyComparisonOn = computed(() => comparisonCandidates.value.some((candidate) => candidate.active))
-
-function comparisonOffset(id: number): number {
-  const offset = analyzer.sessionOffsetOf(id)
-  return analyzer.xAxis === 'distance' ? offset.distM : offset.timeSec
-}
-
-function setComparisonOffset(id: number, event: Event): void {
-  const value = Number((event.target as HTMLInputElement).value)
-  analyzer.setSessionOffset(id, analyzer.xAxis === 'distance' ? 'distM' : 'timeSec', value)
-}
-
-function nudgeComparison(id: number, delta: number): void {
-  analyzer.nudgeSessionOffset(id, analyzer.xAxis === 'distance' ? 'distM' : 'timeSec', delta)
-}
-
-function resetComparisonOffset(id: number): void {
-  analyzer.resetSessionOffset(id, analyzer.xAxis === 'distance' ? 'distM' : 'timeSec')
-}
 
 function setComparisonMapOffset(id: number, axis: 'mapX' | 'mapY', event: Event): void {
   analyzer.setSessionOffset(id, axis, Number((event.target as HTMLInputElement).value))
@@ -291,8 +271,18 @@ watch(xAxis, () => {
 watch(
   readyFiles,
   (files) => {
-    const exists = files.some((f) => f.id === analyzer.activeFileId)
-    if (!exists) analyzer.activeFileId = files.length ? files[0].id : null
+    const readyIds = new Set(files.map((file) => file.id))
+    const comparisons = analyzer.selectedSessions.filter(
+      (id) => readyIds.has(id) && id !== analyzer.activeFileId,
+    )
+    const activeExists = analyzer.activeFileId != null && readyIds.has(analyzer.activeFileId)
+    if (!activeExists) {
+      const nextPrimary = comparisons[0] ?? files[0]?.id ?? null
+      analyzer.activeFileId = nextPrimary
+      analyzer.selectedSessions = comparisons.filter((id) => id !== nextPrimary)
+    } else if (comparisons.length !== analyzer.selectedSessions.length) {
+      analyzer.selectedSessions = comparisons
+    }
   },
   { immediate: true },
 )
@@ -305,10 +295,6 @@ function onXZoom(r: { min: number; max: number } | null): void {
   // manual zoom means the user moved off it → deselect. A multi-lap selection is
   // a track comparison that's independent of chart zoom, so leave it intact.
   if (lapStore.selected.length <= 1) lapStore.clearSelection()
-}
-
-function onSelect(e: Event): void {
-  analyzer.activeFileId = Number((e.target as HTMLSelectElement).value)
 }
 
 // A10+A12 — add-chart is now a two-option affordance (時序圖 / XY 散佈圖).
@@ -640,12 +626,6 @@ function titleForItemId(id: string): string {
 
     <template v-else>
       <div class="toolbar">
-        <label class="record">
-          <span>{{ t('analyzer.record') }}</span>
-          <select name="record" :value="analyzer.activeFileId ?? ''" @change="onSelect">
-            <option v-for="f in readyFiles" :key="f.id" :value="f.id">{{ f.name }}</option>
-          </select>
-        </label>
         <div class="xaxis">
           <button type="button" :class="{ active: xAxis === 'time' }" @click="analyzer.xAxis = 'time'">
             {{ t('analyzer.time') }}
@@ -654,67 +634,6 @@ function titleForItemId(id: string): string {
             {{ t('analyzer.distance') }}
           </button>
         </div>
-        <details v-if="comparisonCandidates.length > 0" class="comparison-panel">
-          <summary>{{ t('analyzer.comparisonTitle') }}</summary>
-          <p class="comparison-hint">{{ t('analyzer.comparisonHint') }}</p>
-          <div v-for="candidate in comparisonCandidates" :key="candidate.id" class="comparison-row">
-            <label class="comparison-select">
-              <input
-                type="checkbox"
-                :checked="candidate.active"
-                @change="toggleComparison(candidate.id)"
-              />
-              <span class="comparison-swatch" :style="{ background: candidate.color }" />
-              <span class="comparison-name" :title="candidate.name">{{ candidate.name }}</span>
-            </label>
-            <div v-if="candidate.active" class="comparison-offset">
-              <button type="button" @click="nudgeComparison(candidate.id, xAxis === 'time' ? -0.1 : -1)">−</button>
-              <input
-                type="number"
-                :step="xAxis === 'time' ? 0.1 : 1"
-                :value="comparisonOffset(candidate.id)"
-                :aria-label="t('analyzer.comparisonOffset')"
-                @change="setComparisonOffset(candidate.id, $event)"
-              />
-              <span>{{ xAxis === 'time' ? 's' : 'm' }}</span>
-              <button type="button" @click="nudgeComparison(candidate.id, xAxis === 'time' ? 0.1 : 1)">＋</button>
-              <button type="button" class="comparison-reset" @click="resetComparisonOffset(candidate.id)">
-                {{ t('analyzer.comparisonReset') }}
-              </button>
-            </div>
-            <div v-if="candidate.active" class="comparison-offset comparison-map-offset">
-              <label>
-                {{ t('analyzer.comparisonMapEast') }}
-                <input
-                  type="number"
-                  step="0.5"
-                  :value="analyzer.sessionOffsetOf(candidate.id).mapX"
-                  @change="setComparisonMapOffset(candidate.id, 'mapX', $event)"
-                />
-              </label>
-              <label>
-                {{ t('analyzer.comparisonMapNorth') }}
-                <input
-                  type="number"
-                  step="0.5"
-                  :value="analyzer.sessionOffsetOf(candidate.id).mapY"
-                  @change="setComparisonMapOffset(candidate.id, 'mapY', $event)"
-                />
-              </label>
-              <span>m</span>
-              <button
-                type="button"
-                class="comparison-reset"
-                @click="analyzer.resetSessionOffset(candidate.id, 'mapX'); analyzer.resetSessionOffset(candidate.id, 'mapY')"
-              >
-                {{ t('analyzer.comparisonReset') }}
-              </button>
-            </div>
-          </div>
-          <button v-if="anyComparisonOn" type="button" class="comparison-clear" @click="clearComparisons">
-            {{ t('analyzer.comparisonClear') }}
-          </button>
-        </details>
         <!-- T4 — the add-chart buttons live HERE, grouped with the reset-layout
              button, so every dashboard-level layout action (add cards / reset
              arrangement) sits in one toolbar cluster instead of the add
@@ -853,6 +772,38 @@ function titleForItemId(id: string): string {
                 @update:line="lapStore.setLine($event)"
                 @update:gate="onUpdateGate"
               />
+              <details v-if="overlayTracks.length" class="map-comparison-align">
+                <summary>{{ t('analyzer.comparisonMapAlign') }}</summary>
+                <div v-for="entry in overlayTracks" :key="entry.id" class="map-offset-row">
+                  <span class="comparison-swatch" :style="{ background: entry.color }" />
+                  <span class="comparison-name" :title="entry.label">{{ entry.label }}</span>
+                  <label>
+                    {{ t('analyzer.comparisonMapEast') }}
+                    <input
+                      type="number"
+                      step="0.5"
+                      :value="analyzer.sessionOffsetOf(entry.id).mapX"
+                      @change="setComparisonMapOffset(entry.id, 'mapX', $event)"
+                    />
+                  </label>
+                  <label>
+                    {{ t('analyzer.comparisonMapNorth') }}
+                    <input
+                      type="number"
+                      step="0.5"
+                      :value="analyzer.sessionOffsetOf(entry.id).mapY"
+                      @change="setComparisonMapOffset(entry.id, 'mapY', $event)"
+                    />
+                  </label>
+                  <span>m</span>
+                  <button
+                    type="button"
+                    @click="analyzer.resetSessionOffset(entry.id, 'mapX'); analyzer.resetSessionOffset(entry.id, 'mapY')"
+                  >
+                    {{ t('analyzer.comparisonReset') }}
+                  </button>
+                </div>
+              </details>
               <div v-if="heatNorm" class="tc-legend">
                 <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
                 <span class="tc-bar" :style="{ background: legendGradient }" />
@@ -962,6 +913,8 @@ function titleForItemId(id: string): string {
                 :session="session"
                 :has-ecu-laps="hasEcuLaps"
                 :comparison-sessions="comparisonSessions"
+                :primary-file-id="activeFile?.id ?? null"
+                :primary-file-name="activeFile?.name ?? ''"
                 @select="onLapSelect"
               />
             </DashboardCard>
@@ -1296,45 +1249,6 @@ function titleForItemId(id: string): string {
   font-size: 0.8rem;
   color: var(--color-text-muted);
 }
-/* One global comparison picker/legend shared by every comparison-aware card. */
-.comparison-panel {
-  min-width: min(360px, 100%);
-  padding: 6px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-bg);
-  font-size: 0.82rem;
-}
-.comparison-panel summary {
-  cursor: pointer;
-  color: var(--color-text);
-  font-weight: 600;
-}
-.comparison-hint {
-  margin: 8px 0;
-  color: var(--color-text-muted);
-  line-height: 1.4;
-}
-.comparison-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 12px;
-  padding: 5px 0;
-}
-.comparison-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  color: var(--color-text);
-  max-width: 100%;
-}
-.comparison-select input {
-  accent-color: var(--color-accent);
-  margin: 0;
-}
 .comparison-swatch {
   width: 12px;
   height: 12px;
@@ -1348,22 +1262,40 @@ function titleForItemId(id: string): string {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.comparison-offset {
+.map-comparison-align {
+  margin-top: var(--space);
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-bg);
+  font-size: 0.8rem;
+}
+.map-comparison-align summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.map-offset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  padding-top: 7px;
+  color: var(--color-text-muted);
+}
+.map-offset-row label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--color-text-muted);
 }
-.comparison-offset input {
-  width: 72px;
+.map-offset-row input {
+  width: 68px;
   padding: 3px 5px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-surface);
   color: var(--color-text);
 }
-.comparison-offset button,
-.comparison-clear {
+.map-offset-row button {
   background: var(--color-bg);
   color: var(--color-text-muted);
   border: 1px solid var(--color-border);
@@ -1372,16 +1304,9 @@ function titleForItemId(id: string): string {
   font: inherit;
   cursor: pointer;
 }
-.comparison-offset button:hover,
-.comparison-clear:hover {
+.map-offset-row button:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
-}
-.comparison-reset {
-  margin-left: 3px;
-}
-.comparison-clear {
-  margin-top: 6px;
 }
 .laps {
   display: flex;

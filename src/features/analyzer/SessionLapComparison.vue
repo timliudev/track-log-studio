@@ -27,19 +27,54 @@ function delta(value: number | null): string {
   const sign = value > 0 ? '+' : value < 0 ? '−' : '±'
   return `${sign}${(Math.abs(value) / 1000).toFixed(3)} s`
 }
+
+function chartOffset(id: number): number {
+  const offset = analyzer.sessionOffsetOf(id)
+  return analyzer.xAxis === 'distance' ? offset.distM : offset.timeSec
+}
+
+function nudgeChartOffset(id: number, delta: number): void {
+  analyzer.nudgeSessionOffset(id, analyzer.xAxis === 'distance' ? 'distM' : 'timeSec', delta)
+}
+
+function setChartOffset(id: number, event: Event): void {
+  analyzer.setSessionOffset(
+    id,
+    analyzer.xAxis === 'distance' ? 'distM' : 'timeSec',
+    Number((event.target as HTMLInputElement).value),
+  )
+}
+
+function resetChartOffset(id: number): void {
+  analyzer.resetSessionOffset(id, analyzer.xAxis === 'distance' ? 'distM' : 'timeSec')
+}
 </script>
 
 <template>
   <section v-if="summaries.length" class="session-summary">
     <h4>{{ t('analyzer.comparisonLapSummary') }}</h4>
-    <details v-for="summary in summaries" :key="summary.id" class="recording-laps">
-      <summary class="summary-row">
+    <div v-for="summary in summaries" :key="summary.id" class="recording-laps">
+      <div class="summary-row">
         <span class="swatch" :style="{ background: summary.color }" />
         <span class="name" :title="summary.name">{{ summary.name }}</span>
         <span>{{ summary.fastestMs == null ? '—' : formatLapTime(summary.fastestMs) }}</span>
         <span class="delta">{{ delta(summary.deltaMs) }}</span>
         <span class="count">{{ t('analyzer.comparisonLapCount', { n: summary.lapCount }) }}</span>
-      </summary>
+      </div>
+      <div class="chart-align" :aria-label="t('analyzer.comparisonChartAlign')">
+        <span>{{ t('analyzer.comparisonChartAlign') }}</span>
+        <button type="button" @click="nudgeChartOffset(summary.id, analyzer.xAxis === 'time' ? -0.1 : -1)">−</button>
+        <input
+          type="number"
+          :step="analyzer.xAxis === 'time' ? 0.1 : 1"
+          :value="chartOffset(summary.id)"
+          :aria-label="t('analyzer.comparisonOffset')"
+          @change="setChartOffset(summary.id, $event)"
+        />
+        <span>{{ analyzer.xAxis === 'time' ? 's' : 'm' }}</span>
+        <button type="button" @click="nudgeChartOffset(summary.id, analyzer.xAxis === 'time' ? 0.1 : 1)">＋</button>
+        <button type="button" @click="resetChartOffset(summary.id)">{{ t('analyzer.comparisonReset') }}</button>
+      </div>
       <div class="lap-picks" :aria-label="t('analyzer.comparisonSelectLaps')">
         <label
           v-for="lap in comparisons.find((item) => item.id === summary.id)?.laps ?? []"
@@ -59,7 +94,7 @@ function delta(value: number | null): string {
           </template>
         </label>
       </div>
-    </details>
+    </div>
   </section>
 </template>
 
@@ -71,7 +106,10 @@ h4 { margin: 0 0 6px; font-size: .85rem; color: var(--color-text-muted); }
 .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .delta, .count { color: var(--color-text-muted); }
 .recording-laps + .recording-laps { margin-top: 3px; }
-.summary-row { cursor: pointer; }
 .lap-picks { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 5px 0 4px 17px; }
 .lap-pick { font-size: .8rem; white-space: nowrap; }
+.chart-align { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 0 0 17px; color: var(--color-text-muted); font-size: .78rem; }
+.chart-align input { width: 68px; padding: 2px 4px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); }
+.chart-align button { padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
+.chart-align button:hover { border-color: var(--color-accent); color: var(--color-accent); }
 </style>

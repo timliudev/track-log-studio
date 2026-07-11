@@ -89,7 +89,10 @@ const buildDate = __BUILD_DATE__
       </button>
     </nav>
 
-    <FileBar v-if="tab === 'converter' || tab === 'analyzer'" />
+    <FileBar
+      v-if="tab === 'converter' || tab === 'analyzer'"
+      :analyzer-mode="tab === 'analyzer'"
+    />
 
     <main class="content">
       <Transition :name="transitionName" mode="out-in">
