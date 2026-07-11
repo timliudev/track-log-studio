@@ -4,12 +4,13 @@ import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 
-/** A per-lap channel extremum projected onto the map, normalised for colour. */
+/** A channel extremum (for the focused lap, or the whole track when no lap
+ *  is focused) projected onto the map, normalised for colour. */
 export interface TrackExtremaMarker {
   lat: number
   lon: number
   value: number
-  /** Value normalised within THIS lap's own extrema set (0..1), for the map's green/red gradient. */
+  /** Value normalised within the current extrema set (0..1), for the map's green/red gradient. */
   valueFrac: number
   kind: 'min' | 'max'
   /** `value` pre-formatted for display (e.g. next to the marker on TrackMap) —
@@ -40,11 +41,17 @@ export function formatExtremumValue(v: number): string {
  * TrackChannelPanel's list), which is exactly why it's a composable rather
  * than logic embedded in either panel.
  *
- * Multi-lap rule: extrema are only meaningful for ONE lap at a time (a
- * numbered marker set doesn't generalise to overlaying several laps' extrema
- * on the same points), so `focusedLap` should resolve to null unless exactly
- * one lap is selected — the caller decides that policy, this composable just
- * consumes whatever single lap (or null) it's given.
+ * Multi-lap rule: extrema are only meaningful for ONE lap (or the whole
+ * track) at a time (a numbered marker set doesn't generalise to overlaying
+ * several laps' extrema on the same points), so `focusedLap` should resolve
+ * to null unless exactly one lap is selected — the caller decides that
+ * policy, this composable just consumes whatever single lap (or null) it's
+ * given.
+ *
+ * No-lap fallback: when `focusedLap` is null (no lap selected, or several
+ * selected at once), extrema fall back to the FULL TRACK's min/max instead
+ * of going empty — a channel-marker reference should always be available,
+ * not just when exactly one lap happens to be selected.
  */
 export function useTrackExtrema(
   session: Ref<LogSession | null> | ComputedRef<LogSession | null>,
@@ -56,6 +63,7 @@ export function useTrackExtrema(
 ): {
   trackChannelData: ComputedRef<{ data: Float32Array } | null>
   trackExtrema: ComputedRef<ReturnType<typeof detectChannelExtrema> | null>
+  trackExtremaIsLapScoped: ComputedRef<boolean | null>
   mapExtremaMarkers: ComputedRef<TrackExtremaMarker[]>
   trackChannelChosen: ComputedRef<boolean>
 } {
@@ -69,22 +77,39 @@ export function useTrackExtrema(
 
   const trackExtrema = computed(() => {
     if (!markMinima.value && !markMaxima.value) return null
-    const lap = focusedLap.value
     const tk = track.value
     const ch = trackChannelData.value
-    if (!lap || !tk || !ch) return null
+    if (!tk || !ch) return null
+    // No single lap focused -> fall back to the whole track's range so the
+    // marker feature still has a reference instead of going empty (see the
+    // "No-lap fallback" doc above).
+    const lap = focusedLap.value
+    const startIdx = lap ? lap.startIdx : 0
+    const endIdx = lap ? lap.endIdx : tk.lat.length
     const mins = markMinima.value
-      ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'min' })
+      ? detectChannelExtrema(tk, ch.data, startIdx, endIdx, { mode: 'min' })
       : []
     const maxs = markMaxima.value
-      ? detectChannelExtrema(tk, ch.data, lap.startIdx, lap.endIdx, { mode: 'max' })
+      ? detectChannelExtrema(tk, ch.data, startIdx, endIdx, { mode: 'max' })
       : []
     return [...mins, ...maxs].sort((a, b) => a.lapDistanceM - b.lapDistanceM)
   })
 
-  // Map markers need a per-lap-normalised valueFrac (0..1) so the green/red
-  // gradient is meaningful regardless of the channel's absolute range —
-  // normalised across THIS lap's own extrema set, not the whole session.
+  // Whether the current `trackExtrema` reflects a single focused lap (true)
+  // or the whole-track fallback (false when a channel/marker is active but
+  // no single lap is selected). Null mirrors trackExtrema's own null-ness
+  // (no channel, no track, or neither marker toggle on) so consumers can
+  // tell "nothing to show" apart from "showing the whole track".
+  const trackExtremaIsLapScoped = computed<boolean | null>(() => {
+    if (trackExtrema.value === null) return null
+    return focusedLap.value != null
+  })
+
+  // Map markers need a normalised valueFrac (0..1) so the green/red gradient
+  // is meaningful regardless of the channel's absolute range — normalised
+  // across the CURRENT extrema set only (one lap's, or the whole-track
+  // fallback's — see trackExtremaIsLapScoped), never across the whole session
+  // when a single lap is focused.
   const mapExtremaMarkers = computed<TrackExtremaMarker[]>(() => {
     const extrema = trackExtrema.value
     if (!extrema || extrema.length === 0) return []
@@ -106,8 +131,8 @@ export function useTrackExtrema(
   })
 
   // Whether a channel is picked at all — distinguishes TrackChannelPanel's "pick
-  // a channel first" hint from its "select exactly one lap" hint.
+  // a channel first" hint from its "no track data" hint.
   const trackChannelChosen = computed(() => trackChannelData.value != null)
 
-  return { trackChannelData, trackExtrema, mapExtremaMarkers, trackChannelChosen }
+  return { trackChannelData, trackExtrema, trackExtremaIsLapScoped, mapExtremaMarkers, trackChannelChosen }
 }

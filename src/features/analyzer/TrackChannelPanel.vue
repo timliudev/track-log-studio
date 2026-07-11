@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ChannelExtremum } from '@/domain/analysis/cornerSpeed'
 import { COLORMAP_IDS, colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useLapStore } from '@/stores/lapStore'
 import { formatExtremumValue } from '@/composables/useTrackExtrema'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
@@ -13,19 +15,27 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 // SINGLE place the channel is chosen (AnalyzerView no longer duplicates it).
 const props = defineProps<{
   options: { name: string; description?: string }[]
-  /** Extrema for the single focused lap, or null when the feature doesn't
-   *  apply right now (no lap selected, multiple laps selected, or neither
-   *  marker toggle is on) — see AnalyzerView's trackExtrema computed for the
-   *  rule. */
+  /** Extrema for the focused lap, or the WHOLE TRACK when no single lap is
+   *  focused (see useTrackExtrema's "No-lap fallback"), or null when the
+   *  feature doesn't apply right now (no channel/track, or neither marker
+   *  toggle is on) — see AnalyzerView's trackExtrema computed for the rule. */
   extrema: ChannelExtremum[] | null
   /** Whether at least one marker toggle is on but a channel isn't chosen yet
-   *  vs. a channel IS chosen but no single lap is focused — distinguishes the
+   *  vs. a channel IS chosen but there's no track data — distinguishes the
    *  two "nothing to show yet" hints. */
   channelChosen: boolean
 }>()
 
 const { t } = useI18n()
 const analyzer = useAnalyzerStore()
+const lapStore = useLapStore()
+
+// Mirrors AnalyzerView's own `focusedLap` rule (exactly one lap selected) so
+// the panel can tell apart "showing this lap's extrema" from "showing the
+// whole-track fallback" without AnalyzerView needing to pass that down
+// separately — `lapStore.selected` is the same source AnalyzerView derives
+// `focusedLap` from.
+const isSingleLapFocused = computed(() => lapStore.selected.length === 1)
 
 function colormapPreview(id: ColormapId): string {
   return `linear-gradient(to right, ${colormapSwatches(id, 8).join(',')})`
@@ -99,15 +109,18 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
 
     <template v-if="markersRequested()">
       <p v-if="!props.channelChosen" class="hint">{{ t('analyzer.trackChannelNoChannel') }}</p>
-      <p v-else-if="props.extrema == null" class="hint">{{ t('analyzer.trackChannelSelectLap') }}</p>
-      <p v-else-if="props.extrema.length === 0" class="hint">{{ t('analyzer.trackChannelNone') }}</p>
-      <ul v-else class="extrema-list">
-        <li v-for="(e, i) in props.extrema" :key="i" :class="e.kind">
-          <span class="ex-kind">{{ e.kind === 'min' ? t('analyzer.extremumMin') : t('analyzer.extremumMax') }}</span>
-          <span class="ex-dist">{{ (e.lapDistanceM / 1000).toFixed(2) }} km</span>
-          <span class="ex-value">{{ fmtValue(e.value) }}</span>
-        </li>
-      </ul>
+      <p v-else-if="props.extrema == null" class="hint">{{ t('analyzer.trackChannelNoTrack') }}</p>
+      <template v-else>
+        <p v-if="!isSingleLapFocused" class="hint scope-hint">{{ t('analyzer.trackChannelScopeTrack') }}</p>
+        <p v-if="props.extrema.length === 0" class="hint">{{ t('analyzer.trackChannelNone') }}</p>
+        <ul v-else class="extrema-list">
+          <li v-for="(e, i) in props.extrema" :key="i" :class="e.kind">
+            <span class="ex-kind">{{ e.kind === 'min' ? t('analyzer.extremumMin') : t('analyzer.extremumMax') }}</span>
+            <span class="ex-dist">{{ (e.lapDistanceM / 1000).toFixed(2) }} km</span>
+            <span class="ex-value">{{ fmtValue(e.value) }}</span>
+          </li>
+        </ul>
+      </template>
     </template>
   </div>
 </template>
@@ -173,6 +186,9 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
   margin: 0;
   font-size: 0.85rem;
   color: var(--color-text-muted);
+}
+.scope-hint {
+  font-style: italic;
 }
 .extrema-list {
   list-style: none;
