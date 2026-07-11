@@ -22,7 +22,7 @@ import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
-import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
+import { fastestDistanceFromLaunch, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { buildComparisonLapHighlights } from '@/domain/analysis/crossSessionLapHighlight'
 import {
@@ -228,9 +228,9 @@ const accelResult = computed<AccelSegment | null>(() => {
   const cond = analyzer.accelCondition
   if (cond.kind === 'distance') {
     if (!(cond.distanceM > 0)) return null
-    return fastestDistanceSegment(cumDist, tMs, ch.data, {
+    return fastestDistanceFromLaunch(cumDist, tMs, ch.data, {
       distanceM: cond.distanceM,
-      minEntrySpeedKmh: cond.minEntrySpeedKmh ?? undefined,
+      entrySpeedKmh: cond.entrySpeedKmh,
     })
   }
   return fastestSpeedSegment(tMs, ch.data, cumDist, { fromKmh: cond.fromKmh, toKmh: cond.toKmh })

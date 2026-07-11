@@ -212,10 +212,9 @@ export default {
     accelKindDistance: 'Distance',
     accelKindSpeed: 'Speed range',
     accelDistanceM: 'Distance (m)',
-    accelMinEntry: 'Min entry speed (km/h)',
-    accelMinEntryPlaceholder: 'Any (incl. standing start)',
-    accelMinEntryHint:
-      "The threshold only changes the result once it's above the winning segment's own entry speed ({entry}).",
+    accelEntrySpeed: 'Entry speed (km/h)',
+    accelEntrySpeedHint:
+      'Times how long it takes to cover the set distance starting from a launch at this speed; 0 = standing start.',
     accelFromKmh: 'From (km/h)',
     accelToKmh: 'To (km/h)',
     accelNoChannel: 'No speed channel (GPS_Speed / Vehicle_Speed) available.',
