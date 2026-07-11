@@ -205,6 +205,75 @@ export function resolveOverlaps(layout: DashboardLayoutItem[]): DashboardLayoutI
 }
 
 /**
+ * Grid-compact fix — pull every card toward the TOP-LEFT corner, closing both
+ * vertical AND horizontal gaps. grid-layout-plus's own `verticalCompact` (the
+ * `:vertical-compact="true"` prop on `<GridLayout>`, see AnalyzerView.vue)
+ * only ever pulls a card UP within its own x-span — it has no notion of also
+ * sliding a card LEFT into space freed up in an adjacent column (there's no
+ * `compact-type: 'horizontal'`-equivalent in this library, unlike e.g.
+ * react-grid-layout). That's what leaves the "hole" this fixes: deleting a
+ * chart from a short column, or moving a card away from one, can leave a
+ * gap that only a card sitting in a DIFFERENT x range could fill, and
+ * grid-layout-plus's vertical-only pass will never do that.
+ *
+ * Algorithm: process items in reading order (top-to-bottom, then left-to-
+ * right — `(y, x)`, same placement-priority ordering {@link resolveOverlaps}
+ * uses) so an item already near the top-left keeps priority over one lower/
+ * righter when both could claim the same freed slot. Each item is then
+ * repeatedly nudged up one row, then left one column, alternating until
+ * neither move is possible without colliding with an already-placed item —
+ * alternating (rather than "all the way up, then all the way left, once") is
+ * necessary because sliding an item left can open up NEW vertical space above
+ * it that a single up-then-left pass would miss. Only previously-placed items
+ * are checked for collision (same one-directional dependency `resolveOverlaps`
+ * relies on for termination): `x`/`y` only ever DECREASE and are bounded below
+ * by 0, so the loop is guaranteed to terminate.
+ *
+ * This is a greedy "gravity" pack (same family as gridstack.js's `float:
+ * false` compaction), not a globally-optimal bin-packing — good enough for a
+ * dashboard-card-count grid (a dozen-ish items) and, critically, stable: an
+ * already-packed layout is a fixed point (running it twice gives back the
+ * exact same object for every item — see the identity-preserving return below),
+ * which matters because this gets called from a live layout-update pipeline
+ * (see AnalyzerView.vue's `onLayoutUpdated`) that depends on eventually
+ * converging to a no-op, same invariant {@link mergeLayoutPositions} documents.
+ *
+ * Pure; returns a NEW array only when at least one item's `x`/`y` actually
+ * changed, and even then keeps the exact same object reference for any
+ * INDIVIDUAL item that didn't move (mirrors mergeLayoutPositions/
+ * reconcileLayout's no-op guards).
+ */
+export function compactLayoutTopLeft(layout: DashboardLayoutItem[]): DashboardLayoutItem[] {
+  const order = [...layout].sort((a, b) => a.y - b.y || a.x - b.x)
+  const placed: DashboardLayoutItem[] = []
+  for (const original of order) {
+    let item = original
+    let moved = true
+    while (moved) {
+      moved = false
+      while (item.y > 0 && placed.every((o) => !rectsOverlap({ ...item, y: item.y - 1 }, o))) {
+        item = { ...item, y: item.y - 1 }
+        moved = true
+      }
+      while (item.x > 0 && placed.every((o) => !rectsOverlap({ ...item, x: item.x - 1 }, o))) {
+        item = { ...item, x: item.x - 1 }
+        moved = true
+      }
+    }
+    placed.push(item)
+  }
+  const byId = new Map(placed.map((it) => [it.i, it]))
+  let changed = false
+  const result = layout.map((it) => {
+    const next = byId.get(it.i)!
+    if (next === it) return it
+    changed = true
+    return next
+  })
+  return changed ? result : layout
+}
+
+/**
  * #1 fix — merge a grid-layout-plus callback payload (from `update:layout`,
  * `layout-updated`, `resized`, or `moved`; the library emits the SAME shape
  * for all of them: an array of every VISIBLE item's CURRENT x/y/w/h/i,
@@ -467,7 +536,18 @@ export function reconcileLayout(
   // static-card entry (and any not-yet-recognised id) untouched.
   const kept = layout.filter((it) => !isChartItemId(it.i) || wantedChartItemIds.has(it.i))
 
-  const result = [...kept]
+  // Grid-compact fix — a chart's removal is exactly the "hole" scenario
+  // compactLayoutTopLeft exists for: the deleted card's slot would otherwise
+  // sit empty until the user manually drags something into it (grid-layout-
+  // plus's own vertical-only compaction can pull a same-column card up into
+  // part of the gap, but never slides a DIFFERENT column's card sideways to
+  // fill it). Only run when something was actually dropped — a pure add
+  // (missingChartIds.length > 0 but hasStaleChartEntries false) leaves every
+  // existing card exactly where the user put it; only defaultChartItem's own
+  // append-at-the-bottom placement applies then, same as before this fix.
+  const compactedKept = hasStaleChartEntries ? compactLayoutTopLeft(kept) : kept
+
+  const result = [...compactedKept]
   for (const chartId of missingChartIds) {
     result.push(defaultChartItem(chartItemId(chartId), result))
   }

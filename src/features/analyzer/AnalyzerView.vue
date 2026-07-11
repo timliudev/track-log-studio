@@ -35,6 +35,7 @@ import {
   isItemDraggable,
   isItemResizable,
   mergeLayoutPositions,
+  compactLayoutTopLeft,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
@@ -491,7 +492,19 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
     // preserving hidden items untouched (pure function — only coordinates
     // are copied, decoration fields like dragAllowFrom/minW never leak into
     // the persisted array — see mergeLayoutPositions's doc).
-    layout.value = mergeLayoutPositions(layout.value, next)
+    //
+    // Grid-compact fix — this is the ONE code path every desktop coordinate
+    // change flows through (native drag/resize end via onLayoutUpdated below,
+    // AND a gutter drag's eventual settle — see useGridGutters' onChange doc),
+    // so running compactLayoutTopLeft here closes whatever hole moving/
+    // resizing a card just left behind, on both axes, right after the
+    // gesture ends. Composing two identity-preserving pure functions keeps
+    // the whole chain a genuine no-op once positions converge (same
+    // invariant #4's crash fix relies on — see mergeLayoutPositions's doc):
+    // an already-compacted layout makes compactLayoutTopLeft hand back the
+    // exact same array it was given, so a `layout.value` assignment that
+    // changed nothing never re-triggers GridLayout's own prop watcher.
+    layout.value = compactLayoutTopLeft(mergeLayoutPositions(layout.value, next))
   },
 })
 
