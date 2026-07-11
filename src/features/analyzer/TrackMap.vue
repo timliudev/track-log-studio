@@ -29,13 +29,37 @@ const props = defineProps<{
    */
   highlightLaps?: { startIdx: number; endIdx: number; color: string; offset?: { x: number; y: number } }[]
   /**
+   * Cross-file lap selections (`lapStore.selectedAcrossSessions`), already
+   * resolved to their OWN session's track by the caller (see
+   * `buildComparisonLapHighlights` in domain/analysis/crossSessionLapHighlight.ts)
+   * — unlike `highlightLaps`, each entry carries its own `track` because a
+   * comparison lap's [startIdx, endIdx] indexes into a DIFFERENT session's
+   * samples than `props.track`. Drawn with the same "faint full track +
+   * bright segment" weight as `highlightLaps`, so a lap picked from another
+   * recording reads identically to a same-file selected lap; the two arrays
+   * are simply drawn together (a mixed same-file + cross-file selection is
+   * the common "compare 2 laps from 2 different files" case). The `track`
+   * itself is always a session already present in `overlayTracks` (a cross-
+   * file lap can only be selected from a currently-toggled comparison
+   * session), so its faint full polyline is already drawn by the overlay
+   * loop above — this only adds the bright emphasized segment on top.
+   */
+  comparisonLapHighlights?: {
+    track: GpsTrack
+    startIdx: number
+    endIdx: number
+    color: string
+    offset?: { x: number; y: number }
+  }[]
+  /**
    * Chart-zoom-follow focus (#7): a session index span to emphasize when the
    * user has narrowed a TIMELINE chart's visible X range, derived by the
    * caller (see `AnalyzerView`'s `focusRange`, already null'd out whenever
-   * `highlightLaps` is non-empty — lap selection takes precedence, so this
-   * and `highlightLaps` are never both drawn at once). Rendered via the same
-   * "faint full track + bright segment" path as `highlightLaps`, and — when
-   * it's a genuine sub-segment — the view auto-fits to its bbox.
+   * `highlightLaps` OR `comparisonLapHighlights` is non-empty — lap selection
+   * takes precedence, so `focusRange` and either highlight array are never
+   * both drawn at once). Rendered via the same "faint full track + bright
+   * segment" path as `highlightLaps`, and — when it's a genuine sub-segment —
+   * the view auto-fits to its bbox.
    */
   focusRange?: { startIdx: number; endIdx: number } | null
   /**
@@ -458,15 +482,18 @@ function draw(): void {
       : focus
         ? [{ startIdx: focus.startIdx, endIdx: focus.endIdx, color: cssVar('--color-accent') }]
         : []
+  const comparisonHighlights = props.comparisonLapHighlights ?? []
+  const anySelection = highlightLaps.length > 0 || comparisonHighlights.length > 0
   const heat = !!colorVals
 
   // Full-track polyline. With no selection it's the normal muted track (or the
-  // heatmap if active); with a selection we draw it faint (border color) for
-  // context and let the selected laps stand out, per "only show selected laps".
-  if (heat && !highlightLaps.length) {
+  // heatmap if active); with a selection (same-file OR cross-file) we draw it
+  // faint (border color) for context and let the selected laps stand out, per
+  // "only show selected laps".
+  if (heat && !anySelection) {
     strokeHeatmap(0, n - 1, 2.5)
   } else {
-    ctx.strokeStyle = cssVar(highlightLaps.length ? '--color-border' : '--color-text-muted')
+    ctx.strokeStyle = cssVar(anySelection ? '--color-border' : '--color-text-muted')
     ctx.lineWidth = 2
     strokeRange(0, n - 1)
   }
@@ -485,6 +512,39 @@ function draw(): void {
       ctx.lineWidth = 3
       strokeRange(lo, hi, dx, dy)
     }
+  }
+
+  // Cross-file selected laps: same visual weight (3px, identity color) as the
+  // loop above, but projected from EACH entry's OWN track rather than the
+  // module-scoped px/py (which only holds `props.track`'s projected pixels).
+  // Never heatmap-coloured — the active heatmap channel's data belongs to the
+  // PRIMARY session, not a comparison one, so identity color is always used
+  // (matching how the faint overlay-track loop above also ignores the heatmap).
+  for (const hl of comparisonHighlights) {
+    const hn = hl.track.valid.length
+    const lo = Math.max(0, Math.min(hl.startIdx, hl.endIdx))
+    const hi = Math.min(hn - 1, Math.max(hl.startIdx, hl.endIdx))
+    const [dx, dy] = pixelShift(hl.offset)
+    ctx.strokeStyle = hl.color
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    let on = false
+    for (let i = lo; i <= hi; i++) {
+      if (!hl.track.valid[i]) {
+        on = false
+        continue
+      }
+      const p = base.toPixel(hl.track.lat[i], hl.track.lon[i])
+      const x = p.x * z + tx + dx
+      const y = p.y * z + ty + dy
+      if (!on) {
+        ctx.moveTo(x, y)
+        on = true
+      } else {
+        ctx.lineTo(x, y)
+      }
+    }
+    ctx.stroke()
   }
 
   // start/finish line + draggable endpoints. Drawn as a checkered-flag band
@@ -975,6 +1035,7 @@ watch(() => props.track, () => resetView())
 watch(() => props.cursorIdx, () => draw())
 watch(() => props.line, () => draw())
 watch(() => props.highlightLaps, () => draw())
+watch(() => props.comparisonLapHighlights, () => draw())
 // #7: on a focusRange CHANGE (not every draw — see fitToFocus's docs), draw
 // once to (re)capture this range's base-pixel bbox, auto-fit the view to it
 // when it's a real sub-segment, then draw again to render at the new
