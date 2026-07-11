@@ -37,6 +37,7 @@ import {
   isItemResizable,
   mergeLayoutPositions,
   compactLayoutTopLeft,
+  compactVertical,
   resolveOverlaps,
   applyCollapsedHeights,
   sameLayoutPositions,
@@ -548,15 +549,27 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
     // `layout` before persisting, so dragging while a card is collapsed never
     // freezes its header-only height into the saved arrangement — expanding
     // still restores the full height. resolveOverlaps then re-seats the
-    // just-restored full-height cards below their neighbours before the
-    // top-left compaction closes any gap.
+    // just-restored full-height cards below their neighbours before
+    // compaction closes any gap.
+    //
+    // Which packer runs here matters: while ANY card is collapsed, this write-
+    // back path is also where the collapse-reflow display (built by
+    // applyCollapsedHeights/compactVertical, see the getter above) echoes back
+    // through the grid's `update:layout`/`layout-updated` events — so it must
+    // use the SAME vertical-only packer, or the echo would horizontally
+    // re-pack the canonical layout with compactLayoutTopLeft and reintroduce
+    // the reported bug (collapsing a row-2 card sideways-yanking a row-3
+    // card from a different column). When nothing is collapsed this is just
+    // the ordinary drag/resize/delete write-back, which keeps the existing
+    // top-left (vertical+horizontal) compaction unchanged.
     const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
     const restored = collapsedIds.value.size
       ? next.map((it) =>
           collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it,
         )
       : next
-    const packed = compactLayoutTopLeft(resolveOverlaps(mergeLayoutPositions(layout.value, restored)))
+    const pack = collapsedIds.value.size > 0 ? compactVertical : compactLayoutTopLeft
+    const packed = pack(resolveOverlaps(mergeLayoutPositions(layout.value, restored)))
     // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
     // display we fed it, which `packed` reconstructs back into the current
     // canonical layout — assigning a fresh-but-equal array would re-run the

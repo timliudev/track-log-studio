@@ -273,21 +273,73 @@ export function compactLayoutTopLeft(layout: DashboardLayoutItem[]): DashboardLa
   return changed ? result : layout
 }
 
+/**
+ * Collapse-reflow packer — same idea as {@link compactLayoutTopLeft} but
+ * VERTICAL-ONLY: each item is pulled straight up within its own x-span (its
+ * `x`/`w` never change) until it collides with an already-placed item or
+ * hits the top. Unlike compactLayoutTopLeft, this never slides an item
+ * sideways into a column it wasn't already in.
+ *
+ * This matters specifically for the collapse-reflow overlay
+ * ({@link applyCollapsedHeights}): shrinking a collapsed card only frees up
+ * rows in ITS OWN column, and collapsing a card must never yank an unrelated
+ * card from a DIFFERENT column across into that freed slot. Reported bug:
+ * collapsing a row-2 card pulled a row-3 card from a different column up
+ * into row 2 — that's compactLayoutTopLeft's horizontal "gravity" doing its
+ * job for drag/resize/delete, but it's the wrong behaviour for a collapse
+ * toggle, where only cards already BELOW the collapsed one in the same
+ * x-span should move.
+ *
+ * Same structure/termination/identity-preservation guarantees as
+ * compactLayoutTopLeft: items are processed in reading order (`y`, then `x`)
+ * so an item nearer the top keeps priority over one further down when both
+ * could claim the same freed row; only previously-placed items are checked
+ * for collision, and `y` only ever decreases (bounded below by 0), so the
+ * loop is guaranteed to terminate. Pure; returns the SAME array reference
+ * when nothing moved, and keeps the exact same object reference for any
+ * individual item that didn't move (same no-op guard compactLayoutTopLeft
+ * uses, needed for the same reason — see its doc's "Maximum recursive
+ * updates" note).
+ */
+export function compactVertical(layout: DashboardLayoutItem[]): DashboardLayoutItem[] {
+  const order = [...layout].sort((a, b) => a.y - b.y || a.x - b.x)
+  const placed: DashboardLayoutItem[] = []
+  for (const original of order) {
+    let item = original
+    while (item.y > 0 && placed.every((o) => !rectsOverlap({ ...item, y: item.y - 1 }, o))) {
+      item = { ...item, y: item.y - 1 }
+    }
+    placed.push(item)
+  }
+  const byId = new Map(placed.map((it) => [it.i, it]))
+  let changed = false
+  const result = layout.map((it) => {
+    const next = byId.get(it.i)!
+    if (next === it) return it
+    changed = true
+    return next
+  })
+  return changed ? result : layout
+}
+
 /** Grid rows a collapsed card occupies while only its header shows (its body is
  *  hidden — see DashboardCard's #9 note). Just tall enough for the header bar. */
 export const COLLAPSED_ROWS = 2
 
 /**
  * Collapse-reflow (補位) — DISPLAY-only overlay: replace every collapsed card's
- * height with {@link COLLAPSED_ROWS} and pack the result top-left so the rows a
- * collapsed card gives up are reclaimed by its neighbours. The caller keeps the
- * CANONICAL (expanded) heights in its own `layout` ref and feeds THIS to the
- * grid, so expanding a card is just dropping it from `collapsedIds` — its
- * stored height returns with no separate "pre-collapse height" bookkeeping (the
- * alternative DashboardCard's #9 note rejected).
+ * height with {@link COLLAPSED_ROWS} and pack the result VERTICALLY-only so the
+ * rows a collapsed card gives up are reclaimed by cards BELOW it in the same
+ * column — never a card from a different column sliding sideways into the
+ * freed slot (see {@link compactVertical}'s doc for why this must be
+ * vertical-only rather than {@link compactLayoutTopLeft}'s top-left packing).
+ * The caller keeps the CANONICAL (expanded) heights in its own `layout` ref
+ * and feeds THIS to the grid, so expanding a card is just dropping it from
+ * `collapsedIds` — its stored height returns with no separate "pre-collapse
+ * height" bookkeeping (the alternative DashboardCard's #9 note rejected).
  *
  * Pure and identity-preserving on an already collapsed-and-packed layout
- * (compactLayoutTopLeft is a fixed point), so it can sit in the live layout
+ * (compactVertical is a fixed point), so it can sit in the live layout
  * pipeline (AnalyzerView's `activeLayout` getter) without oscillating.
  */
 export function applyCollapsedHeights(
@@ -302,7 +354,7 @@ export function applyCollapsedHeights(
     }
     return it
   })
-  return compactLayoutTopLeft(changed ? shrunk : layout)
+  return compactVertical(changed ? shrunk : layout)
 }
 
 /** True when two layouts hold the same cards at the same x/y/w/h, regardless of
