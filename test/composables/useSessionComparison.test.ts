@@ -22,6 +22,20 @@ function session(offsetMs = 0): LogSession {
   })
 }
 
+function ecuLapSession(boundaries: [number, number]): LogSession {
+  const n = 7
+  let lap = 0
+  const laps = Array.from({ length: n }, (_, index) => {
+    if (boundaries.includes(index)) lap++
+    return lap
+  })
+  return new LogSession([
+    channel('Time', Array.from({ length: n }, (_, index) => index * 1000)),
+    channel('IR_LapNumber', laps),
+    channel('RPM', Array.from({ length: n }, (_, index) => 1000 + index)),
+  ], { formatId: 'test', createdDate: null, headerInfo: {} })
+}
+
 beforeEach(() => setActivePinia(createPinia()))
 
 describe('useSessionComparison', () => {
@@ -53,6 +67,19 @@ describe('useSessionComparison', () => {
     const { comparisonSessions } = useSessionComparison()
     expect(Array.from(comparisonSessions.value[0].xValues)).toEqual([1.25, 2.25, 3.25])
     expect(comparisonSessions.value[0].session.get('RPM')?.data[2]).toBe(3000)
+  })
+
+  it('automatically aligns each session first complete lap to the primary origin', () => {
+    const files = useFileStore()
+    const analyzer = useAnalyzerStore()
+    const primaryId = files.addMergedSession('primary.loga', ecuLapSession([1, 5]))
+    const otherId = files.addMergedSession('other.loga', ecuLapSession([2, 6]))
+    analyzer.activeFileId = primaryId
+    analyzer.toggleSessionComparison(otherId)
+
+    const { comparisonSessions } = useSessionComparison()
+    // Primary first boundary = 1s, comparison = 2s, so comparison shifts -1s.
+    expect(Array.from(comparisonSessions.value[0].xValues)).toEqual([-1, 0, 1, 2, 3, 4, 5])
   })
 
   it('silently drops stale ids and excludes a selected id when it becomes primary', () => {
