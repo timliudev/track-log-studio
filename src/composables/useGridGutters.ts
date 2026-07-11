@@ -89,6 +89,14 @@ export interface UseGridGuttersReturn {
  * "absolute, not incremental" approach grid-layout-plus's own resize uses,
  * rather than accumulating small per-move deltas (which would compound any
  * rounding from `pxDeltaToColUnits`' `Math.round`).
+ *
+ * `pointermove` (and, from #1, `pointerup`/`pointercancel`) are listened for
+ * on `window`, not the gutter `<div>` the drag started on (`event.target`) —
+ * see `onGutterPointerDown`'s `#6 fix` comment: that div's `:key` can go
+ * stale and get unmounted mid-drag as soon as the FIRST move resizes `a` away
+ * from `b`, so a target-scoped listener would only ever see one step per
+ * gesture. `onMove` only reads `e.clientX`/`e.clientY`, so which element the
+ * event nominally targets never matters.
  */
 export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersReturn {
   const { items, enabled, cols, rowHeight, marginX, marginY, onChange } = options
@@ -180,18 +188,40 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
     function endDrag(e: PointerEvent): void {
       if (e.pointerId !== pointerId) return
       target.releasePointerCapture?.(pointerId)
-      target.removeEventListener('pointermove', onMove)
       target.removeEventListener('pointerup', endDrag)
       target.removeEventListener('pointercancel', endDrag)
+      window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', endDrag)
       window.removeEventListener('pointercancel', endDrag)
       draggingKey.value = null
       endActiveDrag = null
     }
-    target.addEventListener('pointermove', onMove)
     target.addEventListener('pointerup', endDrag)
     target.addEventListener('pointercancel', endDrag)
-    // Safety-net registrations — see endDrag's doc above.
+    // #6 fix — "gutter drag only moves one grid step at a time, then sticks
+    // until pointer-up + a fresh pointer-down". Root cause: `onMove` used to
+    // be registered on `target` (the specific gutter `<div>` the drag
+    // started on) ONLY. `onMove` recomputes the TOTAL delta from
+    // `startX`/`startY` on every call (an absolute, not incremental, delta —
+    // see this function's module doc), so continuing to receive events was
+    // the only thing standing between "one step" and "smooth drag" — and
+    // exactly the SAME "DOM node gets swapped out mid-drag" scenario endDrag's
+    // doc above already describes for pointerup/pointercancel ALSO applies to
+    // pointermove, far more visibly: the first `onChange` call resizes `a`,
+    // which moves `a`'s trailing edge away from `b` (grid-layout-plus's own
+    // compaction — the thing that reflows `b` back into place — only runs on
+    // a LATER render once the new `layout` prop round-trips back in, see
+    // AnalyzerView's `onChange` doc), so on the VERY NEXT tick `detectGutters`
+    // stops pairing `a`/`b` as adjacent, `gutters`' v-for key disappears, and
+    // Vue unmounts the exact `<div>` this drag's `target`/pointer-capture
+    // pointed at — ending target-scoped event delivery for the rest of the
+    // gesture (a target-only pointermove listener would go silent right
+    // there). Registering `onMove` on `window` instead (which doesn't depend
+    // on any particular element still being mounted, same fix shape as
+    // endDrag's window-level safety net) keeps every subsequent pointermove
+    // arriving for the whole gesture, however many gutter DOM nodes get
+    // swapped out along the way — only `e.clientX`/`e.clientY` are ever read.
+    window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', endDrag)
     window.addEventListener('pointercancel', endDrag)
     endActiveDrag = () => endDrag({ pointerId } as PointerEvent)

@@ -1,14 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {
-  computeFlipInvert,
-  isFlipNoop,
-  flipTransformCss,
-  PIN_FLIP_DURATION_MS,
-  PIN_FLIP_EASING,
-  type FlipRect,
-} from '@/domain/layout/flip'
+import { PIN_FLIP_EASING } from '@/domain/layout/flip'
+import { playFlipTransition, prefersReducedMotion, useAutoFlip } from '@/composables/useFlipAnimation'
 
 /**
  * #8/#9 — one grid item's visual chrome on the analyzer dashboard: a header
@@ -56,6 +50,21 @@ import {
  * its size also changed, resizes) between the grid slot and the pinned
  * anchor instead of teleporting instantly. Skipped entirely under
  * `prefers-reduced-motion: reduce`.
+ *
+ * #20 — two more instant-jump spots, now smoothed the same way:
+ *  - Collapse/expand's own height change (the BODY hide/show — see #9's note
+ *    above; the card's grid slot itself still doesn't move, only the body's
+ *    own visible height does) is animated via the `<Transition>` JS hooks
+ *    below (`onBodyEnter`/`onBodyLeave`), rather than the instant `v-if`
+ *    mount/unmount this had before.
+ *  - Any OTHER cause of this card's grid slot moving — grid-layout-plus's
+ *    compaction settling after a drag/resize/delete, or a breakpoint switch —
+ *    is picked up generically by `useAutoFlip` (see useFlipAnimation.ts's
+ *    module doc): it watches this card's own `.vgl-item` parent for the
+ *    library rewriting its position/size, and FLIP-animates the move the
+ *    same way #19's pin-toggle does. It's turned OFF while `pinned` (the
+ *    Teleport move above already animates that case explicitly; running
+ *    both here would double-animate the same transform).
  */
 const props = defineProps<{
   title: string
@@ -99,66 +108,89 @@ function onToggleCollapsed(): void {
 // inside #dashboard-pinned-anchor — Teleport relocates it, never remounts
 // it, so one ref keeps working across the move.
 const rootEl = ref<HTMLElement | null>(null)
-let cleanupTransition: (() => void) | null = null
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-}
-
-/** Apply the FLIP "invert, then play" animation to `el`, given its rect
- *  `before` the toggle (measured synchronously in {@link onTogglePinned},
- *  i.e. before Vue/Teleport have moved anything) — `el`'s CURRENT rect is
- *  `after` (this runs post-`nextTick`, once the move has actually happened). */
-function playPinFlip(el: HTMLElement, before: FlipRect): void {
-  const after = el.getBoundingClientRect()
-  const t = computeFlipInvert(before, after)
-  if (isFlipNoop(t)) return
-
-  cleanupTransition?.()
-  el.style.transition = 'none'
-  el.style.transformOrigin = 'top left'
-  el.style.transform = flipTransformCss(t)
-  // Force a synchronous style flush so the browser registers the INVERTED
-  // (no-transition) state before the next frame re-enables the transition —
-  // otherwise the browser could coalesce both style writes into one paint
-  // and skip straight to the final state with nothing to animate.
-  void el.offsetWidth
-
-  const raf = requestAnimationFrame(() => {
-    el.style.transition = `transform ${PIN_FLIP_DURATION_MS}ms ${PIN_FLIP_EASING}`
-    el.style.transform = ''
-    function onTransitionEnd(e: TransitionEvent): void {
-      if (e.target === el && e.propertyName === 'transform') finish()
-    }
-    function finish(): void {
-      el.style.transition = ''
-      el.style.transform = ''
-      el.style.transformOrigin = ''
-      el.removeEventListener('transitionend', onTransitionEnd)
-      cleanupTransition = null
-    }
-    el.addEventListener('transitionend', onTransitionEnd)
-    // Belt-and-braces: guarantee cleanup even if `transitionend` never fires
-    // (e.g. the element is hidden/collapsed mid-animation).
-    const timeout = setTimeout(finish, PIN_FLIP_DURATION_MS + 100)
-    cleanupTransition = () => {
-      clearTimeout(timeout)
-      el.removeEventListener('transitionend', onTransitionEnd)
-    }
-  })
-  cleanupTransition = () => cancelAnimationFrame(raf)
-}
+let cleanupPinFlip: (() => void) | null = null
 
 function onTogglePinned(): void {
   const el = rootEl.value
   const before = el && !prefersReducedMotion() ? el.getBoundingClientRect() : null
   emit('update:pinned', !props.pinned)
   if (el && before) {
-    void nextTick(() => playPinFlip(el, before))
+    void nextTick(() => {
+      cleanupPinFlip?.()
+      cleanupPinFlip = playFlipTransition(el, before)
+    })
   }
 }
 
-onBeforeUnmount(() => cleanupTransition?.())
+// #20 — generic FLIP for any OTHER cause of this card's grid slot moving
+// (compaction settle, drag/resize settle, delete-compaction, breakpoint
+// switch) — see useFlipAnimation.ts's module doc. Disabled while pinned: the
+// Teleport move above is already animated explicitly, and the pinned anchor
+// isn't part of the compacted grid anyway.
+useAutoFlip(rootEl, { enabled: computed(() => !props.pinned) })
+
+// #20 — smooth height transition for the collapse/expand body hide/show
+// (the card's own grid slot doesn't move — see #9's note — only the body's
+// visible height does). Kept as JS `<Transition>` hooks (rather than a pure-
+// CSS max-height trick) so the animated height is always the CONTENT's real
+// `scrollHeight`, not a guessed/fixed cap. `:css="false"` on the `<Transition>`
+// in the template opts out of Vue's own CSS-class-based end detection since
+// this hand-rolls it (transitionend + a timeout fallback), matching #19's
+// choreography. Skipped entirely under `prefers-reduced-motion: reduce`.
+const BODY_TRANSITION_DURATION_MS = 220
+
+function animateBodyHeight(el: HTMLElement, from: number, to: number, done: () => void): void {
+  if (prefersReducedMotion()) {
+    done()
+    return
+  }
+  // Flex items along the flex-direction's main axis (here: `.body`'s own
+  // `flex: 1 1 auto` inside `.dashboard-card`'s column flex) grow/shrink to
+  // fill available space regardless of an inline `height` — override that
+  // for the DURATION of the animation so the explicit height actually takes
+  // visual effect; `onBodyAfterTransition` restores the CSS class's rule.
+  el.style.flex = '0 0 auto'
+  el.style.overflow = 'hidden'
+  el.style.height = `${from}px`
+  void el.offsetHeight
+  el.style.transition = `height ${BODY_TRANSITION_DURATION_MS}ms ${PIN_FLIP_EASING}`
+  el.style.height = `${to}px`
+
+  function onTransitionEnd(e: TransitionEvent): void {
+    if (e.target === el && e.propertyName === 'height') finish()
+  }
+  function finish(): void {
+    el.removeEventListener('transitionend', onTransitionEnd)
+    done()
+  }
+  el.addEventListener('transitionend', onTransitionEnd)
+  // Belt-and-braces: guarantee `done()` even if `transitionend` never fires
+  // (e.g. the element is removed mid-animation, or a test environment with
+  // no real layout engine never dispatches a genuine transition event).
+  setTimeout(finish, BODY_TRANSITION_DURATION_MS + 100)
+}
+
+function onBodyEnter(el: Element, done: () => void): void {
+  const body = el as HTMLElement
+  animateBodyHeight(body, 0, body.scrollHeight, done)
+}
+function onBodyLeave(el: Element, done: () => void): void {
+  const body = el as HTMLElement
+  animateBodyHeight(body, body.scrollHeight, 0, done)
+}
+/** Common `@after-enter`/`@after-leave`/`@enter-cancelled`/`@leave-cancelled`
+ *  cleanup: release every inline style the animation above set, so the CSS
+ *  class rules (`flex: 1 1 auto`, `overflow: auto`) govern again once the
+ *  body is at its natural resting state. */
+function onBodyAfterTransition(el: Element): void {
+  const body = el as HTMLElement
+  body.style.flex = ''
+  body.style.overflow = ''
+  body.style.height = ''
+  body.style.transition = ''
+}
+
+onBeforeUnmount(() => cleanupPinFlip?.())
 </script>
 
 <template>
@@ -196,9 +228,19 @@ onBeforeUnmount(() => cleanupTransition?.())
         </button>
       </span>
     </header>
-    <div v-if="!collapsed" class="body">
-      <slot />
-    </div>
+    <Transition
+      :css="false"
+      @enter="onBodyEnter"
+      @leave="onBodyLeave"
+      @after-enter="onBodyAfterTransition"
+      @after-leave="onBodyAfterTransition"
+      @enter-cancelled="onBodyAfterTransition"
+      @leave-cancelled="onBodyAfterTransition"
+    >
+      <div v-if="!collapsed" class="body">
+        <slot />
+      </div>
+    </Transition>
   </div>
 </template>
 

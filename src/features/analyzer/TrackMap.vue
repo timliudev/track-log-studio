@@ -6,6 +6,7 @@ import type { LapLine } from '@/domain/analysis/laps'
 import { colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import type { TrackOverlayEntry } from '@/domain/analysis/trackOverlay'
 import { fitProjection, type MapProjection } from './projection'
+import { nearestSample } from './trackNearestSample'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -145,6 +146,28 @@ let focusMinY = NaN
 let focusMaxY = NaN
 
 const showReset = computed(() => zoom.value !== 1 || panX.value !== 0 || panY.value !== 0)
+
+// Mobile "maximize" overlay (手機賽道地圖最大化): purely local UI state — no
+// prop/store involvement, so it can't collide with anything else reading/
+// writing analyzerStore or AnalyzerView's grid layout. Teleporting the WHOLE
+// `.track-wrap` (canvas + its own overlay buttons) to <body> when active keeps
+// the exact same canvas DOM node in the tree (Vue's Teleport relocates rather
+// than remounts), so the ResizeObserver already wired up in onMounted below
+// keeps firing/redrawing as the CSS-driven size changes — no extra draw() path
+// needed for the fullscreen transition itself.
+const maximized = ref(false)
+function toggleMaximize(): void {
+  maximized.value = !maximized.value
+}
+function onMaximizedKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && maximized.value) maximized.value = false
+}
+// Prevent the page behind the fullscreen overlay from scrolling while it's
+// open; always restored on close AND on unmount so a mid-session route change
+// can never leave the app permanently unscrollable.
+watch(maximized, (isMax) => {
+  document.body.style.overflow = isMax ? 'hidden' : ''
+})
 
 const PAD = 16
 // Visible endpoint radius and a larger touch-friendly hit radius (~44px target).
@@ -886,25 +909,13 @@ function onPointerMove(e: PointerEvent): void {
   }
 
   // Idle hover (mouse, no button): scrub the nearest sample for chart sync.
+  // Only selects when the pointer is actually near the track line (HIT radius),
+  // so the whitespace around it doesn't snap to the outermost point.
   if (!px || !py) return
   const pos = clientPos(e)
   if (!pos) return
-  let best = -1
-  let bestD = Infinity
-  for (let i = 0; i < px.length; i++) {
-    if (Number.isNaN(px[i])) continue
-    const dx = px[i] - pos.x
-    const dy = py[i] - pos.y
-    const d = dx * dx + dy * dy
-    if (d < bestD) {
-      bestD = d
-      best = i
-    }
-  }
-  // Only select when the pointer is actually near the track line, so the
-  // whitespace around it doesn't snap to the outermost point.
   const HIT = 24
-  emit('cursor', best >= 0 && bestD <= HIT * HIT ? best : null)
+  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT))
 }
 
 function onPointerUp(e: PointerEvent): void {
@@ -942,10 +953,15 @@ onMounted(() => {
   if (canvas.value) ro.observe(canvas.value)
   // dpr / viewport changes (devtools device-mode toggle) may not trigger RO.
   window.addEventListener('resize', draw)
+  window.addEventListener('keydown', onMaximizedKeydown)
 })
 onBeforeUnmount(() => {
   ro?.disconnect()
   window.removeEventListener('resize', draw)
+  window.removeEventListener('keydown', onMaximizedKeydown)
+  // Guard against unmounting while still maximized (e.g. switching sessions/
+  // tabs mid-fullscreen) leaving the page permanently unscrollable.
+  document.body.style.overflow = ''
 })
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
@@ -980,24 +996,51 @@ watch(() => props.overlayTracks, () => draw())
 </script>
 
 <template>
-  <div class="track-wrap" :class="{ fill: fillHeight }">
-    <canvas
-      ref="canvas"
-      class="track"
-      :class="{ fill: fillHeight }"
-      v-tooltip="t('analyzer.zoomHint')"
-      @pointerdown="onPointerDown"
-      @pointermove="onPointerMove"
-      @pointerup="onPointerUp"
-      @pointercancel="onPointerUp"
-      @pointerleave="onPointerLeave"
-      @wheel.prevent="onWheel"
-      @dblclick="resetView"
-    />
-    <button v-if="showReset" type="button" class="reset-view" @click="resetView">
-      {{ t('analyzer.resetView') }}
-    </button>
-  </div>
+  <!-- Mobile maximize (手機賽道地圖最大化): Teleporting the SAME `.track-wrap`
+       node to <body> when active (rather than v-if'ing a second copy) keeps
+       the canvas element — and its ResizeObserver/pointer state — intact
+       across the transition. Disabled (in-place) otherwise, so normal/desktop
+       layout is completely unaffected. -->
+  <Teleport to="body" :disabled="!maximized">
+    <div class="track-wrap" :class="{ fill: fillHeight, maximized }">
+      <canvas
+        ref="canvas"
+        class="track"
+        :class="{ fill: fillHeight, maximized }"
+        v-tooltip="t('analyzer.zoomHint')"
+        @pointerdown="onPointerDown"
+        @pointermove="onPointerMove"
+        @pointerup="onPointerUp"
+        @pointercancel="onPointerUp"
+        @pointerleave="onPointerLeave"
+        @wheel.prevent="onWheel"
+        @dblclick="resetView"
+      />
+      <button v-if="showReset" type="button" class="reset-view" @click="resetView">
+        {{ t('analyzer.resetView') }}
+      </button>
+      <button
+        v-if="!maximized"
+        type="button"
+        class="maximize-toggle"
+        :aria-label="t('analyzer.maximizeMap')"
+        v-tooltip="t('analyzer.maximizeMap')"
+        @click="toggleMaximize"
+      >
+        <span aria-hidden="true">⛶</span>
+      </button>
+      <button
+        v-else
+        type="button"
+        class="maximize-toggle maximize-toggle--close"
+        :aria-label="t('analyzer.minimizeMap')"
+        v-tooltip="t('analyzer.minimizeMap')"
+        @click="toggleMaximize"
+      >
+        <span aria-hidden="true">✕</span>
+      </button>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -1047,5 +1090,58 @@ watch(() => props.overlayTracks, () => draw())
 }
 .reset-view:hover {
   border-color: var(--color-text-muted);
+}
+
+/* Mobile maximize overlay — covers the viewport when active. z-index chosen
+   above the app's other fixed layers (tooltip 1000, FileBar dropdown 100,
+   BottomNav 40) so it always reads as the top-most surface. */
+.track-wrap.maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  background: var(--color-bg);
+}
+.track.maximized {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.maximize-toggle {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 1rem;
+  line-height: 1;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.maximize-toggle:hover {
+  border-color: var(--color-text-muted);
+}
+/* Trigger button is mobile-only (narrow-screen convenience, matching the
+   app's existing 768px breakpoint — see useDashboardLayout's
+   MOBILE_BREAKPOINT_PX/App.vue's @media rules); the close button below always
+   shows once the overlay is open, regardless of viewport width, so however
+   the overlay was opened it can always be closed. */
+@media (max-width: 768px) {
+  .maximize-toggle {
+    display: flex;
+  }
+}
+.maximize-toggle--close {
+  display: flex;
 }
 </style>

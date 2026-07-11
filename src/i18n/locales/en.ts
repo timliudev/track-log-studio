@@ -15,7 +15,6 @@ export default {
     analyzer: 'Analyzer',
     analyzerSoon: '(Phase 4)',
     settings: 'Settings',
-    about: 'About',
     mainLabel: 'Main navigation',
   },
   settings: {
@@ -27,6 +26,8 @@ export default {
   about: {
     project: {
       heading: 'Project info',
+      description:
+        'A fully client-side track-telemetry tool: convert ECU logs (aRacer .loga) and several GPS logger formats (RaceChrono, RaceLogic VBOX, AiM, Qstarz) into RaceChrono .nmea / .loga / .vbo / .csv, and analyse laps, sectors and telemetry on a track map. Everything runs locally in your browser — no data is uploaded.',
       author: 'Author',
       website: 'Website',
       repo: 'Source code',
@@ -163,12 +164,15 @@ export default {
     trackChannelHint:
       'Pick a channel, then independently toggle "Track colour," "Mark minima," and "Mark maxima" — both marker kinds can be shown at once.',
     trackChannelNoChannel: 'Pick a channel first.',
-    trackChannelSelectLap: 'Select exactly one lap to see its extrema markers.',
-    trackChannelNone: 'No qualifying extrema detected on this lap.',
+    trackChannelNoTrack: 'No GPS track data available for this session.',
+    trackChannelScopeTrack: 'No lap selected — showing extrema for the whole track.',
+    trackChannelNone: 'No qualifying extrema detected.',
     extremumMin: 'Min',
     extremumMax: 'Max',
     resetView: 'Reset view',
     zoomHint: 'Scroll to zoom, drag to pan, pinch to zoom, double-click to reset',
+    maximizeMap: 'Maximize track map',
+    minimizeMap: 'Restore track map',
     trackOverlayTitle: 'Overlay tracks',
     trackOverlayHint:
       'Tick other loaded logs to draw their racing lines faintly on the map for comparison; the active log stays on top at full opacity.',
@@ -267,6 +271,7 @@ export default {
     gg: {
       xAxis: 'X-axis channel',
       yAxis: 'Y-axis channel',
+      colorAxis: 'Colour axis (3rd channel)',
       pickBoth: 'Pick a channel for both X and Y.',
       session: 'Whole session',
       lapSeries: 'Lap {n}',

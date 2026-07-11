@@ -17,7 +17,6 @@ import GithubStarButton from '@/components/GithubStarButton.vue'
 const ConverterView = defineAsyncComponent(() => import('@/features/converter/ConverterView.vue'))
 const AnalyzerView = defineAsyncComponent(() => import('@/features/analyzer/AnalyzerView.vue'))
 const SettingsView = defineAsyncComponent(() => import('@/features/settings/SettingsView.vue'))
-const AboutView = defineAsyncComponent(() => import('@/features/about/AboutView.vue'))
 
 const { t } = useI18n()
 
@@ -26,8 +25,8 @@ const { t } = useI18n()
 useTheme()
 useLocale()
 
-type Tab = 'converter' | 'analyzer' | 'settings' | 'about'
-const tabOrder: Tab[] = ['converter', 'analyzer', 'settings', 'about']
+type Tab = 'converter' | 'analyzer' | 'settings'
+const tabOrder: Tab[] = ['converter', 'analyzer', 'settings']
 const tab = ref<Tab>('converter')
 
 // Direction-aware slide: figure out whether the newly selected tab sits to
@@ -81,21 +80,12 @@ const buildDate = __BUILD_DATE__
       </button>
       <button
         type="button"
-        class="tab"
+        class="tab tab--right"
         :class="{ active: tab === 'settings' }"
         :aria-current="tab === 'settings' ? 'page' : undefined"
         @click="selectTab('settings')"
       >
         {{ t('nav.settings') }}
-      </button>
-      <button
-        type="button"
-        class="tab tab--right"
-        :class="{ active: tab === 'about' }"
-        :aria-current="tab === 'about' ? 'page' : undefined"
-        @click="selectTab('about')"
-      >
-        {{ t('nav.about') }}
       </button>
     </nav>
 
@@ -106,7 +96,6 @@ const buildDate = __BUILD_DATE__
         <ConverterView v-if="activeView === 'converter'" key="converter" />
         <AnalyzerView v-else-if="activeView === 'analyzer'" key="analyzer" />
         <SettingsView v-else-if="activeView === 'settings'" key="settings" />
-        <AboutView v-else-if="activeView === 'about'" key="about" />
       </Transition>
     </main>
 

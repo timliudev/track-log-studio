@@ -17,6 +17,7 @@ import {
   isItemDraggable,
   isItemResizable,
   mergeLayoutPositions,
+  compactLayoutTopLeft,
   STATIC_CARD_TITLE_KEYS,
 } from '@/domain/layout/dashboardLayout'
 
@@ -358,6 +359,119 @@ describe('resolveOverlaps', () => {
   })
 })
 
+describe('compactLayoutTopLeft (grid-compact fix — closes both vertical AND horizontal gaps)', () => {
+  it('pulls a card left into empty space freed up in an adjacent column', () => {
+    // Column A (x0..4) is empty; column B (x4..8) has one card. Nothing
+    // above/beside it in column A should stop it sliding all the way left —
+    // this is exactly what grid-layout-plus's OWN vertical-only compaction
+    // can never do (it never moves a card to a different x).
+    const layout = [{ i: 'b', x: 4, y: 0, w: 4, h: 4 }]
+    const compacted = compactLayoutTopLeft(layout)
+    expect(compacted).toEqual([{ i: 'b', x: 0, y: 0, w: 4, h: 4 }])
+  })
+
+  it('pulls a card up into empty space above it', () => {
+    const layout = [{ i: 'a', x: 0, y: 5, w: 4, h: 4 }]
+    const compacted = compactLayoutTopLeft(layout)
+    expect(compacted).toEqual([{ i: 'a', x: 0, y: 0, w: 4, h: 4 }])
+  })
+
+  it('closes a hole left by a deleted card: the card below/right of it moves up-left to fill it', () => {
+    // b used to sit directly below a (touching, no gap). Removing a's lower
+    // neighbour conceptually (simulated here by just giving b a gap above it)
+    // — b should slide all the way up to touch y=0.
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 4, y: 6, w: 4, h: 4 }, // gap above (y4..6) AND beside `a` (x0..4 free for y0..4? no, a occupies it)
+    ]
+    const compacted = compactLayoutTopLeft(layout)
+    const a = compacted.find((it) => it.i === 'a')!
+    const b = compacted.find((it) => it.i === 'b')!
+    expect(a).toEqual(layout[0]) // already top-left, untouched
+    expect(b.y).toBe(0) // pulled all the way up (nothing blocks it once past a's row band)
+    expect(b.x).toBe(4) // can't slide into x0..4 — a occupies that column for y0..4
+  })
+
+  it('respects reading order: an earlier (higher/lefter) item keeps priority over a later one for the same freed slot', () => {
+    const layout = [
+      { i: 'first', x: 4, y: 0, w: 4, h: 4 },
+      { i: 'second', x: 8, y: 0, w: 4, h: 4 },
+    ]
+    const compacted = compactLayoutTopLeft(layout)
+    const first = compacted.find((it) => it.i === 'first')!
+    const second = compacted.find((it) => it.i === 'second')!
+    expect(first).toEqual({ i: 'first', x: 0, y: 0, w: 4, h: 4 }) // claims x0 first
+    expect(second).toEqual({ i: 'second', x: 4, y: 0, w: 4, h: 4 }) // takes what's left
+  })
+
+  it('never overlaps two items after compacting', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 6 },
+      { i: 'b', x: 8, y: 2, w: 4, h: 4 },
+      { i: 'c', x: 4, y: 10, w: 4, h: 3 },
+      { i: 'd', x: 0, y: 20, w: 8, h: 2 },
+    ]
+    const compacted = compactLayoutTopLeft(layout)
+    for (let i = 0; i < compacted.length; i++) {
+      for (let j = i + 1; j < compacted.length; j++) {
+        const a = compacted[i]
+        const b = compacted[j]
+        const overlap = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+        expect(overlap).toBe(false)
+      }
+    }
+  })
+
+  it('never moves an item past x=0 or y=0', () => {
+    const layout = [{ i: 'a', x: 0, y: 0, w: 4, h: 4 }]
+    const compacted = compactLayoutTopLeft(layout)
+    expect(compacted[0].x).toBeGreaterThanOrEqual(0)
+    expect(compacted[0].y).toBeGreaterThanOrEqual(0)
+  })
+
+  it('is a no-op (returns the SAME array reference) on an already top-left-packed layout', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 4 },
+    ]
+    expect(compactLayoutTopLeft(layout)).toBe(layout)
+  })
+
+  it('is a no-op on defaultLayout (already balanced 3-column arrangement stays put)', () => {
+    const layout = defaultLayout()
+    expect(compactLayoutTopLeft(layout)).toBe(layout)
+  })
+
+  it('is idempotent: compacting an already-compacted layout is a fixed point', () => {
+    const layout = [
+      { i: 'a', x: 4, y: 5, w: 4, h: 4 },
+      { i: 'b', x: 8, y: 0, w: 4, h: 4 },
+    ]
+    const once = compactLayoutTopLeft(layout)
+    const twice = compactLayoutTopLeft(once)
+    expect(twice).toBe(once)
+  })
+
+  it('keeps the SAME object reference for an individual item that did not move', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 }, // already packed, won't move
+      { i: 'b', x: 8, y: 0, w: 4, h: 4 }, // will slide left to x=4
+    ]
+    const compacted = compactLayoutTopLeft(layout)
+    expect(compacted.find((it) => it.i === 'a')).toBe(layout[0])
+    expect(compacted.find((it) => it.i === 'b')).not.toBe(layout[1])
+  })
+
+  it('preserves the original array order (same ids at same indices as input)', () => {
+    const layout = [
+      { i: 'b', x: 8, y: 0, w: 4, h: 4 },
+      { i: 'a', x: 4, y: 0, w: 4, h: 4 },
+    ]
+    const compacted = compactLayoutTopLeft(layout)
+    expect(compacted.map((it) => it.i)).toEqual(['b', 'a'])
+  })
+})
+
 describe('reconcileLayout', () => {
   it('appends a default-positioned item for a newly added chart', () => {
     const layout = defaultLayout()
@@ -431,6 +545,35 @@ describe('reconcileLayout', () => {
     const next = reconcileLayout(layout, [1])
     const added = next.find((it) => it.i === chartItemId(1))!
     expect(added.y).toBeGreaterThanOrEqual(10)
+  })
+
+  // Grid-compact fix — removing a chart card is the headline "hole" scenario
+  // from the task: deleting the middle column's only card leaves a vertical
+  // strip empty that grid-layout-plus's own vertical-only compaction can
+  // never fill (it never slides a card sideways). reconcileLayout is the
+  // function that runs on every chart removal (via useDashboardLayout's
+  // chartIds watcher), so this is where that hole must get closed.
+  it('closes the horizontal hole a removed chart leaves behind (a different column slides left to fill it)', () => {
+    const layout = [
+      { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 20 }, // column A, full height
+      { i: chartItemId(1), x: 4, y: 0, w: 4, h: 5 }, // column B — about to be removed
+      { i: chartItemId(2), x: 8, y: 0, w: 4, h: 20 }, // column C, matches A's height
+    ]
+    const next = reconcileLayout(layout, [2]) // chart-1 removed
+    expect(next.some((it) => it.i === chartItemId(1))).toBe(false)
+    const chart2 = next.find((it) => it.i === chartItemId(2))!
+    // Column B (x4..8) is now empty for its full height — chart-2 slides all
+    // the way into it (blocked from going further by column A).
+    expect(chart2).toMatchObject({ x: 4, y: 0 })
+  })
+
+  it('does NOT reposition existing cards on a pure add (only compacts when something was actually removed)', () => {
+    const layout = [
+      { i: STATIC_CARD_IDS.map, x: 4, y: 0, w: 4, h: 10 }, // deliberately NOT at x=0
+    ]
+    const next = reconcileLayout(layout, [1]) // chart-1 newly added, nothing removed
+    const map = next.find((it) => it.i === STATIC_CARD_IDS.map)!
+    expect(map).toEqual(layout[0]) // untouched — no compaction ran
   })
 })
 

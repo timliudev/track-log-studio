@@ -90,9 +90,26 @@ describe('useTrackExtrema', () => {
     expect(trackExtrema.value).toBeNull()
   })
 
-  it('trackExtrema is null when no single lap is focused', () => {
+  it('trackExtrema is null when there is no track at all, even with no lap focused', () => {
     const n = 100
     const s = session([{ name: 'RPM', data: Array.from(withFeature(n, 4000, 50, 30, 8000)) }])
+    const { trackExtrema } = useTrackExtrema(
+      computed<LogSession | null>(() => s),
+      ref(null), // no GPS track for this session
+      ref('RPM'),
+      ref(null),
+      ref(true),
+      ref(true),
+    )
+    expect(trackExtrema.value).toBeNull()
+  })
+
+  it('trackExtrema falls back to the WHOLE TRACK range when no single lap is focused', () => {
+    const n = 160
+    const dip = withFeature(n, 4000, 40, 20, 1000) // min value ~1000
+    const bump = withFeature(n, 4000, 120, 20, 8000) // max value ~8000
+    const data = dip.map((v, i) => (Math.abs(bump[i] - 4000) > Math.abs(v - 4000) ? bump[i] : v))
+    const s = session([{ name: 'RPM', data: Array.from(data) }])
     const { trackExtrema } = useTrackExtrema(
       computed<LogSession | null>(() => s),
       ref(straightTrack(n)),
@@ -101,7 +118,67 @@ describe('useTrackExtrema', () => {
       ref(true),
       ref(true),
     )
-    expect(trackExtrema.value).toBeNull()
+    // Both features span the whole track, so the whole-track fallback finds
+    // both — same result a lap covering [0, n) would give.
+    expect(trackExtrema.value).toHaveLength(2)
+    expect(trackExtrema.value?.[0].kind).toBe('min')
+    expect(trackExtrema.value?.[0].value).toBeCloseTo(1000, 0)
+    expect(trackExtrema.value?.[1].kind).toBe('max')
+    expect(trackExtrema.value?.[1].value).toBeCloseTo(8000, 0)
+  })
+
+  it('trackExtrema restricts to the lap range when a lap IS focused, ignoring data outside it', () => {
+    const n = 160
+    // Minimum sits INSIDE the focused lap [0, 80); maximum sits OUTSIDE it.
+    const dip = withFeature(n, 4000, 40, 20, 1000)
+    const bump = withFeature(n, 4000, 120, 20, 8000)
+    const data = dip.map((v, i) => (Math.abs(bump[i] - 4000) > Math.abs(v - 4000) ? bump[i] : v))
+    const s = session([{ name: 'RPM', data: Array.from(data) }])
+    const { trackExtrema } = useTrackExtrema(
+      computed<LogSession | null>(() => s),
+      ref(straightTrack(n)),
+      ref('RPM'),
+      ref(lap(0, 80)),
+      ref(true),
+      ref(true),
+    )
+    expect(trackExtrema.value).toHaveLength(1)
+    expect(trackExtrema.value?.[0].kind).toBe('min')
+  })
+
+  it('trackExtremaIsLapScoped is true for a focused lap, false for the whole-track fallback, null when nothing applies', () => {
+    const n = 100
+    const s = session([{ name: 'RPM', data: Array.from(withFeature(n, 4000, 50, 30, 8000)) }])
+
+    const scopedToLap = useTrackExtrema(
+      computed<LogSession | null>(() => s),
+      ref(straightTrack(n)),
+      ref('RPM'),
+      ref(lap(0, n)),
+      ref(false),
+      ref(true),
+    ).trackExtremaIsLapScoped
+    expect(scopedToLap.value).toBe(true)
+
+    const scopedToTrack = useTrackExtrema(
+      computed<LogSession | null>(() => s),
+      ref(straightTrack(n)),
+      ref('RPM'),
+      ref(null),
+      ref(false),
+      ref(true),
+    ).trackExtremaIsLapScoped
+    expect(scopedToTrack.value).toBe(false)
+
+    const scopedToNothing = useTrackExtrema(
+      computed<LogSession | null>(() => s),
+      ref(straightTrack(n)),
+      ref('RPM'),
+      ref(null),
+      ref(false),
+      ref(false), // neither marker toggle on -> trackExtrema itself is null
+    ).trackExtremaIsLapScoped
+    expect(scopedToNothing.value).toBeNull()
   })
 
   it('finds a maximum within the focused lap when markMaxima is on', () => {

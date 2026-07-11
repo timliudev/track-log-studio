@@ -34,6 +34,7 @@ describe('analyzerStore', () => {
       expect(chart.xChannel).toBeNull()
       expect(chart.yChannel).toBeNull()
       expect(chart.equalAspect).toBe(false)
+      expect(chart.colorChannel).toBeNull()
     }
   })
 
@@ -74,6 +75,25 @@ describe('analyzerStore', () => {
     if (c2?.kind === 'scatter') expect(c2.equalAspect).toBe(false)
     s.setChartEqualAspect(id1, false)
     if (c1?.kind === 'scatter') expect(c1.equalAspect).toBe(false)
+  })
+
+  it('setChartColorChannel sets/clears only the targeted scatter chart; no-op on timeseries', () => {
+    const s = useAnalyzerStore()
+    const timeseriesId = s.charts[0].id
+    s.addChart('scatter')
+    s.addChart('scatter')
+    const [id1, id2] = [s.charts[1].id, s.charts[2].id]
+    s.setChartColorChannel(id1, 'Vehicle_Speed')
+    s.setChartColorChannel(timeseriesId, 'RPM') // wrong kind — must not throw/mutate
+    const c1 = s.charts.find((c) => c.id === id1)
+    const c2 = s.charts.find((c) => c.id === id2)
+    if (c1?.kind === 'scatter') expect(c1.colorChannel).toBe('Vehicle_Speed')
+    // id2 was never touched — still at its default null.
+    if (c2?.kind === 'scatter') expect(c2.colorChannel).toBeNull()
+    const ts = s.charts.find((c) => c.id === timeseriesId)
+    if (ts?.kind === 'timeseries') expect(ts).not.toHaveProperty('colorChannel')
+    s.setChartColorChannel(id1, null)
+    if (c1?.kind === 'scatter') expect(c1.colorChannel).toBeNull()
   })
 
   it('addChart("scatter", initial) seeds the initial X/Y channels', () => {
@@ -226,8 +246,21 @@ describe('analyzerStore — chart persistence (T5)', () => {
     expect(s2.charts).toEqual([
       { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
       { kind: 'timeseries', id: 2, channels: ['RPM', 'T_Eng'], mode: 'overlay' },
-      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true },
+      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true, colorChannel: null },
     ])
+  })
+
+  it('a picked colour-axis channel survives reload (persisted with the chart card)', async () => {
+    const s = useAnalyzerStore()
+    s.addChart('scatter', { xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' })
+    s.setChartColorChannel(s.charts[1].id, 'Vehicle_Speed')
+    await nextTick()
+
+    setActivePinia(createPinia())
+    const s2 = useAnalyzerStore()
+    const restored = s2.charts.find((c) => c.kind === 'scatter')
+    expect(restored?.kind).toBe('scatter')
+    if (restored?.kind === 'scatter') expect(restored.colorChannel).toBe('Vehicle_Speed')
   })
 
   it('a toggled-off equalAspect survives reload (persisted with the chart card)', async () => {

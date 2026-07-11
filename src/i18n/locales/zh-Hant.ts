@@ -15,7 +15,6 @@ export default {
     analyzer: '分析',
     analyzerSoon: '（Phase 4）',
     settings: '設定',
-    about: '關於',
     mainLabel: '主導覽',
   },
   settings: {
@@ -27,6 +26,8 @@ export default {
   about: {
     project: {
       heading: '專案資訊',
+      description:
+        '純前端的賽道遙測工具：把 ECU（aRacer .loga）與多款 GPS 記錄器格式（RaceChrono、RaceLogic VBOX、AiM、Qstarz）轉成 RaceChrono .nmea／.loga／.vbo／.csv，並在賽道底圖上做切圈、分段與遙測分析。所有處理都在你的瀏覽器本機完成，資料不上傳。',
       author: '開發者',
       website: '官方網站',
       repo: '原始碼',
@@ -161,12 +162,15 @@ export default {
     markMaxima: '標記最大值',
     trackChannelHint: '選擇一個通道後，可分別開啟「軌跡上色」「標記最小值」「標記最大值」，兩種標記可同時開啟。',
     trackChannelNoChannel: '請先選擇一個通道。',
-    trackChannelSelectLap: '請選擇單一圈以顯示該圈的極值標記。',
-    trackChannelNone: '此圈未偵測到符合條件的極值。',
+    trackChannelNoTrack: '此紀錄沒有可用的 GPS 軌跡資料。',
+    trackChannelScopeTrack: '未選擇圈，顯示整段軌跡的極值。',
+    trackChannelNone: '未偵測到符合條件的極值。',
     extremumMin: '最小',
     extremumMax: '最大',
     resetView: '重設視角',
     zoomHint: '滾輪縮放、拖曳平移、雙指縮放、雙擊重設',
+    maximizeMap: '放大賽道地圖',
+    minimizeMap: '還原賽道地圖',
     trackOverlayTitle: '疊加軌跡',
     trackOverlayHint: '勾選其他已載入的記錄，把它們的軌跡半透明疊在地圖上比較；作用中記錄維持原樣顯示在最上層。',
     trackOverlayClear: '全部關閉',
@@ -262,6 +266,7 @@ export default {
     gg: {
       xAxis: 'X 軸頻道',
       yAxis: 'Y 軸頻道',
+      colorAxis: '顏色軸（第三軸）',
       pickBoth: '請選擇 X 與 Y 軸的頻道。',
       session: '整份記錄',
       lapSeries: '第 {n} 圈',

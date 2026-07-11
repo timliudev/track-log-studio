@@ -46,6 +46,56 @@ export interface BuildGgPointsOptions {
 }
 
 /**
+ * Shared filter+decimate core for {@link buildGgPoints} and
+ * {@link buildGgPointsWithColor}: walks the aligned arrays once, drops any
+ * sample where X, Y, OR (when given) the colour channel is non-finite
+ * (dropout/NaN — same rule as the X/Y-only path, extended so a colour-axis
+ * point is never shown without a meaningful colour), then stride-decimates
+ * to `maxPoints`. `colorData == null` skips the third array entirely (the
+ * plain X/Y path) and `colorValues` comes back `null` in that case.
+ */
+function buildGgPointsCore(
+  xData: ArrayLike<number>,
+  yData: ArrayLike<number>,
+  colorData: ArrayLike<number> | null,
+  opts: BuildGgPointsOptions,
+): { points: [number, number][]; colorValues: number[] | null } {
+  const scale = opts.scale ?? 1
+  const n = Math.min(xData.length, yData.length, colorData?.length ?? Infinity)
+  const start = Math.max(0, Math.min(opts.start ?? 0, n))
+  const end = Math.max(start, Math.min(opts.end ?? n, n))
+
+  const points: [number, number][] = []
+  const colorValues: number[] | null = colorData ? [] : null
+  for (let i = start; i < end; i++) {
+    const x = xData[i]
+    const y = yData[i]
+    const c = colorData ? colorData[i] : 0
+    if (!Number.isFinite(x) || !Number.isFinite(y) || (colorData && !Number.isFinite(c))) continue
+    points.push([x * scale, y * scale])
+    colorValues?.push(c)
+  }
+
+  const maxPoints = opts.maxPoints
+  if (maxPoints == null || maxPoints <= 0 || points.length <= maxPoints) return { points, colorValues }
+
+  const stride = Math.ceil(points.length / maxPoints)
+  const decimatedPoints: [number, number][] = []
+  const decimatedColors: number[] | null = colorValues ? [] : null
+  for (let i = 0; i < points.length; i += stride) {
+    decimatedPoints.push(points[i])
+    decimatedColors?.push(colorValues![i])
+  }
+  // Always keep the final point so the tail of the range isn't silently cut.
+  const last = points[points.length - 1]
+  if (decimatedPoints[decimatedPoints.length - 1] !== last) {
+    decimatedPoints.push(last)
+    decimatedColors?.push(colorValues![colorValues!.length - 1])
+  }
+  return { points: decimatedPoints, colorValues: decimatedColors }
+}
+
+/**
  * Build [x, y] scatter points (in g) from two aligned raw channel arrays.
  * Filters out samples where either channel is non-finite (dropout/NaN), then
  * simple stride-decimates to `maxPoints` if given. Both channels are scaled
@@ -56,27 +106,24 @@ export function buildGgPoints(
   yData: ArrayLike<number>,
   opts: BuildGgPointsOptions = {},
 ): [number, number][] {
-  const scale = opts.scale ?? 1
-  const n = Math.min(xData.length, yData.length)
-  const start = Math.max(0, Math.min(opts.start ?? 0, n))
-  const end = Math.max(start, Math.min(opts.end ?? n, n))
+  return buildGgPointsCore(xData, yData, null, opts).points
+}
 
-  const points: [number, number][] = []
-  for (let i = start; i < end; i++) {
-    const x = xData[i]
-    const y = yData[i]
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue
-    points.push([x * scale, y * scale])
-  }
-
-  const maxPoints = opts.maxPoints
-  if (maxPoints == null || maxPoints <= 0 || points.length <= maxPoints) return points
-
-  const stride = Math.ceil(points.length / maxPoints)
-  const decimated: [number, number][] = []
-  for (let i = 0; i < points.length; i += stride) decimated.push(points[i])
-  // Always keep the final point so the tail of the range isn't silently cut.
-  const last = points[points.length - 1]
-  if (decimated[decimated.length - 1] !== last) decimated.push(last)
-  return decimated
+/**
+ * Colour-axis variant of {@link buildGgPoints} (third-channel scatter
+ * colouring — see ScatterChart.vue's colour-axis picker): same X/Y
+ * filter+scale+decimate behaviour, plus a `colorValues` array aligned 1:1
+ * with `points` carrying the third channel's RAW (unscaled — colour values
+ * aren't milli-g) value at each kept sample. A sample is dropped if X, Y, OR
+ * the colour value is non-finite, so every returned point has a usable
+ * colour.
+ */
+export function buildGgPointsWithColor(
+  xData: ArrayLike<number>,
+  yData: ArrayLike<number>,
+  colorData: ArrayLike<number>,
+  opts: BuildGgPointsOptions = {},
+): { points: [number, number][]; colorValues: number[] } {
+  const { points, colorValues } = buildGgPointsCore(xData, yData, colorData, opts)
+  return { points, colorValues: colorValues ?? [] }
 }
