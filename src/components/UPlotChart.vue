@@ -47,11 +47,14 @@ const props = defineProps<{
    */
   fillHeight?: boolean
   externalCursor?: number | null
+  /** Full X extent when `data` is a visible-range/downsampled subset. */
+  xBounds?: { min: number; max: number } | null
 }>()
 
 const emit = defineEmits<{
   cursor: [number | null]
   xZoom: [{ min: number; max: number }]
+  plotWidth: [number]
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
@@ -162,6 +165,7 @@ function create(): void {
   if (!host.value) return
   destroy()
   const width = host.value.clientWidth || 600
+  emit('plotWidth', width)
   // uPlot auto-ranges the x scale while laying out the freshly-constructed
   // chart (via its own internal setScale) — that's not a user zoom action, so
   // guard it the same way applyXRange guards its own programmatic setScale,
@@ -225,6 +229,7 @@ let pinchLast: { dist: number; midX: number } | null = null
 /** Current X data-bounds (full data extent), used to clamp touch pan/pinch —
  * same bounds uPlot itself would use for a fully-zoomed-out view. */
 function dataXBounds(): XRange | null {
+  if (props.xBounds && props.xBounds.min < props.xBounds.max) return props.xBounds
   const xs = props.data[0] as (number | null)[] | undefined
   if (!xs || xs.length === 0) return null
   let min = Infinity
@@ -361,6 +366,7 @@ function seriesKey(): string {
 
 function resize(): void {
   if (plot && host.value) {
+    emit('plotWidth', host.value.clientWidth)
     plot.setSize({ width: host.value.clientWidth, height: targetHeight() })
   }
 }

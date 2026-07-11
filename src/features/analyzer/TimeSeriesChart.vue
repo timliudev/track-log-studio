@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
@@ -12,6 +12,9 @@ import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
 import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
 import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { lapColor } from './lapColors'
+import { categoricalColor } from '@/domain/analysis/colorPalette'
+import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 
@@ -21,6 +24,9 @@ const props = defineProps<{
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
   externalCursor?: number | null
+  comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
   /** Selected laps (in colour order) for overlay mode. */
   selectedLaps?: Lap[]
   /** #8 — forwarded to UPlotChart: fill the dashboard grid item's height
@@ -60,16 +66,52 @@ const pickerOptions = computed(() =>
 const present = computed(() => props.chart.channels.filter((n) => props.session.get(n)))
 
 // --- Timeline mode: each channel over the full session on a shared X. ---
+const plotWidth = ref(1200)
+const pointBudget = computed(() => Math.max(300, Math.ceil(plotWidth.value * 2)))
+const timelineSources = computed<TimelineSource[]>(() => {
+  const primaryId = props.primaryFileId ?? -1
+  const sources: TimelineSource[] = [{
+    id: primaryId,
+    label: props.primaryFileName ?? 'Primary',
+    color: categoricalColor(primaryId),
+    primary: true,
+    xValues: props.xValues,
+    channels: new Map(props.session.channels.map((channel) => [channel.name, channel.data])),
+  }]
+  for (const comparison of props.comparisonSessions ?? []) {
+    sources.push({
+      id: comparison.id,
+      label: comparison.name,
+      color: comparison.color,
+      primary: false,
+      xValues: comparison.xValues,
+      channels: new Map(comparison.session.channels.map((channel) => [channel.name, channel.data])),
+    })
+  }
+  return sources
+})
+const timeline = computed(() => buildTimelineData(
+  timelineSources.value,
+  present.value,
+  props.xRange ?? null,
+  pointBudget.value,
+))
 const timelineData = computed<uPlot.AlignedData>(
-  () =>
-    [props.xValues, ...present.value.map((n) => props.session.get(n)!.data)] as unknown as uPlot.AlignedData,
+  () => timeline.value.data as unknown as uPlot.AlignedData,
 )
 
 // Each series gets its own scale key (= channel name) → independent auto-ranging,
 // so a small-range channel isn't flattened by a large-range one.
 const timelineSeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
-  ...present.value.map((n, i) => ({ label: n, stroke: color(i), width: 1, scale: n })),
+  ...timeline.value.series.map((entry) => ({
+    label: `${entry.sourceLabel} · ${entry.channel}`,
+    stroke: entry.color,
+    dash: dash(entry.channelIndex),
+    width: entry.primary ? 1.5 : 1,
+    scale: entry.channel,
+    spanGaps: true,
+  })),
 ])
 
 // --- Overlay mode: selected laps re-based to a lap-relative X (from 0). ---
@@ -200,11 +242,16 @@ const canRender = computed(() =>
   mode.value === 'overlay' ? present.value.length > 0 && laps.value.length > 0 : present.value.length > 0,
 )
 const effectiveCursor = computed<number | null>(() =>
-  mode.value === 'overlay' ? analyzer.overlayCursorIdx : (props.externalCursor ?? null),
+  mode.value === 'overlay'
+    ? analyzer.overlayCursorIdx
+    : props.externalCursor == null
+      ? null
+      : nearestXIndex(timeline.value.data[0], props.xValues[props.externalCursor]),
 )
 function onCursor(idx: number | null): void {
   if (mode.value === 'overlay') analyzer.setOverlayCursor(idx)
-  else emit('cursor', idx)
+  else if (idx == null) emit('cursor', null)
+  else emit('cursor', nearestXIndex(props.xValues, timeline.value.data[0][idx]))
 }
 function onXZoom(r: { min: number; max: number }): void {
   if (mode.value === 'timeline') emit('xZoom', r)
@@ -268,8 +315,10 @@ function removeChannel(name: string): void {
       :x-range="mode === 'timeline' ? xRange : null"
       :external-cursor="effectiveCursor"
       :fill-height="fillHeight"
+      :x-bounds="xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
       @cursor="onCursor"
       @x-zoom="onXZoom"
+      @plot-width="plotWidth = $event"
     />
     <p v-else-if="mode === 'overlay' && present.length > 0" class="muted overlay-hint">
       {{ t('analyzer.overlayHint') }}
