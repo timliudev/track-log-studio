@@ -5,6 +5,7 @@ import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import GearRatioChart from '@/features/analyzer/GearRatioChart.vue'
 import TimeSeriesChart from '@/features/analyzer/TimeSeriesChart.vue'
+import UPlotChart from '@/components/UPlotChart.vue'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import zhHant from '@/i18n/locales/zh-Hant'
@@ -59,5 +60,33 @@ describe('GearRatioChart', () => {
     const plot = wrapper.findComponent(TimeSeriesChart)
     expect(plot.props('fixedSeries')).toEqual([])
     expect(plot.props('emptyMessage')).toContain('缺少速度')
+  })
+
+  it('feeds the derived ratio through the aligned timeline builder', async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: 'zh-Hant',
+      fallbackLocale: 'en',
+      messages: { 'zh-Hant': zhHant, en },
+    })
+    const wrapper = mount(GearRatioChart, {
+      props: {
+        chart: { kind: 'gearRatio', id: 7, mode: 'timeline' },
+        session: makeSession(),
+        xValues: new Float64Array([0, 0.1, 0.2]),
+        selectedLaps: [],
+      },
+      global: {
+        plugins: [i18n],
+        stubs: { UPlotChart: true, SearchableSelect: true },
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    const plot = wrapper.findComponent(UPlotChart)
+    const data = plot.props('data') as [number[], Array<number | null>]
+    expect(data[0]).toEqual([0, 0.1, 0.2])
+    expect(data[1]).toHaveLength(3)
+    expect(data[1].every((value) => value != null && Number.isFinite(value))).toBe(true)
   })
 })

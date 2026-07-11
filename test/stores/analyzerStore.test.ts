@@ -189,23 +189,37 @@ describe('analyzerStore', () => {
     expect(s.cursorIdx).toBeNull()
   })
 
-  it('toggleOverlayFile adds/removes a file id from the track-map overlay set', () => {
+  it('toggleSessionComparison adds/removes a file id from the global comparison set', () => {
     const s = useAnalyzerStore()
-    expect(s.overlayFileIds).toEqual([])
-    s.toggleOverlayFile(7)
-    expect(s.overlayFileIds).toEqual([7])
-    s.toggleOverlayFile(9)
-    expect(s.overlayFileIds).toEqual([7, 9])
-    s.toggleOverlayFile(7)
-    expect(s.overlayFileIds).toEqual([9])
+    expect(s.selectedSessions).toEqual([])
+    s.toggleSessionComparison(7)
+    expect(s.selectedSessions).toEqual([7])
+    s.toggleSessionComparison(9)
+    expect(s.selectedSessions).toEqual([7, 9])
+    s.toggleSessionComparison(7)
+    expect(s.selectedSessions).toEqual([9])
   })
 
-  it('clearOverlayFiles empties the track-map overlay set', () => {
+  it('holds independent per-session alignment offsets and resets them', () => {
     const s = useAnalyzerStore()
-    s.toggleOverlayFile(1)
-    s.toggleOverlayFile(2)
-    s.clearOverlayFiles()
-    expect(s.overlayFileIds).toEqual([])
+    expect(s.sessionOffsetOf(7)).toEqual({ timeSec: 0, distM: 0, mapX: 0, mapY: 0 })
+    s.nudgeSessionOffset(7, 'timeSec', 0.5)
+    s.nudgeSessionOffset(7, 'distM', -2)
+    s.setSessionOffset(7, 'mapX', 3)
+    expect(s.sessionOffsetOf(7)).toEqual({ timeSec: 0.5, distM: -2, mapX: 3, mapY: 0 })
+    s.resetSessionOffset(7, 'timeSec')
+    expect(s.sessionOffsetOf(7).timeSec).toBe(0)
+    s.resetSessionOffset(7)
+    expect(s.sessionOffsets).toEqual({})
+  })
+
+  it('clearSessionComparisons leaves offsets available for re-selecting a session', () => {
+    const s = useAnalyzerStore()
+    s.toggleSessionComparison(1)
+    s.nudgeSessionOffset(1, 'timeSec', 1)
+    s.clearSessionComparisons()
+    expect(s.selectedSessions).toEqual([])
+    expect(s.sessionOffsetOf(1).timeSec).toBe(1)
   })
 })
 
