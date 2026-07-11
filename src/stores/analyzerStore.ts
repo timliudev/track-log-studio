@@ -32,6 +32,7 @@ export type {
   ChartConfig,
   ChartMode,
   TimeSeriesChartConfig,
+  GearRatioChartConfig,
   ScatterChartConfig,
 } from '@/domain/layout/chartConfigs'
 
@@ -173,6 +174,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
    *  squashes the smaller-magnitude axis into a sliver (#5 in the
    *  equal-aspect fix) — the user can still flip it on manually. */
   function addChart(kind?: 'timeseries'): void
+  function addChart(kind: 'gearRatio'): void
   function addChart(kind: 'scatter', initial?: { xChannel?: string | null; yChannel?: string | null }): void
   function addChart(
     kind: ChartConfig['kind'] = 'timeseries',
@@ -189,6 +191,8 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         equalAspect: looksLikeForcePair(xChannel, yChannel),
         colorChannel: null,
       })
+    } else if (kind === 'gearRatio') {
+      charts.value.push({ kind: 'gearRatio', id: nextId++, mode: 'timeline' })
     } else {
       charts.value.push({ kind: 'timeseries', id: nextId++, channels: [], mode: 'timeline' })
     }
@@ -205,7 +209,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setChartMode(id: number, mode: ChartMode): void {
     const chart = charts.value.find((c) => c.id === id)
-    if (chart && chart.kind === 'timeseries') chart.mode = mode
+    if (chart && (chart.kind === 'timeseries' || chart.kind === 'gearRatio')) chart.mode = mode
   }
 
   /** Set a scatter chart's X and/or Y channel (whichever is provided);
