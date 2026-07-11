@@ -18,6 +18,9 @@ import {
   isItemResizable,
   mergeLayoutPositions,
   compactLayoutTopLeft,
+  applyCollapsedHeights,
+  sameLayoutPositions,
+  COLLAPSED_ROWS,
   STATIC_CARD_TITLE_KEYS,
 } from '@/domain/layout/dashboardLayout'
 
@@ -757,5 +760,63 @@ describe('mobileLayout (single-column builder from an explicit order)', () => {
 
   it('returns an empty array for an empty order', () => {
     expect(mobileLayout([], desktop)).toEqual([])
+  })
+})
+
+describe('applyCollapsedHeights (collapse-reflow / 補位)', () => {
+  // Two stacked full-width cards; collapsing the top one should let the bottom
+  // one pack up into the reclaimed rows.
+  const stacked = () => [
+    { i: 'a', x: 0, y: 0, w: 12, h: 8 },
+    { i: 'b', x: 0, y: 8, w: 12, h: 6 },
+  ]
+
+  it('shrinks a collapsed card to COLLAPSED_ROWS and packs neighbours up', () => {
+    const out = applyCollapsedHeights(stacked(), new Set(['a']))
+    const a = out.find((it) => it.i === 'a')!
+    const b = out.find((it) => it.i === 'b')!
+    expect(a.h).toBe(COLLAPSED_ROWS)
+    expect(a.y).toBe(0)
+    // b reflows up from y:8 to sit directly below the now-short a.
+    expect(b.y).toBe(COLLAPSED_ROWS)
+    expect(b.h).toBe(6)
+  })
+
+  it('leaves canonical heights untouched when nothing is collapsed (identity)', () => {
+    const input = stacked()
+    const out = applyCollapsedHeights(input, new Set())
+    // Already top-left packed ⇒ same array reference back (fixed point).
+    expect(out).toBe(input)
+  })
+
+  it('is idempotent on an already collapsed-and-packed layout', () => {
+    const once = applyCollapsedHeights(stacked(), new Set(['a']))
+    const twice = applyCollapsedHeights(once, new Set(['a']))
+    expect(twice).toEqual(once)
+  })
+
+  it('reclaims the full column when every card is collapsed', () => {
+    const out = applyCollapsedHeights(stacked(), new Set(['a', 'b']))
+    expect(out.map((it) => it.h)).toEqual([COLLAPSED_ROWS, COLLAPSED_ROWS])
+    expect(out.find((it) => it.i === 'b')!.y).toBe(COLLAPSED_ROWS)
+  })
+})
+
+describe('sameLayoutPositions', () => {
+  const base = [
+    { i: 'a', x: 0, y: 0, w: 4, h: 8 },
+    { i: 'b', x: 4, y: 0, w: 4, h: 6 },
+  ]
+
+  it('is true for the same cards at the same coords in any order', () => {
+    expect(sameLayoutPositions(base, [base[1], base[0]])).toBe(true)
+  })
+
+  it('is false when any coordinate differs', () => {
+    expect(sameLayoutPositions(base, [{ ...base[0], y: 1 }, base[1]])).toBe(false)
+  })
+
+  it('is false on a length mismatch', () => {
+    expect(sameLayoutPositions(base, [base[0]])).toBe(false)
   })
 })

@@ -273,6 +273,53 @@ export function compactLayoutTopLeft(layout: DashboardLayoutItem[]): DashboardLa
   return changed ? result : layout
 }
 
+/** Grid rows a collapsed card occupies while only its header shows (its body is
+ *  hidden — see DashboardCard's #9 note). Just tall enough for the header bar. */
+export const COLLAPSED_ROWS = 2
+
+/**
+ * Collapse-reflow (補位) — DISPLAY-only overlay: replace every collapsed card's
+ * height with {@link COLLAPSED_ROWS} and pack the result top-left so the rows a
+ * collapsed card gives up are reclaimed by its neighbours. The caller keeps the
+ * CANONICAL (expanded) heights in its own `layout` ref and feeds THIS to the
+ * grid, so expanding a card is just dropping it from `collapsedIds` — its
+ * stored height returns with no separate "pre-collapse height" bookkeeping (the
+ * alternative DashboardCard's #9 note rejected).
+ *
+ * Pure and identity-preserving on an already collapsed-and-packed layout
+ * (compactLayoutTopLeft is a fixed point), so it can sit in the live layout
+ * pipeline (AnalyzerView's `activeLayout` getter) without oscillating.
+ */
+export function applyCollapsedHeights(
+  layout: DashboardLayoutItem[],
+  collapsedIds: ReadonlySet<string>,
+): DashboardLayoutItem[] {
+  let changed = false
+  const shrunk = layout.map((it) => {
+    if (collapsedIds.has(it.i) && it.h !== COLLAPSED_ROWS) {
+      changed = true
+      return { ...it, h: COLLAPSED_ROWS }
+    }
+    return it
+  })
+  return compactLayoutTopLeft(changed ? shrunk : layout)
+}
+
+/** True when two layouts hold the same cards at the same x/y/w/h, regardless of
+ *  array order. Used to short-circuit the collapse-reflow write-back: when a
+ *  grid emission reconstructs the CURRENT canonical layout (the common case — a
+ *  collapse toggle echoing the display we just fed it), the caller skips
+ *  re-assigning its `layout` ref, breaking the update→compact→update loop
+ *  DashboardCard's #9 note warns collapse-into-`h` would otherwise cause. */
+export function sameLayoutPositions(a: DashboardLayoutItem[], b: DashboardLayoutItem[]): boolean {
+  if (a.length !== b.length) return false
+  const byId = new Map(b.map((it) => [it.i, it]))
+  return a.every((it) => {
+    const o = byId.get(it.i)
+    return o != null && o.x === it.x && o.y === it.y && o.w === it.w && o.h === it.h
+  })
+}
+
 /**
  * #1 fix — merge a grid-layout-plus callback payload (from `update:layout`,
  * `layout-updated`, `resized`, or `moved`; the library emits the SAME shape
