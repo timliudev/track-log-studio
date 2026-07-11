@@ -26,7 +26,7 @@ function fileTypeOf(name: string): ImportedFile['fileType'] {
   if (lower.endsWith('.nmea')) return 'nmea'
   if (lower.endsWith('.vbo')) return 'vbo'
   if (lower.endsWith('.rcz')) return 'rcz'
-  if (lower.endsWith('.xrk')) return 'xrk'
+  if (lower.endsWith('.xrk') || lower.endsWith('.xrz')) return 'xrk'
   if (lower.endsWith('.rcnx')) return 'rcnx'
   return 'loga'
 }

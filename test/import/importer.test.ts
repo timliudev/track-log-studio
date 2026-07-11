@@ -38,7 +38,7 @@ describe('detectImporter', () => {
 
 describe('allImportExtensions', () => {
   it('lists every registered extension', () => {
-    expect(allImportExtensions()).toEqual(['loga', 'nmea', 'vbo', 'rcz', 'rcnx', 'xrk'])
+    expect(allImportExtensions()).toEqual(['loga', 'nmea', 'vbo', 'rcz', 'rcnx', 'xrk', 'xrz'])
   })
 })
 
