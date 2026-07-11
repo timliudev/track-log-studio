@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
 import SessionLapComparison from '@/features/analyzer/SessionLapComparison.vue'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useLapStore } from '@/stores/lapStore'
 import { LogSession } from '@/domain/model/LogSession'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import type { Lap } from '@/domain/model/Lap'
@@ -31,28 +32,52 @@ function comparison(): ComparisonSession {
   }
 }
 
+function mountWith() {
+  return mount(SessionLapComparison, {
+    props: {
+      primaryLaps: [lap(0, 60_000)],
+      primaryExcluded: [],
+      comparisons: [comparison()],
+    },
+    global: {
+      plugins: [createI18n({ legacy: false, locale: 'zh-Hant', messages: { 'zh-Hant': zhHant } })],
+      directives: { tooltip: {} },
+    },
+  })
+}
+
 beforeEach(() => setActivePinia(createPinia()))
 
 describe('SessionLapComparison', () => {
-  it('shows every compared recording lap without a collapsed disclosure', async () => {
+  it('renders every compared lap as a per-lap table row with markers', async () => {
     const analyzer = useAnalyzerStore()
-    const wrapper = mount(SessionLapComparison, {
-      props: {
-        primaryLaps: [lap(0, 60_000)],
-        primaryExcluded: [],
-        comparisons: [comparison()],
-      },
-      global: {
-        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', messages: { 'zh-Hant': zhHant } })],
-      },
-    })
+    const wrapper = mountWith()
 
+    // No collapsed disclosure — the laps are always visible as a table.
     expect(wrapper.find('details').exists()).toBe(false)
     expect(wrapper.text()).toContain('comparison.loga')
-    expect(wrapper.text()).toContain('#1 · 1:01.000')
-    expect(wrapper.text()).toContain('#2 · 1:02.000')
+    // Unified count wording with the primary table ("圈數：{n}").
+    expect(wrapper.text()).toContain('圈數：2')
+
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows).toHaveLength(2)
+    // Row 1 is the fastest lap (⚡), row 2 the slowest (🐢).
+    expect(rows[0].text()).toContain('1:01.000')
+    expect(rows[0].text()).toContain('⚡')
+    expect(rows[1].text()).toContain('1:02.000')
+    expect(rows[1].text()).toContain('🐢')
 
     await wrapper.find('.chart-align button').trigger('click')
     expect(analyzer.sessionOffsetOf(2).timeSec).toBeCloseTo(-0.1)
+  })
+
+  it('toggles a lap into the cross-recording overlay via its row checkbox', async () => {
+    const lapStore = useLapStore()
+    const wrapper = mountWith()
+
+    const checkbox = wrapper.findAll('tbody tr input[type="checkbox"]')[0]
+    expect(lapStore.isSessionLapSelected(2, 0)).toBe(false)
+    await checkbox.setValue(true)
+    expect(lapStore.isSessionLapSelected(2, 0)).toBe(true)
   })
 })

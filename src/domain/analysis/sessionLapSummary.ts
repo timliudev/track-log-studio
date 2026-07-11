@@ -1,4 +1,6 @@
 import type { Lap } from '@/domain/model/Lap'
+import { fastestLapIndex, slowestLapIndex } from './bestLap'
+import { computeMetric } from './lapMetrics'
 
 export interface SessionLapSource {
   id: number
@@ -45,4 +47,44 @@ export function buildSessionLapSummaries(
       lapCount: source.laps.length,
     }
   })
+}
+
+/** One per-lap row for a comparison recording's lap table. Mirrors the primary
+ * LapTable's built-in columns (#/time/distance) plus fastest/slowest flags so the
+ * two present laps in the same visual language. */
+export interface ComparisonLapRow {
+  index: number
+  lapTimeMs: number
+  /** Per-lap distance in metres; NaN when no track / degenerate span. */
+  distanceM: number
+  isFastest: boolean
+  isSlowest: boolean
+}
+
+/**
+ * Per-lap rows for one comparison recording. Comparison recordings carry no
+ * primary-session exclusion state, so every finite lap participates and the
+ * fastest/slowest markers are computed over all laps (matching
+ * {@link buildSessionLapSummaries}). The slowest marker is suppressed when it
+ * would land on the same lap as the fastest — with 0/1 valid laps they coincide
+ * and a second marker on one row is just noise (same rule as the primary table).
+ *
+ * `cumDistM` is the cumulative-distance array for the recording's own track, so
+ * distances come through the SAME {@link computeMetric} path as the primary.
+ */
+export function buildComparisonLapRows(
+  laps: readonly Lap[],
+  cumDistM: Float64Array | null,
+): ComparisonLapRow[] {
+  const mutable = laps as Lap[]
+  const fastest = fastestLapIndex(mutable, [])
+  const slowestRaw = slowestLapIndex(mutable, [])
+  const slowest = slowestRaw != null && slowestRaw !== fastest ? slowestRaw : null
+  return laps.map((lap) => ({
+    index: lap.index,
+    lapTimeMs: lap.lapTimeMs,
+    distanceM: computeMetric({ kind: 'distance' }, lap, { session: null, cumDistM }),
+    isFastest: lap.index === fastest,
+    isSlowest: lap.index === slowest,
+  }))
 }
