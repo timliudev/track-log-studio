@@ -24,6 +24,7 @@ import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceSegment, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
+import { buildComparisonLapHighlights } from '@/domain/analysis/crossSessionLapHighlight'
 import {
   STATIC_CARD_IDS,
   STATIC_CARD_TITLE_KEYS,
@@ -132,6 +133,27 @@ const highlightLaps = computed(() =>
 // shows whenever ≥2 laps are selected (independent of any overlay chart).
 const showMapAlign = computed(() => selectedLaps.value.length >= 2)
 
+// Cross-file lap selections (picked from a COMPARISON recording's own per-lap
+// table — see SessionLapComparison.vue's `toggleSessionLap`), resolved to
+// drawable track-map segments on THEIR OWN session's track. This is the
+// track-map counterpart of `highlightLaps` above: same "one bright segment
+// per selected lap" idea, but each entry carries its own track (and that
+// session's map offset) instead of indexing into the primary `track`. The
+// mapping itself is a pure function (crossSessionLapHighlight.ts, unit-
+// tested) so this computed is just the store/composable-shaped adapter.
+const comparisonLapHighlights = computed(() =>
+  buildComparisonLapHighlights(
+    lapStore.selectedAcrossSessions,
+    comparisonSessions.value.map((cs) => ({
+      id: cs.id,
+      color: cs.color,
+      track: cs.track,
+      laps: cs.laps,
+      offset: { x: analyzer.sessionOffsetOf(cs.id).mapX, y: analyzer.sessionOffsetOf(cs.id).mapY },
+    })),
+  ),
+)
+
 // #7: derive the track map's chart-zoom-follow focus from the shared xRange.
 // xRange is written ONLY by timeline-mode charts (overlay charts live in a
 // lap-relative grid and structurally never call setXRange — see
@@ -140,13 +162,16 @@ const showMapAlign = computed(() => selectedLaps.value.length >= 2)
 // so the map isn't emphasizing everything. DERIVED, not stored — no
 // state-writing watcher.
 //
-// Precedence: an explicit LAP SELECTION (highlightLaps non-empty) always wins
-// over chart-range focus — selecting laps is a deliberate, higher-intent
-// choice than an in-progress chart zoom, and the two would otherwise fight
-// over the map's single "emphasized segment" visual. Chart-range focus only
-// applies when nothing is selected.
+// Precedence: an explicit LAP SELECTION (highlightLaps OR comparisonLapHighlights
+// non-empty) always wins over chart-range focus — selecting laps is a
+// deliberate, higher-intent choice than an in-progress chart zoom, and the two
+// would otherwise fight over the map's single "emphasized segment" visual.
+// Chart-range focus only applies when nothing is selected (same-file or
+// cross-file).
 const focusRange = computed(() =>
-  highlightLaps.value.length > 0 ? null : xRangeToFocusIndices(xRange.value, xValues.value),
+  highlightLaps.value.length > 0 || comparisonLapHighlights.value.length > 0
+    ? null
+    : xRangeToFocusIndices(xRange.value, xValues.value),
 )
 
 // Sector gates for the track map: every gate is a real, working gate now (A1+A15
@@ -823,6 +848,7 @@ function titleForItemId(id: string): string {
                 :cursor-idx="cursorIdx"
                 :line="lapStore.line"
                 :highlight-laps="highlightLaps"
+                :comparison-lap-highlights="comparisonLapHighlights"
                 :focus-range="focusRange"
                 :color-values="colorValues"
                 :colormap="trackColormap"
