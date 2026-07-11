@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import type { ChartMode } from '@/stores/analyzerStore'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
-import { buildGearRatioTrace } from '@/domain/analysis/gearRatioTrace'
+import { cachedGearRatioTrace } from '@/domain/analysis/gearRatioTrace'
+import { MEASURED_TOTAL_RATIO_CHANNEL } from '@/domain/analysis/analyzerChannels'
+import type { ComparisonSession } from '@/composables/useSessionComparison'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 
 const props = defineProps<{
@@ -15,6 +17,9 @@ const props = defineProps<{
   xRange?: { min: number; max: number } | null
   externalCursor?: number | null
   selectedLaps?: Lap[]
+  comparisonSessions?: ComparisonSession[]
+  primaryFileId?: number | null
+  primaryFileName?: string
   fillHeight?: boolean
 }>()
 
@@ -31,18 +36,26 @@ const circumferenceMm = computed(() =>
     ? drivetrain.inversionWheelCircumferenceMm
     : drivetrain.cvt.wheelCircumferenceMm,
 )
-const trace = computed(() => buildGearRatioTrace(props.session, circumferenceMm.value))
-const hasFiniteData = computed(() => {
-  const data = trace.value.data
-  if (!data) return false
-  for (let i = 0; i < data.length; i++) if (Number.isFinite(data[i])) return true
-  return false
-})
-const fixedSeries = computed(() =>
-  hasFiniteData.value && trace.value.data
-    ? [{ name: t('analyzer.gear.ratioSeriesLabel') as string, data: trace.value.data }]
-    : [],
-)
+const trace = computed(() => cachedGearRatioTrace(props.session, circumferenceMm.value))
+const STORAGE_KEY = 'aracer-loga.gearChartChannels.v1'
+function loadExtraChannels(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')
+    return Array.isArray(value)
+      ? value.filter((id): id is string => typeof id === 'string' && id !== MEASURED_TOTAL_RATIO_CHANNEL)
+      : []
+  } catch {
+    return []
+  }
+}
+const extraChannels = ref<string[]>(loadExtraChannels())
+watch(extraChannels, (value) => {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(value)) } catch { /* optional UI persistence */ }
+}, { deep: true })
+const channelIds = computed(() => [MEASURED_TOTAL_RATIO_CHANNEL, ...extraChannels.value])
+function updateChannels(ids: string[]): void {
+  extraChannels.value = ids.filter((id) => id !== MEASURED_TOTAL_RATIO_CHANNEL)
+}
 const emptyMessage = computed(() => {
   switch (trace.value.error) {
     case 'rpm':
@@ -65,11 +78,16 @@ const emptyMessage = computed(() => {
     :x-range="xRange"
     :external-cursor="externalCursor"
     :selected-laps="selectedLaps"
-    :fixed-series="fixedSeries"
+    :comparison-sessions="comparisonSessions"
+    :primary-file-id="primaryFileId"
+    :primary-file-name="primaryFileName"
+    :channel-ids="channelIds"
+    :locked-channels="[MEASURED_TOTAL_RATIO_CHANNEL]"
     :empty-message="emptyMessage"
     :fill-height="fillHeight"
     @cursor="emit('cursor', $event)"
     @x-zoom="emit('xZoom', $event)"
     @update-mode="emit('updateMode', $event)"
+    @update-channels="updateChannels"
   />
 </template>
