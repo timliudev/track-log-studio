@@ -5,9 +5,9 @@ Status: `[ ]` open · `[~]` in progress · `[x]` done. When done, note the fixin
 Please keep this list free of working-hours logs (issue text + status + commit only).
 
 ## Comparison lap-table (must REUSE the primary LapTable's parsing + UI, not a parallel impl)
-- [~] **B1 / B17** Comparison-record laps must use the SAME parsing logic AND UI/component as the primary LapTable (read-only) — not a separate simplified table. (Sector column currently blank on comparison because it's a separate impl.) — branch `fix/comparison-laptable-unify`
-- [~] **B2** Valid-lap band (有效圈區間) does not apply to comparison-record laps. — same branch
-- [~] **B3** A duplicate lap list wrongly renders inside the sector-gate card. — same branch
+- [x] **B1 / B17** Comparison table now reuses the primary LapTable via a shared `LapTableView` (read-only); sector column computed from each comparison's own track through the shared gates. — `bbb9c15`
+- [x] **B2** Valid-lap time/distance band now marks comparison laps as excluded, same as primary. — `bbb9c15`
+- [x] **B3** Removed the duplicate lap list that was double-mounted inside the sector-gate card. — `bbb9c15`
 
 ## LapTable layout
 - [ ] **B4** Primary-file title belongs above the table (not top of whole card); "add column" button on the same row as the line/ECU source toggle; clear-selection on that row too but far right.
@@ -32,7 +32,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [ ] **B14** List ALL matching segments, not just the single fastest (e.g. 10 traffic-light launches → ~10 0→50 km/h or 0→100 m segments).
 
 ## PWA
-- [~] **B13** Convert the project logo to PNG icons (192/512 + maskable + iOS 180); add an "update available" toast (iOS/Android UX-correct). — branch `feat/pwa-icons-toast`
+- [x] **B13** PNG icon set generated from `public/app-icon.svg` (192/512 + maskable + iOS 180 + favicon); `virtual:pwa-register/vue` update-available toast added. — `5fdd152`
 
 ## Settings
 - [ ] **B19** Define + implement settings export scope (theme/language/timezone/units, drivetrain, and layout — dashboard layout + panel state; likely a "include layout" toggle) + import.
