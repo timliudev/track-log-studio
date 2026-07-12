@@ -87,14 +87,32 @@ describe('SessionLapComparison', () => {
     expect(analyzer.sessionOffsetOf(2).timeSec).toBeCloseTo(-0.1)
   })
 
-  it('toggles a lap into the cross-recording overlay via its row checkbox', async () => {
+  // B1b: no independent checkbox column — clicking the row itself (same
+  // interaction as the primary table) toggles the cross-recording overlay
+  // selection, and a selected row shows a color swatch in its lead cell
+  // (matching the primary table's lead-column rhythm), using the SAME
+  // per-session identity color the cross-file highlight on the map draws
+  // with (`table.color` === `categoricalColor(fileId)`, see
+  // useSessionComparison.ts / crossSessionLapHighlight.ts).
+  it('toggles a lap into the cross-recording overlay by clicking its row, with a matching-color swatch', async () => {
     const lapStore = useLapStore()
     const wrapper = mountWith()
 
-    const checkbox = wrapper.findAll('tbody tr input[type="checkbox"]')[0]
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+
+    const firstRow = wrapper.findAll('tbody tr')[0]
     expect(lapStore.isSessionLapSelected(2, 0)).toBe(false)
-    await checkbox.setValue(true)
+    expect(firstRow.find('.swatch').exists()).toBe(false)
+
+    await firstRow.trigger('click')
     expect(lapStore.isSessionLapSelected(2, 0)).toBe(true)
+    const swatch = firstRow.find('.swatch')
+    expect(swatch.exists()).toBe(true)
+    expect(swatch.attributes('style')).toContain('#ff0000')
+
+    await firstRow.trigger('click')
+    expect(lapStore.isSessionLapSelected(2, 0)).toBe(false)
+    expect(firstRow.find('.swatch').exists()).toBe(false)
   })
 
   it('renders the SAME configured columns as the primary table, read-only', async () => {

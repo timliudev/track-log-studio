@@ -53,6 +53,36 @@ describe('lapStore', () => {
     expect(s.source).toBe('line')
   })
 
+  // B5: 'line' vs 'ecu' can produce a different lap set/count entirely, so an
+  // existing selection (primary or cross-session) would silently point at the
+  // wrong lap — or an out-of-range index — once the source changes. Manual
+  // exclusions are independent of detection source and must survive.
+  it('setSource clears the primary and cross-session lap selections but leaves manual exclusions', () => {
+    const s = useLapStore()
+    s.toggleLap(0)
+    s.toggleLap(1)
+    s.toggleSessionLap(10, 2)
+    s.toggleExcluded(0)
+
+    s.setSource('ecu')
+
+    expect(s.selected).toEqual([])
+    expect(s.selectedAcrossSessions).toEqual([])
+    // Manual exclusion is a separate, source-independent facet.
+    expect(s.manualExcluded).toEqual([0])
+  })
+
+  it('setSource is a no-op (does not clear selection) when the source is unchanged', () => {
+    const s = useLapStore()
+    s.toggleLap(1)
+    s.toggleSessionLap(10, 2)
+
+    s.setSource('line') // already 'line'
+
+    expect(s.selected).toEqual([1])
+    expect(s.selectedAcrossSessions).toEqual([{ fileId: 10, index: 2 }])
+  })
+
   it('starts with no laps selected', () => {
     const s = useLapStore()
     expect(s.selected).toEqual([])

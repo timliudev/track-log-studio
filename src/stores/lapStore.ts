@@ -146,8 +146,21 @@ export const useLapStore = defineStore('lap', () => {
     line.value = null
   }
 
+  /**
+   * Switch lap-detection source. The two sources can (and usually do) produce
+   * a DIFFERENT set/count of laps, so any existing lap selection — both the
+   * primary `selected` indices and cross-session `selectedAcrossSessions`
+   * refs into THIS session's laps — would silently point at the wrong laps
+   * (or an out-of-range index) once the source changes. Clear both (B5);
+   * manual exclusions are untouched (they're independent of which source
+   * detected the laps). Re-clicking the already-active source is a true
+   * no-op — nothing to invalidate — so the selection is only cleared when
+   * the source actually changes.
+   */
   function setSource(s: LapSource): void {
+    if (source.value === s) return
     source.value = s
+    clearAllLapSelections()
   }
 
   /** Add lap `i` to the selection (appended), or remove it when already present. */
