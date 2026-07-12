@@ -502,6 +502,9 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - 效能稽核：載入/解析/計算/渲染/記憶體實測，結論暫無需優化
 - 匯入格式矩陣（loga/nmea/vbo/rcz/xrk/rcnx，含 `.xrz` 壓縮包）+ 可插拔 Importer 架構 → 狀態見 [`IMPORT-FORMATS-STATUS.md`](./IMPORT-FORMATS-STATUS.md)，規格研究見 [`specs/`](./specs/)
 - 多檔（multi-session）同時分析比較（見 [`MULTI-SESSION-ANALYSIS-DESIGN.md`](./MULTI-SESSION-ANALYSIS-DESIGN.md) Phase 1–4 全數完成：時序圖/XY 散佈圖/圈次表跨檔比較、地圖疊圖與偏移對位、跨檔選圈疊圖、疊圖↔地圖游標連動）、齒比併入主時序圖（`@derived/drivetrain/measured-total-ratio` 衍生通道）、卡片收折縮小格位＋鄰卡補位（FLIP 平滑）
+- 軌跡圖極值標記收斂：未選圈時的「全程」標記從「每圈各一組局部極值（多圈時灑滿地圖）」改為單一 min/max 各一枚（`findGlobalChannelExtremum`）；選圈後維持原本每圈多極值行為不變
+- 軌跡圖「卡片內最大化」改為桌面/行動共通：不再是手機專屬、蓋滿全螢幕的 Teleport-to-body 覆蓋層，改為在卡片內就地放大（隱藏卡片其餘控制項，地圖依現有 flex 版面自動撐滿），再點一次或 Esc 還原
+- 釘選卡片新增可調大小（右下角拖曳把手，雙擊重設回原比例），維持收折卡片刻意不可調整大小的既有規則
 
 ---
 
