@@ -9,8 +9,6 @@ import { useLapStore } from '@/stores/lapStore'
 import { useSectors } from '@/composables/useSectors'
 import { computeSectorTimes, computeOptimalLap } from '@/domain/analysis/sectorTiming'
 import { formatLapTime } from '@/domain/analysis/format'
-import type { ComparisonSession } from '@/composables/useSessionComparison'
-import SessionLapComparison from './SessionLapComparison.vue'
 
 const props = defineProps<{
   laps: Lap[]
@@ -20,7 +18,6 @@ const props = defineProps<{
   /** Current map hover sample, so "add gate" can drop a gate at the cursor
    *  position rather than always at the reference lap's midpoint. */
   cursorIdx: number | null
-  comparisonSessions?: ComparisonSession[]
 }>()
 
 const { t } = useI18n()
@@ -121,11 +118,6 @@ const hasOptimalData = computed(
       </template>
       <p v-else class="optimal-empty">{{ t('analyzer.optimalLapNoData') }}</p>
     </div>
-    <SessionLapComparison
-      :primary-laps="laps"
-      :primary-excluded="lapStore.excluded"
-      :comparisons="comparisonSessions ?? []"
-    />
   </div>
 </template>
 

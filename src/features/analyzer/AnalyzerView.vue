@@ -1021,7 +1021,6 @@ function titleForItemId(id: string): string {
                 :track="track"
                 :time-ms="timeMs"
                 :cursor-idx="cursorIdx"
-                :comparison-sessions="comparisonSessions"
               />
             </DashboardCard>
 
