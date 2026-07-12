@@ -130,9 +130,6 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: var(--space);
-  padding-top: var(--space);
-  border-top: 1px solid var(--color-border);
 }
 .tc-title {
   font-size: 0.9rem;

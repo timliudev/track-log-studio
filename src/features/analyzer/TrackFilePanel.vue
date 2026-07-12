@@ -242,9 +242,6 @@ watch(() => props.track, refreshSaved, { immediate: true })
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: var(--space);
-  padding-top: var(--space);
-  border-top: 1px solid var(--color-border);
 }
 .row {
   display: flex;
