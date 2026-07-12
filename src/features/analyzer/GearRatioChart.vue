@@ -23,7 +23,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   cursor: [number | null]
-  xZoom: [{ min: number; max: number }]
+  xZoom: [{ min: number; max: number } | null]
 }>()
 
 const { t } = useI18n()

@@ -56,7 +56,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   cursor: [number | null]
-  xZoom: [{ min: number; max: number }]
+  xZoom: [{ min: number; max: number } | null]
   updateChannels: [string[]]
 }>()
 
@@ -446,9 +446,11 @@ function onCursor(idx: number | null): void {
 }
 // The no-selection full-session view is the only rendering that shares the
 // session-wide xRange (overlay's lap-relative grid is structurally unrelated
-// to it — see focusRange.ts) — so xZoom only propagates up while there's no
-// lap selection.
-function onXZoom(r: { min: number; max: number }): void {
+// to it — see focusRange.ts) — so xZoom (including a reset-to-null from
+// UPlotChart's own reset-zoom control) only propagates up while there's no
+// lap selection. A selection-mode chart's local zoom/reset stays purely
+// local to that chart (see UPlotChart.vue's `resetZoomLocal`).
+function onXZoom(r: { min: number; max: number } | null): void {
   if (!hasSelection.value) emit('xZoom', r)
 }
 

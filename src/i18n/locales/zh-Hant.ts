@@ -186,6 +186,8 @@ export default {
     extremumMax: '最大',
     resetView: '重設視角',
     zoomHint: '滾輪縮放、拖曳平移、雙指縮放、雙擊重設',
+    resetZoom: '重設縮放',
+    chartZoomHint: '拖曳框選縮放，按住 Shift 拖曳（或雙指）可平移，雙擊或按重設縮放可恢復全視圖',
     maximizeMap: '放大賽道地圖',
     minimizeMap: '還原賽道地圖',
     trackOverlayTitle: '疊加軌跡',

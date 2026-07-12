@@ -188,6 +188,8 @@ export default {
     extremumMax: 'Max',
     resetView: 'Reset view',
     zoomHint: 'Scroll to zoom, drag to pan, pinch to zoom, double-click to reset',
+    resetZoom: 'Reset zoom',
+    chartZoomHint: 'Drag to box-zoom, hold Shift and drag (or use two fingers) to pan, double-click or Reset zoom to restore the full view',
     maximizeMap: 'Maximize track map',
     minimizeMap: 'Restore track map',
     trackOverlayTitle: 'Overlay tracks',
