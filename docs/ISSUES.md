@@ -29,7 +29,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [ ] **B16** Treat the time display as one of those fields (relates to B15 and B8).
 
 ## Acceleration test
-- [ ] **B14** List ALL matching segments, not just the single fastest (e.g. 10 traffic-light launches → ~10 0→50 km/h or 0→100 m segments).
+- [~] **B14** List ALL matching segments, not just the single fastest (e.g. 10 traffic-light launches → ~10 0→50 km/h or 0→100 m segments). — branch `feat/accel-all-segments`
 
 ## PWA
 - [x] **B13** PNG icon set generated from `public/app-icon.svg` (192/512 + maskable + iOS 180 + favicon); `virtual:pwa-register/vue` update-available toast added. — `5fdd152`
