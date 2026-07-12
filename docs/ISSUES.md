@@ -44,7 +44,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 
 ## Card chrome
 - [x] **B27** Root cause: leftover `border-top`/`margin-top`/`padding-top` on the panel roots (a stacked-panel divider from before each panel got its own card). Removed from GearPanel/AccelTestPanel/SectorPanel. — `9f0a085`
-- [ ] **B27b** Same leftover divider style also exists in `TrackChannelPanel.vue` and `TrackFilePanel.vue` (each solo in its own card) — remove there too.
+- [x] **B27b** Same leftover divider (`margin-top`/`padding-top`/`border-top`) removed from `TrackChannelPanel.vue` and `TrackFilePanel.vue` root class. — `68080f2`
 
 ## Settings
 - [ ] **B19** Define + implement settings export scope (theme/language/timezone/units, drivetrain, and layout — dashboard layout + panel state; likely a "include layout" toggle) + import.
