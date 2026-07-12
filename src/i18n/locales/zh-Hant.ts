@@ -10,6 +10,12 @@ export default {
     githubTooltip: '在 GitHub 上為本專案加星',
     githubStar: 'Star',
   },
+  pwa: {
+    updateAvailable: '有新版本可用',
+    offlineReady: '應用程式已可離線使用',
+    reload: '重新整理',
+    dismiss: '關閉',
+  },
   nav: {
     converter: '轉換',
     analyzer: '分析',
