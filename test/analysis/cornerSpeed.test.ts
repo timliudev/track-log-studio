@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectChannelExtrema, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { detectChannelExtrema, findGlobalChannelExtremum, resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LogSession } from '@/domain/model/LogSession'
 
@@ -204,6 +204,71 @@ describe('detectChannelExtrema — relative default prominence (no explicit minP
     const values = withFeature(n, 0, 50, 10, 5) // small 5-unit bump on a ~5 range
     expect(detectChannelExtrema(track, values, 0, n, { mode: 'max' })).toHaveLength(1)
     expect(detectChannelExtrema(track, values, 0, n, { mode: 'max', minProminence: 100 })).toHaveLength(0)
+  })
+})
+
+describe('findGlobalChannelExtremum (B6: single whole-track marker)', () => {
+  it('returns null when there are no valid samples in range', () => {
+    const n = 10
+    const track = straightTrack(n)
+    track.valid.fill(0)
+    const values = new Float64Array(n).fill(100)
+    expect(findGlobalChannelExtremum(track, values, 0, n, 'min')).toBeNull()
+  })
+
+  it('finds the single global maximum across MANY local peaks (e.g. one corner per lap)', () => {
+    // Simulates a multi-lap session: several corners of similar depth plus
+    // one clearly-highest bump. detectChannelExtrema would report one peak
+    // PER corner here; findGlobalChannelExtremum must collapse to exactly
+    // the single highest point regardless of how many local peaks exist.
+    const n = 400
+    let values = new Float64Array(n).fill(4000)
+    for (const center of [40, 140, 240, 340]) {
+      const bump = withFeature(n, 4000, center, 15, 7000)
+      values = values.map((v, i) => Math.max(v, bump[i]))
+    }
+    // The tallest bump, clearly above the rest.
+    const tallest = withFeature(n, 4000, 190, 15, 9000)
+    values = values.map((v, i) => Math.max(v, tallest[i]))
+    const track = straightTrack(n)
+
+    // Sanity: the multi-peak detector really does find several peaks here.
+    expect(detectChannelExtrema(track, values, 0, n, { mode: 'max' }).length).toBeGreaterThan(1)
+
+    const global = findGlobalChannelExtremum(track, values, 0, n, 'max')
+    expect(global).not.toBeNull()
+    expect(global?.index).toBe(190)
+    expect(global?.value).toBeCloseTo(9000, 0)
+  })
+
+  it('finds the single global minimum the same way', () => {
+    const n = 300
+    let values = new Float64Array(n).fill(150)
+    for (const center of [30, 120, 270]) {
+      const dip = withFeature(n, 150, center, 10, 90)
+      values = values.map((v, i) => Math.min(v, dip[i]))
+    }
+    const deepest = withFeature(n, 150, 200, 10, 40)
+    values = values.map((v, i) => Math.min(v, deepest[i]))
+    const track = straightTrack(n)
+
+    const global = findGlobalChannelExtremum(track, values, 0, n, 'min')
+    expect(global?.index).toBe(200)
+    expect(global?.value).toBeCloseTo(40, 0)
+    expect(global?.kind).toBe('min')
+  })
+
+  it('respects [startIdx, endIdx) bounds and measures lapDistanceM from startIdx', () => {
+    const n = 100
+    const values = withFeature(n, 0, 70, 10, 100) // peak at index 70, outside [0, 50)
+    const track = straightTrack(n, 5) // 5m/sample
+    // Excluding the peak's range should find the (much smaller) baseline max instead.
+    const outOfRange = findGlobalChannelExtremum(track, values, 0, 50, 'max')
+    expect(outOfRange?.index).not.toBe(70)
+    const inRange = findGlobalChannelExtremum(track, values, 60, 100, 'max')
+    expect(inRange?.index).toBe(70)
+    // lapDistanceM measured from startIdx=60 (5m/sample * (70-60) = 50m).
+    expect(inRange?.lapDistanceM).toBeCloseTo(50, 0)
   })
 })
 
