@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useLapStore, type LapMetricColumn } from '@/stores/lapStore'
+import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { type Aggregation } from '@/domain/analysis/lapAggregate'
-import { computeMetric, type LapContext } from '@/domain/analysis/lapMetrics'
+import { type LapContext } from '@/domain/analysis/lapMetrics'
 import { computeSectorTimes } from '@/domain/analysis/sectorTiming'
-import { fastestLapIndex, slowestLapIndex } from '@/domain/analysis/bestLap'
-import { formatLapTime, formatMetricValue, formatMsColumn } from '@/domain/analysis/format'
+import { fastestLapIndex } from '@/domain/analysis/bestLap'
+import { buildLapTableRows } from '@/domain/analysis/sessionLapSummary'
 import { lapColor } from './lapColors'
-import { aggLabel as sharedAggLabel, columnHeader as sharedColumnHeader } from './lapColumnHeader'
+import { aggLabel as sharedAggLabel } from './lapColumnHeader'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import LapTableView from './LapTableView.vue'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -117,67 +118,16 @@ function excludeDisabled(index: number): boolean {
   return reason === 'timeBand' || reason === 'distBand' || reason === 'sector'
 }
 
-// The fastest lap among the non-excluded laps; gets a marker in the table so
-// excluding a "cut" lap visibly promotes the next-best one. null when none.
-const bestLapIndex = computed<number | null>(() =>
-  fastestLapIndex(props.laps, lapStore.excluded),
-)
-
-// The slowest non-excluded lap, marked only when it's a DIFFERENT lap than the
-// fastest — with 0 or 1 included laps the two coincide and a second marker on
-// the same row is just noise.
-const worstLapIndex = computed<number | null>(() => {
-  const i = slowestLapIndex(props.laps, lapStore.excluded)
-  return i != null && i !== bestLapIndex.value ? i : null
-})
-
-/**
- * Localized header for a configurable column's metric. Delegates to the
- * shared {@link sharedColumnHeader} so the primary table and any
- * comparison-recording lap table format headers identically.
- */
-function columnHeader(metric: LapMetricColumn['metric']): string {
-  return sharedColumnHeader(t, metric)
-}
-
-/** Format an aggregated value: '—' for NaN, finer precision for small magnitudes. */
-const formatValue = formatMetricValue
-
 /** How many sector slots exist for the sector-column picker (gates + 1). */
 const sectorCount = computed(() => sectorStore.gates.length + 1)
 
-interface Row {
-  index: number
-  lapTime: string
-  distanceKm: string
-  /** Per-metric value per configured column, aligned to lapStore.columns. */
-  cells: string[]
-}
-
-const rows = computed<Row[]>(() => {
-  const c = ctx.value
-  const cols = lapStore.columns
-
-  return props.laps.map((l) => {
-    // Built-in #/time/distance go through the SAME computeMetric path as the
-    // configurable columns, so every displayed number has one source of truth.
-    const lapTimeMs = computeMetric({ kind: 'lapTime' }, l, c)
-    const distanceM = computeMetric({ kind: 'distance' }, l, c)
-    const cells = cols.map((col) => {
-      const v = computeMetric(col.metric, l, c)
-      if (col.metric.kind === 'sectorTime') return formatMsColumn(v, false)
-      if (col.metric.kind === 'delta') return formatMsColumn(v, true)
-      return formatValue(v)
-    })
-
-    return {
-      index: l.index,
-      lapTime: formatLapTime(lapTimeMs),
-      distanceKm: Number.isNaN(distanceM) ? '—' : (distanceM / 1000).toFixed(3),
-      cells,
-    }
-  })
-})
+// Per-lap rows for the SHARED LapTableView presentational body — the same
+// row-building path a comparison recording's read-only table uses (see
+// sessionLapSummary.ts's buildLapTableRows), so the primary table and every
+// comparison table draw their numbers/markers from one source of truth.
+const rows = computed(() =>
+  buildLapTableRows(props.laps, ctx.value, lapStore.columns.map((c) => c.metric), lapStore.excluded),
+)
 </script>
 
 <template>
@@ -286,60 +236,35 @@ const rows = computed<Row[]>(() => {
       {{ t('analyzer.clearLapSelection') }}
     </button>
 
-    <p v-if="laps.length === 0" class="empty">{{ t('analyzer.noLaps') }}</p>
-
-    <div v-else class="table-scroll">
-    <table>
-      <thead>
-        <tr>
-          <th>{{ t('analyzer.lap') }}</th>
-          <th>{{ t('analyzer.lapTime') }}</th>
-          <th>{{ t('analyzer.lapDistance') }}</th>
-          <th v-for="col in lapStore.columns" :key="col.id">
-            {{ columnHeader(col.metric) }}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="r in rows"
-          :key="r.index"
-          :class="{ selected: lapStore.isSelected(r.index), excluded: lapStore.isExcluded(r.index) }"
-          @click="emit('select', r.index)"
-        >
-          <td>
-            <div class="lap-cell">
-              <button
-                type="button"
-                class="exclude"
-                :class="{ on: lapStore.isExcluded(r.index), 'auto-disabled': excludeDisabled(r.index) }"
-                v-tooltip="excludeLabel(r.index)"
-                :aria-label="excludeLabel(r.index)"
-                :aria-pressed="lapStore.isExcluded(r.index)"
-                :aria-disabled="excludeDisabled(r.index)"
-                @click.stop="!excludeDisabled(r.index) && lapStore.toggleExcluded(r.index)"
-              >
-                ⦸
-              </button>
-              <span
-                v-if="lapStore.isSelected(r.index)"
-                class="swatch"
-                :style="{ background: swatchColor(r.index) }"
-              />
-              {{ r.index + 1 }}
-            </div>
-          </td>
-          <td>
-            <span v-if="r.index === bestLapIndex" class="mark" v-tooltip="t('analyzer.bestLap')">⚡</span>
-            <span v-else-if="r.index === worstLapIndex" class="mark" v-tooltip="t('analyzer.slowestLap')">🐢</span>
-            {{ r.lapTime }}
-          </td>
-          <td>{{ r.distanceKm === '—' ? '—' : `${r.distanceKm} km` }}</td>
-          <td v-for="(cell, i) in r.cells" :key="lapStore.columns[i].id">{{ cell }}</td>
-        </tr>
-      </tbody>
-    </table>
-    </div>
+    <LapTableView
+      :rows="rows"
+      :columns="lapStore.columns"
+      :is-row-selected="lapStore.isSelected"
+      @row-click="emit('select', $event)"
+    >
+      <template #lead="{ row }">
+        <div class="lap-cell">
+          <button
+            type="button"
+            class="exclude"
+            :class="{ on: lapStore.isExcluded(row.index), 'auto-disabled': excludeDisabled(row.index) }"
+            v-tooltip="excludeLabel(row.index)"
+            :aria-label="excludeLabel(row.index)"
+            :aria-pressed="lapStore.isExcluded(row.index)"
+            :aria-disabled="excludeDisabled(row.index)"
+            @click.stop="!excludeDisabled(row.index) && lapStore.toggleExcluded(row.index)"
+          >
+            ⦸
+          </button>
+          <span
+            v-if="lapStore.isSelected(row.index)"
+            class="swatch"
+            :style="{ background: swatchColor(row.index) }"
+          />
+          {{ row.index + 1 }}
+        </div>
+      </template>
+    </LapTableView>
     <SessionLapComparison
       :primary-laps="laps"
       :primary-excluded="lapStore.excluded"
@@ -477,11 +402,6 @@ const rows = computed<Row[]>(() => {
   font-size: 0.9rem;
 }
 
-.empty {
-  color: var(--color-text-muted);
-  font-size: 0.9rem;
-  margin: 0;
-}
 .clear-selection {
   align-self: flex-start;
   background: var(--color-bg);
@@ -495,57 +415,6 @@ const rows = computed<Row[]>(() => {
 .clear-selection:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
-}
-/* Horizontal scroll so extra channel columns scroll instead of squeezing the
-   cells into multi-line wraps (which misaligned rows on narrow phones). */
-.table-scroll {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-th,
-td {
-  text-align: right;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--color-border);
-  /* middle-align every cell so a wrapped header/value can't stagger its row */
-  vertical-align: middle;
-}
-/* Keep data values on one line; the scroll container handles overflow. Headers
-   may still wrap to keep column widths reasonable. */
-tbody td {
-  white-space: nowrap;
-}
-th:first-child,
-td:first-child {
-  text-align: left;
-}
-th {
-  color: var(--color-text-muted);
-  font-weight: 600;
-}
-tbody tr {
-  cursor: pointer;
-}
-tbody tr:hover {
-  background: var(--color-bg);
-}
-tbody tr.selected {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-/* Excluded (garbage) laps are dimmed and struck through; selection styling still
-   wins when both apply so a selected-for-inspection bad lap stays readable. */
-tbody tr.excluded td {
-  color: var(--color-text-muted);
-  text-decoration: line-through;
-}
-tbody tr.excluded.selected td {
-  text-decoration: none;
 }
 .lap-cell {
   display: flex;
@@ -584,10 +453,6 @@ tbody tr.excluded.selected td {
 .exclude.auto-disabled:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
-}
-.mark {
-  /* not decorative-only: the title attr conveys fastest/slowest to AT */
-  margin-right: 2px;
 }
 .swatch {
   display: inline-block;
