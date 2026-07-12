@@ -10,13 +10,18 @@ export interface GgSeries {
    *  Present only when a colour-axis channel is picked; when set on ANY
    *  series in the chart, every point across every series is coloured by
    *  this value via a continuous colormap instead of `color` (see
-   *  `colorExtent`/`buildOption`'s `visualMap`) — the flat per-lap `color`
-   *  is then only used as a fallback border/legend swatch. */
+   *  `colorExtent`/`buildOption`'s `visualMap`) — the flat per-lap/per-file
+   *  `color` is then unused for point colour (B25 — see `symbol` below for
+   *  how file identity survives that). */
   colorValues?: number[]
-  /** Third-channel values used only by the item tooltip. This is separate
-   * from `colorValues` so multi-session charts can retain session identity
-   * colours while still exposing the selected third channel on hover. */
-  tooltipValues?: number[]
+  /** B25 — ECharts symbol name identifying which FILE this series' points
+   *  belong to (assigned per comparison-list position — see
+   *  `markerShapeForIndex` in domain/analysis/markerShapes.ts). Defaults to
+   *  'circle' when omitted, so every pre-existing caller (single-file/
+   *  per-lap series) renders exactly as before. Doubles as the shape
+   *  legend's icon when the colour axis is active with more than one shape
+   *  in play — see `shouldShowMarkerLegend`. */
+  symbol?: string
 }
 
 function escapeTooltipHtml(value: string): string {
@@ -156,21 +161,19 @@ export function colorExtent(series: GgSeries[]): { min: number; max: number } | 
   return { min, max }
 }
 
-/** Raw extent for tooltip precision, including both continuous-colour values
- * and tooltip-only values used by identity-coloured multi-session series. */
-export function thirdValueExtent(series: GgSeries[]): { min: number; max: number } | null {
-  let min = Infinity
-  let max = -Infinity
-  for (const s of series) {
-    const values = s.colorValues ?? s.tooltipValues
-    if (!values) continue
-    for (const value of values) {
-      if (!Number.isFinite(value)) continue
-      if (value < min) min = value
-      if (value > max) max = value
-    }
-  }
-  return Number.isFinite(min) ? { min, max } : null
+/**
+ * B25 — whether to show the marker-SHAPE legend (icon = each series'
+ * `symbol`, label = its name). Two conditions must both hold: the colour
+ * axis has actually taken hue away from file identity (`hasColor`), AND more
+ * than one distinct shape is actually in play. A single-file scatter (or any
+ * chart where every series still defaults to 'circle') would otherwise show
+ * a one-entry legend that explains nothing — see markerShapes.ts's doc for
+ * why shape is the file-identity channel once colour is taken.
+ */
+export function shouldShowMarkerLegend(series: GgSeries[], hasColor: boolean): boolean {
+  if (!hasColor) return false
+  const shapes = new Set(series.map((s) => s.symbol ?? 'circle'))
+  return shapes.size > 1
 }
 
 /**
@@ -297,11 +300,18 @@ export function formatAxisTick(value: number, span: number): string {
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts/core'
 import { ScatterChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { colormapSwatches } from '@/domain/analysis/colormap'
 
-echarts.use([ScatterChart, GridComponent, TooltipComponent, VisualMapComponent, CanvasRenderer])
+echarts.use([
+  ScatterChart,
+  GridComponent,
+  TooltipComponent,
+  VisualMapComponent,
+  LegendComponent,
+  CanvasRenderer,
+])
 
 // Colour-axis feature — fixed to viridis: perceptually uniform (equal data
 // steps read as equal visual steps, unlike e.g. jet/rainbow) and
@@ -389,9 +399,12 @@ function buildOption(): echarts.EChartsCoreOption {
   const colorRange = colorExtent(props.series)
   const hasColor = colorRange !== null
   const colorSpan = colorRange ? colorRange.max - colorRange.min : NaN
-  const thirdRange = thirdValueExtent(props.series)
-  const thirdSpan = thirdRange ? thirdRange.max - thirdRange.min : NaN
-  const thirdDecimals = axisLabelDecimals(thirdSpan)
+  const thirdDecimals = axisLabelDecimals(colorSpan)
+  // B25 — file identity moves to marker shape once the colour axis is
+  // active (see markerShapes.ts's doc); show a shape legend only when that's
+  // actually true AND more than one shape is in play (see
+  // `shouldShowMarkerLegend`'s doc).
+  const showMarkerLegend = shouldShowMarkerLegend(props.series, hasColor)
 
   // Explicit per-axis ranges. Needed for BOTH 1:1 flavours: echarts' own
   // auto-ranging applies nice-tick rounding per axis independently, which
@@ -448,7 +461,10 @@ function buildOption(): echarts.EChartsCoreOption {
     // doesn't overlap the plotted points.
     right: hasColor ? 96 : 16,
     top: 16,
-    bottom: hasXName ? 56 : 40,
+    // B25 — reserve a strip along the bottom for the shape legend (a
+    // floating component, like the colorbar above) so it doesn't overlap the
+    // X-axis name/plotted points.
+    bottom: (hasXName ? 56 : 40) + (showMarkerLegend ? 22 : 0),
   }
   // #6 — 1:1 mode: measure the CURRENT container and force a literal SQUARE
   // grid box (equal pixel width/height — see `squareGridBox`), combined with
@@ -535,9 +551,32 @@ function buildOption(): echarts.EChartsCoreOption {
           formatter: (v: number) => formatAxisTick(v, colorSpan),
         }
       : undefined,
+    // B25 — shape legend: icon = each series' marker `symbol`, label = its
+    // name (the file name for a multi-file scatter). Icons are drawn in a
+    // neutral stroke colour (not `s.color`) since colour no longer encodes
+    // file identity once this legend is shown (hue is the colour axis's
+    // gradient instead) — see `shouldShowMarkerLegend`'s doc.
+    legend: showMarkerLegend
+      ? {
+          type: 'plain',
+          bottom: 2,
+          left: 'center',
+          itemWidth: 12,
+          itemHeight: 12,
+          textStyle: { color: axisStroke, fontSize: 11 },
+          data: props.series.map((s) => ({
+            name: s.name,
+            icon: s.symbol ?? 'circle',
+          })),
+          itemStyle: { color: axisStroke, borderColor: axisStroke },
+        }
+      : undefined,
     series: props.series.map((s) => ({
       name: s.name,
       type: 'scatter',
+      // B25 — marker shape identifies which file this series is (defaults
+      // to 'circle', same look as before B25 for every pre-existing caller).
+      symbol: s.symbol ?? 'circle',
       // Colour-axis feature — when active, every point across every series
       // carries its colour value as a 3rd tuple element (visualMap's
       // `dimension: 2` reads it); when inactive, points stay plain [x, y]
@@ -545,9 +584,7 @@ function buildOption(): echarts.EChartsCoreOption {
       data:
         hasColor && s.colorValues
           ? s.points.map((p, i) => [p[0], p[1], s.colorValues![i]])
-          : s.tooltipValues
-            ? s.points.map((p, i) => [p[0], p[1], s.tooltipValues![i]])
-            : s.points,
+          : s.points,
       symbolSize: 4,
       // visualMap owns `itemStyle.color` once active — setting it here too
       // would just be overridden, so only `opacity` (a touch higher than the
