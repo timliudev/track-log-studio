@@ -26,7 +26,6 @@ function mountChart(session: LogSession) {
   const i18n = createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })
   return mount(GearRatioChart, {
     props: {
-      mode: 'timeline',
       session,
       xValues: new Float64Array([0, 0.1, 0.2]),
       selectedLaps: [],
@@ -48,12 +47,8 @@ describe('GearRatioChart', () => {
     const wrapper = mountChart(makeSession())
     const plot = wrapper.findComponent(TimeSeriesChart)
     expect(plot.props('chart')).toBeUndefined()
-    expect(plot.props('mode')).toBe('timeline')
     expect(plot.props('channelIds')).toEqual([MEASURED_TOTAL_RATIO_CHANNEL])
     expect(plot.props('lockedChannels')).toEqual([MEASURED_TOTAL_RATIO_CHANNEL])
-
-    plot.vm.$emit('updateMode', 'overlay')
-    expect(wrapper.emitted('updateMode')).toEqual([['overlay']])
   })
 
   it('keeps the shared chart pipeline without a separate removable card and supplies a useful prerequisite error', () => {
@@ -84,7 +79,6 @@ describe('GearRatioChart', () => {
     })
     const wrapper = mount(GearRatioChart, {
       props: {
-        mode: 'timeline',
         session: makeSession(),
         xValues: new Float64Array([0, 0.1, 0.2]),
         selectedLaps: [],

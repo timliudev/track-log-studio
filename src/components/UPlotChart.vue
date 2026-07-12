@@ -19,13 +19,37 @@ export function fillPlotHeight(
   const h = hostHeight - legendHeight
   return h > 0 ? h : fallback
 }
+
+/**
+ * B9 — whether `range` is a real ZOOM relative to `bounds` (the full data
+ * extent): true when `range` doesn't cover (nearly) all of `bounds`, within
+ * `epsFraction` of `bounds`' span (guards against float-precision false
+ * positives right after a reset-to-bounds `setScale`). A null `bounds` (no
+ * data yet) is never "zoomed". Drives the reset-zoom button's visibility.
+ *
+ * Plain-script export (same pattern as `fillPlotHeight` above) so the rule is
+ * unit-testable without mounting uPlot.
+ */
+export function isZoomed(
+  range: { min: number; max: number },
+  bounds: { min: number; max: number } | null,
+  epsFraction = 1e-6,
+): boolean {
+  if (!bounds) return false
+  const span = bounds.max - bounds.min
+  const eps = span > 0 ? span * epsFraction : 0
+  return range.min > bounds.min + eps || range.max < bounds.max - eps
+}
 </script>
 
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { panRange, pinchRange, type XRange } from '@/features/analyzer/xRangeGesture'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   data: uPlot.AlignedData
@@ -53,7 +77,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   cursor: [number | null]
-  xZoom: [{ min: number; max: number }]
+  /** B9 — `null` means "reset to the full data extent" (the reset-zoom
+   *  control below, or a caller-driven clear of a synced shared range). */
+  xZoom: [{ min: number; max: number } | null]
   plotWidth: [number]
 }>()
 
@@ -83,6 +109,19 @@ function clearApplyingRangeSoon(): void {
   })
 }
 let applyingCursor = false
+
+// B9 — whether the chart's CURRENT x scale is narrower than the full data
+// extent, i.e. "there's something to reset". Drives the reset-zoom button's
+// visibility. Updated from the `setScale` hook UNCONDITIONALLY (unlike the
+// `xZoom` emit below, which is guarded by `applyingRange`) so a
+// programmatic zoom — e.g. focusing a lap or an acceleration segment, which
+// drives this chart via the `xRange` prop rather than a user drag — still
+// makes the reset button appear/disappear correctly.
+const zoomed = ref(false)
+
+function updateZoomed(min: number, max: number): void {
+  zoomed.value = isZoomed({ min, max }, dataXBounds())
+}
 
 function themeColor(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -137,9 +176,11 @@ function buildOptions(width: number): uPlot.Options {
       ],
       setScale: [
         (u: uPlot, key: string) => {
-          if (key !== 'x' || applyingRange) return
+          if (key !== 'x') return
           const { min, max } = u.scales.x
-          if (min != null && max != null) emit('xZoom', { min, max })
+          if (min == null || max == null) return
+          updateZoomed(min, max)
+          if (!applyingRange) emit('xZoom', { min, max })
         },
       ],
     },
@@ -154,10 +195,19 @@ function buildOptions(width: number): uPlot.Options {
 // afterward, so applyXRange must NOT set/clear it a second time — that would
 // only be redundant here, but would be actively wrong if a future caller ever
 // needed the guard to stay open past applyXRange's return.
+//
+// B9 — when `props.xRange` is null (no synced range — including a RESET back
+// to null), fall back to the full data extent (`dataXBounds`) instead of a
+// no-op: otherwise a chart that was previously zoomed via the shared range
+// stayed stuck at its last (now-stale) scale once that range was cleared —
+// exactly the "no way to get back to the full view" half of B9. A chart with
+// nothing to fall back to (no data yet) still no-ops, same as before.
 function applyXRange(standalone = true): void {
-  if (!plot || !props.xRange) return
+  if (!plot) return
+  const range = props.xRange ?? dataXBounds()
+  if (!range) return
   applyingRange = true
-  plot.setScale('x', { min: props.xRange.min, max: props.xRange.max })
+  plot.setScale('x', { min: range.min, max: range.max })
   if (standalone) clearApplyingRangeSoon()
 }
 
@@ -259,6 +309,67 @@ function emitXRange(range: XRange): void {
   plot?.setScale('x', range)
   applyingRange = false
   emit('xZoom', range)
+}
+
+// B9 — reset-zoom control: restores the full data extent and tells the
+// parent via `xZoom(null)` (rather than the resolved bounds) so a caller
+// syncing a SHARED range — e.g. analyzerStore.xRange — clears it back to
+// "auto" instead of pinning every synced chart to this chart's bounds. A
+// chart whose xRange stays disconnected from any shared store (e.g. an
+// overlay chart with a lap selection — see TimeSeriesChart.vue's
+// `hasSelection` gate on its own `xZoom` forwarding) simply resets locally;
+// nothing upstream reacts to the null, which is correct there too.
+function resetZoomLocal(): void {
+  const bounds = dataXBounds()
+  if (!plot || !bounds) return
+  applyingRange = true
+  plot.setScale('x', bounds)
+  clearApplyingRangeSoon()
+  zoomed.value = false
+  emit('xZoom', null)
+}
+
+// B9 — mouse pan: uPlot's own mousedown on `.u-over` always starts its
+// native box-zoom drag (cursor.drag defaults to x-only, dist 0), so a plain
+// mouse drag can never mean "pan" without fighting that default. Instead of
+// touching uPlot's cursor.bind (whose MouseListenerFactory typings return a
+// listener that's supposed to call uPlot's own internal handler — awkward to
+// satisfy without reaching into uPlot internals), a capture-phase listener
+// on `host` (an ANCESTOR of `.u-over`) intercepts Shift+drag before it ever
+// reaches uPlot's own listener and starts our own window-level drag-to-pan,
+// reusing the exact same `dataXBounds`/`currentXRange`/`emitXRange`/
+// `panRange` pipeline the touch pan gesture below already uses. Plain
+// (non-Shift) drags are left completely alone for uPlot's native zoom.
+let panningMouse = false
+let panLastXMouse = 0
+
+function onMousePanMove(e: MouseEvent): void {
+  if (!panningMouse || !plot) return
+  const bounds = dataXBounds()
+  if (!bounds) return
+  const range = currentXRange() ?? bounds
+  const overRect = plot.over.getBoundingClientRect()
+  const prevVal = plot.posToVal(panLastXMouse - overRect.left, 'x')
+  const curVal = plot.posToVal(e.clientX - overRect.left, 'x')
+  const deltaX = curVal - prevVal
+  emitXRange(panRange(range, deltaX, bounds))
+  panLastXMouse = e.clientX
+}
+
+function onMousePanUp(): void {
+  panningMouse = false
+  window.removeEventListener('mousemove', onMousePanMove)
+  window.removeEventListener('mouseup', onMousePanUp)
+}
+
+function onHostMouseDown(e: MouseEvent): void {
+  if (e.button !== 0 || !e.shiftKey || !plot) return
+  e.preventDefault()
+  e.stopPropagation() // capture phase — keeps uPlot's own listener on .u-over from ever seeing this mousedown
+  panningMouse = true
+  panLastXMouse = e.clientX
+  window.addEventListener('mousemove', onMousePanMove)
+  window.addEventListener('mouseup', onMousePanUp)
 }
 
 function touchMidpoint(): { x: number; y: number } | null {
@@ -392,12 +503,18 @@ onMounted(() => {
     attributes: true,
     attributeFilter: ['data-theme'],
   })
+  // B9 — Shift+drag-to-pan (capture phase, see onHostMouseDown's doc); `host`
+  // itself is stable across recreate()s, so this is wired up once.
+  host.value?.addEventListener('mousedown', onHostMouseDown, true)
 })
 
 onBeforeUnmount(() => {
   ro?.disconnect()
   themeObs?.disconnect()
   window.removeEventListener('resize', resize)
+  host.value?.removeEventListener('mousedown', onHostMouseDown, true)
+  window.removeEventListener('mousemove', onMousePanMove)
+  window.removeEventListener('mouseup', onMousePanUp)
   destroy()
 })
 
@@ -438,18 +555,58 @@ watch(
 </script>
 
 <template>
-  <div
-    ref="host"
-    class="uplot-host"
-    :class="{ fill: fillHeight }"
-    @pointerdown="onPointerDown"
-    @pointermove="onPointerMove"
-    @pointerup="onPointerUp"
-    @pointercancel="onPointerUp"
-  />
+  <div class="uplot-wrap" :class="{ fill: fillHeight }">
+    <div
+      ref="host"
+      class="uplot-host"
+      :class="{ fill: fillHeight }"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
+    />
+    <!-- B9 — reset-zoom control: only shown while actually zoomed (see the
+         `zoomed` ref's doc), so it doesn't clutter the chart at the default
+         full view. Double-click also resets (uPlot's own default dblclick
+         auto-ranges the scale back to the data extent), but that's not
+         discoverable on touch and easy to miss on desktop — this button
+         makes the same action explicit and always reachable. -->
+    <button v-if="zoomed" type="button" class="reset-zoom" @click="resetZoomLocal">
+      {{ t('analyzer.resetZoom') }}
+    </button>
+  </div>
 </template>
 
 <style scoped>
+.uplot-wrap {
+  position: relative;
+  width: 100%;
+}
+.uplot-wrap.fill {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.uplot-wrap.fill .uplot-host {
+  flex: 1;
+  min-width: 0;
+}
+.reset-zoom {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  padding: 3px 9px;
+  font-size: 0.75rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.reset-zoom:hover {
+  border-color: var(--color-text-muted);
+}
 .uplot-host {
   width: 100%;
   /* This chart sits in a scrollable page, unlike TrackMap's dedicated canvas —

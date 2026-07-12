@@ -126,7 +126,7 @@ describe('analyzerStore', () => {
     }
   })
 
-  it('setChartXY / setChartChannels / setChartMode are no-ops on the wrong chart kind', () => {
+  it('setChartXY / setChartChannels are no-ops on the wrong chart kind', () => {
     const s = useAnalyzerStore()
     const timeseriesId = s.charts[0].id
     s.addChart('scatter')
@@ -134,7 +134,6 @@ describe('analyzerStore', () => {
     // Wrong-kind calls shouldn't throw and shouldn't mutate anything.
     s.setChartXY(timeseriesId, 'x', 'RPM')
     s.setChartChannels(scatterId, ['RPM'])
-    s.setChartMode(scatterId, 'overlay')
     const ts = s.charts.find((c) => c.id === timeseriesId)
     const sc = s.charts.find((c) => c.id === scatterId)
     if (ts?.kind === 'timeseries') expect(ts.channels).toEqual([])
@@ -250,7 +249,6 @@ describe('analyzerStore — chart persistence (T5)', () => {
     const s = useAnalyzerStore()
     s.addChart()
     s.setChartChannels(s.charts[1].id, ['RPM', 'T_Eng'])
-    s.setChartMode(s.charts[1].id, 'overlay')
     s.addChart('scatter', { xChannel: 'TC_Xforce', yChannel: 'TC_Yforce' })
     await nextTick() // deep watch persists on the next flush
 
@@ -258,8 +256,8 @@ describe('analyzerStore — chart persistence (T5)', () => {
     setActivePinia(createPinia())
     const s2 = useAnalyzerStore()
     expect(s2.charts).toEqual([
-      { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
-      { kind: 'timeseries', id: 2, channels: ['RPM', 'T_Eng'], mode: 'overlay' },
+      { kind: 'timeseries', id: 1, channels: [] },
+      { kind: 'timeseries', id: 2, channels: ['RPM', 'T_Eng'] },
       { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true, colorChannel: null },
     ])
   })
@@ -312,6 +310,6 @@ describe('analyzerStore — chart persistence (T5)', () => {
     localStorage.setItem('aracer-loga.analyzerCharts.v1', '{corrupt')
     setActivePinia(createPinia())
     const s = useAnalyzerStore()
-    expect(s.charts).toEqual([{ kind: 'timeseries', id: 1, channels: [], mode: 'timeline' }])
+    expect(s.charts).toEqual([{ kind: 'timeseries', id: 1, channels: [] }])
   })
 })

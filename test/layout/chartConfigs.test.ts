@@ -35,10 +35,21 @@ beforeEach(() => {
 describe('chartConfigs — parseCharts (T5)', () => {
   it('round-trips a mixed timeseries + scatter list', () => {
     const charts: ChartConfig[] = [
-      { kind: 'timeseries', id: 1, channels: ['RPM', 'TPS_Percent'], mode: 'overlay' },
+      { kind: 'timeseries', id: 1, channels: ['RPM', 'TPS_Percent'] },
       { kind: 'scatter', id: 2, xChannel: 'TC_Xforce', yChannel: null, equalAspect: false, colorChannel: null },
     ]
     expect(parseCharts(JSON.stringify(charts))).toEqual(charts)
+  })
+
+  it('B8 — drops a stray pre-B8 `mode` field on a timeseries chart (the removed timeline/overlay toggle)', () => {
+    const raw = JSON.stringify([
+      { kind: 'timeseries', id: 1, channels: ['RPM'], mode: 'overlay' },
+      { kind: 'timeseries', id: 2, channels: [], mode: 'timeline' },
+    ])
+    expect(parseCharts(raw)).toEqual([
+      { kind: 'timeseries', id: 1, channels: ['RPM'] },
+      { kind: 'timeseries', id: 2, channels: [] },
+    ])
   })
 
   it('round-trips a picked colour-axis channel', () => {
@@ -111,21 +122,21 @@ describe('chartConfigs — parseCharts (T5)', () => {
       { kind: 'timeseries' }, // no id
       { kind: 'timeseries', id: 'x', channels: [] }, // non-numeric id
       { kind: 'scatter', id: 3, xChannel: 42, yChannel: 'RPM' }, // bad xChannel -> null
-      { kind: 'timeseries', id: 4, channels: ['RPM', 5], mode: 'weird' }, // bad channels/mode
+      { kind: 'timeseries', id: 4, channels: ['RPM', 5] }, // bad channels entry
     ])
     expect(parseCharts(raw)).toEqual([
       { kind: 'scatter', id: 3, xChannel: null, yChannel: 'RPM', equalAspect: false, colorChannel: null },
-      { kind: 'timeseries', id: 4, channels: [], mode: 'timeline' },
+      { kind: 'timeseries', id: 4, channels: [] },
     ])
   })
 
   it('de-duplicates ids, keeping the first occurrence', () => {
     const raw = JSON.stringify([
-      { kind: 'timeseries', id: 1, channels: ['RPM'], mode: 'timeline' },
+      { kind: 'timeseries', id: 1, channels: ['RPM'] },
       { kind: 'scatter', id: 1, xChannel: null, yChannel: null },
     ])
     expect(parseCharts(raw)).toEqual([
-      { kind: 'timeseries', id: 1, channels: ['RPM'], mode: 'timeline' },
+      { kind: 'timeseries', id: 1, channels: ['RPM'] },
     ])
   })
 })
@@ -137,8 +148,8 @@ describe('chartConfigs — load/save (T5)', () => {
 
   it('loadCharts restores what saveCharts wrote (dynamically added charts included)', () => {
     const charts: ChartConfig[] = [
-      { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
-      { kind: 'timeseries', id: 2, channels: ['RPM'], mode: 'overlay' },
+      { kind: 'timeseries', id: 1, channels: [] },
+      { kind: 'timeseries', id: 2, channels: ['RPM'] },
       { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: false, colorChannel: null },
     ]
     saveCharts(charts)
@@ -148,6 +159,14 @@ describe('chartConfigs — load/save (T5)', () => {
   it('loadCharts falls back to default on corrupt storage', () => {
     localStorage.setItem(STORAGE_KEY, '{not valid json')
     expect(loadCharts()).toEqual(defaultCharts())
+  })
+
+  it('B8 — loadCharts safely drops a stray pre-B8 `mode` field from persisted storage', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([{ kind: 'timeseries', id: 1, channels: ['RPM'], mode: 'overlay' }]),
+    )
+    expect(loadCharts()).toEqual([{ kind: 'timeseries', id: 1, channels: ['RPM'] }])
   })
 
   it('saveCharts does not throw when localStorage.setItem fails', () => {
@@ -174,7 +193,7 @@ describe('chartConfigs — nextChartId (T5)', () => {
   it('is one past the highest id (ids never reused across restores)', () => {
     expect(
       nextChartId([
-        { kind: 'timeseries', id: 1, channels: [], mode: 'timeline' },
+        { kind: 'timeseries', id: 1, channels: [] },
         { kind: 'scatter', id: 7, xChannel: null, yChannel: null, equalAspect: true, colorChannel: null },
       ]),
     ).toBe(8)

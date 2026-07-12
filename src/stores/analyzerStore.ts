@@ -7,7 +7,6 @@ import {
   saveCharts,
   nextChartId,
   type ChartConfig,
-  type ChartMode,
 } from '@/domain/layout/chartConfigs'
 
 export type XAxis = 'time' | 'distance'
@@ -47,7 +46,6 @@ export type AccelCondition =
  */
 export type {
   ChartConfig,
-  ChartMode,
   TimeSeriesChartConfig,
   ScatterChartConfig,
 } from '@/domain/layout/chartConfigs'
@@ -238,7 +236,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         colorChannel: null,
       })
     } else {
-      charts.value.push({ kind: 'timeseries', id: nextId++, channels: [], mode: 'timeline' })
+      charts.value.push({ kind: 'timeseries', id: nextId++, channels: [] })
     }
   }
 
@@ -249,11 +247,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   function setChartChannels(id: number, channels: string[]): void {
     const chart = charts.value.find((c) => c.id === id)
     if (chart && chart.kind === 'timeseries') chart.channels = channels
-  }
-
-  function setChartMode(id: number, mode: ChartMode): void {
-    const chart = charts.value.find((c) => c.id === id)
-    if (chart && chart.kind === 'timeseries') chart.mode = mode
   }
 
   /** Set a scatter chart's X and/or Y channel (whichever is provided);
@@ -318,7 +311,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     addChart,
     removeChart,
     setChartChannels,
-    setChartMode,
     setChartXY,
     setChartEqualAspect,
     setChartColorChannel,
