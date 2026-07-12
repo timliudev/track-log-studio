@@ -143,17 +143,15 @@ function resetChartOffset(id: number): void {
         :is-row-selected="(i) => lapStore.isSessionLapSelected(table.id, i)"
         @row-click="lapStore.toggleSessionLap(table.id, $event)"
       >
-        <template #pick-header>
-          <span class="sr-only">{{ t('analyzer.comparisonSelectLaps') }}</span>
-        </template>
-        <template #pick="{ row }">
-          <input
-            type="checkbox"
-            :checked="lapStore.isSessionLapSelected(table.id, row.index)"
-            :aria-label="t('analyzer.comparisonSelectLaps')"
-            @click.stop
-            @change="lapStore.toggleSessionLap(table.id, row.index)"
-          />
+        <template #lead="{ row }">
+          <div class="lap-cell">
+            <span
+              v-if="lapStore.isSessionLapSelected(table.id, row.index)"
+              class="swatch"
+              :style="{ background: table.color }"
+            />
+            {{ row.index + 1 }}
+          </div>
         </template>
         <template #trail-header>
           <span class="sr-only">{{ t('analyzer.comparisonOffset') }}</span>
@@ -204,4 +202,20 @@ h4 { margin: 0 0 6px; font-size: .85rem; color: var(--color-text-muted); }
 /* Selected-row offset controls sit on the accent background — keep them legible. */
 .lap-offset.row-selected button { background: var(--color-surface); color: var(--color-text); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Same lead-cell rhythm as the primary LapTable.vue's .lap-cell/.swatch (kept
+   as a scoped duplicate, not a shared import, matching this file's existing
+   .recording-heading/.recording-swatch convention) — just without the
+   exclude toggle, since comparison recordings carry no manual exclusion
+   state (B1b). */
+.lap-cell { display: flex; align-items: center; gap: 6px; }
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: baseline;
+  box-shadow: 0 0 0 1px var(--color-surface);
+}
 </style>

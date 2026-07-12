@@ -15,9 +15,10 @@ import { columnHeader as sharedColumnHeader } from './lapColumnHeader'
  *
  * Callers own everything that differs: the primary supplies a `lead` slot
  * with its exclude-toggle + selection swatch; a comparison recording supplies
- * a `pick` slot (cross-recording overlay checkbox) and a `trail` slot (per-lap
- * chart-offset controls). Row click is bubbled via `row-click`, not acted on
- * here — this component owns rendering only, never store writes.
+ * its own `lead` slot (selection swatch only, no exclude — comparisons carry
+ * no manual exclusion state) and a `trail` slot (per-lap chart-offset
+ * controls). Row click is bubbled via `row-click`, not acted on here — this
+ * component owns rendering only, never store writes.
  */
 const props = withDefaults(
   defineProps<{
@@ -54,9 +55,6 @@ function selected(index: number): boolean {
     <table :aria-label="ariaLabel" :aria-readonly="readonly || undefined">
       <thead>
         <tr>
-          <th v-if="$slots['pick-header']" class="pick-col">
-            <slot name="pick-header" />
-          </th>
           <th>{{ t('analyzer.lap') }}</th>
           <th>{{ t('analyzer.lapTime') }}</th>
           <th>{{ t('analyzer.lapDistance') }}</th>
@@ -73,9 +71,6 @@ function selected(index: number): boolean {
           :class="{ selected: selected(row.index), excluded: row.isExcluded }"
           @click="emit('row-click', row.index)"
         >
-          <td v-if="$slots.pick" class="pick-col">
-            <slot name="pick" :row="row" :selected="selected(row.index)" />
-          </td>
           <td>
             <slot name="lead" :row="row" :selected="selected(row.index)">{{ row.index + 1 }}</slot>
           </td>
@@ -133,12 +128,6 @@ td:first-child {
 th {
   color: var(--color-text-muted);
   font-weight: 600;
-}
-th.pick-col,
-td.pick-col {
-  text-align: center;
-  padding-left: 4px;
-  padding-right: 4px;
 }
 tbody tr {
   cursor: pointer;
