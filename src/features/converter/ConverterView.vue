@@ -24,6 +24,24 @@ const suspensionOpen = ref(false)
     <div class="grid">
       <div class="col">
         <ConvertResults />
+        <!-- B21 — the suspension-calibration menu used to sit full-width
+             below the two-column grid, which wasted horizontal space on wide
+             (PC) layouts. It's a secondary/occasional setup step for the
+             output/conversion side (its calibrated channels only affect the
+             .loga save-modified output and the CSV/VBO/NMEA exports' derived
+             suspension columns), so it belongs in THIS column rather than the
+             input-mapping column on the right. On narrow/mobile widths the
+             grid already collapses to a single column (see the media query
+             below), so this still ends up stacked under ConvertResults same
+             as before — only the wide-layout position changed. -->
+        <details
+          class="suspension-section"
+          :open="suspensionOpen"
+          @toggle="suspensionOpen = ($event.target as HTMLDetailsElement).open"
+        >
+          <summary>{{ t('converter.suspensionToggle') }}</summary>
+          <SuspensionPanel />
+        </details>
       </div>
       <div class="col">
         <!-- RC3 slot mapping only applies to .nmea; .vbo exports every channel
@@ -38,10 +56,6 @@ const suspensionOpen = ref(false)
         <VboChannelMap v-else-if="outputFormat === 'vbo'" />
       </div>
     </div>
-    <details class="suspension-section" :open="suspensionOpen" @toggle="suspensionOpen = ($event.target as HTMLDetailsElement).open">
-      <summary>{{ t('converter.suspensionToggle') }}</summary>
-      <SuspensionPanel />
-    </details>
   </div>
 </template>
 
@@ -79,10 +93,13 @@ const suspensionOpen = ref(false)
   }
 }
 .suspension-section {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: calc(var(--radius) * 1.5);
-  padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
+  /* B21 — now nested inside `.col` (which already supplies the surrounding
+     card background/border), so this no longer needs its OWN full bordered
+     card — that read as a card-inside-a-card. A top divider + no fill keeps
+     it visually part of the same column while still standing apart from
+     ConvertResults above it. */
+  border-top: 1px solid var(--color-border);
+  padding: calc(var(--space) * 1.5) 0 0;
 }
 .suspension-section summary {
   cursor: pointer;
