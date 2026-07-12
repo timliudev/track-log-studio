@@ -26,8 +26,8 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [x] **B9** Reset-zoom button (shown only while zoomed) on all uPlot charts + Shift-drag horizontal pan; clearing zoom elsewhere now properly restores full range; focus-then-reset returns to full view. — `758aaf9`
 
 ## New "current values" card
-- [ ] **B15** New dashboard card: grid of every channel's current value (at cursor). Auto rows/cols by card size, scroll on overflow; each cell shows field name (top-left) + value (centered).
-- [ ] **B16** Treat the time display as one of those fields (relates to B15 and B8).
+- [x] **B15** New 目前數值 dashboard card (`CurrentValuesPanel.vue` + pure `currentValues.ts`): grid of every channel's value at the shared cursor (falls back to the LAST sample when no cursor); auto columns via CSS grid auto-fill, scrolls via CardFillScroll; O(1) per-cell lookups. Registered as a normal draggable/resizable/collapsible card. — `efd22a3`
+- [x] **B16** 目前時間 (elapsed, `m:ss.mmm`) is the first field of that card, formatted via the shared format helpers. — `efd22a3`
 
 ## Acceleration test
 - [x] **B14** List ALL matching segments, not just the single fastest (e.g. 10 traffic-light launches → ~10 0→50 km/h or 0→100 m segments). — `21e8ea6`
@@ -36,7 +36,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [x] **B13** PNG icon set generated from `public/app-icon.svg` (192/512 + maskable + iOS 180 + favicon); `virtual:pwa-register/vue` update-available toast added. — `5fdd152`
 - [x] **B23** Added `<meta name="mobile-web-app-capable" content="yes">` alongside the kept apple variant. (The `cloudflareinsights beacon ERR_BLOCKED_BY_CLIENT` is just the user's ad-blocker — NOT a bug.) — `d1b56f7`
 
-- [ ] **B24** The accel-test segment list doesn't stretch/scroll to fill the card as the card resizes. Make lists-in-cards share ONE "fill card height + scroll on overflow" layout (user: 「我好像不只一次提到這類議題」) — same pattern needed by B15's current-values grid and other in-card lists. Factor out a shared scroll/fill container.
+- [x] **B24** Shared `CardFillScroll.vue` container (fixed `#header` slot + fill-remaining-height scrolling content); accel-test segment list migrated to it (root cause was a hardcoded `max-height:260px`); current-values card (B15) uses the same container. Other in-card lists can adopt it incrementally. — `d373f70`
 - [x] **B26** Accel-test focus is now a toggle (re-click un-focuses) + explicit 清除聚焦 button; stale focus auto-clears when the result set changes; clearing restores the full chart range. — `348cb0c`
 
 ## Charts (scatter)
