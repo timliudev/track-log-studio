@@ -8,6 +8,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [x] **B1 / B17** Comparison table now reuses the primary LapTable via a shared `LapTableView` (read-only); sector column computed from each comparison's own track through the shared gates. — `bbb9c15`
 - [x] **B2** Valid-lap time/distance band now marks comparison laps as excluded, same as primary. — `bbb9c15`
 - [x] **B3** Removed the duplicate lap list that was double-mounted inside the sector-gate card. — `bbb9c15`
+- [ ] **B1b** (RE-REPORT, screenshot 2026-07-12) The comparison table's LEAD/SELECTION UI still differs from the primary: it uses a **checkbox** column + has **no exclude (⦸) button**, whereas the primary uses the ⦸ exclude lead. User: 「怎麼還是獨立的?為何會有checkbox?主表是這種樣式嗎?排除圈的按鈕呢?」 Make the lead column + row-selection interaction visually match the primary (row-click to select for overlay like the primary does; drop the standalone checkbox look; comparison stays non-excludable but the lead cell should read the same). Columns/sector/band parity (B1/B2/B17) already landed — this is the remaining visual/interaction unification.
 
 ## LapTable layout
 - [ ] **B4** Primary-file title belongs above the table (not top of whole card); "add column" button on the same row as the line/ECU source toggle; clear-selection on that row too but far right.
@@ -33,6 +34,16 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 
 ## PWA
 - [x] **B13** PNG icon set generated from `public/app-icon.svg` (192/512 + maskable + iOS 180 + favicon); `virtual:pwa-register/vue` update-available toast added. — `5fdd152`
+- [ ] **B23** Console warns `apple-mobile-web-app-capable` is deprecated — add `<meta name="mobile-web-app-capable" content="yes">` (keep the apple one for older iOS). index.html. (The `cloudflareinsights beacon ERR_BLOCKED_BY_CLIENT` is just the user's ad-blocker — NOT a bug.)
+
+- [ ] **B24** The accel-test segment list doesn't stretch/scroll to fill the card as the card resizes. Make lists-in-cards share ONE "fill card height + scroll on overflow" layout (user: 「我好像不只一次提到這類議題」) — same pattern needed by B15's current-values grid and other in-card lists. Factor out a shared scroll/fill container.
+- [ ] **B26** Accel-test card can focus a segment (highlights it on the map/chart) but has NO way to un-focus/cancel the focused segment. Add a clear/deselect.
+
+## Charts (scatter)
+- [ ] **B25** XY scatter's 3rd axis (colour) breaks once a 2nd track file is selected — the colour channel now collides with per-file identity colour. Find an alternative that keeps the 3rd axis working with multiple files (e.g. separate the file-identity encoding from the value-colour, marker shape per file, or a 3D/z axis). Needs a design decision — confirm approach with user before big work.
+
+## Card chrome
+- [ ] **B27** Gear-ratio calculator, accel-test, and Sector cards show a stray horizontal bar/line at the TOP inside the card. Find + remove the artifact (likely a leftover element/border/empty header row in those panels).
 
 ## Settings
 - [ ] **B19** Define + implement settings export scope (theme/language/timezone/units, drivetrain, and layout — dashboard layout + panel state; likely a "include layout" toggle) + import.
