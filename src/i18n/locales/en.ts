@@ -10,6 +10,12 @@ export default {
     githubTooltip: 'Star this project on GitHub',
     githubStar: 'Star',
   },
+  pwa: {
+    updateAvailable: 'A new version is available',
+    offlineReady: 'App ready to work offline',
+    reload: 'Reload',
+    dismiss: 'Dismiss',
+  },
   nav: {
     converter: 'Converter',
     analyzer: 'Analyzer',
