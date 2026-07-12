@@ -252,6 +252,13 @@ function onAccelFocus(segment: AccelSegment): void {
   analyzer.setXRange({ min: xs[segment.startIdx], max: xs[segment.endIdx] })
 }
 
+// B26: cancel an accel-test focus (re-click the focused segment, or the
+// panel's own "clear focus" button) — just drop back to the full-view zoom,
+// mirroring onLapSelect's explicit-clear branch below.
+function onAccelClear(): void {
+  analyzer.setXRange(null)
+}
+
 // Channels offered for the picker (all of them, sorted) — this is now the
 // ONLY channel picker on the page; TrackChannelPanel owns rendering it.
 const channelOptions = computed(() =>
@@ -1054,7 +1061,12 @@ function titleForItemId(id: string): string {
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
-              <AccelTestPanel :results="accelResults" :speed-available="speedAvailable" @focus="onAccelFocus" />
+              <AccelTestPanel
+                :results="accelResults"
+                :speed-available="speedAvailable"
+                @focus="onAccelFocus"
+                @clear="onAccelClear"
+              />
             </DashboardCard>
 
             <DashboardCard

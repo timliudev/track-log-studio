@@ -950,9 +950,6 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: var(--space);
-  padding-top: var(--space);
-  border-top: 1px solid var(--color-border);
 }
 .heading {
   margin: 0;

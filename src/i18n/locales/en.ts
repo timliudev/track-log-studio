@@ -229,6 +229,8 @@ export default {
     accelFastest: 'Fastest',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: 'Focus this segment',
+    accelUnfocus: 'Cancel focus',
+    accelClearFocus: 'Clear focus',
     gear: {
       heading: 'Gear ratio calculator',
       kindMt: 'MT (geared)',

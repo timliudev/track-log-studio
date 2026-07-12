@@ -224,6 +224,8 @@ export default {
     accelFastest: '最速',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: '聚焦此區段',
+    accelUnfocus: '取消聚焦',
+    accelClearFocus: '清除聚焦',
     gear: {
       heading: '變速齒比計算器',
       kindMt: 'MT（檔車）',
