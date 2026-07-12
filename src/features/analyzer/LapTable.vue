@@ -132,32 +132,10 @@ const rows = computed(() =>
 
 <template>
   <div class="lap-table">
-    <div v-if="primaryFileId != null" class="recording-heading">
-      <span class="recording-swatch" :style="{ background: categoricalColor(primaryFileId) }" />
-      <strong :title="primaryFileName">{{ primaryFileName }}</strong>
-      <span>{{ t('fileBar.primary') }}</span>
-    </div>
-    <div v-if="hasEcuLaps" class="source">
-      <button
-        type="button"
-        :class="{ active: lapStore.source === 'line' }"
-        @click="lapStore.setSource('line')"
-      >
-        {{ t('analyzer.sourceLine') }}
-      </button>
-      <button
-        type="button"
-        :class="{ active: lapStore.source === 'ecu' }"
-        @click="lapStore.setSource('ecu')"
-      >
-        {{ t('analyzer.sourceEcu') }}
-      </button>
-    </div>
-
     <!-- Column editor: one row per configured column. channel-kind exposes the
          channel picker + agg toggle; sectorTime-kind exposes the sector-index
          picker; delta needs no per-column config. -->
-    <div class="columns-editor">
+    <div v-if="lapStore.columns.length" class="columns-editor">
       <div v-for="col in lapStore.columns" :key="col.id" class="column-row">
         <template v-if="col.metric.kind === 'channel'">
           <SearchableSelect
@@ -202,6 +180,29 @@ const rows = computed(() =>
           ×
         </button>
       </div>
+    </div>
+
+    <!-- Actions row (B4): source toggle + add-column buttons share one row,
+         wrapping on narrow viewports; clear-selection sits at the far right
+         (auto-margin, so it wraps to its own line rather than blowing out
+         the layout on phones). -->
+    <div class="actions-row">
+      <div v-if="hasEcuLaps" class="source">
+        <button
+          type="button"
+          :class="{ active: lapStore.source === 'line' }"
+          @click="lapStore.setSource('line')"
+        >
+          {{ t('analyzer.sourceLine') }}
+        </button>
+        <button
+          type="button"
+          :class="{ active: lapStore.source === 'ecu' }"
+          @click="lapStore.setSource('ecu')"
+        >
+          {{ t('analyzer.sourceEcu') }}
+        </button>
+      </div>
       <div class="add-column-row">
         <button
           type="button"
@@ -225,16 +226,21 @@ const rows = computed(() =>
           {{ t('analyzer.addDeltaColumn') }}
         </button>
       </div>
+      <button
+        v-if="lapStore.selected.length > 0"
+        type="button"
+        class="clear-selection"
+        @click="emit('select', null)"
+      >
+        {{ t('analyzer.clearLapSelection') }}
+      </button>
     </div>
 
-    <button
-      v-if="lapStore.selected.length > 0"
-      type="button"
-      class="clear-selection"
-      @click="emit('select', null)"
-    >
-      {{ t('analyzer.clearLapSelection') }}
-    </button>
+    <div v-if="primaryFileId != null" class="recording-heading">
+      <span class="recording-swatch" :style="{ background: categoricalColor(primaryFileId) }" />
+      <strong :title="primaryFileName">{{ primaryFileName }}</strong>
+      <span>{{ t('fileBar.primary') }}</span>
+    </div>
 
     <LapTableView
       :rows="rows"
@@ -301,9 +307,15 @@ const rows = computed(() =>
   border-radius: 50%;
   flex: none;
 }
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space);
+}
 .source {
   display: inline-flex;
-  align-self: flex-start;
+  flex: none;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   overflow: hidden;
@@ -403,7 +415,10 @@ const rows = computed(() =>
 }
 
 .clear-selection {
-  align-self: flex-start;
+  /* Pins to the far right of .actions-row when there's room; wraps to its
+     own (still right-flush, since it's the only item) line on narrow
+     viewports instead of squeezing the source/add-column controls (B4). */
+  margin-left: auto;
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid var(--color-border);
