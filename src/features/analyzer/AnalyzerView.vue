@@ -59,6 +59,7 @@ import TrackFilePanel from './TrackFilePanel.vue'
 import SessionMergePanel from './SessionMergePanel.vue'
 import SuspensionCard from './SuspensionCard.vue'
 import ScatterChart from './ScatterChart.vue'
+import CurrentValuesPanel from './CurrentValuesPanel.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
@@ -1126,6 +1127,18 @@ function titleForItemId(id: string): string {
               @update:pinned="togglePinned(item.i)"
             >
               <SuspensionCard :session="session" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'currentvalues'"
+              :title="t('analyzer.layout.cardCurrentValues')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <CurrentValuesPanel :session="session" :cursor-idx="cursorIdx" />
             </DashboardCard>
 
             <DashboardCard
