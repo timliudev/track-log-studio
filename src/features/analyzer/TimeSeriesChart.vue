@@ -497,6 +497,22 @@ function removeChannel(name: string): void {
       {{ unavailableDerivedMessage }}
     </p>
 
+    <!-- B28 fix: xBounds must describe THIS chart's own data extent, not the
+         session's. UPlotChart's applyXRange() falls back to xBounds (via
+         dataXBounds()) whenever xRange is null (B9) — and xRange IS null
+         whenever hasSelection is true (see the x-range binding below), since
+         the overlay's lap-relative grid is structurally unrelated to the
+         shared session xRange. Passing the full SESSION span here
+         unconditionally (as before) made that B9 fallback re-zoom every
+         selection-mode chart out to the whole session on every lap
+         (re)selection — the overlay data (only ~lap-duration wide) then
+         rendered as a sliver, i.e. "the chart didn't zoom to the lap" (B28).
+         Only the no-selection full-session view's `data` is a
+         downsampled/visible-range SUBSET of the session that genuinely needs
+         this session-wide clamp for touch pan/pinch and the null-xRange
+         fallback; the overlay view's `data` already IS its own full extent,
+         so dataXBounds() should derive straight from `props.data[0]` there
+         (its no-xBounds path) instead. -->
     <UPlotChart
       v-if="canRender"
       class="chart-fill"
@@ -506,7 +522,7 @@ function removeChannel(name: string): void {
       :x-range="!hasSelection ? xRange : null"
       :external-cursor="effectiveCursor"
       :fill-height="fillHeight"
-      :x-bounds="xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
+      :x-bounds="!hasSelection && xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
       @cursor="onCursor"
       @x-zoom="onXZoom"
       @plot-width="plotWidth = $event"
