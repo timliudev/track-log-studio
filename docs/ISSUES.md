@@ -22,8 +22,8 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [ ] **B22** Map base-image overlay (upload + align custom image, free OSM tiles, satellite via user's own API key). Designed in docs/DESIGN.md §6.1/§6.3, never built. Large — schedule separately.
 
 ## Charts
-- [ ] **B8** Remove the 時序/timeline chart mode entirely; overlay mode should show ALL values when no lap is selected.
-- [ ] **B9** Timeseries chart has zoom but no reset (can't restore after zooming) and no horizontal pan while zoomed. Add reset + pan.
+- [x] **B8** 時序/timeline mode removed entirely (type/store/UI/i18n); overlay is the only mode and falls back to the full-session view when no lap is selected; stale persisted `mode` values ignored safely; cross-session overlay kept. — `419bb6a`
+- [x] **B9** Reset-zoom button (shown only while zoomed) on all uPlot charts + Shift-drag horizontal pan; clearing zoom elsewhere now properly restores full range; focus-then-reset returns to full view. — `758aaf9`
 
 ## New "current values" card
 - [ ] **B15** New dashboard card: grid of every channel's current value (at cursor). Auto rows/cols by card size, scroll on overflow; each cell shows field name (top-left) + value (centered).
@@ -57,7 +57,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [ ] **B18** Pinned card still cannot be resized — make it resizable.
 
 ## Maintenance / deferred
-- [ ] **M1** Dependency refresh — pin to current latest versions (not a `latest`/`*` range).
+- [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [ ] **M2** Clean dead code: `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n (superseded by the FileBar 「加入分析」 checkbox).
 - [ ] **M3** Refactor `TrackMap.draw()` (≈500-line god-function) into smaller units.
 - [ ] **M4** Optional: screenshot user manual.
