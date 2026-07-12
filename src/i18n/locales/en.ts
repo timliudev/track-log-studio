@@ -25,9 +25,24 @@ export default {
   },
   settings: {
     heading: 'Settings',
-    futureNote: 'More settings (export / import, etc.) coming soon.',
     timezone: 'Time zone',
     timezoneAuto: 'Auto (browser)',
+    current: 'Currently applied: {value}',
+    transfer: {
+      heading: 'Settings export / import',
+      description:
+        'Export/import appearance settings (theme/language/timezone) and drivetrain settings; optionally include the dashboard layout too.',
+      includeLayout: 'Include dashboard layout',
+      exportButton: 'Export settings',
+      importButton: 'Import settings…',
+      importConfirm:
+        'Importing will overwrite your current settings (and the dashboard layout, if included) and cannot be undone. Continue?',
+      importSuccess: 'Settings imported and applied.',
+      importSuccessReload: 'Settings imported, including layout — reloading to apply…',
+      importErrorInvalidJson: 'Import failed: the file is not valid JSON.',
+      importErrorInvalidShape: 'Import failed: the file content is malformed.',
+      importErrorRead: 'Import failed: could not read the file, please try again.',
+    },
   },
   about: {
     project: {

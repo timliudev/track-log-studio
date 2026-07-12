@@ -189,7 +189,7 @@ const MAX_GEARS = 8
 // alone (not deleted) rather than overwritten, in case that's useful later.
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
 
-interface PersistedDrivetrain {
+export interface PersistedDrivetrain {
   kind: DrivetrainKind
   mt: MtFormState
   cvt: CvtFormState
@@ -223,6 +223,34 @@ function looksLikeV2Cvt(v: unknown): v is Partial<CvtFormState> {
   return true
 }
 
+/**
+ * Merge a possibly-partial/garbage MT payload (an older persisted blob, or an
+ * imported settings JSON — see B19) over {@link DEFAULT_MT} — same per-array
+ * defaulting the store's own init used to do inline, pulled out here so both
+ * the store AND the settings export/import transfer module
+ * (`domain/settings/settingsTransfer.ts`) share ONE merge implementation
+ * rather than two copies that could drift.
+ */
+export function mergeMtFormState(partial: Partial<MtFormState> | null | undefined): MtFormState {
+  const p = looksLikeV2Mt(partial) ? partial : undefined
+  return {
+    ...DEFAULT_MT,
+    ...p,
+    gearRatios: p?.gearRatios ? p.gearRatios.map((g) => ({ ...g })) : DEFAULT_MT.gearRatios.map((g) => ({ ...g })),
+    finalDrive: { ...DEFAULT_MT.finalDrive, ...p?.finalDrive },
+  }
+}
+
+/** CVT counterpart of {@link mergeMtFormState}. */
+export function mergeCvtFormState(partial: Partial<CvtFormState> | null | undefined): CvtFormState {
+  const p = looksLikeV2Cvt(partial) ? partial : undefined
+  return {
+    ...DEFAULT_CVT,
+    ...p,
+    notes: p?.notes ? p.notes.map((n) => ({ ...n })) : defaultCvtNotes(),
+  }
+}
+
 function loadPersisted(): Partial<PersistedDrivetrain> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -250,17 +278,8 @@ function loadPersisted(): Partial<PersistedDrivetrain> {
 export const useDrivetrainStore = defineStore('drivetrain', () => {
   const persisted = loadPersisted()
   const kind = ref<DrivetrainKind>(persisted.kind ?? 'mt')
-  const mt = ref<MtFormState>({
-    ...DEFAULT_MT,
-    ...persisted.mt,
-    gearRatios: persisted.mt?.gearRatios ? persisted.mt.gearRatios.map((g) => ({ ...g })) : DEFAULT_MT.gearRatios.map((g) => ({ ...g })),
-    finalDrive: { ...DEFAULT_MT.finalDrive, ...persisted.mt?.finalDrive },
-  })
-  const cvt = ref<CvtFormState>({
-    ...DEFAULT_CVT,
-    ...persisted.cvt,
-    notes: persisted.cvt?.notes ? persisted.cvt.notes.map((n) => ({ ...n })) : defaultCvtNotes(),
-  })
+  const mt = ref<MtFormState>(mergeMtFormState(persisted.mt))
+  const cvt = ref<CvtFormState>(mergeCvtFormState(persisted.cvt))
   // Tire-spec live conversion (user decision, 2026-07-08): the spec field now
   // converts + auto-applies into the circumference field AS YOU TYPE (see
   // `setTireSpec`), so the old tire/direct mode toggle is gone from the UI
@@ -409,6 +428,21 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     return apply
   }
 
+  /**
+   * B19 — replace kind/mt/cvt/inversionWheelCircumferenceMm all at once from
+   * an imported settings bundle (`domain/settings/settingsTransfer.ts` has
+   * already sanitized `next.mt`/`next.cvt` via `mergeMtFormState`/
+   * `mergeCvtFormState`, so this is a plain overwrite — the same shape the
+   * store already persists). One assignment per field so the persistence
+   * `watch` below fires (and writes localStorage) exactly once.
+   */
+  function applyImported(next: PersistedDrivetrain): void {
+    kind.value = next.kind
+    mt.value = next.mt
+    cvt.value = next.cvt
+    inversionWheelCircumferenceMm.value = next.inversionWheelCircumferenceMm
+  }
+
   return {
     kind,
     mt,
@@ -426,6 +460,7 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     setGearCount,
     setInversionWheelCircumferenceMm,
     setTireSpec,
+    applyImported,
   }
 })
 
