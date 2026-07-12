@@ -59,6 +59,7 @@ import TrackFilePanel from './TrackFilePanel.vue'
 import SessionMergePanel from './SessionMergePanel.vue'
 import SuspensionCard from './SuspensionCard.vue'
 import ScatterChart from './ScatterChart.vue'
+import CurrentValuesPanel from './CurrentValuesPanel.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
@@ -685,6 +686,15 @@ function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
 }
 
+// B7 — TrackMap's in-card "maximize" toggle is mirrored here (via
+// `@update:maximized`) purely so the "map" card can hide its OWN other body
+// content (heatmap legend / line hint / lap count+reset / lap-time+distance
+// band inputs) while it's active — TrackMap itself only knows about its own
+// canvas + buttons, not these sibling elements declared in this template.
+// With those hidden, TrackMap's existing `.fill` flex-grow expands to fill
+// the whole card body; no special sizing logic is needed here.
+const mapMaximized = ref(false)
+
 /** Per-chart card title: numbered by POSITION among same-kind charts (1-based,
  *  in `charts` array order) so titles stay short and stable-looking even
  *  though the underlying grid-item id is keyed by the chart's store id (see
@@ -862,8 +872,9 @@ function titleForItemId(id: string): string {
                 @cursor="analyzer.setCursor"
                 @update:line="lapStore.setLine($event)"
                 @update:gate="onUpdateGate"
+                @update:maximized="mapMaximized = $event"
               />
-              <details v-if="overlayTracks.length" class="map-comparison-align">
+              <details v-if="!mapMaximized && overlayTracks.length" class="map-comparison-align">
                 <summary>{{ t('analyzer.comparisonMapAlign') }}</summary>
                 <div v-for="entry in overlayTracks" :key="entry.id" class="map-offset-row">
                   <span class="comparison-swatch" :style="{ background: entry.color }" />
@@ -895,14 +906,14 @@ function titleForItemId(id: string): string {
                   </button>
                 </div>
               </details>
-              <div v-if="heatNorm" class="tc-legend">
+              <div v-if="!mapMaximized && heatNorm" class="tc-legend">
                 <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
                 <span class="tc-bar" :style="{ background: legendGradient }" />
                 <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
                 <span class="tc-name">{{ trackChannel }}</span>
               </div>
-              <p class="line-hint">{{ t('analyzer.lineHint') }}</p>
-              <div class="laps">
+              <p v-if="!mapMaximized" class="line-hint">{{ t('analyzer.lineHint') }}</p>
+              <div v-if="!mapMaximized" class="laps">
                 <span class="lap-count">{{
                   lapStore.excluded.length > 0
                     ? t('analyzer.lapCountExcluded', { n: laps.length, x: lapStore.excluded.length })
@@ -912,7 +923,7 @@ function titleForItemId(id: string): string {
                   {{ t('analyzer.resetLine') }}
                 </button>
               </div>
-              <div class="band" role="group" :aria-label="t('analyzer.lapBand')">
+              <div v-if="!mapMaximized" class="band" role="group" :aria-label="t('analyzer.lapBand')">
                 <span class="band-label">{{ t('analyzer.lapBand') }}</span>
                 <input
                   type="number"
@@ -949,7 +960,7 @@ function titleForItemId(id: string): string {
                   {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
                 </span>
               </div>
-              <div class="band" role="group" :aria-label="t('analyzer.lapDistanceBand')">
+              <div v-if="!mapMaximized" class="band" role="group" :aria-label="t('analyzer.lapDistanceBand')">
                 <span class="band-label">{{ t('analyzer.lapDistanceBand') }}</span>
                 <input
                   type="number"
@@ -1126,6 +1137,18 @@ function titleForItemId(id: string): string {
               @update:pinned="togglePinned(item.i)"
             >
               <SuspensionCard :session="session" />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'currentvalues'"
+              :title="t('analyzer.layout.cardCurrentValues')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <CurrentValuesPanel :session="session" :cursor-idx="cursorIdx" />
             </DashboardCard>
 
             <DashboardCard

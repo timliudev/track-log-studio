@@ -1,5 +1,5 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
-import { detectChannelExtrema } from '@/domain/analysis/cornerSpeed'
+import { detectChannelExtrema, findGlobalChannelExtremum, type ChannelExtremum } from '@/domain/analysis/cornerSpeed'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
@@ -52,6 +52,15 @@ export function formatExtremumValue(v: number): string {
  * selected at once), extrema fall back to the FULL TRACK's min/max instead
  * of going empty — a channel-marker reference should always be available,
  * not just when exactly one lap happens to be selected.
+ *
+ * B6: the whole-track fallback shows ONE marker per requested kind (a single
+ * min and/or a single max — see `findGlobalChannelExtremum`), not the
+ * multi-peak "corner apex" detection `detectChannelExtrema` does for a
+ * focused lap. Running the per-corner peak finder over an entire multi-lap
+ * session found a local extremum in every corner of every lap and flooded
+ * the map; a single reference pair is what a "whole track" marker should
+ * mean. Once a single lap is focused, the original multi-peak behaviour
+ * (one marker per corner within that lap) still applies unchanged.
  */
 export function useTrackExtrema(
   session: Ref<LogSession | null> | ComputedRef<LogSession | null>,
@@ -86,6 +95,22 @@ export function useTrackExtrema(
     const lap = focusedLap.value
     const startIdx = lap ? lap.startIdx : 0
     const endIdx = lap ? lap.endIdx : tk.lat.length
+
+    if (!lap) {
+      // B6: whole-track fallback collapses to a single min/max PAIR rather
+      // than every local peak across every lap (see the "B6" doc above).
+      const result: ChannelExtremum[] = []
+      if (markMinima.value) {
+        const m = findGlobalChannelExtremum(tk, ch.data, startIdx, endIdx, 'min')
+        if (m) result.push(m)
+      }
+      if (markMaxima.value) {
+        const m = findGlobalChannelExtremum(tk, ch.data, startIdx, endIdx, 'max')
+        if (m) result.push(m)
+      }
+      return result.sort((a, b) => a.lapDistanceM - b.lapDistanceM)
+    }
+
     const mins = markMinima.value
       ? detectChannelExtrema(tk, ch.data, startIdx, endIdx, { mode: 'min' })
       : []

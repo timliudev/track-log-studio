@@ -146,6 +146,39 @@ describe('useTrackExtrema', () => {
     expect(trackExtrema.value?.[0].kind).toBe('min')
   })
 
+  it('B6: whole-track fallback collapses MANY per-lap corner peaks to a single min/max pair', () => {
+    // Simulates a multi-lap session where the same corner produces a local
+    // dip/bump every lap. The old behaviour ran the per-lap "corner apex"
+    // multi-peak detector over the whole track and reported one marker per
+    // corner per lap, flooding the map — the fallback must now collapse to
+    // exactly one min and one max regardless of how many local peaks exist.
+    const n = 400
+    // Windows are disjoint (spaced well beyond each feature's halfWidth of
+    // 15), so overlaying each feature only where it deviates from the shared
+    // 4000 baseline combines them without one flattening another.
+    const data = new Float32Array(n).fill(4000)
+    for (const center of [40, 140, 240, 340]) {
+      const bump = withFeature(n, 4000, center, 15, 7000)
+      for (let i = 0; i < n; i++) if (bump[i] !== 4000) data[i] = bump[i]
+    }
+    const dip = withFeature(n, 4000, 190, 15, 1000)
+    for (let i = 0; i < n; i++) if (dip[i] !== 4000) data[i] = dip[i]
+    const s = session([{ name: 'RPM', data: Array.from(data) }])
+    const { trackExtrema } = useTrackExtrema(
+      computed<LogSession | null>(() => s),
+      ref(straightTrack(n)),
+      ref('RPM'),
+      ref(null), // no single lap focused -> whole-track fallback
+      ref(true),
+      ref(true),
+    )
+    expect(trackExtrema.value).toHaveLength(2)
+    const min = trackExtrema.value?.find((e) => e.kind === 'min')
+    const max = trackExtrema.value?.find((e) => e.kind === 'max')
+    expect(min?.value).toBeCloseTo(1000, 0)
+    expect(max?.value).toBeCloseTo(7000, 0)
+  })
+
   it('trackExtremaIsLapScoped is true for a focused lap, false for the whole-track fallback, null when nothing applies', () => {
     const n = 100
     const s = session([{ name: 'RPM', data: Array.from(withFeature(n, 4000, 50, 30, 8000)) }])

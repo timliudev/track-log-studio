@@ -8,15 +8,12 @@ import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 
 /**
- * Mobile "maximize" overlay (手機賽道地圖最大化) — TrackMap.vue's own local
- * `maximized` ref toggles a fullscreen Teleport-to-body overlay. This is
- * deliberately self-contained (no analyzerStore / AnalyzerView involvement),
- * so the test only needs a bare TrackMap with a null track (draw() bails out
- * immediately on a null track, so no canvas 2D context mocking is required).
- *
- * `attachTo: document.body` is required so the real <Teleport to="body">
- * target resolves inside happy-dom and the teleported content is queryable
- * via `document.body.querySelector`.
+ * B7 — in-card "maximize" (works identically on desktop and mobile, replacing
+ * the old mobile-only fullscreen-Teleport-to-body design). TrackMap.vue's own
+ * local `maximized` ref toggles a class hook and emits `update:maximized` so
+ * a host card can hide its OTHER body content — the map itself never leaves
+ * its place in the DOM, so no Teleport/attachTo-document.body plumbing is
+ * needed to query it; `wrapper.find(...)` sees it directly.
  */
 let wrapper: VueWrapper | null = null
 
@@ -30,7 +27,6 @@ function mountMap() {
   wrapper = mount(TrackMap, {
     props: { track: null, cursorIdx: null, line: null },
     global: { plugins: [i18n], directives: { tooltip: vTooltip } },
-    attachTo: document.body,
   })
   return wrapper
 }
@@ -38,76 +34,64 @@ function mountMap() {
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
-  document.body.style.overflow = ''
 })
 
-describe('TrackMap mobile maximize overlay', () => {
-  it('starts un-maximized: shows the maximize trigger with an i18n aria-label, no close button, no overlay class', () => {
+describe('TrackMap in-card maximize (B7)', () => {
+  it('starts un-maximized: shows the maximize trigger with an i18n aria-label, no close button, no maximized class', () => {
     const w = mountMap()
-    const trigger = document.body.querySelector('.maximize-toggle:not(.maximize-toggle--close)')
-    expect(trigger).not.toBeNull()
-    expect(trigger?.getAttribute('aria-label')).toBe('放大賽道地圖')
-    expect(document.body.querySelector('.maximize-toggle--close')).toBeNull()
-    expect(document.body.querySelector('.track-wrap.maximized')).toBeNull()
-    void w
+    const trigger = w.find('.maximize-toggle:not(.maximize-toggle--close)')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.attributes('aria-label')).toBe('放大賽道地圖')
+    expect(w.find('.maximize-toggle--close').exists()).toBe(false)
+    expect(w.find('.track-wrap.maximized').exists()).toBe(false)
   })
 
-  it('clicking the trigger flips to the fullscreen overlay: adds .maximized, swaps in the close button, hides the trigger', async () => {
-    mountMap()
-    const trigger = document.body.querySelector<HTMLButtonElement>('.maximize-toggle')!
-    trigger.click()
-    await wrapper!.vm.$nextTick()
+  it('clicking the trigger flips to the in-card maximized state: adds .maximized, swaps in the close button, hides the trigger', async () => {
+    const w = mountMap()
+    await w.find('.maximize-toggle').trigger('click')
 
-    expect(document.body.querySelector('.track-wrap.maximized')).not.toBeNull()
-    const closeBtn = document.body.querySelector('.maximize-toggle--close')
-    expect(closeBtn).not.toBeNull()
-    expect(closeBtn?.getAttribute('aria-label')).toBe('還原賽道地圖')
-    expect(document.body.querySelector('.maximize-toggle:not(.maximize-toggle--close)')).toBeNull()
+    expect(w.find('.track-wrap.maximized').exists()).toBe(true)
+    const closeBtn = w.find('.maximize-toggle--close')
+    expect(closeBtn.exists()).toBe(true)
+    expect(closeBtn.attributes('aria-label')).toBe('還原賽道地圖')
+    expect(w.find('.maximize-toggle:not(.maximize-toggle--close)').exists()).toBe(false)
+  })
+
+  it('emits update:maximized(true/false) as the toggle flips, for a host card to hide its other content', async () => {
+    const w = mountMap()
+    await w.find('.maximize-toggle').trigger('click')
+    expect(w.emitted('update:maximized')?.[0]).toEqual([true])
+
+    await w.find('.maximize-toggle--close').trigger('click')
+    expect(w.emitted('update:maximized')?.[1]).toEqual([false])
   })
 
   it('clicking the close button restores the normal (in-place) layout', async () => {
-    mountMap()
-    document.body.querySelector<HTMLButtonElement>('.maximize-toggle')!.click()
-    await wrapper!.vm.$nextTick()
-    document.body.querySelector<HTMLButtonElement>('.maximize-toggle--close')!.click()
-    await wrapper!.vm.$nextTick()
-
-    expect(document.body.querySelector('.track-wrap.maximized')).toBeNull()
-    expect(document.body.querySelector('.maximize-toggle--close')).toBeNull()
-    expect(document.body.querySelector('.maximize-toggle')).not.toBeNull()
-  })
-
-  it('locks page scroll (body overflow: hidden) while maximized and restores it on close', async () => {
-    mountMap()
-    expect(document.body.style.overflow).toBe('')
-    document.body.querySelector<HTMLButtonElement>('.maximize-toggle')!.click()
-    await wrapper!.vm.$nextTick()
-    expect(document.body.style.overflow).toBe('hidden')
-
-    document.body.querySelector<HTMLButtonElement>('.maximize-toggle--close')!.click()
-    await wrapper!.vm.$nextTick()
-    expect(document.body.style.overflow).toBe('')
-  })
-
-  it('restores body scroll on unmount even if still maximized (no permanently-locked page)', async () => {
     const w = mountMap()
-    document.body.querySelector<HTMLButtonElement>('.maximize-toggle')!.click()
-    await w.vm.$nextTick()
-    expect(document.body.style.overflow).toBe('hidden')
+    await w.find('.maximize-toggle').trigger('click')
+    await w.find('.maximize-toggle--close').trigger('click')
 
-    w.unmount()
-    wrapper = null
-    expect(document.body.style.overflow).toBe('')
+    expect(w.find('.track-wrap.maximized').exists()).toBe(false)
+    expect(w.find('.maximize-toggle--close').exists()).toBe(false)
+    expect(w.find('.maximize-toggle').exists()).toBe(true)
   })
 
-  it('pressing Escape while maximized closes the overlay', async () => {
-    mountMap()
-    document.body.querySelector<HTMLButtonElement>('.maximize-toggle')!.click()
-    await wrapper!.vm.$nextTick()
-    expect(document.body.querySelector('.track-wrap.maximized')).not.toBeNull()
+  it('pressing Escape while maximized closes it (and emits update:maximized(false))', async () => {
+    const w = mountMap()
+    await w.find('.maximize-toggle').trigger('click')
+    expect(w.find('.track-wrap.maximized').exists()).toBe(true)
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    await wrapper!.vm.$nextTick()
-    expect(document.body.querySelector('.track-wrap.maximized')).toBeNull()
+    await w.vm.$nextTick()
+    expect(w.find('.track-wrap.maximized').exists()).toBe(false)
+    expect(w.emitted('update:maximized')?.at(-1)).toEqual([false])
+  })
+
+  it('never leaves the DOM tree it was mounted in (no Teleport-to-body escape)', async () => {
+    const w = mountMap()
+    await w.find('.maximize-toggle').trigger('click')
+    // The maximized markup is still findable through the component's own
+    // wrapper — i.e. still a normal descendant, not relocated to <body>.
+    expect(w.find('.track-wrap.maximized').exists()).toBe(true)
   })
 })

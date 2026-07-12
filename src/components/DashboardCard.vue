@@ -88,26 +88,97 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-// Only feed a POSITIVE finite ratio through to CSS — an unset/zero/NaN
-// aspectRatio (e.g. a card whose layout entry momentarily has h:0) must not
-// produce an invalid `aspect-ratio: NaN` or a divide-by-zero shape.
-const cardStyle = computed(() =>
-  props.pinned && props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0
-    ? { aspectRatio: String(props.aspectRatio) }
-    : undefined,
-)
-
-function onToggleCollapsed(): void {
-  emit('update:collapsed', !props.collapsed)
-}
-
 // #19 — FLIP transition for the pin/unpin Teleport move (see flip.ts's
 // module doc for why this can't just be a `<Transition>` around the
 // `<Teleport>`, and for the maths this delegates to). `rootEl` is the same
 // physical DOM node whether it's currently rendered in the grid slot or
 // inside #dashboard-pinned-anchor — Teleport relocates it, never remounts
-// it, so one ref keeps working across the move.
+// it, so one ref keeps working across the move. Declared here (rather than
+// just above `onTogglePinned` below) because B18's resize handle also reads
+// it, above that.
 const rootEl = ref<HTMLElement | null>(null)
+
+// B18 — pinned cards can be resized by dragging a corner handle (see
+// `.pin-resize-handle` below). This is DELIBERATELY separate from
+// grid-layout-plus's own drag/resize (dashboardLayout.ts's isItemResizable
+// still returns false while pinned): a pinned card's real content has been
+// Teleported OUT of the grid into AnalyzerView's sticky pinned anchor (see
+// this component's module doc), so its grid slot is just an inert
+// placeholder — the grid library has nothing meaningful to resize there.
+// This handle instead resizes the ACTUAL floating card directly, in plain
+// pixels, independent of the grid's column/row units. A collapsed card has
+// no body to make bigger, so the handle only shows while `!collapsed` — the
+// existing "collapsed cards aren't resizable" rule is preserved.
+const PINNED_MIN_W = 220
+const PINNED_MIN_H = 140
+const PINNED_MAX_W_VW = 96
+const PINNED_MAX_H_VH = 90
+const pinnedSize = ref<{ w: number; h: number } | null>(null)
+
+function clampPinnedSize(w: number, h: number): { w: number; h: number } {
+  const maxW = (window.innerWidth * PINNED_MAX_W_VW) / 100
+  const maxH = (window.innerHeight * PINNED_MAX_H_VH) / 100
+  return {
+    w: Math.min(Math.max(w, PINNED_MIN_W), Math.max(maxW, PINNED_MIN_W)),
+    h: Math.min(Math.max(h, PINNED_MIN_H), Math.max(maxH, PINNED_MIN_H)),
+  }
+}
+
+let pinResizeStart: { x: number; y: number; w: number; h: number } | null = null
+
+function onPinResizePointerDown(e: PointerEvent): void {
+  const el = rootEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  pinResizeStart = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height }
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  window.addEventListener('pointermove', onPinResizePointerMove)
+  window.addEventListener('pointerup', onPinResizePointerUp)
+}
+function onPinResizePointerMove(e: PointerEvent): void {
+  if (!pinResizeStart) return
+  const dx = e.clientX - pinResizeStart.x
+  const dy = e.clientY - pinResizeStart.y
+  pinnedSize.value = clampPinnedSize(pinResizeStart.w + dx, pinResizeStart.h + dy)
+}
+function onPinResizePointerUp(): void {
+  pinResizeStart = null
+  window.removeEventListener('pointermove', onPinResizePointerMove)
+  window.removeEventListener('pointerup', onPinResizePointerUp)
+}
+/** Double-clicking the handle drops the manual size and reverts to the
+ *  automatic aspect-ratio sizing — an easy way back after an experimental drag. */
+function onPinResizeReset(): void {
+  pinnedSize.value = null
+}
+
+// Only feed a POSITIVE finite ratio through to CSS — an unset/zero/NaN
+// aspectRatio (e.g. a card whose layout entry momentarily has h:0) must not
+// produce an invalid `aspect-ratio: NaN` or a divide-by-zero shape.
+const cardStyle = computed(() => {
+  if (!props.pinned) return undefined
+  if (pinnedSize.value) {
+    // A user-dragged size overrides both the aspect-ratio default AND the
+    // `.pinned` CSS rule's `max-height: 45vh` / the anchor's `width:
+    // min(560px, 100%)` cap — clampPinnedSize already bounds it sensibly, so
+    // those class-level ceilings would otherwise silently fight this.
+    return {
+      width: `${pinnedSize.value.w}px`,
+      height: `${pinnedSize.value.h}px`,
+      maxWidth: 'none',
+      maxHeight: 'none',
+    }
+  }
+  if (props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0) {
+    return { aspectRatio: String(props.aspectRatio) }
+  }
+  return undefined
+})
+
+function onToggleCollapsed(): void {
+  emit('update:collapsed', !props.collapsed)
+}
+
 let cleanupPinFlip: (() => void) | null = null
 
 function onTogglePinned(): void {
@@ -190,7 +261,15 @@ function onBodyAfterTransition(el: Element): void {
   body.style.transition = ''
 }
 
-onBeforeUnmount(() => cleanupPinFlip?.())
+onBeforeUnmount(() => {
+  cleanupPinFlip?.()
+  // Belt-and-braces: a card can be unmounted (or unpinned mid-drag by some
+  // other interaction) while a resize gesture is in flight — these listeners
+  // are on `window`, not this component's own DOM, so Vue's own teardown
+  // would never remove them on its own.
+  window.removeEventListener('pointermove', onPinResizePointerMove)
+  window.removeEventListener('pointerup', onPinResizePointerUp)
+})
 </script>
 
 <template>
@@ -241,6 +320,19 @@ onBeforeUnmount(() => cleanupPinFlip?.())
         <slot />
       </div>
     </Transition>
+    <!-- B18 — pinned-card resize handle: only while pinned (nothing to
+         resize otherwise) and not collapsed (a header-only card has no body
+         to grow — see this handle's module doc above `pinnedSize`). -->
+    <div
+      v-if="pinned && !collapsed"
+      class="pin-resize-handle"
+      v-tooltip="t('analyzer.layout.pinnedResizeHandle')"
+      :aria-label="t('analyzer.layout.pinnedResizeHandle')"
+      role="separator"
+      aria-orientation="horizontal"
+      @pointerdown="onPinResizePointerDown"
+      @dblclick="onPinResizeReset"
+    />
   </div>
 </template>
 
@@ -393,6 +485,8 @@ onBeforeUnmount(() => cleanupPinFlip?.())
   height: auto;
   max-height: 45vh;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  /* B18 — positioning context for `.pin-resize-handle` below. */
+  position: relative;
 }
 .dashboard-card.pinned .body {
   /* Cap the body so the whole sticky card respects max-height instead of
@@ -400,5 +494,36 @@ onBeforeUnmount(() => cleanupPinFlip?.())
      internally beyond that (TrackMap's own fillHeight mode already fills
      whatever height its host gives it, verified against this constraint). */
   min-height: 0;
+}
+
+/* B18 — pinned-card resize handle: a small corner grip, bottom-right, shown
+   only while pinned + not collapsed (see the template's `v-if`). Dragging it
+   sets an explicit pixel width/height on the card (`pinnedSize`/`cardStyle`
+   above), overriding both the aspect-ratio default and the `max-height: 45vh`
+   / anchor `width: min(560px, 100%)` ceilings — `clampPinnedSize` keeps the
+   result sane instead. */
+.pin-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  border-radius: 0 0 calc(var(--radius) * 1.5) 0;
+}
+.pin-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--color-text-muted);
+  border-bottom: 2px solid var(--color-text-muted);
+  opacity: 0.6;
+}
+.pin-resize-handle:hover::after {
+  opacity: 1;
 }
 </style>

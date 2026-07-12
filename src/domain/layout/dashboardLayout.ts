@@ -52,6 +52,7 @@ export const STATIC_CARD_IDS = {
   lapAlign: 'lapalign',
   sessionMerge: 'sessionmerge',
   suspension: 'suspension',
+  currentValues: 'currentvalues',
 } as const
 
 /** Prefix for dynamic chart-card ids — see {@link chartItemId}. */
@@ -82,6 +83,10 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.sessionMerge]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.suspension]: { minW: 2, minH: 3 },
+  // B15 — same floor as most control panels; the grid of value tiles scrolls
+  // (via CardFillScroll) below this, so there's no correctness reason to
+  // require more than a couple of rows to stay legible.
+  [STATIC_CARD_IDS.currentValues]: { minW: 3, minH: 3 },
 }
 
 /** Chart cards (uPlot/echarts) need more room than a small control panel to
@@ -108,10 +113,16 @@ export function minSizeFor(id: string): { minW: number; minH: number } {
  * current breakpoint already permits) AND the card itself isn't the
  * currently-pinned one: a pinned card's real content has been Teleported out
  * of the grid into the sticky pinned anchor (see AnalyzerView's module doc),
- * so its grid slot is just an empty placeholder — dragging/resizing that
- * placeholder would be meaningless (nothing visibly moves) and would desync
- * the placeholder's size from the card's actual position it returns to on
- * unpin.
+ * so its grid slot is just an empty placeholder — dragging/resizing THAT
+ * placeholder (via grid-layout-plus's own handles) would be meaningless
+ * (nothing visibly moves) and would desync the placeholder's size from the
+ * card's actual position it returns to on unpin.
+ *
+ * B18 — this does NOT mean a pinned card can't be resized at all: the
+ * floating card itself has its own, separate corner-drag resize handle (see
+ * DashboardCard.vue's `pin-resize-handle` / `pinnedSize`), independent of
+ * the grid entirely. Only the grid-layout-plus resize handle on the inert
+ * grid-slot placeholder is disabled here.
  */
 export function isItemDraggable(globalDraggable: boolean, pinned: boolean): boolean {
   return globalDraggable && !pinned
@@ -138,6 +149,7 @@ export const STATIC_CARD_TITLE_KEYS: Record<string, string> = {
   [STATIC_CARD_IDS.lapAlign]: 'analyzer.layout.cardLapAlign',
   [STATIC_CARD_IDS.sessionMerge]: 'analyzer.layout.cardSessionMerge',
   [STATIC_CARD_IDS.suspension]: 'analyzer.layout.cardSuspension',
+  [STATIC_CARD_IDS.currentValues]: 'analyzer.layout.cardCurrentValues',
 }
 
 /** Returns `item` unchanged if it already meets its minimum size, otherwise a
@@ -477,10 +489,19 @@ export function isChartItemId(id: string): boolean {
  */
 export function defaultLayout(): DashboardLayoutItem[] {
   return [
-    // Column A
+    // Column A — B15's current-values card goes here, right under sectors:
+    // it's the same kind of "at a glance, always relevant" card as the
+    // map/lap table above it, and column A (bottom y=24 before this card)
+    // had the most headroom to absorb it at its minimum height (3 rows)
+    // without unbalancing the three columns (see the "balances column
+    // heights" test below) or opening a gap ahead of column B's bottom
+    // (y=27) that compactLayoutTopLeft could pull column C's hidden
+    // align-panel stack sideways into (see the "is a no-op on defaultLayout"
+    // regression test).
     { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 },
     { i: STATIC_CARD_IDS.lapTable, x: 0, y: 10, w: 4, h: 8 },
     { i: STATIC_CARD_IDS.sectors, x: 0, y: 18, w: 4, h: 6 },
+    { i: STATIC_CARD_IDS.currentValues, x: 0, y: 24, w: 4, h: 3 },
     // Column B
     { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 5 },
     { i: STATIC_CARD_IDS.accelTest, x: 4, y: 5, w: 4, h: 5 },

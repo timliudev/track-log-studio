@@ -136,6 +136,47 @@ export function detectChannelExtrema(
 }
 
 /**
+ * Find the SINGLE global extremum (min or max) of a channel within
+ * [startIdx, endIdx) — no peak-finding, just the one absolute lowest/highest
+ * valid sample. Used for the whole-track (no-lap-focused) marker fallback
+ * (B6): `detectChannelExtrema`'s per-lap "corner apex" design finds one local
+ * peak per corner, which is correct for a single lap but floods the map with
+ * a marker per corner of every lap once it's run over an entire multi-lap
+ * session — this gives exactly one reference point per requested kind
+ * instead. Returns null when there are no valid samples in range.
+ */
+export function findGlobalChannelExtremum(
+  track: GpsTrack,
+  values: ArrayLike<number>,
+  startIdx: number,
+  endIdx: number,
+  mode: 'min' | 'max',
+): ChannelExtremum | null {
+  let bestIdx = -1
+  let bestValue = mode === 'max' ? -Infinity : Infinity
+  for (let i = startIdx; i < endIdx; i++) {
+    if (!track.valid[i] || !Number.isFinite(values[i])) continue
+    const v = values[i]
+    if (mode === 'max' ? v > bestValue : v < bestValue) {
+      bestValue = v
+      bestIdx = i
+    }
+  }
+  if (bestIdx < 0) return null
+  const fullDist = cumulativeDistanceM(track.lat, track.lon, track.valid)
+  const lapStartDist = fullDist[Math.max(0, Math.min(startIdx, fullDist.length - 1))]
+  return {
+    index: bestIdx,
+    lapDistanceM: fullDist[bestIdx] - lapStartDist,
+    lat: track.lat[bestIdx],
+    lon: track.lon[bestIdx],
+    value: bestValue,
+    prominence: 0,
+    kind: mode,
+  }
+}
+
+/**
  * Resolve the session's speed channel (km/h), preferring GPS_Speed over
  * Vehicle_Speed — the same fallback used to seed the lap table's default
  * "top speed" column (see `useLaps.ts`). Returns null when neither is present.

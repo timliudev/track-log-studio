@@ -245,6 +245,10 @@ export default {
     accelFocus: 'Focus this segment',
     accelUnfocus: 'Cancel focus',
     accelClearFocus: 'Clear focus',
+    currentValues: {
+      time: 'Current time',
+      noSession: 'Load a recording to see the current values.',
+    },
     gear: {
       heading: 'Gear ratio calculator',
       kindMt: 'MT (geared)',
@@ -394,6 +398,7 @@ export default {
       cardLapAlign: 'Lap overlay alignment',
       cardSessionMerge: 'GPS session merge',
       cardSuspension: 'Suspension calibration',
+      cardCurrentValues: 'Current values',
       cardChart: 'Chart {n}',
       cardScatterChart: 'XY scatter {n}',
       collapse: 'Collapse',
@@ -401,6 +406,7 @@ export default {
       pin: 'Pin (stays fixed at the top while scrolling — only one card at a time)',
       unpin: 'Unpin',
       pinnedPlaceholder: '📌 Pinned at top',
+      pinnedResizeHandle: 'Drag to resize (double-click to reset)',
     },
   },
   suspension: {

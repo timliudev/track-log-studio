@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   colorExtent,
   formatScatterTooltip,
-  thirdValueExtent,
+  shouldShowMarkerLegend,
   type GgSeries,
 } from '@/features/analyzer/GgChart.vue'
 
@@ -72,12 +72,39 @@ describe('third-channel scatter tooltip', () => {
       '&lt;file&gt;<br/>X: 1.00<br/>Y: 2.00<br/>A&amp;B: 3',
     )
   })
+})
 
-  it('derives precision from tooltip-only multi-session values', () => {
+// B25 — the marker-shape legend replaces per-file colour identity once the
+// colour axis is active; it should only appear when it's actually needed.
+describe('shouldShowMarkerLegend (B25 marker-shape legend)', () => {
+  it('is false when the colour axis is off, regardless of how many shapes are present', () => {
     const series: GgSeries[] = [
-      { points: [[0, 0], [1, 1]], color: '#a00', name: 'A', tooltipValues: [10, 10.25] },
+      { points: [[0, 0]], color: '#a00', name: 'A', symbol: 'circle' },
+      { points: [[1, 1]], color: '#0a0', name: 'B', symbol: 'triangle' },
     ]
-    expect(colorExtent(series)).toBeNull()
-    expect(thirdValueExtent(series)).toEqual({ min: 10, max: 10.25 })
+    expect(shouldShowMarkerLegend(series, false)).toBe(false)
+  })
+
+  it('is false when the colour axis is on but every series shares one shape (single file)', () => {
+    const series: GgSeries[] = [
+      { points: [[0, 0]], color: '#4363d8', name: 'session', colorValues: [1] },
+    ]
+    expect(shouldShowMarkerLegend(series, true)).toBe(false)
+  })
+
+  it('is true when the colour axis is on AND more than one shape is in play (multi-file)', () => {
+    const series: GgSeries[] = [
+      { points: [[0, 0]], color: '#a00', name: 'A', colorValues: [1], symbol: 'circle' },
+      { points: [[1, 1]], color: '#0a0', name: 'B', colorValues: [2], symbol: 'triangle' },
+    ]
+    expect(shouldShowMarkerLegend(series, true)).toBe(true)
+  })
+
+  it('treats a missing symbol as the circle default when comparing shapes', () => {
+    const series: GgSeries[] = [
+      { points: [[0, 0]], color: '#a00', name: 'A', colorValues: [1] },
+      { points: [[1, 1]], color: '#0a0', name: 'B', colorValues: [2], symbol: 'circle' },
+    ]
+    expect(shouldShowMarkerLegend(series, true)).toBe(false)
   })
 })

@@ -238,6 +238,10 @@ export default {
     accelFocus: '聚焦此區段',
     accelUnfocus: '取消聚焦',
     accelClearFocus: '清除聚焦',
+    currentValues: {
+      time: '目前時間',
+      noSession: '請先載入記錄以顯示目前數值。',
+    },
     gear: {
       heading: '變速齒比計算器',
       kindMt: 'MT（檔車）',
@@ -387,6 +391,7 @@ export default {
       cardLapAlign: '疊圈對位微調',
       cardSessionMerge: 'GPS 場次合併',
       cardSuspension: '避震校正',
+      cardCurrentValues: '目前數值',
       cardChart: '圖表 {n}',
       cardScatterChart: 'XY 散佈圖 {n}',
       collapse: '收合',
@@ -394,6 +399,7 @@ export default {
       pin: '釘選（捲動頁面時固定於頂部，同時僅能釘選一張卡片）',
       unpin: '取消釘選',
       pinnedPlaceholder: '📌 已釘選於頂部',
+      pinnedResizeHandle: '拖曳調整大小（點兩下重設）',
     },
   },
   suspension: {

@@ -5,6 +5,7 @@ import type { AccelSegment } from '@/domain/analysis/accelTest'
 import type { AccelCondition } from '@/stores/analyzerStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { formatLapTime } from '@/domain/analysis/format'
+import CardFillScroll from '@/components/CardFillScroll.vue'
 
 const props = defineProps<{
   /** EVERY matching segment for the current condition, in chronological order
@@ -114,79 +115,79 @@ function fmtDist(v: number): string {
 </script>
 
 <template>
-  <div class="accel-test-panel">
-    <div class="row kind-toggle" role="group" :aria-label="t('analyzer.accelKind')">
-      <button
-        type="button"
-        :class="{ active: isDistance }"
-        @click="setKind('distance')"
-      >
-        {{ t('analyzer.accelKindDistance') }}
-      </button>
-      <button
-        type="button"
-        :class="{ active: !isDistance }"
-        @click="setKind('speed')"
-      >
-        {{ t('analyzer.accelKindSpeed') }}
-      </button>
-    </div>
+  <CardFillScroll class="accel-test-panel">
+    <template #header>
+      <div class="row kind-toggle" role="group" :aria-label="t('analyzer.accelKind')">
+        <button
+          type="button"
+          :class="{ active: isDistance }"
+          @click="setKind('distance')"
+        >
+          {{ t('analyzer.accelKindDistance') }}
+        </button>
+        <button
+          type="button"
+          :class="{ active: !isDistance }"
+          @click="setKind('speed')"
+        >
+          {{ t('analyzer.accelKindSpeed') }}
+        </button>
+      </div>
 
-    <div v-if="condition.kind === 'distance'" class="row params">
-      <label class="field">
-        <span>{{ t('analyzer.accelDistanceM') }}</span>
-        <input
-          type="number"
-          inputmode="decimal"
-          min="1"
-          step="1"
-          :value="condition.distanceM"
-          @input="onDistanceInput"
-        />
-      </label>
-      <label class="field">
-        <span>{{ t('analyzer.accelEntrySpeed') }}</span>
-        <input
-          type="number"
-          inputmode="decimal"
-          min="0"
-          step="1"
-          :value="condition.entrySpeedKmh"
-          @input="onEntrySpeedInput"
-        />
-      </label>
-      <p class="hint entry-speed-hint">{{ t('analyzer.accelEntrySpeedHint') }}</p>
-    </div>
+      <div v-if="condition.kind === 'distance'" class="row params">
+        <label class="field">
+          <span>{{ t('analyzer.accelDistanceM') }}</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="1"
+            step="1"
+            :value="condition.distanceM"
+            @input="onDistanceInput"
+          />
+        </label>
+        <label class="field">
+          <span>{{ t('analyzer.accelEntrySpeed') }}</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="1"
+            :value="condition.entrySpeedKmh"
+            @input="onEntrySpeedInput"
+          />
+        </label>
+        <p class="hint entry-speed-hint">{{ t('analyzer.accelEntrySpeedHint') }}</p>
+      </div>
 
-    <div v-else class="row params">
-      <label class="field">
-        <span>{{ t('analyzer.accelFromKmh') }}</span>
-        <input
-          type="number"
-          inputmode="decimal"
-          min="0"
-          step="1"
-          :value="condition.fromKmh"
-          @input="onFromInput"
-        />
-      </label>
-      <label class="field">
-        <span>{{ t('analyzer.accelToKmh') }}</span>
-        <input
-          type="number"
-          inputmode="decimal"
-          min="0"
-          step="1"
-          :value="condition.toKmh"
-          @input="onToInput"
-        />
-      </label>
-    </div>
+      <div v-else class="row params">
+        <label class="field">
+          <span>{{ t('analyzer.accelFromKmh') }}</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="1"
+            :value="condition.fromKmh"
+            @input="onFromInput"
+          />
+        </label>
+        <label class="field">
+          <span>{{ t('analyzer.accelToKmh') }}</span>
+          <input
+            type="number"
+            inputmode="decimal"
+            min="0"
+            step="1"
+            :value="condition.toKmh"
+            @input="onToInput"
+          />
+        </label>
+      </div>
 
-    <p v-if="!props.speedAvailable" class="hint">{{ t('analyzer.accelNoChannel') }}</p>
-    <p v-else-if="props.results.length === 0" class="hint">{{ t('analyzer.accelNoMatch') }}</p>
-    <template v-else>
-      <div class="row result-count-row">
+      <p v-if="!props.speedAvailable" class="hint">{{ t('analyzer.accelNoChannel') }}</p>
+      <p v-else-if="props.results.length === 0" class="hint">{{ t('analyzer.accelNoMatch') }}</p>
+      <div v-else class="row result-count-row">
         <p class="hint result-count">{{ t('analyzer.accelResultCount', { n: props.results.length }) }}</p>
         <button
           v-if="focusedKey != null"
@@ -197,38 +198,34 @@ function fmtDist(v: number): string {
           {{ t('analyzer.accelClearFocus') }}
         </button>
       </div>
-      <ul class="result-list">
-        <li
-          v-for="(seg, i) in props.results"
-          :key="`${seg.startIdx}-${seg.endIdx}`"
-          class="result"
-          :class="{ fastest: seg.isFastest, focused: isFocused(seg) }"
-        >
-          <span class="result-index">#{{ i + 1 }}</span>
-          <span v-if="seg.isFastest" class="fastest-badge" :title="t('analyzer.accelFastest')">⚡</span>
-          <span class="result-time">{{ formatLapTime(seg.timeMs) }}</span>
-          <span class="result-detail">{{ fmtDist(seg.distanceM) }}</span>
-          <span class="result-detail">
-            {{ t('analyzer.accelEntryExit', {
-              entry: fmtSpeed(seg.entrySpeedKmh),
-              exit: fmtSpeed(seg.exitSpeedKmh),
-            }) }}
-          </span>
-          <button type="button" class="focus-btn" :class="{ active: isFocused(seg) }" @click="onFocusClick(seg)">
-            {{ isFocused(seg) ? t('analyzer.accelUnfocus') : t('analyzer.accelFocus') }}
-          </button>
-        </li>
-      </ul>
     </template>
-  </div>
+
+    <ul v-if="props.speedAvailable && props.results.length > 0" class="result-list">
+      <li
+        v-for="(seg, i) in props.results"
+        :key="`${seg.startIdx}-${seg.endIdx}`"
+        class="result"
+        :class="{ fastest: seg.isFastest, focused: isFocused(seg) }"
+      >
+        <span class="result-index">#{{ i + 1 }}</span>
+        <span v-if="seg.isFastest" class="fastest-badge" :title="t('analyzer.accelFastest')">⚡</span>
+        <span class="result-time">{{ formatLapTime(seg.timeMs) }}</span>
+        <span class="result-detail">{{ fmtDist(seg.distanceM) }}</span>
+        <span class="result-detail">
+          {{ t('analyzer.accelEntryExit', {
+            entry: fmtSpeed(seg.entrySpeedKmh),
+            exit: fmtSpeed(seg.exitSpeedKmh),
+          }) }}
+        </span>
+        <button type="button" class="focus-btn" :class="{ active: isFocused(seg) }" @click="onFocusClick(seg)">
+          {{ isFocused(seg) ? t('analyzer.accelUnfocus') : t('analyzer.accelFocus') }}
+        </button>
+      </li>
+    </ul>
+  </CardFillScroll>
 </template>
 
 <style scoped>
-.accel-test-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -303,14 +300,17 @@ function fmtDist(v: number): string {
   color: var(--color-accent);
 }
 .result-list {
+  /* B24 — no own max-height/overflow any more: CardFillScroll's content pane
+     (the `<ul>`'s actual scroll parent now) fills the card's remaining
+     height and scrolls itself, so the list grows/shrinks with the card
+     instead of being capped at a fixed pixel height regardless of the card's
+     real size. */
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 260px;
-  overflow-y: auto;
 }
 .result {
   display: flex;
