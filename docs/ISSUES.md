@@ -8,12 +8,13 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [x] **B1 / B17** Comparison table now reuses the primary LapTable via a shared `LapTableView` (read-only); sector column computed from each comparison's own track through the shared gates. — `bbb9c15`
 - [x] **B2** Valid-lap time/distance band now marks comparison laps as excluded, same as primary. — `bbb9c15`
 - [x] **B3** Removed the duplicate lap list that was double-mounted inside the sector-gate card. — `bbb9c15`
+- [x] **B1b** Comparison table lead/selection UI unified with the primary: checkbox column removed, row-click selects, lead cell = selection swatch (same colour as the map/chart cross-file highlight) + lap number; unused `pick` slot removed from LapTableView. Comparison stays non-excludable (no ⦸). — `40e3155`
 
 ## LapTable layout
-- [ ] **B4** Primary-file title belongs above the table (not top of whole card); "add column" button on the same row as the line/ECU source toggle; clear-selection on that row too but far right.
+- [x] **B4** Primary-file title moved to directly above the table; add-column buttons share a row with the line/ECU source toggle; clear-selection on that row, far right (wraps on narrow screens). — `df97c7d`
 
 ## Lap detection
-- [ ] **B5** Switching lap source 線段自算 ↔ ECU must clear the selected laps (lap sets differ between sources).
+- [x] **B5** Switching lap source 線段自算 ↔ ECU clears both primary and cross-session lap selections (indices invalid under the new source); manual exclusions kept; same-source re-click is a no-op. — `5091250`
 
 ## Track map
 - [ ] **B6** Min/max extrema markers with no lap selected show the whole track's extrema (screen floods). Rework to avoid clutter.
@@ -21,8 +22,8 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [ ] **B22** Map base-image overlay (upload + align custom image, free OSM tiles, satellite via user's own API key). Designed in docs/DESIGN.md §6.1/§6.3, never built. Large — schedule separately.
 
 ## Charts
-- [ ] **B8** Remove the 時序/timeline chart mode entirely; overlay mode should show ALL values when no lap is selected.
-- [ ] **B9** Timeseries chart has zoom but no reset (can't restore after zooming) and no horizontal pan while zoomed. Add reset + pan.
+- [x] **B8** 時序/timeline mode removed entirely (type/store/UI/i18n); overlay is the only mode and falls back to the full-session view when no lap is selected; stale persisted `mode` values ignored safely; cross-session overlay kept. — `419bb6a`
+- [x] **B9** Reset-zoom button (shown only while zoomed) on all uPlot charts + Shift-drag horizontal pan; clearing zoom elsewhere now properly restores full range; focus-then-reset returns to full view. — `758aaf9`
 
 ## New "current values" card
 - [ ] **B15** New dashboard card: grid of every channel's current value (at cursor). Auto rows/cols by card size, scroll on overflow; each cell shows field name (top-left) + value (centered).
@@ -33,19 +34,30 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 
 ## PWA
 - [x] **B13** PNG icon set generated from `public/app-icon.svg` (192/512 + maskable + iOS 180 + favicon); `virtual:pwa-register/vue` update-available toast added. — `5fdd152`
+- [x] **B23** Added `<meta name="mobile-web-app-capable" content="yes">` alongside the kept apple variant. (The `cloudflareinsights beacon ERR_BLOCKED_BY_CLIENT` is just the user's ad-blocker — NOT a bug.) — `d1b56f7`
+
+- [ ] **B24** The accel-test segment list doesn't stretch/scroll to fill the card as the card resizes. Make lists-in-cards share ONE "fill card height + scroll on overflow" layout (user: 「我好像不只一次提到這類議題」) — same pattern needed by B15's current-values grid and other in-card lists. Factor out a shared scroll/fill container.
+- [x] **B26** Accel-test focus is now a toggle (re-click un-focuses) + explicit 清除聚焦 button; stale focus auto-clears when the result set changes; clearing restores the full chart range. — `348cb0c`
+
+## Charts (scatter)
+- [ ] **B25** XY scatter's 3rd axis (colour) breaks once a 2nd track file is selected — the colour channel now collides with per-file identity colour. **DECIDED (user, 2026-07-12): marker SHAPE per file (circle/triangle/square…) + shape legend; colour stays fully on the 3rd-axis value gradient.** Implement accordingly.
+
+## Card chrome
+- [x] **B27** Root cause: leftover `border-top`/`margin-top`/`padding-top` on the panel roots (a stacked-panel divider from before each panel got its own card). Removed from GearPanel/AccelTestPanel/SectorPanel. — `9f0a085`
+- [x] **B27b** Same leftover divider (`margin-top`/`padding-top`/`border-top`) removed from `TrackChannelPanel.vue` and `TrackFilePanel.vue` root class. — `68080f2`
 
 ## Settings
-- [ ] **B19** Define + implement settings export scope (theme/language/timezone/units, drivetrain, and layout — dashboard layout + panel state; likely a "include layout" toggle) + import.
-- [ ] **B20** Settings page: show the current read values of theme / language / timezone.
+- [x] **B19** Settings export/import implemented (`settingsTransfer.ts`): versioned JSON bundle of appearance (theme/language/timezone) + drivetrain, with an "include dashboard layout" toggle (layout + panel state + lock); import validates leniently via each store's sanitizer, confirms before overwrite, reloads when layout is applied. — `2bc6b35`
+- [x] **B20** Settings page now shows the currently-applied value next to auto theme/language/timezone controls. — `1e1e13f`
 
 ## Converter
-- [ ] **B21** PC mode: the suspension-calibration menu need not be full-width at the bottom — place it on the output/convert side to save space.
+- [x] **B21** Suspension-calibration section moved into the output/convert column on wide layouts (stacked behaviour unchanged ≤880px). — `f87cb9a`
 
 ## Dashboard
 - [ ] **B18** Pinned card still cannot be resized — make it resizable.
 
 ## Maintenance / deferred
-- [ ] **M1** Dependency refresh — pin to current latest versions (not a `latest`/`*` range).
+- [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [ ] **M2** Clean dead code: `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n (superseded by the FileBar 「加入分析」 checkbox).
 - [ ] **M3** Refactor `TrackMap.draw()` (≈500-line god-function) into smaller units.
 - [ ] **M4** Optional: screenshot user manual.

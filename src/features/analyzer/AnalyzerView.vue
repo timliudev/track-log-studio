@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { GridLayout } from 'grid-layout-plus'
 import { useFileStore } from '@/stores/fileStore'
-import { useAnalyzerStore, type ChartMode } from '@/stores/analyzerStore'
+import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
@@ -103,19 +103,11 @@ const selectedLaps = computed(() =>
     .filter((l): l is NonNullable<typeof l> => l != null),
 )
 
-// The synchronized ratio trace now lives inside the static GearPanel card,
-// so its timeline/overlay mode is transient view state rather than another
-// persisted/dynamically removable dashboard chart config.
-const gearRatioMode = ref<ChartMode>('timeline')
-
-// The alignment panel only makes sense when laps are being overlaid: at least
-// one chart in overlay mode and ≥2 laps selected to compare/align.
-const showAlign = computed(
-  () =>
-    selectedLaps.value.length >= 2 &&
-    (gearRatioMode.value === 'overlay' ||
-      charts.value.some((c) => c.kind === 'timeseries' && c.mode === 'overlay')),
-)
+// B8 — every time-series chart (the dashboard ones AND the gear-ratio chart
+// embedded in the static GearPanel card) now renders as an overlay whenever
+// laps are selected — there's no separate mode to gate on any more, so the
+// alignment panel's only real condition is "≥2 laps selected to compare".
+const showAlign = computed(() => selectedLaps.value.length >= 2)
 
 // One colored segment per selected lap; color is assigned by selection order.
 // `offset` is the per-lap MAP position nudge (metres east/north) so GNSS-drifted
@@ -155,10 +147,10 @@ const comparisonLapHighlights = computed(() =>
 )
 
 // #7: derive the track map's chart-zoom-follow focus from the shared xRange.
-// xRange is written ONLY by timeline-mode charts (overlay charts live in a
-// lap-relative grid and structurally never call setXRange — see
-// TimeSeriesChart.vue's onXZoom), so no separate mode flag is needed here;
-// xRangeToFocusIndices also treats a (near-)whole-session range as "no focus"
+// xRange is written ONLY by charts with NO lap selected (B8 — overlay charts
+// with a selection live in a lap-relative grid and structurally never call
+// setXRange — see TimeSeriesChart.vue's onXZoom), so no separate mode flag is
+// needed here; xRangeToFocusIndices also treats a (near-)whole-session range as "no focus"
 // so the map isn't emphasizing everything. DERIVED, not stored — no
 // state-writing watcher.
 //
@@ -250,6 +242,13 @@ function onAccelFocus(segment: AccelSegment): void {
   if (!xs || segment.startIdx >= xs.length || segment.endIdx >= xs.length) return
   lapStore.clearSelection()
   analyzer.setXRange({ min: xs[segment.startIdx], max: xs[segment.endIdx] })
+}
+
+// B26: cancel an accel-test focus (re-click the focused segment, or the
+// panel's own "clear focus" button) — just drop back to the full-view zoom,
+// mirroring onLapSelect's explicit-clear branch below.
+function onAccelClear(): void {
+  analyzer.setXRange(null)
 }
 
 // Channels offered for the picker (all of them, sorted) — this is now the
@@ -1054,7 +1053,12 @@ function titleForItemId(id: string): string {
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
-              <AccelTestPanel :results="accelResults" :speed-available="speedAvailable" @focus="onAccelFocus" />
+              <AccelTestPanel
+                :results="accelResults"
+                :speed-available="speedAvailable"
+                @focus="onAccelFocus"
+                @clear="onAccelClear"
+              />
             </DashboardCard>
 
             <DashboardCard
@@ -1075,10 +1079,8 @@ function titleForItemId(id: string): string {
                 :comparison-sessions="comparisonSessions"
                 :primary-file-id="activeFile?.id"
                 :primary-file-name="activeFile?.name"
-                :gear-ratio-mode="gearRatioMode"
                 @cursor="analyzer.setCursor"
                 @x-zoom="onXZoom"
-                @update-gear-ratio-mode="gearRatioMode = $event"
               />
             </DashboardCard>
 

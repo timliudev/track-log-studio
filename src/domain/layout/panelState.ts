@@ -37,7 +37,11 @@ export interface PanelState {
 
 export const STORAGE_KEY = 'aracer-loga.panelState.v1'
 
-function emptyState(): PanelState {
+/** The empty/default panel state — no cards collapsed, none pinned, no
+ *  mobile-order customisation yet. Exported (not just an internal fallback)
+ *  so other callers needing a well-formed default (e.g. the settings
+ *  export/import transfer module, B19) don't have to hand-roll the shape. */
+export function defaultPanelState(): PanelState {
   return { collapsed: [], pinnedId: null, mobileOrder: [] }
 }
 
@@ -71,9 +75,9 @@ export function parsePanelState(raw: string | null): PanelState | null {
 
 export function loadPanelState(): PanelState {
   try {
-    return parsePanelState(localStorage.getItem(STORAGE_KEY)) ?? emptyState()
+    return parsePanelState(localStorage.getItem(STORAGE_KEY)) ?? defaultPanelState()
   } catch {
-    return emptyState()
+    return defaultPanelState()
   }
 }
 

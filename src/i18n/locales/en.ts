@@ -25,9 +25,24 @@ export default {
   },
   settings: {
     heading: 'Settings',
-    futureNote: 'More settings (export / import, etc.) coming soon.',
     timezone: 'Time zone',
     timezoneAuto: 'Auto (browser)',
+    current: 'Currently applied: {value}',
+    transfer: {
+      heading: 'Settings export / import',
+      description:
+        'Export/import appearance settings (theme/language/timezone) and drivetrain settings; optionally include the dashboard layout too.',
+      includeLayout: 'Include dashboard layout',
+      exportButton: 'Export settings',
+      importButton: 'Import settings…',
+      importConfirm:
+        'Importing will overwrite your current settings (and the dashboard layout, if included) and cannot be undone. Continue?',
+      importSuccess: 'Settings imported and applied.',
+      importSuccessReload: 'Settings imported, including layout — reloading to apply…',
+      importErrorInvalidJson: 'Import failed: the file is not valid JSON.',
+      importErrorInvalidShape: 'Import failed: the file content is malformed.',
+      importErrorRead: 'Import failed: could not read the file, please try again.',
+    },
   },
   about: {
     project: {
@@ -159,9 +174,6 @@ export default {
     excludedBySector: 'Auto-excluded — failed sector check',
     bestLap: 'Fastest lap',
     slowestLap: 'Slowest lap',
-    modeTimeline: 'Timeline',
-    modeOverlay: 'Overlay',
-    overlayHint: 'Select laps in the table below to overlay (colour = lap, line style = channel, X aligned from 0)',
     alignTitle: 'Overlay alignment',
     alignHint: "Nudge each lap's start offset so corners/braking points line up in the overlay (does not affect lap times or the track).",
     alignEarlier: 'Shift earlier (left)',
@@ -191,6 +203,8 @@ export default {
     extremumMax: 'Max',
     resetView: 'Reset view',
     zoomHint: 'Scroll to zoom, drag to pan, pinch to zoom, double-click to reset',
+    resetZoom: 'Reset zoom',
+    chartZoomHint: 'Drag to box-zoom, hold Shift and drag (or use two fingers) to pan, double-click or Reset zoom to restore the full view',
     maximizeMap: 'Maximize track map',
     minimizeMap: 'Restore track map',
     trackOverlayTitle: 'Overlay tracks',
@@ -229,6 +243,8 @@ export default {
     accelFastest: 'Fastest',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: 'Focus this segment',
+    accelUnfocus: 'Cancel focus',
+    accelClearFocus: 'Clear focus',
     gear: {
       heading: 'Gear ratio calculator',
       kindMt: 'MT (geared)',

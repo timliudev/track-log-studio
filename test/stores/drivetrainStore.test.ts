@@ -1,7 +1,13 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { useDrivetrainStore, toMtDrivetrainSpec, MAX_GEARS } from '@/stores/drivetrainStore'
+import {
+  useDrivetrainStore,
+  toMtDrivetrainSpec,
+  MAX_GEARS,
+  mergeMtFormState,
+  mergeCvtFormState,
+} from '@/stores/drivetrainStore'
 
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
 const OLD_V1_STORAGE_KEY = 'aracer-loga.drivetrain.v1'
@@ -418,5 +424,68 @@ describe('toMtDrivetrainSpec', () => {
     s.setMt({ primaryReduction: 0 })
     const spec = toMtDrivetrainSpec(s.mt)
     expect(spec.primaryReduction).toBeUndefined()
+  })
+})
+
+// B19 — settings export/import reuses these same merge functions (see
+// domain/settings/settingsTransfer.ts's parseImportBundle) so an imported
+// drivetrain payload is sanitized identically to a normal localStorage load.
+describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
+  it('mergeMtFormState fills in every default field for an empty/undefined payload', () => {
+    const merged = mergeMtFormState(undefined)
+    expect(merged.gearRatios.map((g) => g.ratio)).toEqual([2.615, 1.812, 1.409, 1.16, 1.0, 0.885])
+    expect(merged.finalDrive).toEqual({ mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 })
+    expect(merged.redlineRpm).toBe(10000)
+  })
+
+  it('mergeMtFormState accepts a well-shaped partial payload and overrides only what it has', () => {
+    const merged = mergeMtFormState({ redlineRpm: 12000 })
+    expect(merged.redlineRpm).toBe(12000)
+    // Untouched fields keep their defaults.
+    expect(merged.gearRatios).toHaveLength(6)
+  })
+
+  it('mergeMtFormState rejects a v1-shaped (numeric gearRatios) payload and falls back to defaults', () => {
+    const merged = mergeMtFormState({ gearRatios: [2.615, 1.812] } as never)
+    expect(merged.gearRatios.map((g) => g.ratio)).toEqual([2.615, 1.812, 1.409, 1.16, 1.0, 0.885])
+  })
+
+  it('mergeMtFormState does not leak a shared gearRatios array reference across calls', () => {
+    const a = mergeMtFormState(undefined)
+    const b = mergeMtFormState(undefined)
+    a.gearRatios[0].ratio = 999
+    expect(b.gearRatios[0].ratio).toBe(2.615)
+  })
+
+  it('mergeCvtFormState fills in default notes for an empty/undefined payload', () => {
+    const merged = mergeCvtFormState(undefined)
+    expect(merged.notes.length).toBeGreaterThan(0)
+    expect(merged.notes.every((n) => n.value === '')).toBe(true)
+  })
+
+  it('mergeCvtFormState rejects a v1-shaped (ratioLow/ratioHigh) payload and falls back to defaults', () => {
+    const merged = mergeCvtFormState({ ratioLow: 2.4, ratioHigh: 0.9 } as never)
+    expect(merged.wheelCircumferenceMm).toBe(1400)
+    expect(merged.notes.length).toBeGreaterThan(0)
+  })
+})
+
+describe('applyImported (B19 — settings import overwrite)', () => {
+  it('replaces kind/mt/cvt/inversionWheelCircumferenceMm in one shot and persists', async () => {
+    const s = useDrivetrainStore()
+    s.applyImported({
+      kind: 'cvt',
+      mt: mergeMtFormState({ redlineRpm: 11000 }),
+      cvt: mergeCvtFormState(undefined),
+      inversionWheelCircumferenceMm: 2001,
+    })
+    expect(s.kind).toBe('cvt')
+    expect(s.mt.redlineRpm).toBe(11000)
+    expect(s.inversionWheelCircumferenceMm).toBe(2001)
+
+    await nextTick()
+    const raw = localStorage.getItem(STORAGE_KEY)
+    expect(raw).not.toBeNull()
+    expect(JSON.parse(raw as string).inversionWheelCircumferenceMm).toBe(2001)
   })
 })

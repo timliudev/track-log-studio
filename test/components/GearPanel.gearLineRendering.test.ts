@@ -203,21 +203,17 @@ describe('GearPanel — MT gear-ratio chart lines actually render (#8)', () => {
       xRange: { min: 0, max: 0.2 },
       externalCursor: 1,
       selectedLaps: [],
-      gearRatioMode: 'overlay',
     })
     const ratio = wrapper.findComponent(GearRatioChart)
 
     expect(ratio.exists()).toBe(true)
-    expect(ratio.props('mode')).toBe('overlay')
     expect(ratio.props('xValues')).toBe(xValues)
     expect(ratio.props('xRange')).toEqual({ min: 0, max: 0.2 })
     expect(ratio.props('externalCursor')).toBe(1)
 
     ratio.vm.$emit('cursor', 2)
     ratio.vm.$emit('xZoom', { min: 0.05, max: 0.15 })
-    ratio.vm.$emit('updateMode', 'timeline')
     expect(wrapper.emitted('cursor')).toEqual([[2]])
     expect(wrapper.emitted('xZoom')).toEqual([[{ min: 0.05, max: 0.15 }]])
-    expect(wrapper.emitted('updateGearRatioMode')).toEqual([['timeline']])
   })
 })

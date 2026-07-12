@@ -170,7 +170,12 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - X 軸：時間或距離（距離由 GPS haversine 累積）。
 - Y 軸：自由選擇，可多軸疊圖或獨立顯示。
 - 多圖表 **X 軸同步**；軌跡圖同步顯示目前游標位置。
-- XY 軸可縮放。
+- XY 軸可縮放；**重設縮放**鈕於縮放中出現，桌面另支援按住 Shift 拖曳平移（觸控維持單指拖曳
+  平移 / 雙指縮放，見 B9）。
+- **B8**：主時序圖不再有「時序 / 疊圈」模式切換——**疊圈是唯一的顯示方式**：沒有選圈時退回
+  顯示整段 session（時間/距離軸連續資料，等同舊「時序」模式的畫面）；選了圈之後才切到
+  各圈疊在共用「圈相對 X」（從 0 起算）上比較。跨檔 overlay（cross-session、每圈 offset）
+  行為不變。
 - **G-G 圖**：橫向/縱向 G 圓形點雲。
 - **FFT**：避震行程、輪速等轉頻域（找共振 / 路面頻率）。
 - **分布圖**：XY 自選。
@@ -199,12 +204,14 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 ---
 
-## 7. 設定持久化與匯出 (#9)
+## 7. 設定持久化與匯出 (#9, B19)
 
-- 小設定（主題 / 語言 / 單位 / 欄位 preset 中繼資料）→ **localStorage**。
+- 小設定（主題 / 語言 / 時區 / 傳動系統 / dashboard 版面等）→ **localStorage**，各自一組 `aracer-loga.*.v1` key（`settingsStore`／`drivetrainStore`／`domain/layout/dashboardLayout.ts`／`panelState.ts`／`layoutLock.ts`），未走過一層共用的 `SettingsRepository` 抽象——每個 store/模組自行管的 key 數量還不多，先不引入額外抽象層。
 - 大資料（上傳的底圖、完整 preset 集合）→ **IndexedDB**（localStorage 約 5MB 上限會爆）。
-- 全部包在 `SettingsRepository` 介面後，UI 不需知道存哪。
-- **匯出 / 匯入**：序列化成單一 JSON 檔下載 / 上傳還原。
+- **匯出 / 匯入（B19，已實作）**：設定頁「設定匯出 / 匯入」卡片，序列化成單一 JSON 檔下載 / 上傳還原，邏輯集中在 `src/domain/settings/settingsTransfer.ts`（純函式，另有單元測試）：
+  - 範圍固定包含「外觀」（主題／語言／時區）與「傳動系統」（齒比、輪胎規格等）；「dashboard 版面配置」（grid 位置 + 卡片收合/釘選/手機排序）另有一個「包含版面配置」勾選開關，預設勾選。
+  - 匯出檔含 `schemaVersion`／`exportedAt` 供未來遷移與除錯。
+  - 匯入為覆寫性操作：解析＋逐欄位驗證（未知欄位容忍、缺欄位補預設值），套用前跳出確認對話框；外觀／傳動系統套用後透過 Pinia 響應式 refs 立即生效，若含版面配置則因 dashboard grid 只在掛載時讀取一次 localStorage，改為寫回 localStorage 後自動重新整理頁面以生效。
 
 ---
 
@@ -290,12 +297,14 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
     `.nvmrc`=22。**已 push 並公開**：`github.com/timliudev/track-log-studio`。
   - **6b 完整收尾（待做）**：內部資料夾 / 程式碼大改名、`docs/DESIGN.md` 標題改名、
     關於我頁、SEO（meta/OG、robots.txt、sitemap、structured data）、Logo / favicon
-    （PWA icon 換點陣 PNG 192/512 + maskable）、使用說明外部文件連結。
+    （✅ B13：PWA icon 已由 `public/app-icon.svg` 產出點陣 PNG 192/512 + maskable + iOS 180 + favicon）、使用說明外部文件連結。
 - **Phase 7 — 直線加速測試（✅ 完成，B14 列出全部區段 ✅ 完成）**：在整段軌跡中**掃描出所有符合
   條件的區段**並逐筆列出（例如整份記錄跑了 10 個紅綠燈，就列出 10 筆），最速一筆額外標記，
   常見於速可達/機車玩家。實作為 `domain/analysis/accelTest.ts`（`fastestDistanceFromLaunch` /
   `fastestSpeedSegment`，回傳 `AccelSegment[]`，其中恰一筆 `isFastest: true`）
-  + `AccelTestPanel.vue` 以清單顯示每筆結果（最速標記⚡）、可點擊個別聚焦到軌跡：
+  + `AccelTestPanel.vue` 以清單顯示每筆結果（最速標記⚡）、可點擊個別聚焦到軌跡（**B26**：
+  再點一次已聚焦的區段＝取消聚焦，另有面板層級的「清除聚焦」按鈕；切換搜尋條件也會自動清除
+  已失效的聚焦，避免圖表停留在不再對應任何結果的縮放範圍）：
   - **距離型**：從設定的起跑車速 `v0`（**預設 0 ＝靜止起步**）開始計時，找出每次起跑後跑完 `d`
     公尺所需秒數（例如「0~400m」每一次）。
   - **車速型**：例如每一次「0~100 km/h」所需秒數 / 距離（標準加速指標）。
@@ -357,8 +366,9 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   安全解壓（白名單 / 防炸彈 / 防 zip-slip）；FileBar 接受 `.loga/.nmea/.zip`。詳見 §4。
 - **軸顯示 #5/#6（feature/axis-display）**：圖表 X 軸刻度改為可讀格式——時間 `m:ss`／
   `h:mm:ss`、距離自動 m↔km（純函式 `domain/analysis/axisFormat.ts`：`formatElapsed`/
-  `formatDistance`/`formatClock`）。時間 + timeline 模式且能取得絕對起點時，**疊加第二條
-  X 軸**(uPlot side 2，自動堆疊)顯示當地時鐘 `HH:mm:ss`，軸標籤標 `UTC±N`。起點時刻由
+  `formatDistance`/`formatClock`）。時間軸 + 未選圈（整段 session，B8 起是唯一的「無選圈」
+  檢視）且能取得絕對起點時，**疊加第二條 X 軸**(uPlot side 2，自動堆疊)顯示當地時鐘
+  `HH:mm:ss`，軸標籤標 `UTC±N`。起點時刻由
   純函式 `domain/analysis/startTime.ts` `sessionStartAnchor` 決定：**GPS_UTC 優先**（首個
   有效 UTC fix，日期取 header createdDate，再扣掉該 sample 的 elapsed 對齊 elapsed=0，
   source=`gpsUtc`），退回 `meta.createdDate`（把本地時分秒「重新解讀成 UTC」，offset 0 即
@@ -494,8 +504,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 - 距離計算用 GPS haversine 累積（與 py 一致）。
 - 圈時預設用線段自算，並提供切換成 ECU `IR_LapTime`。
-- PWA 更新策略：**autoUpdate**（持續部署期間新版自動套用，避免 service worker 餵舊快取；
-  原訂「提示重整」因更新提示 UI 未實作會卡舊版，故改為自動更新）。
+- PWA 更新策略：**prompt + 更新提示 toast**（B13）——`registerType: 'prompt'` 搭配
+  `virtual:pwa-register/vue`，偵測到新版時顯示底部 snackbar 讓使用者按「重新整理」套用
+  （offline-ready 提示 6 秒自動消失、更新提示不自動消失）。先前因提示 UI 未實作而暫用
+  autoUpdate，現已補上正式提示流程。
 - 單位：公制（mm / km/h / °C），未來可加切換。
 
 ---

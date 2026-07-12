@@ -1,7 +1,6 @@
 /**
  * T5 — Analyzer dashboard CHART-CARD persistence: which chart cards exist and
- * their per-chart config (kind, picked channels, timeline/overlay mode, X/Y
- * scatter channels).
+ * their per-chart config (kind, picked channels, X/Y scatter channels).
  *
  * Closes the persistence gap the dashboard had until now: positions/sizes
  * were saved (dashboardLayout.v1) and collapse/pin/mobile-order too
@@ -21,19 +20,24 @@
  * does today: TimeSeriesChart filters to present channels, ScatterChart
  * renders empty until a valid pick — nothing breaks, so no session-dependent
  * validation happens here.
+ *
+ * B8 — a time-series chart used to carry a `mode: 'timeline' | 'overlay'`
+ * toggle; the whole "timeline" mode was removed (overlay is the only display
+ * now — with no laps selected it falls back to showing the full session on
+ * the shared time/distance axis, see TimeSeriesChart.vue's `hasSelection`).
+ * `parseCharts` below simply no longer copies a persisted `mode` field, so a
+ * pre-B8 payload that still has one degrades safely (the stray field is just
+ * dropped, same "ignore what we don't understand" spirit as every other
+ * unknown field here).
  */
 
 import { looksLikeForcePair } from '@/domain/analysis/ggData'
-
-/** How a chart plots its channels — see analyzerStore (re-exported there). */
-export type ChartMode = 'timeline' | 'overlay'
 
 /** A time-series chart: N channels over a shared X. */
 export interface TimeSeriesChartConfig {
   kind: 'timeseries'
   id: number
   channels: string[]
-  mode: ChartMode
 }
 
 /** An XY scatter chart: any two channels plotted against each other. */
@@ -73,7 +77,7 @@ export const STORAGE_KEY = 'aracer-loga.analyzerCharts.v1'
 /** The pristine dashboard: one empty timeseries chart (id 1) — same default
  *  the store hardcoded before charts were persisted. */
 export function defaultCharts(): ChartConfig[] {
-  return [{ kind: 'timeseries', id: 1, channels: [], mode: 'timeline' }]
+  return [{ kind: 'timeseries', id: 1, channels: [] }]
 }
 
 /** The id the NEXT added chart should get: one past the highest existing id
@@ -111,7 +115,6 @@ export function parseCharts(raw: string | null): ChartConfig[] | null {
           kind: 'timeseries',
           id,
           channels: isStringArray(it.channels) ? it.channels : [],
-          mode: it.mode === 'overlay' ? 'overlay' : 'timeline',
         })
         seen.add(id)
       } else if (it.kind === 'scatter') {

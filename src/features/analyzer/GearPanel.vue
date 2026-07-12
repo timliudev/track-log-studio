@@ -35,7 +35,6 @@ import { useI18n } from 'vue-i18n'
 import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
-import type { ChartMode } from '@/stores/analyzerStore'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import {
   useDrivetrainStore,
@@ -73,7 +72,6 @@ const props = defineProps<{
   xRange?: { min: number; max: number } | null
   externalCursor?: number | null
   selectedLaps?: Lap[]
-  gearRatioMode?: ChartMode
   comparisonSessions?: ComparisonSession[]
   primaryFileId?: number | null
   primaryFileName?: string
@@ -81,8 +79,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   cursor: [number | null]
-  xZoom: [{ min: number; max: number }]
-  updateGearRatioMode: [ChartMode]
+  xZoom: [{ min: number; max: number } | null]
 }>()
 
 const { t } = useI18n()
@@ -512,7 +509,6 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
     <p v-else-if="!props.xValues" class="hint">{{ t('analyzer.gear.noRatioAxis') }}</p>
     <GearRatioChart
       v-else
-      :mode="gearRatioMode ?? 'timeline'"
       :session="props.session"
       :x-values="props.xValues"
       :x-range="props.xRange"
@@ -523,7 +519,6 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
       :primary-file-name="props.primaryFileName"
       @cursor="emit('cursor', $event)"
       @x-zoom="emit('xZoom', $event)"
-      @update-mode="emit('updateGearRatioMode', $event)"
     />
 
     <!-- ════════════════════════ MT ════════════════════════ -->
@@ -950,9 +945,6 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: var(--space);
-  padding-top: var(--space);
-  border-top: 1px solid var(--color-border);
 }
 .heading {
   margin: 0;

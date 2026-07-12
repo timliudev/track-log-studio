@@ -75,18 +75,22 @@ describe('LapTableView', () => {
     expect(wrapper.emitted('row-click')?.[0]).toEqual([1])
   })
 
-  it('renders optional pick/trail slot columns only when the caller supplies them', () => {
+  it('renders optional lead/trail slot columns only when the caller supplies them', () => {
     const withSlots = mountView(
       { rows: [row()] },
       {
-        'pick-header': '<span class="ph">pick</span>',
-        pick: '<input type="checkbox" class="pick-input" />',
+        lead: '<span class="lead-cell">lead</span>',
+        'trail-header': '<span class="th">trail</span>',
+        trail: '<input type="text" class="trail-input" />',
       },
     )
-    expect(withSlots.find('.pick-col').exists()).toBe(true)
-    expect(withSlots.find('.pick-input').exists()).toBe(true)
+    expect(withSlots.find('.lead-cell').exists()).toBe(true)
+    expect(withSlots.find('.offset-col').exists()).toBe(true)
+    expect(withSlots.find('.trail-input').exists()).toBe(true)
+
     // No trail slot supplied ⇒ no offset-col rendered.
-    expect(withSlots.find('.offset-col').exists()).toBe(false)
+    const withoutTrail = mountView({ rows: [row()] })
+    expect(withoutTrail.find('.offset-col').exists()).toBe(false)
 
     const readonly = mountView({ rows: [row()], readonly: true })
     expect(readonly.find('table').attributes('aria-readonly')).toBe('true')
