@@ -25,9 +25,21 @@ export default {
   },
   settings: {
     heading: '設定',
-    futureNote: '更多設定（設定匯出 / 匯入等）將陸續加入。',
     timezone: '時區',
     timezoneAuto: '自動（瀏覽器）',
+    transfer: {
+      heading: '設定匯出 / 匯入',
+      description: '匯出／匯入外觀設定（主題／語言／時區）與傳動系統設定；可另外勾選是否一併包含 dashboard 版面配置。',
+      includeLayout: '包含 dashboard 版面配置',
+      exportButton: '匯出設定',
+      importButton: '匯入設定…',
+      importConfirm: '匯入將覆蓋目前的設定（若勾選也包含版面配置），且無法復原，確定要繼續嗎？',
+      importSuccess: '設定已匯入並套用。',
+      importSuccessReload: '設定已匯入，包含版面配置，頁面即將重新整理以套用…',
+      importErrorInvalidJson: '匯入失敗：檔案不是有效的 JSON。',
+      importErrorInvalidShape: '匯入失敗：檔案內容格式不正確。',
+      importErrorRead: '匯入失敗：讀取檔案時發生錯誤，請重試。',
+    },
   },
   about: {
     project: {

@@ -1,12 +1,17 @@
 // @vitest-environment happy-dom
 import { setActivePinia, createPinia } from 'pinia'
-import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { nextTick } from 'vue'
 import SettingsView from '@/features/settings/SettingsView.vue'
 import { thirdPartyLicenses } from '@/data/licenses'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
+import {
+  buildExportBundle,
+  serializeExportBundle,
+} from '@/domain/settings/settingsTransfer'
 
 // settingsStore reads/writes localStorage on construction — happy-dom's jsdom
 // shim doesn't ship one here, so stub an in-memory implementation (mirrors
@@ -85,5 +90,130 @@ describe('SettingsView', () => {
     const wrapper = mountSettings('en')
     expect(wrapper.text()).toContain('Third-party open-source licenses')
     expect(wrapper.text()).toContain('vue')
+  })
+
+  // B19 — settings export / import.
+  describe('B19 — export / import', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
+    })
+
+    it('renders the include-layout toggle and export/import buttons', () => {
+      const wrapper = mountSettings()
+      expect(wrapper.find('input[name="includeLayout"]').exists()).toBe(true)
+      const buttonTexts = wrapper.findAll('button').map((b) => b.text())
+      expect(buttonTexts).toContain('匯出設定')
+      expect(buttonTexts).toContain('匯入設定…')
+    })
+
+    it('clicking export triggers a JSON blob download without throwing', async () => {
+      installMemoryLocalStorage()
+      const createObjectURL = vi.fn(() => 'blob:mock')
+      const revokeObjectURL = vi.fn()
+      vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+      // happy-dom implements `click` on HTMLElement.prototype (not
+      // re-declared per-tag), so that's what an <a> instance resolves to.
+      const clickSpy = vi.spyOn(HTMLElement.prototype, 'click').mockImplementation(() => {})
+
+      const wrapper = mountSettings()
+      const exportButton = wrapper.findAll('button').find((b) => b.text() === '匯出設定')!
+      await exportButton.trigger('click')
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1)
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('importing a valid file (confirmed) applies appearance settings immediately', async () => {
+      installMemoryLocalStorage()
+      vi.stubGlobal('confirm', vi.fn(() => true))
+
+      const wrapper = mountSettings()
+      const bundle = buildExportBundle({
+        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480 },
+        drivetrain: {
+          kind: 'mt',
+          mt: {
+            primaryReduction: 2.833,
+            gearRatios: [],
+            finalDrive: { mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 },
+            circumferenceMode: 'direct',
+            tireSpec: '',
+            wheelCircumferenceMm: 1884,
+            redlineRpm: 10000,
+          },
+          cvt: { wheelCircumferenceMm: 1400, tireSpec: '', notes: [] },
+          inversionWheelCircumferenceMm: 1870,
+        },
+      })
+      const json = serializeExportBundle(bundle)
+      const file = new File([json], 'settings.json', { type: 'application/json' })
+      const input = wrapper.find('input[type="file"]')
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(file)
+      const inputEl = input.element as HTMLInputElement
+      inputEl.files = dataTransfer.files
+      await input.trigger('change')
+      // Flush the async onImportFileChange handler (awaits file.text()).
+      await new Promise((r) => setTimeout(r, 0))
+      await nextTick()
+
+      const themeSelect = wrapper.find('select[name="theme"]').element as HTMLSelectElement
+      expect(themeSelect.value).toBe('dark')
+      expect(wrapper.text()).toContain('設定已匯入並套用')
+    })
+
+    it('does not apply anything when the user cancels the overwrite confirmation', async () => {
+      installMemoryLocalStorage()
+      vi.stubGlobal('confirm', vi.fn(() => false))
+
+      const wrapper = mountSettings()
+      const bundle = buildExportBundle({
+        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480 },
+        drivetrain: {
+          kind: 'mt',
+          mt: {
+            primaryReduction: 2.833,
+            gearRatios: [],
+            finalDrive: { mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 },
+            circumferenceMode: 'direct',
+            tireSpec: '',
+            wheelCircumferenceMm: 1884,
+            redlineRpm: 10000,
+          },
+          cvt: { wheelCircumferenceMm: 1400, tireSpec: '', notes: [] },
+          inversionWheelCircumferenceMm: 1870,
+        },
+      })
+      const json = serializeExportBundle(bundle)
+      const file = new File([json], 'settings.json', { type: 'application/json' })
+      const input = wrapper.find('input[type="file"]')
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(file)
+      const inputEl = input.element as HTMLInputElement
+      inputEl.files = dataTransfer.files
+      await input.trigger('change')
+      await new Promise((r) => setTimeout(r, 0))
+      await nextTick()
+
+      const themeSelect = wrapper.find('select[name="theme"]').element as HTMLSelectElement
+      expect(themeSelect.value).toBe('auto')
+    })
+
+    it('shows an error message for an invalid (non-JSON) import file', async () => {
+      installMemoryLocalStorage()
+      const wrapper = mountSettings()
+      const file = new File(['not json'], 'settings.json', { type: 'application/json' })
+      const input = wrapper.find('input[type="file"]')
+      const dataTransfer = new DataTransfer()
+      dataTransfer.items.add(file)
+      const inputEl = input.element as HTMLInputElement
+      inputEl.files = dataTransfer.files
+      await input.trigger('change')
+      await new Promise((r) => setTimeout(r, 0))
+      await nextTick()
+
+      expect(wrapper.text()).toContain('不是有效的 JSON')
+    })
   })
 })

@@ -199,12 +199,14 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 ---
 
-## 7. 設定持久化與匯出 (#9)
+## 7. 設定持久化與匯出 (#9, B19)
 
-- 小設定（主題 / 語言 / 單位 / 欄位 preset 中繼資料）→ **localStorage**。
+- 小設定（主題 / 語言 / 時區 / 傳動系統 / dashboard 版面等）→ **localStorage**，各自一組 `aracer-loga.*.v1` key（`settingsStore`／`drivetrainStore`／`domain/layout/dashboardLayout.ts`／`panelState.ts`／`layoutLock.ts`），未走過一層共用的 `SettingsRepository` 抽象——每個 store/模組自行管的 key 數量還不多，先不引入額外抽象層。
 - 大資料（上傳的底圖、完整 preset 集合）→ **IndexedDB**（localStorage 約 5MB 上限會爆）。
-- 全部包在 `SettingsRepository` 介面後，UI 不需知道存哪。
-- **匯出 / 匯入**：序列化成單一 JSON 檔下載 / 上傳還原。
+- **匯出 / 匯入（B19，已實作）**：設定頁「設定匯出 / 匯入」卡片，序列化成單一 JSON 檔下載 / 上傳還原，邏輯集中在 `src/domain/settings/settingsTransfer.ts`（純函式，另有單元測試）：
+  - 範圍固定包含「外觀」（主題／語言／時區）與「傳動系統」（齒比、輪胎規格等）；「dashboard 版面配置」（grid 位置 + 卡片收合/釘選/手機排序）另有一個「包含版面配置」勾選開關，預設勾選。
+  - 匯出檔含 `schemaVersion`／`exportedAt` 供未來遷移與除錯。
+  - 匯入為覆寫性操作：解析＋逐欄位驗證（未知欄位容忍、缺欄位補預設值），套用前跳出確認對話框；外觀／傳動系統套用後透過 Pinia 響應式 refs 立即生效，若含版面配置則因 dashboard grid 只在掛載時讀取一次 localStorage，改為寫回 localStorage 後自動重新整理頁面以生效。
 
 ---
 
