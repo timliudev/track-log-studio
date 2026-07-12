@@ -233,6 +233,7 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **響應式**：CSS 變數 + container queries；可手動切換版面與縮放，並持久化。
 - **日夜**：`prefers-color-scheme` + 手動覆蓋，CSS 變數主題。
 - **輸入**：Pointer Events 統一滑鼠 / 觸控 / 觸控板；可在設定調整。
+- **觸控友善原則（2026-07-13 拍板，B35）**：觸控配套以**輸入能力**判斷（`pointer: coarse` / `hover: none` 或共用 `useCoarsePointer()`），**不得**以視窗寬度（`max-width:768px`）代替——平板橫放跑的是完整桌面版面，但沒有滑鼠/hover/修飾鍵。凡是「hover 才有的資訊」「需要 Shift 等修飾鍵的手勢」「小於 ~44px 的點擊目標」都必須有觸控等價操作；圖表在 coarse-pointer 裝置上提供單指平移/雙指縮放與（B31）中央固定指針拖動模式。
 
 ---
 
