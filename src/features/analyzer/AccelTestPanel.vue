@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AccelSegment } from '@/domain/analysis/accelTest'
 import type { AccelCondition } from '@/stores/analyzerStore'
@@ -19,10 +19,54 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** User asked to focus the found segment (zoom the charts/map to it). */
   focus: [segment: AccelSegment]
+  /** User asked to cancel the current focus (B26) — restore the full view. */
+  clear: []
 }>()
 
 const { t } = useI18n()
 const analyzer = useAnalyzerStore()
+
+// B26: a found segment can be "focused" (zooms the charts/map to its span —
+// see AnalyzerView's onAccelFocus), but there was previously no way back out
+// short of manually re-zooming. `focusedKey` tracks which segment (by its
+// `startIdx-endIdx` key, same as the list's `:key`) is currently focused so
+// the row can render a highlight + toggle its own button, and so a global
+// "clear focus" affordance can appear.
+const focusedKey = ref<string | null>(null)
+
+function segKey(seg: AccelSegment): string {
+  return `${seg.startIdx}-${seg.endIdx}`
+}
+
+function isFocused(seg: AccelSegment): boolean {
+  return focusedKey.value === segKey(seg)
+}
+
+/** Row click / focus-button click: toggles — clicking the already-focused
+ *  segment again cancels the focus instead of re-emitting the same zoom. */
+function onFocusClick(seg: AccelSegment): void {
+  if (isFocused(seg)) {
+    clearFocus()
+    return
+  }
+  focusedKey.value = segKey(seg)
+  emit('focus', seg)
+}
+
+function clearFocus(): void {
+  if (focusedKey.value == null) return
+  focusedKey.value = null
+  emit('clear')
+}
+
+// The result list changes (condition edited, new session, …) whenever a
+// fresh search runs — any previously-focused segment may no longer exist in
+// the new array, so drop the stale focus rather than leave the chart zoomed
+// to a span that no longer corresponds to a listed result.
+watch(
+  () => props.results,
+  () => clearFocus(),
+)
 
 const condition = computed(() => analyzer.accelCondition)
 const isDistance = computed(() => condition.value.kind === 'distance')
@@ -142,13 +186,23 @@ function fmtDist(v: number): string {
     <p v-if="!props.speedAvailable" class="hint">{{ t('analyzer.accelNoChannel') }}</p>
     <p v-else-if="props.results.length === 0" class="hint">{{ t('analyzer.accelNoMatch') }}</p>
     <template v-else>
-      <p class="hint result-count">{{ t('analyzer.accelResultCount', { n: props.results.length }) }}</p>
+      <div class="row result-count-row">
+        <p class="hint result-count">{{ t('analyzer.accelResultCount', { n: props.results.length }) }}</p>
+        <button
+          v-if="focusedKey != null"
+          type="button"
+          class="clear-focus-btn"
+          @click="clearFocus"
+        >
+          {{ t('analyzer.accelClearFocus') }}
+        </button>
+      </div>
       <ul class="result-list">
         <li
           v-for="(seg, i) in props.results"
           :key="`${seg.startIdx}-${seg.endIdx}`"
           class="result"
-          :class="{ fastest: seg.isFastest }"
+          :class="{ fastest: seg.isFastest, focused: isFocused(seg) }"
         >
           <span class="result-index">#{{ i + 1 }}</span>
           <span v-if="seg.isFastest" class="fastest-badge" :title="t('analyzer.accelFastest')">⚡</span>
@@ -160,8 +214,8 @@ function fmtDist(v: number): string {
               exit: fmtSpeed(seg.exitSpeedKmh),
             }) }}
           </span>
-          <button type="button" class="focus-btn" @click="emit('focus', seg)">
-            {{ t('analyzer.accelFocus') }}
+          <button type="button" class="focus-btn" :class="{ active: isFocused(seg) }" @click="onFocusClick(seg)">
+            {{ isFocused(seg) ? t('analyzer.accelUnfocus') : t('analyzer.accelFocus') }}
           </button>
         </li>
       </ul>
@@ -174,9 +228,6 @@ function fmtDist(v: number): string {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: var(--space);
-  padding-top: var(--space);
-  border-top: 1px solid var(--color-border);
 }
 .row {
   display: flex;
@@ -230,8 +281,26 @@ function fmtDist(v: number): string {
   font-size: 0.78rem;
   opacity: 0.8;
 }
+.result-count-row {
+  justify-content: space-between;
+  flex-wrap: nowrap;
+}
 .result-count {
   margin-bottom: -2px;
+}
+.clear-focus-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  white-space: nowrap;
+}
+.clear-focus-btn:hover {
+  color: var(--color-accent);
 }
 .result-list {
   list-style: none;
@@ -256,6 +325,9 @@ function fmtDist(v: number): string {
 .result.fastest {
   outline: 1px solid var(--color-accent);
   background: var(--color-surface);
+}
+.result.focused {
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 .result-index {
   color: var(--color-text-muted);
@@ -291,5 +363,10 @@ function fmtDist(v: number): string {
 .focus-btn:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.focus-btn.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border-color: var(--color-accent);
 }
 </style>
