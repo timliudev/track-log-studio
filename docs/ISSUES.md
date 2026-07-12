@@ -8,13 +8,13 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [x] **B1 / B17** Comparison table now reuses the primary LapTable via a shared `LapTableView` (read-only); sector column computed from each comparison's own track through the shared gates. — `bbb9c15`
 - [x] **B2** Valid-lap time/distance band now marks comparison laps as excluded, same as primary. — `bbb9c15`
 - [x] **B3** Removed the duplicate lap list that was double-mounted inside the sector-gate card. — `bbb9c15`
-- [ ] **B1b** (RE-REPORT, screenshot 2026-07-12) The comparison table's LEAD/SELECTION UI still differs from the primary: it uses a **checkbox** column + has **no exclude (⦸) button**, whereas the primary uses the ⦸ exclude lead. User: 「怎麼還是獨立的?為何會有checkbox?主表是這種樣式嗎?排除圈的按鈕呢?」 Make the lead column + row-selection interaction visually match the primary (row-click to select for overlay like the primary does; drop the standalone checkbox look; comparison stays non-excludable but the lead cell should read the same). Columns/sector/band parity (B1/B2/B17) already landed — this is the remaining visual/interaction unification.
+- [x] **B1b** Comparison table lead/selection UI unified with the primary: checkbox column removed, row-click selects, lead cell = selection swatch (same colour as the map/chart cross-file highlight) + lap number; unused `pick` slot removed from LapTableView. Comparison stays non-excludable (no ⦸). — `40e3155`
 
 ## LapTable layout
-- [ ] **B4** Primary-file title belongs above the table (not top of whole card); "add column" button on the same row as the line/ECU source toggle; clear-selection on that row too but far right.
+- [x] **B4** Primary-file title moved to directly above the table; add-column buttons share a row with the line/ECU source toggle; clear-selection on that row, far right (wraps on narrow screens). — `df97c7d`
 
 ## Lap detection
-- [ ] **B5** Switching lap source 線段自算 ↔ ECU must clear the selected laps (lap sets differ between sources).
+- [x] **B5** Switching lap source 線段自算 ↔ ECU clears both primary and cross-session lap selections (indices invalid under the new source); manual exclusions kept; same-source re-click is a no-op. — `5091250`
 
 ## Track map
 - [ ] **B6** Min/max extrema markers with no lap selected show the whole track's extrema (screen floods). Rework to avoid clutter.
@@ -34,16 +34,17 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 
 ## PWA
 - [x] **B13** PNG icon set generated from `public/app-icon.svg` (192/512 + maskable + iOS 180 + favicon); `virtual:pwa-register/vue` update-available toast added. — `5fdd152`
-- [ ] **B23** Console warns `apple-mobile-web-app-capable` is deprecated — add `<meta name="mobile-web-app-capable" content="yes">` (keep the apple one for older iOS). index.html. (The `cloudflareinsights beacon ERR_BLOCKED_BY_CLIENT` is just the user's ad-blocker — NOT a bug.)
+- [x] **B23** Added `<meta name="mobile-web-app-capable" content="yes">` alongside the kept apple variant. (The `cloudflareinsights beacon ERR_BLOCKED_BY_CLIENT` is just the user's ad-blocker — NOT a bug.) — `d1b56f7`
 
 - [ ] **B24** The accel-test segment list doesn't stretch/scroll to fill the card as the card resizes. Make lists-in-cards share ONE "fill card height + scroll on overflow" layout (user: 「我好像不只一次提到這類議題」) — same pattern needed by B15's current-values grid and other in-card lists. Factor out a shared scroll/fill container.
-- [ ] **B26** Accel-test card can focus a segment (highlights it on the map/chart) but has NO way to un-focus/cancel the focused segment. Add a clear/deselect.
+- [x] **B26** Accel-test focus is now a toggle (re-click un-focuses) + explicit 清除聚焦 button; stale focus auto-clears when the result set changes; clearing restores the full chart range. — `348cb0c`
 
 ## Charts (scatter)
 - [ ] **B25** XY scatter's 3rd axis (colour) breaks once a 2nd track file is selected — the colour channel now collides with per-file identity colour. **DECIDED (user, 2026-07-12): marker SHAPE per file (circle/triangle/square…) + shape legend; colour stays fully on the 3rd-axis value gradient.** Implement accordingly.
 
 ## Card chrome
-- [ ] **B27** Gear-ratio calculator, accel-test, and Sector cards show a stray horizontal bar/line at the TOP inside the card. Find + remove the artifact (likely a leftover element/border/empty header row in those panels).
+- [x] **B27** Root cause: leftover `border-top`/`margin-top`/`padding-top` on the panel roots (a stacked-panel divider from before each panel got its own card). Removed from GearPanel/AccelTestPanel/SectorPanel. — `9f0a085`
+- [ ] **B27b** Same leftover divider style also exists in `TrackChannelPanel.vue` and `TrackFilePanel.vue` (each solo in its own card) — remove there too.
 
 ## Settings
 - [ ] **B19** Define + implement settings export scope (theme/language/timezone/units, drivetrain, and layout — dashboard layout + panel state; likely a "include layout" toggle) + import.
