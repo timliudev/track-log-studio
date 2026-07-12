@@ -180,6 +180,18 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **FFT**：避震行程、輪速等轉頻域（找共振 / 路面頻率）。
 - **分布圖**：XY 自選。
 - **每圈統計表**：圈時、距離、車速…可選欄位。
+- **B15/B16「目前數值」卡**：dashboard 靜態卡片之一（`currentvalues`），以自動換行格狀（CSS
+  grid auto-fill）顯示**目前記錄的所有 channel**在同一個取樣點的值，**目前時間**（session 內經過
+  時間，`m:ss.mmm`）固定排第一格、格式與其他 channel 一致。取樣點＝共用游標（圖表/地圖 hover，
+  `analyzerStore.cursorIdx`）；沒有游標時退回顯示**最後一筆**（而非全部顯示「—」），因為游標多數
+  時間是未設定狀態，顯示「記錄結束時的狀態」比整卡破折號更有用。純函式見
+  `domain/analysis/currentValues.ts`（`resolveCurrentValueIndex` / `buildCurrentValueFields` /
+  `formatCurrentValueField`）——每格皆為 O(1) 索引存取，`timeSeconds()` 只依 session 快取一次，
+  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。
+- **B24 共用容器 `CardFillScroll.vue`**：卡片內「固定控制列 + 內容區自身伸縮捲動」的共用版型
+  （`#header` 具名 slot 固定、預設 slot 填滿剩餘高度並自行 `overflow:auto`），取代個別元件各自
+  土砲 `max-height` 寫死高度（例：加速測試區段列表原本卡在 260px，改用此容器後跟卡片一起縮放）；
+  「目前數值」卡的格狀內容也用同一個容器捲動。
 
 ### 6.5 避震校正（**更正：5 參數，對齊原廠 App**）
 
