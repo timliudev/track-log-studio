@@ -40,7 +40,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [ ] **B26** Accel-test card can focus a segment (highlights it on the map/chart) but has NO way to un-focus/cancel the focused segment. Add a clear/deselect.
 
 ## Charts (scatter)
-- [ ] **B25** XY scatter's 3rd axis (colour) breaks once a 2nd track file is selected — the colour channel now collides with per-file identity colour. Find an alternative that keeps the 3rd axis working with multiple files (e.g. separate the file-identity encoding from the value-colour, marker shape per file, or a 3D/z axis). Needs a design decision — confirm approach with user before big work.
+- [ ] **B25** XY scatter's 3rd axis (colour) breaks once a 2nd track file is selected — the colour channel now collides with per-file identity colour. **DECIDED (user, 2026-07-12): marker SHAPE per file (circle/triangle/square…) + shape legend; colour stays fully on the 3rd-axis value gradient.** Implement accordingly.
 
 ## Card chrome
 - [ ] **B27** Gear-ratio calculator, accel-test, and Sector cards show a stray horizontal bar/line at the TOP inside the card. Find + remove the artifact (likely a leftover element/border/empty header row in those panels).
