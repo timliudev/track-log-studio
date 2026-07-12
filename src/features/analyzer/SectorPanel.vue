@@ -9,6 +9,7 @@ import { useLapStore } from '@/stores/lapStore'
 import { useSectors } from '@/composables/useSectors'
 import { computeSectorTimes, computeOptimalLap } from '@/domain/analysis/sectorTiming'
 import { formatLapTime } from '@/domain/analysis/format'
+import CardFillScroll from '@/components/CardFillScroll.vue'
 
 const props = defineProps<{
   laps: Lap[]
@@ -62,24 +63,26 @@ const hasOptimalData = computed(
 </script>
 
 <template>
-  <div class="sector-panel">
-    <div class="row">
-      <button type="button" class="detect" @click="onAutoDetect">
-        {{ t('analyzer.sectorAutoDetect') }}
-      </button>
-      <button type="button" class="add" @click="onAddGate">
-        {{ t('analyzer.sectorAddGate') }}
-      </button>
-      <span class="count">
-        {{ t('analyzer.sectorGateCount', { n: gates.length }) }}
-      </span>
-      <button v-if="gates.length > 0" type="button" class="clear" @click="sectorStore.clearGates()">
-        {{ t('analyzer.sectorClearGates') }}
-      </button>
-      <span v-if="invalidCount > 0" class="invalid-count">
-        {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
-      </span>
-    </div>
+  <CardFillScroll class="sector-panel">
+    <template #header>
+      <div class="row">
+        <button type="button" class="detect" @click="onAutoDetect">
+          {{ t('analyzer.sectorAutoDetect') }}
+        </button>
+        <button type="button" class="add" @click="onAddGate">
+          {{ t('analyzer.sectorAddGate') }}
+        </button>
+        <span class="count">
+          {{ t('analyzer.sectorGateCount', { n: gates.length }) }}
+        </span>
+        <button v-if="gates.length > 0" type="button" class="clear" @click="sectorStore.clearGates()">
+          {{ t('analyzer.sectorClearGates') }}
+        </button>
+        <span v-if="invalidCount > 0" class="invalid-count">
+          {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
+        </span>
+      </div>
+    </template>
 
     <ul v-if="gates.length > 0" class="gate-list">
       <li v-for="(_g, i) in gates" :key="i">
@@ -118,15 +121,10 @@ const hasOptimalData = computed(
       </template>
       <p v-else class="optimal-empty">{{ t('analyzer.optimalLapNoData') }}</p>
     </div>
-  </div>
+  </CardFillScroll>
 </template>
 
 <style scoped>
-.sector-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .optimal {
   display: flex;
   flex-direction: column;
@@ -198,14 +196,16 @@ const hasOptimalData = computed(
   padding: 0;
 }
 .gate-list {
+  /* B24b — no own max-height/overflow: CardFillScroll's content pane is the
+     real scroll parent now, so the list fills/scrolls with the card's actual
+     size instead of being capped at a fixed pixel height (same fix as
+     AccelTestPanel's B24 result-list). */
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 180px;
-  overflow-y: auto;
 }
 .gate-list li {
   display: flex;
