@@ -28,7 +28,26 @@ describe('buildMultiSessionScatter', () => {
     expect(result.every((series) => series.points.length <= 2)).toBe(true)
   })
 
-  it('keeps third-channel values aligned for hover without replacing session colours', () => {
+  // B25 — a distinct marker shape identifies each file, by its POSITION in
+  // `sources` (matching FileBar/the comparison list's order), regardless of
+  // whether an earlier source was skipped for a missing channel pair.
+  it('assigns a stable marker shape per source position', () => {
+    const result = buildMultiSessionScatter([
+      { id: 5, name: 'A', color: '#a00', session: session({ X: [1], Y: [2] }) },
+      { id: 9, name: 'missing', color: '#00a', session: session({ X: [1] }) },
+      { id: 2, name: 'C', color: '#0a0', session: session({ X: [3], Y: [4] }) },
+    ], 'X', 'Y')
+
+    expect(result.map(({ name, symbol }) => ({ name, symbol }))).toEqual([
+      { name: 'A', symbol: 'circle' },
+      { name: 'C', symbol: 'rect' },
+    ])
+  })
+
+  // B25 — once a colour-axis channel is picked, hue goes ENTIRELY to that
+  // channel's gradient (colorValues) for every session, not just the tooltip;
+  // file identity is then carried by `symbol` alone, not `color`.
+  it('routes the third channel to the shared colour axis (not just the tooltip) when picked', () => {
     const result = buildMultiSessionScatter(
       [
         {
@@ -51,12 +70,12 @@ describe('buildMultiSessionScatter', () => {
     )
 
     expect(result).toEqual([
-      { points: [[1, 3], [2, 4]], tooltipValues: [5000, 6000], color: '#a00', name: 'A' },
-      { points: [[5, 7], [6, 8]], tooltipValues: [7000, 8000], color: '#0a0', name: 'B' },
+      { points: [[1, 3], [2, 4]], colorValues: [5000, 6000], color: '#a00', name: 'A', symbol: 'circle' },
+      { points: [[5, 7], [6, 8]], colorValues: [7000, 8000], color: '#0a0', name: 'B', symbol: 'triangle' },
     ])
   })
 
-  it('keeps a compatible session visible when it lacks the optional hover channel', () => {
+  it('keeps a compatible session visible when it lacks the optional colour channel', () => {
     const result = buildMultiSessionScatter(
       [{ id: 1, name: 'A', color: '#a00', session: session({ X: [1], Y: [2] }) }],
       'X',
@@ -65,6 +84,6 @@ describe('buildMultiSessionScatter', () => {
       'RPM',
     )
 
-    expect(result).toEqual([{ points: [[1, 2]], color: '#a00', name: 'A' }])
+    expect(result).toEqual([{ points: [[1, 2]], color: '#a00', name: 'A', symbol: 'circle' }])
   })
 })
