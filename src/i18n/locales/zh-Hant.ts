@@ -27,6 +27,7 @@ export default {
     heading: '設定',
     timezone: '時區',
     timezoneAuto: '自動（瀏覽器）',
+    current: '目前套用：{value}',
     transfer: {
       heading: '設定匯出 / 匯入',
       description: '匯出／匯入外觀設定（主題／語言／時區）與傳動系統設定；可另外勾選是否一併包含 dashboard 版面配置。',

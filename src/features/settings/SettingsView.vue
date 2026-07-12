@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { TzOverride } from '@/stores/settingsStore'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { detectLocale, type LocaleCode } from '@/i18n'
 import { thirdPartyLicenses } from '@/data/licenses'
 import { loadLayout, saveLayout } from '@/domain/layout/dashboardLayout'
 import { loadPanelState, savePanelState } from '@/domain/layout/panelState'
@@ -16,7 +17,7 @@ import {
   type ImportError,
 } from '@/domain/settings/settingsTransfer'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
 const { tzOverride, themePref, localePref } = storeToRefs(settingsStore)
 const drivetrainStore = useDrivetrainStore()
@@ -35,6 +36,64 @@ const tzModel = computed<string>({
     const next: TzOverride = v === 'auto' ? 'auto' : Number(v)
     tzOverride.value = next
   },
+})
+
+// --- B20: show the CURRENTLY-APPLIED value next to each 'auto'-capable
+// control — the <select> itself already reflects an explicit choice, but
+// 'auto' alone doesn't tell the user what it currently resolves to. ---
+
+// Effective theme: mirrors useTheme.ts's resolution formula, but kept as its
+// OWN small matchMedia listener (rather than calling useTheme() again here)
+// so mounting/unmounting the Settings tab doesn't accumulate duplicate
+// 'change' listeners on top of the one App.vue's root-level useTheme() call
+// already owns for the entire app lifetime — this is display-only and never
+// touches <html data-theme> itself.
+const systemPrefersDark = ref(false)
+let darkMediaQuery: MediaQueryList | undefined
+function onSystemThemeChange(e: MediaQueryListEvent): void {
+  systemPrefersDark.value = e.matches
+}
+onMounted(() => {
+  darkMediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  systemPrefersDark.value = darkMediaQuery.matches
+  darkMediaQuery.addEventListener('change', onSystemThemeChange)
+})
+onBeforeUnmount(() => {
+  darkMediaQuery?.removeEventListener('change', onSystemThemeChange)
+})
+const effectiveTheme = computed<'light' | 'dark'>(() =>
+  themePref.value === 'auto' ? (systemPrefersDark.value ? 'dark' : 'light') : themePref.value,
+)
+
+// Effective language: the app-wide locale useLocale() (mounted once in
+// App.vue) keeps `locale` (vue-i18n's global-scope ref, since useI18n() here
+// has no local `messages` option) in sync with localePref/detectLocale — so
+// this just reads that same reactive value rather than recomputing it.
+const localeLabels: Record<LocaleCode, string> = { 'zh-Hant': '繁體中文', en: 'English' }
+const effectiveLocaleLabel = computed(() => localeLabels[(locale.value as LocaleCode) ?? detectLocale()])
+
+// Effective timezone: browser's own offset when 'auto'. getTimezoneOffset()
+// returns minutes WEST of UTC (positive west, negative east) — negate for
+// this app's "minutes east of UTC" convention (see TzOverride's doc).
+const systemTzOffsetMinutes = -new Date().getTimezoneOffset()
+function formatOffsetMinutes(min: number): string {
+  if (min === 0) return 'UTC'
+  const sign = min > 0 ? '+' : '-'
+  const abs = Math.abs(min)
+  const h = Math.floor(abs / 60)
+  const m = abs % 60
+  return `UTC${sign}${h}${m ? ':' + String(m).padStart(2, '0') : ''}`
+}
+const systemTzName = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  } catch {
+    return undefined
+  }
+})()
+const effectiveTimezoneLabel = computed(() => {
+  const offset = formatOffsetMinutes(systemTzOffsetMinutes)
+  return systemTzName ? `${offset} (${systemTzName})` : offset
 })
 
 // --- B19: settings export / import ---
@@ -155,6 +214,9 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
           <option value="light">{{ t('theme.light') }}</option>
           <option value="dark">{{ t('theme.dark') }}</option>
         </select>
+        <span v-if="themePref === 'auto'" class="current-value">
+          {{ t('settings.current', { value: t(`theme.${effectiveTheme}`) }) }}
+        </span>
       </label>
       <label class="control">
         <span>{{ t('language.label') }}</span>
@@ -163,6 +225,9 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
           <option value="zh-Hant">繁體中文</option>
           <option value="en">English</option>
         </select>
+        <span v-if="localePref === 'auto'" class="current-value">
+          {{ t('settings.current', { value: effectiveLocaleLabel }) }}
+        </span>
       </label>
       <label class="control">
         <span>{{ t('settings.timezone') }}</span>
@@ -170,6 +235,9 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
           <option value="auto">{{ t('settings.timezoneAuto') }}</option>
           <option v-for="h in tzHours" :key="h" :value="String(h * 60)">{{ tzLabel(h) }}</option>
         </select>
+        <span v-if="tzOverride === 'auto'" class="current-value">
+          {{ t('settings.current', { value: effectiveTimezoneLabel }) }}
+        </span>
       </label>
     </div>
 
@@ -301,6 +369,7 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
 .control {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space);
 }
 .control span {
@@ -314,6 +383,11 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
   border-radius: var(--radius);
   padding: 5px 8px;
   font: inherit;
+}
+.current-value {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-style: italic;
 }
 .transfer-description {
   margin: 0;

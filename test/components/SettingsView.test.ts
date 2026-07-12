@@ -92,6 +92,29 @@ describe('SettingsView', () => {
     expect(wrapper.text()).toContain('vue')
   })
 
+  // B20 — show the currently-applied value next to an 'auto' control.
+  describe('B20 — current value display', () => {
+    it('shows the resolved theme/language/timezone next to each control while on "auto"', () => {
+      const wrapper = mountSettings()
+      // Defaults are all 'auto'; happy-dom's matchMedia stub reports
+      // prefers-color-scheme:dark as false, so theme resolves to 'light'.
+      const currentValues = wrapper.findAll('.current-value').map((el) => el.text())
+      expect(currentValues.length).toBe(3)
+      expect(currentValues.some((t) => t.includes('淺色'))).toBe(true)
+      expect(currentValues.some((t) => t.includes('繁體中文'))).toBe(true)
+      expect(currentValues.some((t) => t.includes('UTC'))).toBe(true)
+    })
+
+    it('hides the current-value hint once a control is set to an explicit (non-auto) value', async () => {
+      const wrapper = mountSettings()
+      const themeSelect = wrapper.find('select[name="theme"]')
+      await themeSelect.setValue('dark')
+      await nextTick()
+      // Only language + timezone remain 'auto' now.
+      expect(wrapper.findAll('.current-value').length).toBe(2)
+    })
+  })
+
   // B19 — settings export / import.
   describe('B19 — export / import', () => {
     afterEach(() => {

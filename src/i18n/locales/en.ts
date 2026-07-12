@@ -27,6 +27,7 @@ export default {
     heading: 'Settings',
     timezone: 'Time zone',
     timezoneAuto: 'Auto (browser)',
+    current: 'Currently applied: {value}',
     transfer: {
       heading: 'Settings export / import',
       description:
