@@ -225,6 +225,8 @@ export default {
     accelToKmh: 'To (km/h)',
     accelNoChannel: 'No speed channel (GPS_Speed / Vehicle_Speed) available.',
     accelNoMatch: 'No matching segment found in this recording.',
+    accelResultCount: '{n} matching segments found',
+    accelFastest: 'Fastest',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: 'Focus this segment',
     gear: {

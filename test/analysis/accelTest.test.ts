@@ -33,6 +33,32 @@ function rampSession(
   return { timeMs, speedKmh: new Float64Array(speeds), cumDistM }
 }
 
+/** Concatenate several ramp sessions end-to-end, offsetting time/distance so
+ *  the combined arrays read as one continuous recording (same helper pattern
+ *  used by the "multiple launches"/"multiple runs" tests below). */
+function concatSessions(
+  segs: Array<{ timeMs: Float64Array; speedKmh: Float64Array; cumDistM: Float64Array }>,
+): { timeMs: Float64Array; speedKmh: Float64Array; cumDistM: Float64Array } {
+  const totalN = segs.reduce((s, x) => s + x.speedKmh.length, 0)
+  const speedKmh = new Float64Array(totalN)
+  const timeMs = new Float64Array(totalN)
+  const cumDistM = new Float64Array(totalN)
+  let offset = 0
+  let tOffset = 0
+  let dOffset = 0
+  for (const seg of segs) {
+    for (let i = 0; i < seg.speedKmh.length; i++) {
+      speedKmh[offset + i] = seg.speedKmh[i]
+      timeMs[offset + i] = seg.timeMs[i] + tOffset
+      cumDistM[offset + i] = seg.cumDistM[i] + dOffset
+    }
+    offset += seg.speedKmh.length
+    tOffset = timeMs[offset - 1] + 100
+    dOffset = cumDistM[offset - 1]
+  }
+  return { timeMs, speedKmh, cumDistM }
+}
+
 describe('fastestDistanceFromLaunch', () => {
   it('times a standing start (entrySpeedKmh=0) over the set distance', () => {
     // 0 -> 200 km/h over 10s (100 samples @ 100ms) then hold at 200 for 2s.
@@ -40,18 +66,21 @@ describe('fastestDistanceFromLaunch', () => {
       { v0: 0, v1: 200, n: 101 },
       { v0: 200, v1: 200, n: 20 },
     ])
-    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+    const results = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
       distanceM: 100,
       entrySpeedKmh: 0,
     })
-    expect(result).not.toBeNull()
-    expect(result!.distanceM).toBeCloseTo(100, 6)
+    expect(results).toHaveLength(1)
+    const result = results[0]
+    expect(result.distanceM).toBeCloseTo(100, 6)
     // A standing start must be timed from (very close to) 0 km/h — NOT from
     // some near-top-speed window elsewhere in the ramp (the old floor-filter
     // bug this function replaces).
-    expect(result!.entrySpeedKmh).toBeCloseTo(0, 0)
-    expect(result!.startIdx).toBe(0)
-    expect(result!.timeMs).toBeGreaterThan(0)
+    expect(result.entrySpeedKmh).toBeCloseTo(0, 0)
+    expect(result.startIdx).toBe(0)
+    expect(result.timeMs).toBeGreaterThan(0)
+    // A single result is trivially the fastest.
+    expect(result.isFastest).toBe(true)
   })
 
   it('times a rolling launch at a non-zero entry speed', () => {
@@ -70,94 +99,97 @@ describe('fastestDistanceFromLaunch', () => {
       distanceM: 100,
       entrySpeedKmh: 0,
     })
-    expect(rolling).not.toBeNull()
-    expect(standing).not.toBeNull()
-    expect(rolling!.entrySpeedKmh).toBeCloseTo(100, 0)
+    expect(rolling).toHaveLength(1)
+    expect(standing).toHaveLength(1)
+    expect(rolling[0].entrySpeedKmh).toBeCloseTo(100, 0)
     // Launching from a higher speed and covering the same distance takes
     // strictly less time than a standing start on an accelerating ramp.
-    expect(rolling!.timeMs).toBeLessThan(standing!.timeMs)
+    expect(rolling[0].timeMs).toBeLessThan(standing[0].timeMs)
   })
 
-  it('picks the fastest of multiple launches in the same session', () => {
-    // Two separate standing-start launches: a slow one (long time to cover
-    // 100m) and a fast one (short time), separated by a return to 0.
+  it('reports multiple launches in chronological order, with the fastest flagged (B14)', () => {
+    // Three separate standing-start launches (10 traffic lights in miniature):
+    // medium, slow, then fast — each separated by a return to 0. All three
+    // should come back as separate segments, in the order they occurred, with
+    // only the fast one flagged isFastest.
+    const mediumLaunch = rampSession([{ v0: 0, v1: 100, n: 81 }], 100)
+    const gap1 = rampSession([{ v0: 100, v1: 0, n: 20 }], 100)
     const slowLaunch = rampSession([{ v0: 0, v1: 60, n: 121 }], 100) // gentle ramp
-    const backToZero = rampSession([{ v0: 60, v1: 0, n: 30 }], 100)
+    const gap2 = rampSession([{ v0: 60, v1: 0, n: 20 }], 100)
     const fastLaunch = rampSession([{ v0: 0, v1: 200, n: 61 }], 100) // steep ramp
 
-    const segs = [slowLaunch, backToZero, fastLaunch]
-    const totalN = segs.reduce((s, x) => s + x.speedKmh.length, 0)
-    const speedKmh = new Float64Array(totalN)
-    const timeMs = new Float64Array(totalN)
-    const cumDistM = new Float64Array(totalN)
-    let offset = 0
-    let tOffset = 0
-    let dOffset = 0
-    for (const seg of segs) {
-      for (let i = 0; i < seg.speedKmh.length; i++) {
-        speedKmh[offset + i] = seg.speedKmh[i]
-        timeMs[offset + i] = seg.timeMs[i] + tOffset
-        cumDistM[offset + i] = seg.cumDistM[i] + dOffset
-      }
-      offset += seg.speedKmh.length
-      tOffset = timeMs[offset - 1] + 100
-      dOffset = cumDistM[offset - 1]
-    }
+    const { timeMs, speedKmh, cumDistM } = concatSessions([
+      mediumLaunch,
+      gap1,
+      slowLaunch,
+      gap2,
+      fastLaunch,
+    ])
 
-    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+    const results = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
       distanceM: 50,
       entrySpeedKmh: 0,
     })
-    expect(result).not.toBeNull()
-    // Must land inside the second (fast) launch, not the first (slow) one.
-    const fastStartIdx = slowLaunch.speedKmh.length + backToZero.speedKmh.length
-    expect(result!.startIdx).toBeGreaterThanOrEqual(fastStartIdx)
+
+    expect(results).toHaveLength(3)
+    // Chronological order: startIdx strictly increasing.
+    expect(results[0].startIdx).toBeLessThan(results[1].startIdx)
+    expect(results[1].startIdx).toBeLessThan(results[2].startIdx)
+    // Exactly one flagged fastest, and it's the third (steep-ramp) launch.
+    const fastestFlags = results.map((r) => r.isFastest)
+    expect(fastestFlags.filter(Boolean)).toHaveLength(1)
+    expect(results[2].isFastest).toBe(true)
+    expect(results[0].isFastest).toBe(false)
+    expect(results[1].isFastest).toBe(false)
+    // The flagged one is indeed the minimum timeMs among the three.
+    const minTime = Math.min(...results.map((r) => r.timeMs))
+    expect(results[2].timeMs).toBe(minTime)
   })
 
-  it('returns null when speed never launches through entrySpeedKmh', () => {
+  it('returns an empty array when speed never launches through entrySpeedKmh', () => {
     // A session that never exceeds 50 km/h can't produce a launch through 100.
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 50, n: 60 }])
-    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+    const results = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
       distanceM: 50,
       entrySpeedKmh: 100,
     })
-    expect(result).toBeNull()
+    expect(results).toEqual([])
   })
 
-  it('returns null when a launch exists but no launch covers the requested distance', () => {
+  it('returns an empty array when a launch exists but no launch covers the requested distance', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 50, n: 10 }])
-    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+    const results = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
       distanceM: 1_000_000,
       entrySpeedKmh: 0,
     })
-    expect(result).toBeNull()
+    expect(results).toEqual([])
   })
 
-  it('returns null for a very short log (< 2 samples)', () => {
-    const result = fastestDistanceFromLaunch(
+  it('returns an empty array for a very short log (< 2 samples)', () => {
+    const results = fastestDistanceFromLaunch(
       new Float64Array([0]),
       new Float64Array([0]),
       new Float64Array([0]),
       { distanceM: 100, entrySpeedKmh: 0 },
     )
-    expect(result).toBeNull()
+    expect(results).toEqual([])
   })
 
-  it('returns null for non-positive distanceM', () => {
+  it('returns an empty array for non-positive distanceM', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 100, n: 20 }])
     expect(
       fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, { distanceM: 0, entrySpeedKmh: 0 }),
-    ).toBeNull()
+    ).toEqual([])
     expect(
       fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, { distanceM: -5, entrySpeedKmh: 0 }),
-    ).toBeNull()
+    ).toEqual([])
   })
 
-  it('returns null for a non-finite entrySpeedKmh', () => {
+  it('returns an empty array for a non-finite entrySpeedKmh', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 100, n: 20 }])
     expect(
       fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, { distanceM: 50, entrySpeedKmh: NaN }),
-    ).toBeNull()
+    ).toEqual([])
   })
 
   it('skips NaN samples without throwing and still finds a valid launch', () => {
@@ -167,11 +199,11 @@ describe('fastestDistanceFromLaunch', () => {
     ])
     // Inject a NaN speed sample mid-ramp — should not break the scan.
     speedKmh[50] = NaN
-    const result = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+    const results = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
       distanceM: 50,
       entrySpeedKmh: 0,
     })
-    expect(result).not.toBeNull()
+    expect(results.length).toBeGreaterThan(0)
   })
 })
 
@@ -181,62 +213,57 @@ describe('fastestSpeedSegment', () => {
       { v0: 0, v1: 100, n: 51 }, // 5s ramp @ 100ms steps
       { v0: 100, v1: 100, n: 5 },
     ])
-    const result = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
-    expect(result).not.toBeNull()
-    expect(result!.timeMs).toBeCloseTo(5000, -1) // ~5000ms, allow interpolation slack
-    expect(result!.entrySpeedKmh).toBeCloseTo(0, 0)
-    expect(result!.exitSpeedKmh).toBeCloseTo(100, 0)
+    const results = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
+    expect(results).toHaveLength(1)
+    const result = results[0]
+    expect(result.timeMs).toBeCloseTo(5000, -1) // ~5000ms, allow interpolation slack
+    expect(result.entrySpeedKmh).toBeCloseTo(0, 0)
+    expect(result.exitSpeedKmh).toBeCloseTo(100, 0)
+    expect(result.isFastest).toBe(true)
   })
 
-  it('picks the faster of two 0->100 runs', () => {
+  it('reports multiple 0->100 runs in chronological order, with the fastest flagged (B14)', () => {
     const slow = rampSession([{ v0: 0, v1: 100, n: 81 }], 100) // 8s
-    const decel = rampSession([{ v0: 100, v1: 0, n: 21 }], 100)
+    const decel1 = rampSession([{ v0: 100, v1: 0, n: 21 }], 100)
+    const medium = rampSession([{ v0: 0, v1: 100, n: 61 }], 100) // 6s
+    const decel2 = rampSession([{ v0: 100, v1: 0, n: 21 }], 100)
     const fast = rampSession([{ v0: 0, v1: 100, n: 41 }], 100) // 4s
 
-    const segs = [slow, decel, fast]
-    const totalN = segs.reduce((s, x) => s + x.speedKmh.length, 0)
-    const speedKmh = new Float64Array(totalN)
-    const timeMs = new Float64Array(totalN)
-    const cumDistM = new Float64Array(totalN)
-    let offset = 0
-    let tOffset = 0
-    let dOffset = 0
-    for (const seg of segs) {
-      for (let i = 0; i < seg.speedKmh.length; i++) {
-        speedKmh[offset + i] = seg.speedKmh[i]
-        timeMs[offset + i] = seg.timeMs[i] + tOffset
-        cumDistM[offset + i] = seg.cumDistM[i] + dOffset
-      }
-      offset += seg.speedKmh.length
-      tOffset = timeMs[offset - 1] + 100
-      dOffset = cumDistM[offset - 1]
-    }
+    const { timeMs, speedKmh, cumDistM } = concatSessions([slow, decel1, medium, decel2, fast])
 
-    const result = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
-    expect(result).not.toBeNull()
-    expect(result!.timeMs).toBeLessThan(4500) // the fast run, not the slow ~8s one
+    const results = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
+
+    expect(results).toHaveLength(3)
+    // Chronological order.
+    expect(results[0].startIdx).toBeLessThan(results[1].startIdx)
+    expect(results[1].startIdx).toBeLessThan(results[2].startIdx)
+    // Roughly 8s, 6s, 4s in that order.
+    expect(results[0].timeMs).toBeGreaterThan(results[1].timeMs)
+    expect(results[1].timeMs).toBeGreaterThan(results[2].timeMs)
+    // Only the last (fastest, ~4s) run is flagged.
+    expect(results.map((r) => r.isFastest)).toEqual([false, false, true])
   })
 
-  it('returns null when the target speed is never reached', () => {
+  it('returns an empty array when the target speed is never reached', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 50, n: 20 }])
-    const result = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
-    expect(result).toBeNull()
+    const results = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
+    expect(results).toEqual([])
   })
 
-  it('returns null when toKmh <= fromKmh', () => {
+  it('returns an empty array when toKmh <= fromKmh', () => {
     const { timeMs, speedKmh, cumDistM } = rampSession([{ v0: 0, v1: 100, n: 20 }])
-    expect(fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 50, toKmh: 50 })).toBeNull()
-    expect(fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 80, toKmh: 20 })).toBeNull()
+    expect(fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 50, toKmh: 50 })).toEqual([])
+    expect(fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 80, toKmh: 20 })).toEqual([])
   })
 
-  it('returns null for a very short log (< 2 samples)', () => {
-    const result = fastestSpeedSegment(
+  it('returns an empty array for a very short log (< 2 samples)', () => {
+    const results = fastestSpeedSegment(
       new Float64Array([0]),
       new Float64Array([0]),
       new Float64Array([0]),
       { fromKmh: 0, toKmh: 100 },
     )
-    expect(result).toBeNull()
+    expect(results).toEqual([])
   })
 
   it('tolerates a noisy plateau near the exit threshold without over-splitting', () => {
@@ -257,17 +284,18 @@ describe('fastestSpeedSegment', () => {
       cumDistM[ramp.speedKmh.length + i] =
         ramp.cumDistM[ramp.cumDistM.length - 1] + (i + 1) * 2.7 // ~100km/h * dt
     }
-    const result = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
-    expect(result).not.toBeNull()
+    const results = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
+    expect(results).toHaveLength(1)
     // Should resolve at the ramp's own crossing, not be dragged out by noise.
-    expect(result!.endIdx).toBeLessThanOrEqual(ramp.speedKmh.length)
+    expect(results[0].endIdx).toBeLessThanOrEqual(ramp.speedKmh.length)
+    expect(results[0].isFastest).toBe(true)
   })
 
   it('handles a no-match short log gracefully (NaN/invalid samples)', () => {
     const timeMs = new Float64Array([0, 100, 200, 300])
     const speedKmh = new Float64Array([0, NaN, NaN, 10])
     const cumDistM = new Float64Array([0, 1, 2, 3])
-    const result = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
-    expect(result).toBeNull()
+    const results = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
+    expect(results).toEqual([])
   })
 })

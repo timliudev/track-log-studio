@@ -291,14 +291,17 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **6b 完整收尾（待做）**：內部資料夾 / 程式碼大改名、`docs/DESIGN.md` 標題改名、
     關於我頁、SEO（meta/OG、robots.txt、sitemap、structured data）、Logo / favicon
     （PWA icon 換點陣 PNG 192/512 + maskable）、使用說明外部文件連結。
-- **Phase 7 — 直線加速測試（✅ 完成）**：在整段軌跡中**掃描出符合條件的最速區段**並列出，
+- **Phase 7 — 直線加速測試（✅ 完成，B14 列出全部區段 ✅ 完成）**：在整段軌跡中**掃描出所有符合
+  條件的區段**並逐筆列出（例如整份記錄跑了 10 個紅綠燈，就列出 10 筆），最速一筆額外標記，
   常見於速可達/機車玩家。實作為 `domain/analysis/accelTest.ts`（`fastestDistanceFromLaunch` /
-  `fastestSpeedSegment`，滑動視窗找最佳區段）+ `AccelTestPanel.vue` 顯示結果、可點擊聚焦到軌跡：
-  - **距離型**：從設定的起跑車速 `v0`（**預設 0 ＝靜止起步**）開始計時，找出跑完 `d` 公尺的最短秒數
-    （例如「0~400m 最速」）。
-  - **車速型**：例如「0~100 km/h」最短秒數 / 距離（標準加速指標）。
-  - **歸屬**：與分析器的「圈/區段」同一類東西，未併入 `LapMetric`，改以獨立的 `AccelSegment` 結果
-    型別 + 面板呈現（掃描演算法與圈統計解耦，互不影響既有 `LapMetric` union）。
+  `fastestSpeedSegment`，回傳 `AccelSegment[]`，其中恰一筆 `isFastest: true`）
+  + `AccelTestPanel.vue` 以清單顯示每筆結果（最速標記⚡）、可點擊個別聚焦到軌跡：
+  - **距離型**：從設定的起跑車速 `v0`（**預設 0 ＝靜止起步**）開始計時，找出每次起跑後跑完 `d`
+    公尺所需秒數（例如「0~400m」每一次）。
+  - **車速型**：例如每一次「0~100 km/h」所需秒數 / 距離（標準加速指標）。
+  - **歸屬**：與分析器的「圈/區段」同一類東西，未併入 `LapMetric`，改以獨立的 `AccelSegment[]`
+    結果型別（含 `isFastest` 旗標）+ 面板呈現（掃描演算法與圈統計解耦，互不影響既有 `LapMetric`
+    union）。
 - **`.vbo` 輸出格式（Phase 1 轉檔器延伸；✅ 已實作 2026-06-23）**：轉檔除了 `.nmea`，再加
   **Racelogic VBOX `.vbo`**，讓 log 直接在 **Circuit Tools 3**（Racelogic 官方、免費、賽道分析等級）
   與 **RaceChrono** 開啟。**相對 RC3 `.nmea` 的關鍵價值**：NMEA 只有 15 個固定類比槽（要槽位對應、

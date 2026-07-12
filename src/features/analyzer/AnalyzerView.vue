@@ -216,18 +216,23 @@ const { trackExtrema, mapExtremaMarkers, trackChannelChosen } = useTrackExtrema(
 // resolution reuses the same speedChannelName as corner-speed above. Distance
 // is always needed (both search kinds interpolate/report distanceM), so this
 // is unavailable without a GPS track even for the speed-threshold condition.
-const accelResult = computed<AccelSegment | null>(() => {
+//
+// B14: this is now every qualifying segment found in the session (e.g. every
+// launch through a set of traffic lights), not just the single fastest one —
+// accelTest.ts's search functions return an array with one element flagged
+// `isFastest` for the UI to highlight.
+const accelResults = computed<AccelSegment[]>(() => {
   const chName = speedChannelName.value
   const s = session.value
   const tk = track.value
   const tMs = timeMs.value
-  if (!chName || !s || !tk || !tMs) return null
+  if (!chName || !s || !tk || !tMs) return []
   const ch = s.get(chName)
-  if (!ch) return null
+  if (!ch) return []
   const cumDist = cumulativeDistanceM(tk.lat, tk.lon, tk.valid)
   const cond = analyzer.accelCondition
   if (cond.kind === 'distance') {
-    if (!(cond.distanceM > 0)) return null
+    if (!(cond.distanceM > 0)) return []
     return fastestDistanceFromLaunch(cumDist, tMs, ch.data, {
       distanceM: cond.distanceM,
       entrySpeedKmh: cond.entrySpeedKmh,
@@ -236,7 +241,7 @@ const accelResult = computed<AccelSegment | null>(() => {
   return fastestSpeedSegment(tMs, ch.data, cumDist, { fromKmh: cond.fromKmh, toKmh: cond.toKmh })
 })
 
-// Focus the found segment: zoom the shared xRange to its span (same
+// Focus a found segment: zoom the shared xRange to its span (same
 // select->zoom coupling as onLapSelect) and clear any lap selection so the
 // zoomed range isn't immediately overridden by the lap-selection focus
 // precedence in `focusRange` above.
@@ -1049,7 +1054,7 @@ function titleForItemId(id: string): string {
               @update:collapsed="toggleCollapsed(item.i)"
               @update:pinned="togglePinned(item.i)"
             >
-              <AccelTestPanel :result="accelResult" :speed-available="speedAvailable" @focus="onAccelFocus" />
+              <AccelTestPanel :results="accelResults" :speed-available="speedAvailable" @focus="onAccelFocus" />
             </DashboardCard>
 
             <DashboardCard

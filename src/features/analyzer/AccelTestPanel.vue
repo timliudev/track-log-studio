@@ -7,10 +7,11 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { formatLapTime } from '@/domain/analysis/format'
 
 const props = defineProps<{
-  /** Best matching segment for the current condition, or null when nothing
-   *  qualifies (see AnalyzerView's accelResult computed for the search call).
-   *  Distinguished from "not computed yet" (below) by `speedAvailable`. */
-  result: AccelSegment | null
+  /** EVERY matching segment for the current condition, in chronological order
+   *  (one flagged `isFastest`), or an empty array when nothing qualifies (see
+   *  AnalyzerView's accelResults computed for the search call). Distinguished
+   *  from "not computed yet" (below) by `speedAvailable`. */
+  results: AccelSegment[]
   /** Whether the search even ran (speed channel + session present). */
   speedAvailable: boolean
 }>()
@@ -139,20 +140,32 @@ function fmtDist(v: number): string {
     </div>
 
     <p v-if="!props.speedAvailable" class="hint">{{ t('analyzer.accelNoChannel') }}</p>
-    <p v-else-if="props.result == null" class="hint">{{ t('analyzer.accelNoMatch') }}</p>
-    <div v-else class="result">
-      <span class="result-time">{{ formatLapTime(props.result.timeMs) }}</span>
-      <span class="result-detail">{{ fmtDist(props.result.distanceM) }}</span>
-      <span class="result-detail">
-        {{ t('analyzer.accelEntryExit', {
-          entry: fmtSpeed(props.result.entrySpeedKmh),
-          exit: fmtSpeed(props.result.exitSpeedKmh),
-        }) }}
-      </span>
-      <button type="button" class="focus-btn" @click="emit('focus', props.result)">
-        {{ t('analyzer.accelFocus') }}
-      </button>
-    </div>
+    <p v-else-if="props.results.length === 0" class="hint">{{ t('analyzer.accelNoMatch') }}</p>
+    <template v-else>
+      <p class="hint result-count">{{ t('analyzer.accelResultCount', { n: props.results.length }) }}</p>
+      <ul class="result-list">
+        <li
+          v-for="(seg, i) in props.results"
+          :key="`${seg.startIdx}-${seg.endIdx}`"
+          class="result"
+          :class="{ fastest: seg.isFastest }"
+        >
+          <span class="result-index">#{{ i + 1 }}</span>
+          <span v-if="seg.isFastest" class="fastest-badge" :title="t('analyzer.accelFastest')">⚡</span>
+          <span class="result-time">{{ formatLapTime(seg.timeMs) }}</span>
+          <span class="result-detail">{{ fmtDist(seg.distanceM) }}</span>
+          <span class="result-detail">
+            {{ t('analyzer.accelEntryExit', {
+              entry: fmtSpeed(seg.entrySpeedKmh),
+              exit: fmtSpeed(seg.exitSpeedKmh),
+            }) }}
+          </span>
+          <button type="button" class="focus-btn" @click="emit('focus', seg)">
+            {{ t('analyzer.accelFocus') }}
+          </button>
+        </li>
+      </ul>
+    </template>
   </div>
 </template>
 
@@ -217,6 +230,19 @@ function fmtDist(v: number): string {
   font-size: 0.78rem;
   opacity: 0.8;
 }
+.result-count {
+  margin-bottom: -2px;
+}
+.result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
 .result {
   display: flex;
   flex-wrap: wrap;
@@ -227,10 +253,25 @@ function fmtDist(v: number): string {
   background: var(--color-bg);
   font-size: 0.9rem;
 }
+.result.fastest {
+  outline: 1px solid var(--color-accent);
+  background: var(--color-surface);
+}
+.result-index {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.6em;
+}
+.fastest-badge {
+  line-height: 1;
+}
 .result-time {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--color-text);
+}
+.result.fastest .result-time {
+  color: var(--color-accent);
 }
 .result-detail {
   color: var(--color-text-muted);
