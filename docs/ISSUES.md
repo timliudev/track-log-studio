@@ -47,11 +47,11 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [x] **B27b** Same leftover divider (`margin-top`/`padding-top`/`border-top`) removed from `TrackChannelPanel.vue` and `TrackFilePanel.vue` root class. — `68080f2`
 
 ## Settings
-- [ ] **B19** Define + implement settings export scope (theme/language/timezone/units, drivetrain, and layout — dashboard layout + panel state; likely a "include layout" toggle) + import.
-- [ ] **B20** Settings page: show the current read values of theme / language / timezone.
+- [x] **B19** Settings export/import implemented (`settingsTransfer.ts`): versioned JSON bundle of appearance (theme/language/timezone) + drivetrain, with an "include dashboard layout" toggle (layout + panel state + lock); import validates leniently via each store's sanitizer, confirms before overwrite, reloads when layout is applied. — `2bc6b35`
+- [x] **B20** Settings page now shows the currently-applied value next to auto theme/language/timezone controls. — `1e1e13f`
 
 ## Converter
-- [ ] **B21** PC mode: the suspension-calibration menu need not be full-width at the bottom — place it on the output/convert side to save space.
+- [x] **B21** Suspension-calibration section moved into the output/convert column on wide layouts (stacked behaviour unchanged ≤880px). — `f87cb9a`
 
 ## Dashboard
 - [ ] **B18** Pinned card still cannot be resized — make it resizable.
