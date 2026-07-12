@@ -290,7 +290,7 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
     `.nvmrc`=22。**已 push 並公開**：`github.com/timliudev/track-log-studio`。
   - **6b 完整收尾（待做）**：內部資料夾 / 程式碼大改名、`docs/DESIGN.md` 標題改名、
     關於我頁、SEO（meta/OG、robots.txt、sitemap、structured data）、Logo / favicon
-    （PWA icon 換點陣 PNG 192/512 + maskable）、使用說明外部文件連結。
+    （✅ B13：PWA icon 已由 `public/app-icon.svg` 產出點陣 PNG 192/512 + maskable + iOS 180 + favicon）、使用說明外部文件連結。
 - **Phase 7 — 直線加速測試（✅ 完成，B14 列出全部區段 ✅ 完成）**：在整段軌跡中**掃描出所有符合
   條件的區段**並逐筆列出（例如整份記錄跑了 10 個紅綠燈，就列出 10 筆），最速一筆額外標記，
   常見於速可達/機車玩家。實作為 `domain/analysis/accelTest.ts`（`fastestDistanceFromLaunch` /
@@ -494,8 +494,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 
 - 距離計算用 GPS haversine 累積（與 py 一致）。
 - 圈時預設用線段自算，並提供切換成 ECU `IR_LapTime`。
-- PWA 更新策略：**autoUpdate**（持續部署期間新版自動套用，避免 service worker 餵舊快取；
-  原訂「提示重整」因更新提示 UI 未實作會卡舊版，故改為自動更新）。
+- PWA 更新策略：**prompt + 更新提示 toast**（B13）——`registerType: 'prompt'` 搭配
+  `virtual:pwa-register/vue`，偵測到新版時顯示底部 snackbar 讓使用者按「重新整理」套用
+  （offline-ready 提示 6 秒自動消失、更新提示不自動消失）。先前因提示 UI 未實作而暫用
+  autoUpdate，現已補上正式提示流程。
 - 單位：公制（mm / km/h / °C），未來可加切換。
 
 ---
