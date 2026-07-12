@@ -56,6 +56,18 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 ## Dashboard
 - [x] **B18** Pinned (floating) card gets its own bottom-right pixel drag handle (grid resize stays off for the empty placeholder — that was why it was locked); size clamped 220px–96vw / 140px–90vh, double-click resets to auto aspect; collapsed cards stay non-resizable. — `516648b`
 
+## Acceptance round 2026-07-13 (user tested on device, 10 reports)
+- [ ] **B28** Selecting a lap no longer expands/zooms the chart X axis to that lap — ALL charts affected, including the gear-ratio card's chart. Likely a regression from the B8/B9 chart rework (xRange/xZoom handling). Restore: lap select → charts zoom to the lap's range.
+- [ ] **B29** Rename XY 散佈圖 → 散佈圖 (both locales): now that the 3rd colour axis is built in, "XY" is redundant.
+- [ ] **B25b** (follow-up to B25) Marker shape per file is unreadable at real point densities — shapes are indistinguishable when thousands of points overlap. Rethink the multi-file + 3rd-axis encoding. Candidate directions (need user decision): per-file small-multiple panels side-by-side; one file at a time with a quick file switcher; opacity/size for file identity; or keep colour=3rd-axis but draw file outlines/hulls. Ask user before building.
+- [ ] **B30** Hovering/moving the mouse along the TRACK MAP does not continuously update the linked charts/current position — only the first touched point registers. Map→chart cursor forwarding should track mousemove continuously (chart→map already works).
+- [ ] **B31** Mobile: RaceChrono-style fixed centre needle — charts keep a fixed vertical cursor at centre and the user drags the chart left/right under it to scrub the current value. Feature request for the mobile chart interaction.
+- [ ] **B18b** (follow-up to B18) The pinned-card resize handle reinvented the wheel: a custom 90°-corner icon instead of the same resize affordance every other (grid) card already uses. Reuse the existing grid-card resize handle look & behaviour for the pinned floating card.
+- [ ] **B32** Card transition animations (collapse/expand height transition + FLIP reflow) are GONE — regression, possibly from the collapse/reflow or dashboard changes in the last two batches. Find and restore.
+- [ ] **B24b** (follow-up to B24) Sector card's gate list still does not fill/scroll with card size — migrate SectorPanel's list (and audit ALL remaining in-card lists) to `CardFillScroll`.
+- [ ] **B33** 軌跡通道標記 (track channel markers: colour-on-track / min / max) must work when laps are selected on COMPARISON files too, not just the primary — any selected lap (either file) should light up markers on its own trace.
+- [ ] **B34** User cannot find the new 目前數值 card: it was added to `defaultLayout()` only, so existing persisted layouts never receive it. Need a layout migration that injects newly-introduced card types into saved layouts (or an "add card" affordance) — check how earlier new cards handled this.
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [ ] **M2** Clean dead code: `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n (superseded by the FileBar 「加入分析」 checkbox).
