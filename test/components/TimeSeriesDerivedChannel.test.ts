@@ -31,7 +31,7 @@ beforeEach(() => {
 function mountChart(channels: string[]) {
   return mount(TimeSeriesChart, {
     props: {
-      chart: { kind: 'timeseries', id: 1, channels, mode: 'timeline' },
+      chart: { kind: 'timeseries', id: 1, channels },
       session,
       xValues: new Float64Array([0, 0.1, 0.2]),
       selectedLaps: [],
@@ -76,7 +76,6 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
       kind: 'timeseries',
       id: 1,
       channels: [MEASURED_TOTAL_RATIO_CHANNEL],
-      mode: 'timeline',
     })
   })
 
@@ -88,7 +87,7 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
     ], { formatId: 'test', createdDate: null, headerInfo: {} })
     const wrapper = mount(TimeSeriesChart, {
       props: {
-        chart: { kind: 'timeseries', id: 1, channels: [MEASURED_TOTAL_RATIO_CHANNEL], mode: 'timeline' },
+        chart: { kind: 'timeseries', id: 1, channels: [MEASURED_TOTAL_RATIO_CHANNEL] },
         session,
         xValues: new Float64Array([0, 0.1, 0.2]),
         selectedLaps: [],

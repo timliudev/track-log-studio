@@ -3,11 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type uPlot from 'uplot'
-import {
-  useAnalyzerStore,
-  type TimeSeriesChartConfig,
-  type ChartMode,
-} from '@/stores/analyzerStore'
+import { useAnalyzerStore, type TimeSeriesChartConfig } from '@/stores/analyzerStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLapStore } from '@/stores/lapStore'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -40,8 +36,6 @@ const props = defineProps<{
   channelIds?: readonly string[]
   /** Static-host channels which are always present and cannot be removed. */
   lockedChannels?: readonly string[]
-  /** Transient mode for a time-series embedded in a static card. */
-  mode?: ChartMode
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
@@ -63,7 +57,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   cursor: [number | null]
   xZoom: [{ min: number; max: number }]
-  updateMode: [ChartMode]
   updateChannels: [string[]]
 }>()
 
@@ -81,7 +74,6 @@ const color = (i: number): string => PALETTE[i % PALETTE.length]
 const DASHES: number[][] = [[], [6, 4], [2, 3], [8, 3, 2, 3], [12, 4]]
 const dash = (i: number): number[] => DASHES[i % DASHES.length]
 
-const mode = computed<ChartMode>(() => props.mode ?? props.chart?.mode ?? 'timeline')
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
 const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
@@ -148,7 +140,9 @@ const unavailableDerivedMessage = computed<string | null>(() => {
   return null
 })
 
-// --- Timeline mode: each channel over the full session on a shared X. ---
+// --- No-selection fallback: each channel over the FULL session on a shared
+// X (B8 — this is what renders whenever no lap is selected; see
+// `hasSelection` below for the switch to the lap-relative overlay). ---
 const plotWidth = ref(1200)
 const pointBudget = computed(() => Math.max(300, Math.ceil(plotWidth.value * 2)))
 const timelineSources = computed<TimelineSource[]>(() => {
@@ -203,7 +197,7 @@ const timelineSeries = computed<uPlot.Series[]>(() => [
   })),
 ])
 
-// --- Overlay mode: selected laps re-based to a lap-relative X (from 0). ---
+// --- Overlay: selected laps re-based to a lap-relative X (from 0). ---
 // Colour encodes the lap, line style encodes the channel; same-channel laps
 // share a scale (= channel name) so they're directly comparable.
 const overlay = computed(() =>
@@ -256,6 +250,14 @@ const crossLapSources = computed<CrossSessionLapSource[]>(() => {
 })
 const crossOverlay = computed(() => buildCrossSessionLapOverlay(crossLapSources.value))
 const useCrossOverlay = computed(() => crossLapSources.value.some((source) => source.fileId !== (props.primaryFileId ?? -1)))
+// B8 — overlay is now the ONLY display mode (the old "timeline" mode toggle
+// was removed). With no laps selected (same-session AND cross-session), there
+// is nothing to re-base onto a lap-relative grid, so the chart falls back to
+// showing the full session (every selected channel over the whole session's
+// time/distance axis — exactly what the removed "timeline" mode used to
+// render). `hasSelection` is that single switch every other computed below
+// keys off instead of the old `mode === 'overlay'` check.
+const hasSelection = computed(() => laps.value.length > 0 || crossLapSources.value.length > 0)
 // The shared lap-relative X grid the overlay plots against — same array whether
 // cross-session or single-session. Backs the overlay↔map cursor conversion.
 const overlayGridX = computed<Float64Array>(() =>
@@ -301,10 +303,10 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
 })
 
 const data = computed<uPlot.AlignedData>(() =>
-  mode.value === 'overlay' ? overlayData.value : timelineData.value,
+  hasSelection.value ? overlayData.value : timelineData.value,
 )
 const series = computed<uPlot.Series[]>(() =>
-  mode.value === 'overlay' ? overlaySeries.value : timelineSeries.value,
+  hasSelection.value ? overlaySeries.value : timelineSeries.value,
 )
 
 // Absolute start instant (elapsed=0) of this session, for the clock-time axis.
@@ -331,13 +333,14 @@ const clockAxisLabel = computed<string>(() => {
   return `UTC${sign}${hours}${mins ? ':' + mins.toString().padStart(2, '0') : ''}`
 })
 
-// x axis + one value axis per selected channel; in timeline mode they're coloured per series,
-// in overlay mode colour means "lap" so the channel axes stay theme-neutral.
-// In timeline + time mode an extra bottom x-axis shows absolute clock time.
+// x axis + one value axis per selected channel; in the no-selection full-session
+// view they're coloured per series, when laps are selected colour means "lap"
+// so the channel axes stay theme-neutral. In the no-selection view + time axis,
+// an extra bottom x-axis shows absolute clock time.
 const axes = computed<uPlot.Axis[]>(() => {
   const xValuesFmt = (_u: uPlot, splits: number[]): string[] =>
     splits.map((v) => (xAxis.value === 'distance' ? formatDistance(v) : formatElapsed(v)))
-  const showClock = mode.value === 'timeline' && xAxis.value === 'time' && anchor.value != null
+  const showClock = !hasSelection.value && xAxis.value === 'time' && anchor.value != null
   // Clock labels (HH:mm:ss) are ~2.5× wider than the elapsed labels. Widen the
   // tick spacing on BOTH x-axes so they pick the same coarser splits — the two
   // time rows then line up and the clock labels stop colliding.
@@ -380,7 +383,7 @@ const axes = computed<uPlot.Axis[]>(() => {
       scale: n,
       side: i % 2 === 0 ? 3 : 1,
       label: channelLabel(n),
-      ...(mode.value === 'overlay' || comparisonActive.value ? {} : { stroke: color(i) }),
+      ...(hasSelection.value || comparisonActive.value ? {} : { stroke: color(i) }),
     })),
   ]
 })
@@ -392,13 +395,13 @@ const axes = computed<uPlot.Axis[]>(() => {
 // the primary session's SAMPLE index (overlayCursor.ts) so a hover also drives
 // the track map / timeline cursor, and a map/timeline hover drives the overlay
 // cursor back — the "共同 X ↔ 各圈樣本 index" linking.
-const canRender = computed(() =>
-  mode.value === 'overlay'
-    ? present.value.length > 0 && (laps.value.length > 0 || crossLapSources.value.length > 0)
-    : present.value.length > 0,
-)
+// B8 — with no laps selected there's no lap-relative grid to render against,
+// so `canRender` no longer requires a selection: it falls back to the
+// full-session view (`present.value.length > 0` is the only gate, same as
+// the old timeline mode).
+const canRender = computed(() => present.value.length > 0)
 const effectiveCursor = computed<number | null>(() => {
-  if (mode.value !== 'overlay') {
+  if (!hasSelection.value) {
     return props.externalCursor == null
       ? null
       : nearestXIndex(timeline.value.data[0], props.xValues[props.externalCursor])
@@ -420,7 +423,7 @@ const effectiveCursor = computed<number | null>(() => {
   return analyzer.overlayCursorIdx
 })
 function onCursor(idx: number | null): void {
-  if (mode.value === 'overlay') {
+  if (hasSelection.value) {
     // Keep the overlay charts' shared cursor in sync (works with no primary lap
     // too), and forward-link it to the map/timeline by converting the grid
     // index to a primary-session sample index via the first selected primary
@@ -441,13 +444,12 @@ function onCursor(idx: number | null): void {
   if (idx == null) emit('cursor', null)
   else emit('cursor', nearestXIndex(props.xValues, timeline.value.data[0][idx]))
 }
+// The no-selection full-session view is the only rendering that shares the
+// session-wide xRange (overlay's lap-relative grid is structurally unrelated
+// to it — see focusRange.ts) — so xZoom only propagates up while there's no
+// lap selection.
 function onXZoom(r: { min: number; max: number }): void {
-  if (mode.value === 'timeline') emit('xZoom', r)
-}
-
-function setMode(m: ChartMode): void {
-  if (props.chart) analyzer.setChartMode(props.chart.id, m)
-  else emit('updateMode', m)
+  if (!hasSelection.value) emit('xZoom', r)
 }
 
 function addChannel(name: string | null): void {
@@ -471,14 +473,6 @@ function removeChannel(name: string): void {
       <div v-if="canEditChannels" class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
       </div>
-      <div class="mode">
-        <button type="button" :class="{ active: mode === 'timeline' }" @click="setMode('timeline')">
-          {{ t('analyzer.modeTimeline') }}
-        </button>
-        <button type="button" :class="{ active: mode === 'overlay' }" @click="setMode('overlay')">
-          {{ t('analyzer.modeOverlay') }}
-        </button>
-      </div>
       <button v-if="chart" type="button" class="remove" @click="analyzer.removeChart(chart.id)">
         {{ t('analyzer.removeChart') }}
       </button>
@@ -488,8 +482,8 @@ function removeChannel(name: string): void {
       <span v-for="(name, i) in present" :key="name" class="chip">
         <span
           class="dot"
-          :class="{ line: mode === 'overlay' || comparisonActive }"
-          :style="mode === 'overlay' || comparisonActive ? {} : { background: color(i) }"
+          :class="{ line: hasSelection || comparisonActive }"
+          :style="hasSelection || comparisonActive ? {} : { background: color(i) }"
         />
         {{ channelLabel(name) }}
         <button v-if="canEditChannels && !lockedChannels?.includes(name)" type="button" class="x" @click="removeChannel(name)">×</button>
@@ -507,7 +501,7 @@ function removeChannel(name: string): void {
       :data="data"
       :series="series"
       :axes="axes"
-      :x-range="mode === 'timeline' ? xRange : null"
+      :x-range="!hasSelection ? xRange : null"
       :external-cursor="effectiveCursor"
       :fill-height="fillHeight"
       :x-bounds="xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
@@ -515,9 +509,6 @@ function removeChannel(name: string): void {
       @x-zoom="onXZoom"
       @plot-width="plotWidth = $event"
     />
-    <p v-else-if="mode === 'overlay' && present.length > 0" class="muted overlay-hint">
-      {{ t('analyzer.overlayHint') }}
-    </p>
   </section>
 </template>
 
@@ -558,24 +549,6 @@ function removeChannel(name: string): void {
   flex: 1;
   min-width: 200px;
   max-width: 360px;
-}
-.mode {
-  display: inline-flex;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.mode button {
-  background: var(--color-bg);
-  color: var(--color-text-muted);
-  border: none;
-  padding: 6px 12px;
-  font: inherit;
-  cursor: pointer;
-}
-.mode button.active {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
 }
 .remove {
   background: var(--color-bg);
@@ -630,8 +603,5 @@ function removeChannel(name: string): void {
 .muted {
   color: var(--color-text-muted);
   font-size: 0.85rem;
-}
-.overlay-hint {
-  margin: 8px 0 0;
 }
 </style>

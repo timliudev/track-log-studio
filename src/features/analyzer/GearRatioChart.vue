@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
-import type { ChartMode } from '@/stores/analyzerStore'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import { cachedGearRatioTrace } from '@/domain/analysis/gearRatioTrace'
 import { MEASURED_TOTAL_RATIO_CHANNEL } from '@/domain/analysis/analyzerChannels'
@@ -11,7 +10,6 @@ import type { ComparisonSession } from '@/composables/useSessionComparison'
 import TimeSeriesChart from './TimeSeriesChart.vue'
 
 const props = defineProps<{
-  mode: ChartMode
   session: LogSession
   xValues: Float64Array
   xRange?: { min: number; max: number } | null
@@ -26,7 +24,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   cursor: [number | null]
   xZoom: [{ min: number; max: number }]
-  updateMode: [ChartMode]
 }>()
 
 const { t } = useI18n()
@@ -72,7 +69,6 @@ const emptyMessage = computed(() => {
 
 <template>
   <TimeSeriesChart
-    :mode="mode"
     :session="session"
     :x-values="xValues"
     :x-range="xRange"
@@ -87,7 +83,6 @@ const emptyMessage = computed(() => {
     :fill-height="fillHeight"
     @cursor="emit('cursor', $event)"
     @x-zoom="emit('xZoom', $event)"
-    @update-mode="emit('updateMode', $event)"
     @update-channels="updateChannels"
   />
 </template>

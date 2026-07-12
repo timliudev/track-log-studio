@@ -171,6 +171,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - Y 軸：自由選擇，可多軸疊圖或獨立顯示。
 - 多圖表 **X 軸同步**；軌跡圖同步顯示目前游標位置。
 - XY 軸可縮放。
+- **B8**：主時序圖不再有「時序 / 疊圈」模式切換——**疊圈是唯一的顯示方式**：沒有選圈時退回
+  顯示整段 session（時間/距離軸連續資料，等同舊「時序」模式的畫面）；選了圈之後才切到
+  各圈疊在共用「圈相對 X」（從 0 起算）上比較。跨檔 overlay（cross-session、每圈 offset）
+  行為不變。
 - **G-G 圖**：橫向/縱向 G 圓形點雲。
 - **FFT**：避震行程、輪速等轉頻域（找共振 / 路面頻率）。
 - **分布圖**：XY 自選。
@@ -357,8 +361,9 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   安全解壓（白名單 / 防炸彈 / 防 zip-slip）；FileBar 接受 `.loga/.nmea/.zip`。詳見 §4。
 - **軸顯示 #5/#6（feature/axis-display）**：圖表 X 軸刻度改為可讀格式——時間 `m:ss`／
   `h:mm:ss`、距離自動 m↔km（純函式 `domain/analysis/axisFormat.ts`：`formatElapsed`/
-  `formatDistance`/`formatClock`）。時間 + timeline 模式且能取得絕對起點時，**疊加第二條
-  X 軸**(uPlot side 2，自動堆疊)顯示當地時鐘 `HH:mm:ss`，軸標籤標 `UTC±N`。起點時刻由
+  `formatDistance`/`formatClock`）。時間軸 + 未選圈（整段 session，B8 起是唯一的「無選圈」
+  檢視）且能取得絕對起點時，**疊加第二條 X 軸**(uPlot side 2，自動堆疊)顯示當地時鐘
+  `HH:mm:ss`，軸標籤標 `UTC±N`。起點時刻由
   純函式 `domain/analysis/startTime.ts` `sessionStartAnchor` 決定：**GPS_UTC 優先**（首個
   有效 UTC fix，日期取 header createdDate，再扣掉該 sample 的 elapsed 對齊 elapsed=0，
   source=`gpsUtc`），退回 `meta.createdDate`（把本地時分秒「重新解讀成 UTC」，offset 0 即
