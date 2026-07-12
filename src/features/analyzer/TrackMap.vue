@@ -130,6 +130,9 @@ const emit = defineEmits<{
   'update:line': [LapLine]
   /** A confirmed gate's endpoint was dragged: (gate index into `props.gates`, new line). */
   'update:gate': [number, LapLine]
+  /** B7 — in-card maximize toggled; lets the host card hide its other body
+   *  content (legend/hints/band inputs) while the map fills the card. */
+  'update:maximized': [boolean]
 }>()
 
 const { t } = useI18n()
@@ -171,14 +174,19 @@ let focusMaxY = NaN
 
 const showReset = computed(() => zoom.value !== 1 || panX.value !== 0 || panY.value !== 0)
 
-// Mobile "maximize" overlay (手機賽道地圖最大化): purely local UI state — no
-// prop/store involvement, so it can't collide with anything else reading/
-// writing analyzerStore or AnalyzerView's grid layout. Teleporting the WHOLE
-// `.track-wrap` (canvas + its own overlay buttons) to <body> when active keeps
-// the exact same canvas DOM node in the tree (Vue's Teleport relocates rather
-// than remounts), so the ResizeObserver already wired up in onMounted below
-// keeps firing/redrawing as the CSS-driven size changes — no extra draw() path
-// needed for the fullscreen transition itself.
+// "Maximize" — in-card (B7: works identically on desktop and mobile, unlike
+// the old mobile-only fullscreen-overlay design). The map itself stays in
+// place in the DOM (no Teleport): toggling only flips this local `maximized`
+// flag, which is emitted upward so the HOST card (AnalyzerView's "map"
+// DashboardCard) can hide its OTHER body content (heatmap legend, line hint,
+// lap count/reset, lap-time/lap-distance band inputs) while active. With
+// those siblings gone, `.track-wrap.fill`'s existing `flex: 1 1 0` (see the
+// `.fill` rule below) simply expands to consume the whole card body — no
+// special "maximized" positioning/sizing CSS is needed for the map itself,
+// and the ResizeObserver already wired up in onMounted below keeps firing/
+// redrawing as that flex-driven size change happens. Still purely local UI
+// state (no analyzerStore/grid-layout involvement) beyond the one emitted
+// event a host may listen to.
 const maximized = ref(false)
 function toggleMaximize(): void {
   maximized.value = !maximized.value
@@ -186,12 +194,7 @@ function toggleMaximize(): void {
 function onMaximizedKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && maximized.value) maximized.value = false
 }
-// Prevent the page behind the fullscreen overlay from scrolling while it's
-// open; always restored on close AND on unmount so a mid-session route change
-// can never leave the app permanently unscrollable.
-watch(maximized, (isMax) => {
-  document.body.style.overflow = isMax ? 'hidden' : ''
-})
+watch(maximized, (isMax) => emit('update:maximized', isMax))
 
 const PAD = 16
 // Visible endpoint radius and a larger touch-friendly hit radius (~44px target).
@@ -1025,9 +1028,6 @@ onBeforeUnmount(() => {
   ro?.disconnect()
   window.removeEventListener('resize', draw)
   window.removeEventListener('keydown', onMaximizedKeydown)
-  // Guard against unmounting while still maximized (e.g. switching sessions/
-  // tabs mid-fullscreen) leaving the page permanently unscrollable.
-  document.body.style.overflow = ''
 })
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
@@ -1063,51 +1063,49 @@ watch(() => props.overlayTracks, () => draw())
 </script>
 
 <template>
-  <!-- Mobile maximize (手機賽道地圖最大化): Teleporting the SAME `.track-wrap`
-       node to <body> when active (rather than v-if'ing a second copy) keeps
-       the canvas element — and its ResizeObserver/pointer state — intact
-       across the transition. Disabled (in-place) otherwise, so normal/desktop
-       layout is completely unaffected. -->
-  <Teleport to="body" :disabled="!maximized">
-    <div class="track-wrap" :class="{ fill: fillHeight, maximized }">
-      <canvas
-        ref="canvas"
-        class="track"
-        :class="{ fill: fillHeight, maximized }"
-        v-tooltip="t('analyzer.zoomHint')"
-        @pointerdown="onPointerDown"
-        @pointermove="onPointerMove"
-        @pointerup="onPointerUp"
-        @pointercancel="onPointerUp"
-        @pointerleave="onPointerLeave"
-        @wheel.prevent="onWheel"
-        @dblclick="resetView"
-      />
-      <button v-if="showReset" type="button" class="reset-view" @click="resetView">
-        {{ t('analyzer.resetView') }}
-      </button>
-      <button
-        v-if="!maximized"
-        type="button"
-        class="maximize-toggle"
-        :aria-label="t('analyzer.maximizeMap')"
-        v-tooltip="t('analyzer.maximizeMap')"
-        @click="toggleMaximize"
-      >
-        <span aria-hidden="true">⛶</span>
-      </button>
-      <button
-        v-else
-        type="button"
-        class="maximize-toggle maximize-toggle--close"
-        :aria-label="t('analyzer.minimizeMap')"
-        v-tooltip="t('analyzer.minimizeMap')"
-        @click="toggleMaximize"
-      >
-        <span aria-hidden="true">✕</span>
-      </button>
-    </div>
-  </Teleport>
+  <!-- In-card maximize (B7): no Teleport — the map stays exactly where it is
+       in the grid/card DOM. `maximized` only adds a class hook (for any
+       future styling) and is emitted to the host, which hides its OTHER body
+       content so `.fill`'s existing flex-grow expands the map to fill the
+       card (see the `maximized` ref's module doc above). -->
+  <div class="track-wrap" :class="{ fill: fillHeight, maximized }">
+    <canvas
+      ref="canvas"
+      class="track"
+      :class="{ fill: fillHeight, maximized }"
+      v-tooltip="t('analyzer.zoomHint')"
+      @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerUp"
+      @pointerleave="onPointerLeave"
+      @wheel.prevent="onWheel"
+      @dblclick="resetView"
+    />
+    <button v-if="showReset" type="button" class="reset-view" @click="resetView">
+      {{ t('analyzer.resetView') }}
+    </button>
+    <button
+      v-if="!maximized"
+      type="button"
+      class="maximize-toggle"
+      :aria-label="t('analyzer.maximizeMap')"
+      v-tooltip="t('analyzer.maximizeMap')"
+      @click="toggleMaximize"
+    >
+      <span aria-hidden="true">⛶</span>
+    </button>
+    <button
+      v-else
+      type="button"
+      class="maximize-toggle maximize-toggle--close"
+      :aria-label="t('analyzer.minimizeMap')"
+      v-tooltip="t('analyzer.minimizeMap')"
+      @click="toggleMaximize"
+    >
+      <span aria-hidden="true">✕</span>
+    </button>
+  </div>
 </template>
 
 <style scoped>
@@ -1159,29 +1157,18 @@ watch(() => props.overlayTracks, () => draw())
   border-color: var(--color-text-muted);
 }
 
-/* Mobile maximize overlay — covers the viewport when active. z-index chosen
-   above the app's other fixed layers (tooltip 1000, FileBar dropdown 100,
-   BottomNav 40) so it always reads as the top-most surface. */
-.track-wrap.maximized {
-  position: fixed;
-  inset: 0;
-  z-index: 2000;
-  display: flex;
-  flex-direction: column;
-  padding: 12px;
-  background: var(--color-bg);
-}
-.track.maximized {
-  flex: 1 1 auto;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
+/* B7 — in-card maximize: `.maximized` on `.track-wrap`/`.track` is kept as a
+   styling hook (and a stable test/DOM signal of the toggle's state) even
+   though no rule currently keys off it — the actual "fill the card" effect
+   comes entirely from the host hiding its other body content, which lets
+   `.track-wrap.fill`'s existing flex-grow (above) expand into the reclaimed
+   space. No fixed/viewport-covering positioning here (unlike the old mobile-
+   only fullscreen overlay this replaces): the map never leaves its card. */
 .maximize-toggle {
   position: absolute;
   top: 8px;
   left: 8px;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 32px;
@@ -1197,18 +1184,5 @@ watch(() => props.overlayTracks, () => draw())
 }
 .maximize-toggle:hover {
   border-color: var(--color-text-muted);
-}
-/* Trigger button is mobile-only (narrow-screen convenience, matching the
-   app's existing 768px breakpoint — see useDashboardLayout's
-   MOBILE_BREAKPOINT_PX/App.vue's @media rules); the close button below always
-   shows once the overlay is open, regardless of viewport width, so however
-   the overlay was opened it can always be closed. */
-@media (max-width: 768px) {
-  .maximize-toggle {
-    display: flex;
-  }
-}
-.maximize-toggle--close {
-  display: flex;
 }
 </style>
