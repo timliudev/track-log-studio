@@ -1,13 +1,16 @@
 /**
  * Phase 7 — acceleration / drag test: scan the WHOLE session (not a single
- * lap) for the fastest segment matching a configurable condition, mirroring a
- * drag-strip timer (e.g. "fastest 100 m", "0->100 km/h").
+ * lap) for EVERY segment matching a configurable condition, mirroring a
+ * drag-strip timer used repeatedly across a session (e.g. "every 0->100 km/h
+ * run", "every standing-start 100 m") — think of a session with 10 sets of
+ * traffic lights: there should be 10 qualifying segments, not just the single
+ * fastest one (Track Log Studio issue B14).
  *
  * This is deliberately NOT a {@link LapMetric} (see `lapMetrics.ts`). A
  * `LapMetric` answers "what's this lap's value of X", one number per lap
  * drawn from that lap's own [startIdx, endIdx) span. An accel test answers a
- * different question — "where, ANYWHERE in the whole recording, is the best
- * qualifying segment" — and the winning window routinely straddles a lap
+ * different question — "where, ANYWHERE in the whole recording, do
+ * qualifying segments occur" — and a window routinely straddles a lap
  * boundary (out-lap acceleration onto the front straight, or an in-lap
  * carrying speed past the finish line) or lives in a section that isn't a lap
  * at all (pit-out, a straight-line test outside the circuit). Forcing it into
@@ -15,9 +18,16 @@
  * and losing cross-lap-boundary windows — so it stays a standalone
  * whole-session search, consumed directly by the UI panel rather than through
  * `computeMetric`/`LapContext`.
+ *
+ * Both search functions below return an ARRAY of every qualifying segment
+ * found, in chronological order (ascending `startIdx` — this falls out
+ * naturally since each is a single forward scan over the session), with
+ * exactly one element flagged `isFastest: true` (the minimum `timeMs` among
+ * them) so the UI can highlight the best while still listing every run. An
+ * empty array means the search ran but nothing qualified.
  */
 
-/** A found best-matching segment. */
+/** A found matching segment. */
 export interface AccelSegment {
   startIdx: number
   endIdx: number
@@ -25,6 +35,22 @@ export interface AccelSegment {
   distanceM: number
   entrySpeedKmh: number
   exitSpeedKmh: number
+  /** True for the single fastest (lowest `timeMs`) segment among all the
+   *  segments returned by the same search call; false for the rest. */
+  isFastest: boolean
+}
+
+/** Mark the minimum-`timeMs` element of `segments` as `isFastest`, in place.
+ *  No-op on an empty array. Segments are compared by `timeMs` only — ties
+ *  keep whichever is encountered first (earliest in the chronological list). */
+function markFastest(segments: AccelSegment[]): AccelSegment[] {
+  if (segments.length === 0) return segments
+  let fastest = 0
+  for (let i = 1; i < segments.length; i++) {
+    if (segments[i].timeMs < segments[fastest].timeMs) fastest = i
+  }
+  segments[fastest].isFastest = true
+  return segments
 }
 
 export interface FastestDistanceFromLaunchOptions {
@@ -41,13 +67,16 @@ export interface FastestDistanceFromLaunchOptions {
 }
 
 /**
- * Times "from a launch at `entrySpeedKmh`, how long to cover `distanceM`" —
- * mirroring what the user actually means by e.g. "0 km/h start, 100 m: how
- * many seconds to cover it" (a standing-start drag time), NOT "anywhere in
- * the session where entry speed happens to be >= a floor, find the
- * fastest-covering window" (that's what the old floor-filter search did, and
- * why entry=0 used to return a near-top-speed window instead of a genuine
- * standing start — see the module doc history / accelTest.test.ts).
+ * Times "from a launch at `entrySpeedKmh`, how long to cover `distanceM`",
+ * for EVERY launch found in the session — mirroring what the user actually
+ * means by e.g. "0 km/h start, 100 m: how many seconds to cover it" (a
+ * standing-start drag time), NOT "anywhere in the session where entry speed
+ * happens to be >= a floor, find the fastest-covering window" (that's what
+ * the old floor-filter search did, and why entry=0 used to return a
+ * near-top-speed window instead of a genuine standing start — see the module
+ * doc history / accelTest.test.ts). And NOT just the single fastest launch —
+ * a session with e.g. 10 sets of traffic lights should report all 10
+ * qualifying launches, not only the best (issue B14).
  *
  * Launch detection reuses {@link fastestSpeedSegment}'s `lastLowIdx` idea:
  * scan the whole session tracking the most recent sample at/below
@@ -69,27 +98,28 @@ export interface FastestDistanceFromLaunchOptions {
  * `distanceM`, every later launch (starting even further along, with even
  * less track left) can't either, so the scan stops there.
  *
- * Among ALL launches found in the session, the one with the smallest elapsed
- * time wins. After a launch is resolved (whether or not it covered the
- * distance), a fresh dip back to/below `entrySpeedKmh` is required before
+ * EVERY launch found in the session that covers `distanceM` is collected, in
+ * chronological order (they fall out of the scan already sorted by
+ * `startIdx`), with the smallest-elapsed-time one flagged `isFastest` (see
+ * {@link markFastest}). After a launch is resolved (whether or not it covered
+ * the distance), a fresh dip back to/below `entrySpeedKmh` is required before
  * another launch can start — so a noisy plateau right at the threshold
  * doesn't spawn many overlapping "launches" from the same run.
  *
- * Returns null when: fewer than 2 samples, `distanceM <= 0`,
- * `entrySpeedKmh` isn't finite, no sample ever crosses UP through
- * `entrySpeedKmh` (no launch at all), or no launch's remaining track covers
- * `distanceM`.
+ * Returns `[]` when: fewer than 2 samples, `distanceM <= 0`, `entrySpeedKmh`
+ * isn't finite, no sample ever crosses UP through `entrySpeedKmh` (no launch
+ * at all), or no launch's remaining track covers `distanceM`.
  */
 export function fastestDistanceFromLaunch(
   cumDistM: Float64Array,
   timeMs: Float64Array,
   speedKmh: ArrayLike<number>,
   opts: FastestDistanceFromLaunchOptions,
-): AccelSegment | null {
+): AccelSegment[] {
   const n = cumDistM.length
   const { distanceM, entrySpeedKmh } = opts
   if (n < 2 || n !== timeMs.length || !(distanceM > 0) || !Number.isFinite(entrySpeedKmh)) {
-    return null
+    return []
   }
 
   /** Interpolate the fraction along (i-1 -> i) where speed crosses `target`,
@@ -106,7 +136,7 @@ export function fastestDistanceFromLaunch(
     return arr[i - 1] + frac * (arr[i] - arr[i - 1])
   }
 
-  let best: AccelSegment | null = null
+  const segments: AccelSegment[] = []
   // Most recent sample index seen at/below entrySpeedKmh — a candidate
   // launch base — or -1 when none has been seen yet. See fastestSpeedSegment
   // for why the LATEST such index (not the earliest) is kept.
@@ -171,25 +201,24 @@ export function fastestDistanceFromLaunch(
     const elapsed = endTimeMs - startTimeMs
     if (!(elapsed > 0)) continue
 
-    if (best == null || elapsed < best.timeMs) {
-      const exitV0 = speedKmh[end - 1]
-      const exitV1 = speedKmh[end]
-      const exitSpeedKmh =
-        Number.isFinite(exitV0) && Number.isFinite(exitV1)
-          ? exitV0 + frac * (exitV1 - exitV0)
-          : (speedKmh[end] as number)
-      best = {
-        startIdx: startI,
-        endIdx: end,
-        timeMs: elapsed,
-        distanceM,
-        entrySpeedKmh: startSpeedKmh,
-        exitSpeedKmh,
-      }
-    }
+    const exitV0 = speedKmh[end - 1]
+    const exitV1 = speedKmh[end]
+    const exitSpeedKmh =
+      Number.isFinite(exitV0) && Number.isFinite(exitV1)
+        ? exitV0 + frac * (exitV1 - exitV0)
+        : (speedKmh[end] as number)
+    segments.push({
+      startIdx: startI,
+      endIdx: end,
+      timeMs: elapsed,
+      distanceM,
+      entrySpeedKmh: startSpeedKmh,
+      exitSpeedKmh,
+      isFastest: false,
+    })
   }
 
-  return best
+  return markFastest(segments)
 }
 
 export interface FastestSpeedOptions {
@@ -200,8 +229,10 @@ export interface FastestSpeedOptions {
 }
 
 /**
- * Minimum-time window where speed goes from `<= fromKmh` to `>= toKmh`
- * (e.g. 0 -> 100 km/h), scanning the whole session.
+ * EVERY window where speed goes from `<= fromKmh` to `>= toKmh` (e.g. 0 -> 100
+ * km/h), scanning the whole session — not just the fastest one (a session
+ * with several such runs, e.g. one per set of traffic lights, should report
+ * all of them; see issue B14).
  *
  * Noise/monotonic rule (documented, not merely implied): the endpoints alone
  * define a run — NOT strict monotonicity in between. Concretely, the scan
@@ -214,14 +245,18 @@ export interface FastestSpeedOptions {
  * matter. It also means the reported start is the LATEST qualifying low
  * point before the target is hit (closest to the actual launch), so a run
  * that idles at low speed for a while before launching is timed from the
- * launch, not from when it first dipped below `fromKmh`. Two separate accel
- * runs in the same log each produce their own candidate; the faster wins.
+ * launch, not from when it first dipped below `fromKmh`.
+ *
+ * EVERY separate accel run found in the log produces its own candidate; all
+ * are collected in chronological order (they fall out of the scan already
+ * sorted by `startIdx`), with the fastest one flagged `isFastest` (see
+ * {@link markFastest}).
  *
  * Time/distance are interpolated at the crossing points (same trap-timer
  * semantics as {@link fastestDistanceFromLaunch}) so a threshold crossed
  * mid-sample doesn't bias the result by up to one sample interval.
  *
- * Returns null when: fewer than 2 samples, `toKmh <= fromKmh`, or no
+ * Returns `[]` when: fewer than 2 samples, `toKmh <= fromKmh`, or no
  * candidate run reaches `toKmh` anywhere in the session.
  */
 export function fastestSpeedSegment(
@@ -229,10 +264,10 @@ export function fastestSpeedSegment(
   speedKmh: ArrayLike<number>,
   cumDistM: Float64Array,
   opts: FastestSpeedOptions,
-): AccelSegment | null {
+): AccelSegment[] {
   const n = timeMs.length
   const { fromKmh, toKmh } = opts
-  if (n < 2 || n !== cumDistM.length || !(toKmh > fromKmh)) return null
+  if (n < 2 || n !== cumDistM.length || !(toKmh > fromKmh)) return []
 
   /** Interpolate the fraction along (i-1 -> i) where speed crosses `target`,
    *  assuming speed[i-1] and speed[i] bracket it (one below, one at/above). */
@@ -248,7 +283,7 @@ export function fastestSpeedSegment(
     return arr[i - 1] + frac * (arr[i] - arr[i - 1])
   }
 
-  let best: AccelSegment | null = null
+  const segments: AccelSegment[] = []
   // The most recent sample index seen at/below fromKmh (a qualifying low
   // point a run could start from), or -1 when none has been seen yet. Kept
   // as the LATEST such index (not the earliest) so a run starts as close as
@@ -299,15 +334,16 @@ export function fastestSpeedSegment(
     }
 
     const elapsed = endTimeMs - startTimeMs
-    if (elapsed > 0 && (best == null || elapsed < best.timeMs)) {
-      best = {
+    if (elapsed > 0) {
+      segments.push({
         startIdx: startI,
         endIdx: i,
         timeMs: elapsed,
         distanceM: endDistM - startDistM,
         entrySpeedKmh,
         exitSpeedKmh: toKmh,
-      }
+        isFastest: false,
+      })
     }
 
     // This candidate is resolved; require a fresh dip back to fromKmh before
@@ -316,5 +352,5 @@ export function fastestSpeedSegment(
     lastLowIdx = -1
   }
 
-  return best
+  return markFastest(segments)
 }

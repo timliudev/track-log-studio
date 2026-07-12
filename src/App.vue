@@ -6,6 +6,7 @@ import { useLocale } from '@/composables/useLocale'
 import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
 import GithubStarButton from '@/components/GithubStarButton.vue'
+import PwaUpdateToast from '@/components/PwaUpdateToast.vue'
 
 // Lazy tab views: async imports keep each top-level view in its own chunk so
 // heavy per-tab dependencies (notably grid-layout-plus + interactjs pulled in
@@ -121,6 +122,8 @@ const buildDate = __BUILD_DATE__
       </a>
       <span class="build-stamp">build {{ buildSha }} · {{ buildDate }}</span>
     </footer>
+
+    <PwaUpdateToast />
   </div>
 </template>
 

@@ -40,11 +40,16 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       VitePWA({
-        // autoUpdate (was 'prompt' but the update-prompt UI was never wired, so
-        // returning visitors got stuck on the first cached build). During rapid
-        // continuous deploys we want new builds to apply automatically on next
-        // load instead of serving a stale service-worker cache.
-        registerType: 'autoUpdate',
+        // 'prompt': an update-available toast is now wired (see
+        // src/composables/usePwaUpdate.ts + src/components/PwaUpdateToast.vue),
+        // so a new build no longer needs to silently self-apply — the user is
+        // told a new version is ready and reloads on their own terms (avoids
+        // yanking state out from under someone mid-session, e.g. mid-import).
+        registerType: 'prompt',
+        // We register the service worker ourselves via `virtual:pwa-register`
+        // (see main.ts) so the custom toast can hook onNeedRefresh/onOfflineReady
+        // instead of the plugin's own injected (invisible) auto-registration.
+        injectRegister: false,
         // App shell + assets are precached; large .loga files are user-provided at
         // runtime and never cached.
         workbox: {
@@ -85,23 +90,51 @@ export default defineConfig(({ mode }) => {
           ],
         },
         manifest: {
+          id: '/',
           name: 'Track Log Studio',
           short_name: 'TrackLogStudio',
           description:
             'Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry.',
           lang: 'zh-Hant',
           start_url: '/',
+          scope: '/',
           display: 'standalone',
           background_color: '#0f1115',
           theme_color: '#0f1115',
-          // SVG icon for Phase 0 — replace with rasterised PNG (192/512 +
-          // maskable) before production for the broadest install support.
+          categories: ['utilities', 'sports'],
+          // Rasterised PNGs (generated from public/app-icon.svg by
+          // scripts/generate-pwa-icons.mjs — re-run that script if the logo
+          // ever changes) for the broadest install support: some
+          // installers/stores still expect concrete PNG sizes rather than a
+          // scalable "any" icon. The SVG stays listed too as a crisp
+          // any-size fallback for installers that DO support it. Maskable is
+          // its own dedicated PNG (safe-zone padded) rather than reusing the
+          // "any" art, so a maskable-aware installer doesn't clip artwork
+          // that has no safe-zone padding baked in.
           icons: [
             {
               src: 'app-icon.svg',
               sizes: 'any',
               type: 'image/svg+xml',
-              purpose: 'any maskable',
+              purpose: 'any',
+            },
+            {
+              src: 'pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: 'pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: 'pwa-maskable-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
             },
           ],
         },

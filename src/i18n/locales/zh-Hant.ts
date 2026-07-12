@@ -10,6 +10,12 @@ export default {
     githubTooltip: '在 GitHub 上為本專案加星',
     githubStar: 'Star',
   },
+  pwa: {
+    updateAvailable: '有新版本可用',
+    offlineReady: '應用程式已可離線使用',
+    reload: '重新整理',
+    dismiss: '關閉',
+  },
   nav: {
     converter: '轉換',
     analyzer: '分析',
@@ -214,6 +220,8 @@ export default {
     accelToKmh: '目標速度 (km/h)',
     accelNoChannel: '無速度頻道（GPS_Speed / Vehicle_Speed）可用。',
     accelNoMatch: '整份記錄中找不到符合條件的區段。',
+    accelResultCount: '共找到 {n} 個符合區段',
+    accelFastest: '最速',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: '聚焦此區段',
     gear: {

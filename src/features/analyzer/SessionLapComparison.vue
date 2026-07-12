@@ -3,16 +3,14 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { Lap } from '@/domain/model/Lap'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
-import {
-  buildComparisonLapRows,
-  fastestLapTime,
-  type ComparisonLapRow,
-} from '@/domain/analysis/sessionLapSummary'
+import { buildLapTableRows, fastestLapTime, type LapTableRow } from '@/domain/analysis/sessionLapSummary'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
-import { formatLapTime, formatMetricValue, formatMsColumn } from '@/domain/analysis/format'
-import { columnHeader } from './lapColumnHeader'
+import { computeSectorTimes } from '@/domain/analysis/sectorTiming'
+import { outOfBandLapIndices, outOfBandDistanceLapIndices } from '@/domain/analysis/lapValidity'
 import { useLapStore } from '@/stores/lapStore'
+import { useSectorStore } from '@/stores/sectorStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
+import LapTableView from './LapTableView.vue'
 
 const props = defineProps<{
   primaryLaps: Lap[]
@@ -21,6 +19,7 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const lapStore = useLapStore()
+const sectorStore = useSectorStore()
 const analyzer = useAnalyzerStore()
 
 interface ComparisonTable {
@@ -30,29 +29,43 @@ interface ComparisonTable {
   fastestMs: number | null
   deltaMs: number | null
   lapCount: number
-  rows: ComparisonLapRow[]
+  rows: LapTableRow[]
 }
 
 // The fastest INCLUDED primary lap, used as the delta reference for each
 // comparison's fastest lap (same definition as buildSessionLapSummaries).
 const primaryBest = computed(() => fastestLapTime(props.primaryLaps, props.primaryExcluded))
 
-// One per-lap table per comparison recording, with the SAME configured
-// columns (lapStore.columns) as the primary LapTable for full parity. Each
-// comparison gets its OWN LapContext: cumDistM/session come from its own
-// track/session so channel + distance columns are sourced through the same
-// computeMetric path as the primary; bestLapTimeMs is the comparison's OWN
-// fastest lap (not the primary's) so its `delta` column reads the same way
-// the primary table's does — "how far off THIS recording's best lap". Sector
-// gates are only defined on the primary track, so sectorTimings is left
-// empty here and sectorTime columns simply render '—' (computeMetric already
-// degrades a missing lookup to NaN).
+// One per-lap table per comparison recording, rendered through the SAME
+// LapTableView the primary LapTable uses — one rendering + number-sourcing
+// path, not a parallel implementation (B1/#1/#17). Each comparison gets its
+// OWN LapContext: cumDistM/session come from its own track/session so
+// channel + distance columns are sourced through the same computeMetric path
+// as the primary; bestLapTimeMs is the comparison's OWN fastest lap (not the
+// primary's) so its `delta` column reads the same way the primary table's
+// does — "how far off THIS recording's best lap".
 const tables = computed<ComparisonTable[]>(() =>
   props.comparisons.map((c) => {
-    const cumDistM = c.track
-      ? cumulativeDistanceM(c.track.lat, c.track.lon, c.track.valid)
-      : null
-    const fastestMs = fastestLapTime(c.laps)
+    const cumDistM = cumulativeDistanceM(c.track.lat, c.track.lon, c.track.valid)
+
+    // B2: the SAME valid lap-time/-distance band configured for the primary
+    // recording applies to this comparison's OWN laps/track — read-only (no
+    // toggle here; comparisons carry no manual exclusion state), just the
+    // same dimmed/struck-through visual mark the primary table uses.
+    const excluded = [
+      ...new Set([
+        ...outOfBandLapIndices(c.laps, lapStore.lapTimeBand),
+        ...outOfBandDistanceLapIndices(c.laps, c.track, lapStore.lapDistanceBand),
+      ]),
+    ]
+
+    // B17: the confirmed sector gates are shared across recordings of the
+    // SAME circuit, so they're walked against THIS comparison's own track —
+    // the sector column populates for real whenever the gates actually cross
+    // it, and legitimately stays '—' only when they don't (or none are set).
+    const sectorTimings = computeSectorTimes(c.laps, c.track, c.timeMs, sectorStore.gates)
+
+    const fastestMs = fastestLapTime(c.laps, excluded)
     return {
       id: c.id,
       name: c.name,
@@ -60,34 +73,20 @@ const tables = computed<ComparisonTable[]>(() =>
       fastestMs,
       deltaMs: fastestMs != null && primaryBest.value != null ? fastestMs - primaryBest.value : null,
       lapCount: c.laps.length,
-      rows: buildComparisonLapRows(
+      rows: buildLapTableRows(
         c.laps,
-        { session: c.session, cumDistM, sectorTimings: [], bestLapTimeMs: fastestMs },
+        { session: c.session, cumDistM, sectorTimings, bestLapTimeMs: fastestMs },
         lapStore.columns.map((col) => col.metric),
+        excluded,
       ),
     }
   }),
 )
 
-/** Format one row's per-column cell, matching the primary LapTable's idiom:
- *  sectorTime unsigned seconds, delta signed seconds, everything else the
- *  generic metric formatter — all '—' for NaN. */
-function formatCell(metricIndex: number, value: number): string {
-  const metric = lapStore.columns[metricIndex]?.metric
-  if (metric?.kind === 'sectorTime') return formatMsColumn(value, false)
-  if (metric?.kind === 'delta') return formatMsColumn(value, true)
-  return formatMetricValue(value)
-}
-
 function delta(value: number | null): string {
   if (value == null) return '—'
   const sign = value > 0 ? '+' : value < 0 ? '−' : '±'
   return `${sign}${(Math.abs(value) / 1000).toFixed(3)} s`
-}
-
-/** Per-lap distance label mirroring the primary LapTable: '—' for NaN, km with 3dp. */
-function distanceLabel(distanceM: number): string {
-  return Number.isNaN(distanceM) ? '—' : `${(distanceM / 1000).toFixed(3)} km`
 }
 
 function chartOffset(id: number): number {
@@ -136,66 +135,50 @@ function resetChartOffset(id: number): void {
         <button type="button" @click="nudgeChartOffset(table.id, analyzer.xAxis === 'time' ? 0.1 : 1)">＋</button>
         <button type="button" @click="resetChartOffset(table.id)">{{ t('analyzer.comparisonReset') }}</button>
       </div>
-      <div v-if="table.rows.length" class="table-scroll">
-        <table :aria-label="t('analyzer.comparisonSelectLaps')">
-          <thead>
-            <tr>
-              <th class="pick-col"><span class="sr-only">{{ t('analyzer.comparisonSelectLaps') }}</span></th>
-              <th>{{ t('analyzer.lap') }}</th>
-              <th>{{ t('analyzer.lapTime') }}</th>
-              <th>{{ t('analyzer.lapDistance') }}</th>
-              <th v-for="col in lapStore.columns" :key="col.id">{{ columnHeader(t, col.metric) }}</th>
-              <th class="offset-col"><span class="sr-only">{{ t('analyzer.comparisonOffset') }}</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="row in table.rows"
-              :key="row.index"
-              :class="{ selected: lapStore.isSessionLapSelected(table.id, row.index) }"
-              @click="lapStore.toggleSessionLap(table.id, row.index)"
-            >
-              <td class="pick-col">
-                <input
-                  type="checkbox"
-                  :checked="lapStore.isSessionLapSelected(table.id, row.index)"
-                  :aria-label="t('analyzer.comparisonSelectLaps')"
-                  @click.stop
-                  @change="lapStore.toggleSessionLap(table.id, row.index)"
-                />
-              </td>
-              <td>{{ row.index + 1 }}</td>
-              <td>
-                <span v-if="row.isFastest" class="mark" v-tooltip="t('analyzer.bestLap')">⚡</span>
-                <span v-else-if="row.isSlowest" class="mark" v-tooltip="t('analyzer.slowestLap')">🐢</span>
-                {{ formatLapTime(row.lapTimeMs) }}
-              </td>
-              <td>{{ distanceLabel(row.distanceM) }}</td>
-              <td v-for="(cell, i) in row.cells" :key="lapStore.columns[i].id">{{ formatCell(i, cell) }}</td>
-              <td class="offset-col">
-                <div
-                  v-if="lapStore.isSessionLapSelected(table.id, row.index)"
-                  class="lap-offset"
-                  @click.stop
-                >
-                  <button
-                    type="button"
-                    :aria-label="t('analyzer.comparisonOffset')"
-                    @click="lapStore.nudgeSessionLapOffset(table.id, row.index, analyzer.xAxis, analyzer.xAxis === 'time' ? -0.1 : -1)"
-                  >−</button>
-                  <span>{{ lapStore.sessionLapOffsetOf(table.id, row.index, analyzer.xAxis).toFixed(analyzer.xAxis === 'time' ? 1 : 0) }}</span>
-                  <button
-                    type="button"
-                    :aria-label="t('analyzer.comparisonOffset')"
-                    @click="lapStore.nudgeSessionLapOffset(table.id, row.index, analyzer.xAxis, analyzer.xAxis === 'time' ? 0.1 : 1)"
-                  >＋</button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <p v-else class="empty">{{ t('analyzer.noLaps') }}</p>
+      <LapTableView
+        :rows="table.rows"
+        :columns="lapStore.columns"
+        readonly
+        :aria-label="t('analyzer.comparisonSelectLaps')"
+        :is-row-selected="(i) => lapStore.isSessionLapSelected(table.id, i)"
+        @row-click="lapStore.toggleSessionLap(table.id, $event)"
+      >
+        <template #pick-header>
+          <span class="sr-only">{{ t('analyzer.comparisonSelectLaps') }}</span>
+        </template>
+        <template #pick="{ row }">
+          <input
+            type="checkbox"
+            :checked="lapStore.isSessionLapSelected(table.id, row.index)"
+            :aria-label="t('analyzer.comparisonSelectLaps')"
+            @click.stop
+            @change="lapStore.toggleSessionLap(table.id, row.index)"
+          />
+        </template>
+        <template #trail-header>
+          <span class="sr-only">{{ t('analyzer.comparisonOffset') }}</span>
+        </template>
+        <template #trail="{ row, selected }">
+          <div
+            v-if="lapStore.isSessionLapSelected(table.id, row.index)"
+            class="lap-offset"
+            :class="{ 'row-selected': selected }"
+            @click.stop
+          >
+            <button
+              type="button"
+              :aria-label="t('analyzer.comparisonOffset')"
+              @click="lapStore.nudgeSessionLapOffset(table.id, row.index, analyzer.xAxis, analyzer.xAxis === 'time' ? -0.1 : -1)"
+            >−</button>
+            <span>{{ lapStore.sessionLapOffsetOf(table.id, row.index, analyzer.xAxis).toFixed(analyzer.xAxis === 'time' ? 1 : 0) }}</span>
+            <button
+              type="button"
+              :aria-label="t('analyzer.comparisonOffset')"
+              @click="lapStore.nudgeSessionLapOffset(table.id, row.index, analyzer.xAxis, analyzer.xAxis === 'time' ? 0.1 : 1)"
+            >＋</button>
+          </div>
+        </template>
+      </LapTableView>
     </div>
   </section>
 </template>
@@ -215,22 +198,10 @@ h4 { margin: 0 0 6px; font-size: .85rem; color: var(--color-text-muted); }
 .chart-align button { padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
 .chart-align button:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
-/* Horizontal scroll so the per-lap offset column can't squeeze the row (same
-   idiom as the primary LapTable). */
-.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
-th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--color-border); vertical-align: middle; white-space: nowrap; }
-th { color: var(--color-text-muted); font-weight: 600; }
-th.pick-col, td.pick-col { text-align: center; padding-left: 4px; padding-right: 4px; }
-tbody tr { cursor: pointer; }
-tbody tr:hover { background: var(--color-bg); }
-tbody tr.selected { background: var(--color-accent); color: var(--color-accent-text); }
-.mark { margin-right: 2px; }
 .lap-offset { display: inline-flex; align-items: center; gap: 4px; }
 .lap-offset button { padding: 1px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
 .lap-offset button:hover { border-color: var(--color-accent); color: var(--color-accent); }
 /* Selected-row offset controls sit on the accent background — keep them legible. */
-tbody tr.selected .lap-offset button { background: var(--color-surface); color: var(--color-text); }
-.empty { color: var(--color-text-muted); font-size: .8rem; margin: 4px 0 0 16px; }
+.lap-offset.row-selected button { background: var(--color-surface); color: var(--color-text); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>

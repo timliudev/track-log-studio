@@ -49,56 +49,64 @@ export function buildSessionLapSummaries(
   })
 }
 
-/** One per-lap row for a comparison recording's lap table. Mirrors the primary
- * LapTable's built-in columns (#/time/distance) plus fastest/slowest flags so the
- * two present laps in the same visual language, plus one raw value per
- * user-configured column (same order as the caller's `metrics` list) for full
- * column parity with the primary table. */
-export interface ComparisonLapRow {
+/** One per-lap row for a lap table. Shared shape for BOTH the primary
+ * LapTable and any comparison-recording lap table (via {@link LapTableView})
+ * so the two present laps through the exact same rendering + number-sourcing
+ * path — one source of truth, not two parallel implementations. */
+export interface LapTableRow {
   index: number
   lapTimeMs: number
   /** Per-lap distance in metres; NaN when no track / degenerate span. */
   distanceM: number
   isFastest: boolean
   isSlowest: boolean
+  /** Whether this lap is excluded (manual, out-of-band, or sector-invalid for
+   *  the primary; band-only for a read-only comparison recording — see
+   *  {@link buildLapTableRows}'s `excluded` param). Drives the same dimmed/
+   *  struck-through row styling in both tables. */
+  isExcluded: boolean
   /** Raw per-column values (channel/sector/delta), aligned index-for-index
    *  with the `metrics` argument. Empty when no columns are configured.
-   *  NaN (not formatted) — callers format with the same idiom as the
-   *  primary table (`formatMetricValue` / `formatMsColumn`). */
+   *  NaN (not formatted) — callers format with {@link formatLapMetricCell}. */
   cells: number[]
 }
 
 /**
- * Per-lap rows for one comparison recording. Comparison recordings carry no
- * primary-session exclusion state, so every finite lap participates and the
- * fastest/slowest markers are computed over all laps (matching
- * {@link buildSessionLapSummaries}). The slowest marker is suppressed when it
- * would land on the same lap as the fastest — with 0/1 valid laps they coincide
- * and a second marker on one row is just noise (same rule as the primary table).
+ * Per-lap rows for one lap table — the SINGLE row-building path used by both
+ * the primary LapTable (via its own `laps`/`lapStore.excluded`) and every
+ * comparison recording's read-only lap table (via its own laps/track and the
+ * shared valid-lap band, see B2). Fastest/slowest markers and the `excluded`
+ * flag are all computed over the SAME `excluded` list passed in, so a
+ * comparison recording's markers/dimming behave exactly like the primary's
+ * once the same band rules are threaded through. The slowest marker is
+ * suppressed when it would land on the same lap as the fastest — with 0/1
+ * INCLUDED laps they coincide and a second marker on one row is just noise.
  *
- * `ctx` is the comparison recording's OWN {@link LapContext} (its track's
- * cumulative distance, its own session for channel lookups, its own fastest
- * lap as the `delta` column's reference — sector gates are defined on the
- * PRIMARY track only, so `ctx.sectorTimings` is expected to be empty/absent
- * here and sector columns simply render '—'). `metrics` is the user-configured
- * column list (`lapStore.columns.map(c => c.metric)`); every value is sourced
- * through the SAME {@link computeMetric} path as the primary LapTable.
+ * `ctx` is the recording's OWN {@link LapContext} (its track's cumulative
+ * distance, its own session for channel lookups, its own sector timings when
+ * the shared gates cross its track — see B17 — and its own fastest lap as the
+ * `delta` column's reference). `metrics` is the user-configured column list
+ * (`lapStore.columns.map(c => c.metric)`); every value is sourced through the
+ * SAME {@link computeMetric} path for every recording.
  */
-export function buildComparisonLapRows(
+export function buildLapTableRows(
   laps: readonly Lap[],
   ctx: LapContext,
   metrics: readonly LapMetric[] = [],
-): ComparisonLapRow[] {
+  excluded: readonly number[] = [],
+): LapTableRow[] {
   const mutable = laps as Lap[]
-  const fastest = fastestLapIndex(mutable, [])
-  const slowestRaw = slowestLapIndex(mutable, [])
+  const fastest = fastestLapIndex(mutable, excluded)
+  const slowestRaw = slowestLapIndex(mutable, excluded)
   const slowest = slowestRaw != null && slowestRaw !== fastest ? slowestRaw : null
+  const skip = new Set(excluded)
   return laps.map((lap) => ({
     index: lap.index,
     lapTimeMs: lap.lapTimeMs,
     distanceM: computeMetric({ kind: 'distance' }, lap, ctx),
     isFastest: lap.index === fastest,
     isSlowest: lap.index === slowest,
+    isExcluded: skip.has(lap.index),
     cells: metrics.map((metric) => computeMetric(metric, lap, ctx)),
   }))
 }

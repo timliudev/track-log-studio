@@ -10,6 +10,12 @@ export default {
     githubTooltip: 'Star this project on GitHub',
     githubStar: 'Star',
   },
+  pwa: {
+    updateAvailable: 'A new version is available',
+    offlineReady: 'App ready to work offline',
+    reload: 'Reload',
+    dismiss: 'Dismiss',
+  },
   nav: {
     converter: 'Converter',
     analyzer: 'Analyzer',
@@ -219,6 +225,8 @@ export default {
     accelToKmh: 'To (km/h)',
     accelNoChannel: 'No speed channel (GPS_Speed / Vehicle_Speed) available.',
     accelNoMatch: 'No matching segment found in this recording.',
+    accelResultCount: '{n} matching segments found',
+    accelFastest: 'Fastest',
     accelEntryExit: '{entry} → {exit}',
     accelFocus: 'Focus this segment',
     gear: {
