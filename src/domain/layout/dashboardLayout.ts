@@ -108,10 +108,16 @@ export function minSizeFor(id: string): { minW: number; minH: number } {
  * current breakpoint already permits) AND the card itself isn't the
  * currently-pinned one: a pinned card's real content has been Teleported out
  * of the grid into the sticky pinned anchor (see AnalyzerView's module doc),
- * so its grid slot is just an empty placeholder — dragging/resizing that
- * placeholder would be meaningless (nothing visibly moves) and would desync
- * the placeholder's size from the card's actual position it returns to on
- * unpin.
+ * so its grid slot is just an empty placeholder — dragging/resizing THAT
+ * placeholder (via grid-layout-plus's own handles) would be meaningless
+ * (nothing visibly moves) and would desync the placeholder's size from the
+ * card's actual position it returns to on unpin.
+ *
+ * B18 — this does NOT mean a pinned card can't be resized at all: the
+ * floating card itself has its own, separate corner-drag resize handle (see
+ * DashboardCard.vue's `pin-resize-handle` / `pinnedSize`), independent of
+ * the grid entirely. Only the grid-layout-plus resize handle on the inert
+ * grid-slot placeholder is disabled here.
  */
 export function isItemDraggable(globalDraggable: boolean, pinned: boolean): boolean {
   return globalDraggable && !pinned

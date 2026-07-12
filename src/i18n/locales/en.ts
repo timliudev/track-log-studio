@@ -401,6 +401,7 @@ export default {
       pin: 'Pin (stays fixed at the top while scrolling — only one card at a time)',
       unpin: 'Unpin',
       pinnedPlaceholder: '📌 Pinned at top',
+      pinnedResizeHandle: 'Drag to resize (double-click to reset)',
     },
   },
   suspension: {

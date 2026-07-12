@@ -299,4 +299,89 @@ describe('DashboardCard (scaffold smoke test)', () => {
       expect(wide.attributes('style')).not.toBe(tall.attributes('style'))
     })
   })
+
+  describe('B18 — pinned-card resize handle', () => {
+    function stubRect(el: HTMLElement, width: number, height: number): void {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return this
+        },
+      } as DOMRect)
+    }
+
+    it('shows the resize handle only while pinned and not collapsed', () => {
+      expect(mountCard({ pinned: false }).find('.pin-resize-handle').exists()).toBe(false)
+      expect(mountCard({ pinned: true }).find('.pin-resize-handle').exists()).toBe(true)
+      // Preserves the pre-existing "collapsed cards aren't resizable" rule.
+      expect(mountCard({ pinned: true, collapsed: true }).find('.pin-resize-handle').exists()).toBe(false)
+    })
+
+    it('dragging the handle sets an explicit pixel width/height, overriding the aspect-ratio default', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      // Not part of a real layout in happy-dom, so getBoundingClientRect
+      // needs a stub to report a starting size for the drag delta.
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+
+      // +50 width, +60 height from the drag delta above.
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+      expect(wrapper.attributes('style')).not.toContain('aspect-ratio')
+      window.dispatchEvent(new PointerEvent('pointerup'))
+    })
+
+    it('clamps the dragged size to a sane minimum (does not shrink to near-zero)', async () => {
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: -1000, clientY: -1000 }))
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.attributes('style')).toContain('width: 220px')
+      expect(wrapper.attributes('style')).toContain('height: 140px')
+      window.dispatchEvent(new PointerEvent('pointerup'))
+    })
+
+    it('double-clicking the handle resets to the automatic aspect-ratio size', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 400, clientY: 300 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toContain('width: 400px')
+      window.dispatchEvent(new PointerEvent('pointerup'))
+
+      await handle.trigger('dblclick')
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
+      expect(wrapper.attributes('style')).not.toContain('width:')
+    })
+
+    it('ignores pointermove/up once no drag is in progress (no stray state from a prior drag)', async () => {
+      const wrapper = mountCard({ pinned: true })
+      // No pointerdown at all — a move/up pair should be a complete no-op.
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 999, clientY: 999 }))
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+  })
 })
