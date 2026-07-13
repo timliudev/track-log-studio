@@ -89,6 +89,12 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 - [x] **B46** Scatter/G-G (shared GgChart.vue) gains inside dataZoom on X+Y (wheel/drag, native pinch) + reset-zoom button matching B9 (shown only while zoomed, 44px on coarse); zoom window survives re-renders (resize/theme/axis changes). Known trade-off: 1:1 mode can temporarily deviate from square while zooming. — `d80c901`
 - [x] **B47** 理論最佳圈 summary moved into SectorPanel's CardFillScroll fixed header (after gate controls, before the scrollable gate list) — visible at any card height. — `1e80c0e`
 
+## Acceptance round 3 — 2026-07-14 morning (user tested develop 51e40fa)
+- [ ] **B31b** 固定中線模式 unusable — user: 「一點用都沒有還是歪的」. Investigate BOTH suspects: (a) needle drawn at CANVAS 50% instead of PLOT-AREA 50% (uPlot's left axis gutter offsets the true plot centre — needle must sit at `plotLeft + plotWidth/2`); (b) the sample read under the needle uses the wrong x (must be `posToVal(plotCentreX)`), so values lag/offset while panning. Also verify the drag actually pans in this mode on mouse AND touch. Add unit tests pinning needle x == plot-area centre and sample == posToVal(centre).
+- [ ] **B48** Accel-test segment list: sort results fastest→slowest (currently appearance order with only a ⚡ mark).
+- [ ] **B43b** (B43 insufficient) Current-values card STILL can't reach a single column — at minW 2 the 96px cells still fit two columns. Allow minW 1 for this card and/or make the grid collapse to one column below a width threshold; verify a true single-column narrow card renders cleanly.
+- [ ] **B49** Current-values card: user wants control over field arrangement. Scope decided (proposed to user, no objection): (a) sort options — original channel order / alphabetical / custom — plus (c) per-field hide toggle; custom order via simple up/down or drag within an edit mode; persist in localStorage (and include in the B19 export bundle). Keep 目前時間 always first.
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `d002573`
