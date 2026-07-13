@@ -8,6 +8,14 @@ import { activePwaToast, type PwaToastKind } from './pwaUpdateToast'
 // carries an action (reload) the user might want to defer, e.g. mid-import.
 const OFFLINE_READY_AUTO_DISMISS_MS = 6000
 
+// B37(a): browsers only auto-check a registered SW for updates on navigation
+// (or roughly every 24h per spec, browser-dependent). A tab left open for
+// hours/days would otherwise never learn a new build shipped, leaving the
+// update toast dark even though prompt-mode registration is working as
+// designed. Force an explicit check on this cadence so long-lived tabs still
+// surface the toast in a reasonable window.
+const SW_UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
+
 /**
  * Registers the service worker (`registerType: 'prompt'` in vite.config.ts —
  * see that file for why) and exposes a single-slot toast state machine for
@@ -23,11 +31,21 @@ export function usePwaUpdate(): {
   const needRefreshDismissed = ref(false)
   const offlineReadyDismissed = ref(false)
 
+  let updateCheckTimer: ReturnType<typeof setInterval> | undefined
+
   const { needRefresh, offlineReady, updateServiceWorker } = useRegisterSW({
     onRegisterError(error) {
       // Best-effort: a PWA that fails to register its service worker should
       // degrade to "just a website", not break the app it's meant to serve.
       console.error('[pwa] service worker registration failed', error)
+    },
+    onRegisteredSW(_swScriptUrl, registration) {
+      if (!registration) return
+      updateCheckTimer = setInterval(() => {
+        void registration.update().catch((error: unknown) => {
+          console.error('[pwa] periodic update check failed', error)
+        })
+      }, SW_UPDATE_CHECK_INTERVAL_MS)
     },
   })
 
@@ -57,7 +75,10 @@ export function usePwaUpdate(): {
     },
     { immediate: true },
   )
-  onUnmounted(() => clearTimeout(autoDismissTimer))
+  onUnmounted(() => {
+    clearTimeout(autoDismissTimer)
+    clearInterval(updateCheckTimer)
+  })
 
   function reload(): void {
     // `true` per the plugin's own contract: it fetches, activates the new
