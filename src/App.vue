@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
+import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
 import GithubStarButton from '@/components/GithubStarButton.vue'
@@ -25,6 +26,10 @@ const { t } = useI18n()
 // selectors themselves now live in the Settings tab — B4).
 useTheme()
 useLocale()
+// B35 — §8 觸控友善四層政策: mirrors live pointer-capability signals onto
+// <html data-*> (see useInputCapabilities.ts) once for the whole app, same
+// singleton-side-effect pattern as useTheme/useLocale above.
+useInputCapabilities()
 
 type Tab = 'converter' | 'analyzer' | 'settings'
 const tabOrder: Tab[] = ['converter', 'analyzer', 'settings']

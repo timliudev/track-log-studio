@@ -12,6 +12,7 @@ import {
   buildExportBundle,
   serializeExportBundle,
 } from '@/domain/settings/settingsTransfer'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 // settingsStore reads/writes localStorage on construction — happy-dom's jsdom
 // shim doesn't ship one here, so stub an in-memory implementation (mirrors
@@ -58,12 +59,22 @@ describe('SettingsView', () => {
     installMemoryLocalStorage()
   })
 
-  it('renders the settings controls (theme / language / timezone)', () => {
+  it('renders the settings controls (theme / language / timezone / input mode)', () => {
     const wrapper = mountSettings()
     const selects = wrapper.findAll('select').map((s) => s.attributes('name'))
     expect(selects).toContain('theme')
     expect(selects).toContain('locale')
     expect(selects).toContain('timezone')
+    expect(selects).toContain('inputMode')
+  })
+
+  // B35 — §8 layer-4 manual override fuse.
+  it('persists the input-mode preference to the settings store', async () => {
+    const wrapper = mountSettings()
+    const select = wrapper.find('select[name="inputMode"]')
+    await select.setValue('touch')
+    await nextTick()
+    expect(useSettingsStore().inputModePref).toBe('touch')
   })
 
   it('renders the project name in the merged About section', () => {
@@ -153,7 +164,7 @@ describe('SettingsView', () => {
 
       const wrapper = mountSettings()
       const bundle = buildExportBundle({
-        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480 },
+        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto' },
         drivetrain: {
           kind: 'mt',
           mt: {
@@ -192,7 +203,7 @@ describe('SettingsView', () => {
 
       const wrapper = mountSettings()
       const bundle = buildExportBundle({
-        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480 },
+        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto' },
         drivetrain: {
           kind: 'mt',
           mt: {
