@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AccelSegment } from '@/domain/analysis/accelTest'
+import { sortSegmentsByTime } from '@/domain/analysis/accelTest'
 import type { AccelCondition } from '@/stores/analyzerStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { formatLapTime } from '@/domain/analysis/format'
@@ -68,6 +69,13 @@ watch(
   () => props.results,
   () => clearFocus(),
 )
+
+// B48: displayed fastest-to-slowest (the search functions themselves stay
+// chronological — see sortSegmentsByTime's doc) so the quickest run is always
+// at the top, with the ⚡ fastest badge landing on row #1 as a result. Focus
+// state keys off `startIdx-endIdx` (segKey/isFocused below), not array index,
+// so re-sorting never disturbs which row is highlighted as focused.
+const sortedResults = computed(() => sortSegmentsByTime(props.results))
 
 const condition = computed(() => analyzer.accelCondition)
 const isDistance = computed(() => condition.value.kind === 'distance')
@@ -202,7 +210,7 @@ function fmtDist(v: number): string {
 
     <ul v-if="props.speedAvailable && props.results.length > 0" class="result-list">
       <li
-        v-for="(seg, i) in props.results"
+        v-for="(seg, i) in sortedResults"
         :key="`${seg.startIdx}-${seg.endIdx}`"
         class="result"
         :class="{ fastest: seg.isFastest, focused: isFocused(seg) }"

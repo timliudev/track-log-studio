@@ -244,6 +244,17 @@ export default {
     currentValues: {
       time: 'Current time',
       noSession: 'Load a recording to see the current values.',
+      editFields: 'Edit fields',
+      doneEditing: 'Done',
+      sortLabel: 'Sort by',
+      sortOriginal: 'Original channel order',
+      sortAlphabetical: 'Alphabetical',
+      sortCustom: 'Custom order',
+      moveUp: 'Move {name} up',
+      moveDown: 'Move {name} down',
+      showField: 'Show {name}',
+      hideField: 'Hide {name}',
+      allHidden: 'Every field is hidden — tick a checkbox above to show one again.',
     },
     gear: {
       heading: 'Gear ratio calculator',

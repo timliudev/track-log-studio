@@ -53,6 +53,21 @@ function markFastest(segments: AccelSegment[]): AccelSegment[] {
   return segments
 }
 
+/**
+ * Sort a list of found segments fastest-to-slowest (ascending `timeMs`),
+ * for display purposes only (Track Log Studio issue B48) — the search
+ * functions above deliberately return chronological order (ascending
+ * `startIdx`, see the module doc) since that's the natural scan order and
+ * some tests/consumers rely on it, so this is a separate, non-mutating step
+ * the UI applies on top rather than a change to the search contract. Returns
+ * a NEW array (does not mutate `segments`); the input's `isFastest` flags are
+ * untouched, so the fastest segment ends up first both by flag and by
+ * position. `Array.prototype.sort` is stable, so segments with equal
+ * `timeMs` keep their relative (chronological) order. */
+export function sortSegmentsByTime(segments: AccelSegment[]): AccelSegment[] {
+  return [...segments].sort((a, b) => a.timeMs - b.timeMs)
+}
+
 export interface FastestDistanceFromLaunchOptions {
   /** Distance to cover (metres), e.g. 100 for a "fastest 100 m" search. */
   distanceM: number

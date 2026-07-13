@@ -10,6 +10,7 @@ import { defaultAppearanceSettings } from '@/stores/settingsStore'
 import type { MtFormState } from '@/stores/drivetrainStore'
 import { defaultLayout } from '@/domain/layout/dashboardLayout'
 import { defaultPanelState } from '@/domain/layout/panelState'
+import { defaultCurrentValuesFieldPrefs } from '@/domain/analysis/currentValuesFieldPrefs'
 
 const APPEARANCE = {
   themePref: 'dark' as const,
@@ -55,6 +56,7 @@ describe('settingsTransfer — buildExportBundle / serializeExportBundle', () =>
       dashboardLayout: defaultLayout(),
       panelState: defaultPanelState(),
       layoutLocked: true,
+      currentValuesFieldPrefs: defaultCurrentValuesFieldPrefs(),
     }
     const bundle = buildExportBundle({ appearance: APPEARANCE, drivetrain: DRIVETRAIN, layout })
     expect(bundle.layout).toEqual(layout)
@@ -73,7 +75,12 @@ describe('settingsTransfer — parseImportBundle', () => {
     const original: SettingsExportBundle = buildExportBundle({
       appearance: APPEARANCE,
       drivetrain: DRIVETRAIN,
-      layout: { dashboardLayout: defaultLayout(), panelState: defaultPanelState(), layoutLocked: false },
+      layout: {
+        dashboardLayout: defaultLayout(),
+        panelState: defaultPanelState(),
+        layoutLocked: false,
+        currentValuesFieldPrefs: { sortMode: 'alphabetical', hidden: ['RPM'], order: ['GPS_Speed', 'RPM'] },
+      },
     })
     const result = parseImportBundle(serializeExportBundle(original))
     expect(result.ok).toBe(true)
@@ -146,6 +153,39 @@ describe('settingsTransfer — parseImportBundle', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.bundle.layout?.dashboardLayout).toEqual(defaultLayout())
+  })
+
+  // B49 — current-values field prefs are folded into the same opt-in
+  // `layout` bundle field (see settingsTransfer.ts's LayoutSettings doc).
+  it('parses layout.currentValuesFieldPrefs when present', () => {
+    const result = parseImportBundle(
+      JSON.stringify({
+        layout: {
+          dashboardLayout: defaultLayout(),
+          panelState: defaultPanelState(),
+          layoutLocked: false,
+          currentValuesFieldPrefs: { sortMode: 'custom', hidden: ['RPM'], order: ['GPS_Speed', 'RPM'] },
+        },
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.bundle.layout?.currentValuesFieldPrefs).toEqual({
+      sortMode: 'custom',
+      hidden: ['RPM'],
+      order: ['GPS_Speed', 'RPM'],
+    })
+  })
+
+  it('defaults layout.currentValuesFieldPrefs when missing/malformed (older export)', () => {
+    const result = parseImportBundle(
+      JSON.stringify({
+        layout: { dashboardLayout: defaultLayout(), panelState: defaultPanelState(), layoutLocked: false },
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.bundle.layout?.currentValuesFieldPrefs).toEqual(defaultCurrentValuesFieldPrefs())
   })
 
   it('preserves an unknown/future field being silently dropped without failing the import', () => {
