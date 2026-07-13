@@ -331,6 +331,14 @@ const axisMode = computed<'square' | 'auto'>(() => {
   color: var(--color-accent);
   border-color: var(--color-accent);
 }
+/* B35 — §8 layer 3: capability signal (useInputCapabilities.ts, mirrored onto
+   <html data-any-pointer-coarse>), not a viewport-width guess — grows the
+   remove-chart button ("close" this card's content) to a >=44px touch
+   target on any coarse-pointer device. */
+:root[data-any-pointer-coarse] .remove {
+  min-height: 44px;
+  padding: 12px 16px;
+}
 .hint {
   margin: 0;
   font-size: 0.85rem;

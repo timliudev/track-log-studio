@@ -447,6 +447,12 @@ export default {
     label: '語言',
     auto: '自動',
   },
+  inputMode: {
+    label: '操作模式',
+    auto: '自動',
+    touch: '觸控優先',
+    pointer: '指標優先',
+  },
   converter: {
     suspensionToggle: '避震校正（點擊展開）',
     notes: {

@@ -40,6 +40,29 @@ export function isZoomed(
   const eps = span > 0 ? span * epsFraction : 0
   return range.min > bounds.min + eps || range.max < bounds.max - eps
 }
+
+/**
+ * B35 — §8 layer 2 ("逐事件判斷，不是逐裝置"): whether a `PointerEvent` of the
+ * given `pointerType` should be handled by this chart's OWN touch pan/pinch
+ * gesture code, versus left alone for uPlot's native mouse-based drag-zoom
+ * (and this file's own Shift+drag pan, see `onHostMouseDown`).
+ *
+ * `touch` → true (finger drag pans, two-finger pinch zooms — uPlot has no
+ * native handling for it at all). `mouse` and `pen` → false: a pen input is
+ * DELIBERATELY treated identically to a mouse here, not lumped in with touch
+ * — a stylus drag box-zooms like a mouse drag (its hover support already
+ * gives it the rest of the mouse-like experience for free), rather than
+ * panning like a finger. Any other/future pointerType also falls back to
+ * `false` (native path) rather than being silently swallowed as a touch
+ * gesture.
+ *
+ * Plain-script export (same pattern as `fillPlotHeight`/`isZoomed` above) so
+ * the branch is unit-testable without mounting uPlot or dispatching real
+ * PointerEvents.
+ */
+export function isTouchGesturePointer(pointerType: string): boolean {
+  return pointerType === 'touch'
+}
 </script>
 
 <script setup lang="ts">
@@ -261,15 +284,22 @@ function destroy(): void {
   plot = null
 }
 
-// ── touch gestures (#8) ──────────────────────────────────────────────────────
-// uPlot's built-in drag-box zoom only binds mouse events, so touch/pen input is
+// ── touch gestures (#8, B35) ─────────────────────────────────────────────────
+// uPlot's built-in drag-box zoom only binds mouse events, so touch input is
 // dead on this chart by default. We add our own Pointer Event handling for
-// touch/pen only (mouse is left to uPlot's native mousedown/mousemove/mouseup
-// drag-zoom + hover-scrub, untouched) and translate gestures into X-range
-// changes via the same `xZoom` event the mouse drag-zoom path already emits —
-// so the shared X range still has a single owner (analyzerStore.xRange, or a
-// local xRange for callers that don't sync one), rather than each chart
-// maintaining its own touch-only zoom state.
+// touch ONLY — per §8 layer 2 ("逐事件判斷，不是逐裝置"), pen is deliberately
+// treated the SAME as mouse (bailing out below, same as mouse does) rather
+// than lumped in with touch: a stylus drag should box-zoom like a mouse drag
+// (and Shift+drag should pan like a mouse, via onHostMouseDown below), not pan
+// like a finger — S Pen's hover support means it already gets the mouse-like
+// experience for free once it's routed through the same path. Since neither
+// mouse nor pen calls preventDefault() here, the browser's own compatibility
+// mousedown/mousemove/mouseup events still fire for them, which is exactly
+// what uPlot's native drag-zoom listens to — untouched. Touch gestures
+// translate into X-range changes via the same `xZoom` event the mouse
+// drag-zoom path already emits — so the shared X range still has a single
+// owner (analyzerStore.xRange, or a local xRange for callers that don't sync
+// one), rather than each chart maintaining its own touch-only zoom state.
 const touchPointers = new Map<number, { x: number; y: number }>()
 type TouchMode = 'idle' | 'pan' | 'pinch'
 let touchMode: TouchMode = 'idle'
@@ -397,7 +427,7 @@ function overPos(e: PointerEvent): { x: number; y: number } | null {
 }
 
 function onPointerDown(e: PointerEvent): void {
-  if (e.pointerType === 'mouse') return // mouse keeps uPlot's native drag-zoom
+  if (!isTouchGesturePointer(e.pointerType)) return // mouse AND pen keep uPlot's native drag-zoom (B35 §8 layer 2)
   const pos = overPos(e)
   if (!pos || !plot) return
   touchPointers.set(e.pointerId, pos)
@@ -415,7 +445,7 @@ function onPointerDown(e: PointerEvent): void {
 }
 
 function onPointerMove(e: PointerEvent): void {
-  if (e.pointerType === 'mouse') return
+  if (!isTouchGesturePointer(e.pointerType)) return
   if (!touchPointers.has(e.pointerId)) return
   const pos = overPos(e)
   if (!pos || !plot) return
@@ -453,7 +483,7 @@ function onPointerMove(e: PointerEvent): void {
 }
 
 function onPointerUp(e: PointerEvent): void {
-  if (e.pointerType === 'mouse') return
+  if (!isTouchGesturePointer(e.pointerType)) return
   touchPointers.delete(e.pointerId)
 
   if (touchMode === 'pinch') {
@@ -606,6 +636,17 @@ watch(
 }
 .reset-zoom:hover {
   border-color: var(--color-text-muted);
+}
+/* B35 — §8 layer 3: any coarse pointer present (not a viewport-width guess —
+   see useInputCapabilities.ts, mirrored onto <html data-any-pointer-coarse>)
+   grows this to a comfortable >=44px touch target. Unlike the icon-only
+   buttons elsewhere (which keep their small visual size and grow only their
+   invisible hit area), this button already carries a text label, so growing
+   the visible box itself reads fine here. */
+:root[data-any-pointer-coarse] .reset-zoom {
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  min-height: 44px;
 }
 .uplot-host {
   width: 100%;

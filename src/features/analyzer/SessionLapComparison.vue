@@ -195,12 +195,28 @@ h4 { margin: 0 0 6px; font-size: .85rem; color: var(--color-text-muted); }
 .chart-align input { width: 68px; padding: 2px 4px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); }
 .chart-align button { padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
 .chart-align button:hover { border-color: var(--color-accent); color: var(--color-accent); }
+/* B35 — §8 layer 3: capability signal (useInputCapabilities.ts, mirrored onto
+   <html data-any-pointer-coarse>), not a viewport-width guess — grows the
+   ±/reset nudge buttons to a >=44px touch target on any coarse-pointer
+   device, tablets running the full desktop layout included. */
+:root[data-any-pointer-coarse] .chart-align button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 14px;
+}
 
 .lap-offset { display: inline-flex; align-items: center; gap: 4px; }
 .lap-offset button { padding: 1px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
 .lap-offset button:hover { border-color: var(--color-accent); color: var(--color-accent); }
 /* Selected-row offset controls sit on the accent background — keep them legible. */
 .lap-offset.row-selected button { background: var(--color-surface); color: var(--color-text); }
+/* B35 — §8 layer 3: same capability-driven touch-target bump as .chart-align
+   button above, for the per-lap offset ± buttons. */
+:root[data-any-pointer-coarse] .lap-offset button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 12px;
+}
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Same lead-cell rhythm as the primary LapTable.vue's .lap-cell/.swatch (kept

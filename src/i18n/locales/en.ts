@@ -454,6 +454,12 @@ export default {
     label: 'Language',
     auto: 'Auto',
   },
+  inputMode: {
+    label: 'Input mode',
+    auto: 'Auto',
+    touch: 'Touch-first',
+    pointer: 'Pointer-first',
+  },
   converter: {
     suspensionToggle: 'Suspension calibration (click to expand)',
     notes: {

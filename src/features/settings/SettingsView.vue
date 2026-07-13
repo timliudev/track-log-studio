@@ -19,7 +19,7 @@ import {
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
-const { tzOverride, themePref, localePref } = storeToRefs(settingsStore)
+const { tzOverride, themePref, localePref, inputModePref } = storeToRefs(settingsStore)
 const drivetrainStore = useDrivetrainStore()
 
 // Whole-hour offsets UTC-12 .. UTC+14; value is offset minutes east of UTC.
@@ -120,6 +120,7 @@ function exportSettings(): void {
       themePref: themePref.value,
       localePref: localePref.value,
       tzOverride: tzOverride.value,
+      inputModePref: inputModePref.value,
     },
     drivetrain: {
       kind: drivetrainStore.kind,
@@ -238,6 +239,14 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
         <span v-if="tzOverride === 'auto'" class="current-value">
           {{ t('settings.current', { value: effectiveTimezoneLabel }) }}
         </span>
+      </label>
+      <label class="control">
+        <span>{{ t('inputMode.label') }}</span>
+        <select v-model="inputModePref" name="inputMode">
+          <option value="auto">{{ t('inputMode.auto') }}</option>
+          <option value="touch">{{ t('inputMode.touch') }}</option>
+          <option value="pointer">{{ t('inputMode.pointer') }}</option>
+        </select>
       </label>
     </div>
 
