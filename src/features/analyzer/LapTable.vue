@@ -469,6 +469,15 @@ const rows = computed(() =>
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+/* B35 — §8 layer 3: any coarse pointer present (useInputCapabilities.ts's
+   capability signal mirrored onto <html data-any-pointer-coarse> — NOT a
+   viewport-width guess, so a tablet running the full desktop layout gets
+   this too) grows the ⦸ toggle to a comfortable >=44px touch target. */
+:root[data-any-pointer-coarse] .exclude {
+  width: 44px;
+  height: 44px;
+  font-size: 1.1rem;
+}
 .swatch {
   display: inline-block;
   width: 10px;

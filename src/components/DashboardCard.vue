@@ -483,6 +483,19 @@ onBeforeUnmount(() => {
   color: var(--color-text);
   border-color: var(--color-border);
 }
+/* B35 — §8 layer 3: any coarse pointer present (useInputCapabilities.ts's
+   capability signal, mirrored onto <html data-any-pointer-coarse> — NOT a
+   viewport-width guess, so a tablet running the full desktop layout gets
+   this too) grows the pin/collapse buttons to a comfortable >=44px touch
+   target. */
+:root[data-any-pointer-coarse] .icon-btn {
+  width: 44px;
+  height: 44px;
+}
+:root[data-any-pointer-coarse] .icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
 .pin-btn.active {
   color: var(--color-accent);
 }

@@ -115,3 +115,27 @@ body {
 .app-tooltip.is-visible {
   opacity: 1;
 }
+
+/* B35 — §8 觸控友善四層政策 layer 3: analyzer dashboard grid's own resize
+   handle (grid-layout-plus's `.vgl-item__resizer`, plus DashboardCard.vue's
+   `.pin-resize-handle` which reads the SAME `--vgl-resizer-*` vars — see its
+   own doc) already grows to a 30px touch target under
+   AnalyzerView.vue's `@media (max-width: 768px)` rule, but that's a
+   viewport-width gate — a tablet running the full desktop grid layout
+   (coarse pointer, but wide viewport) fell through it entirely. This
+   PLAIN, unscoped rule (not inside AnalyzerView.vue's `<style scoped>`, so
+   no `data-v-*` attribute gates it) reaches the same `.analyzer` /
+   `.vgl-layout` elements from outside and applies the identical 30px value
+   whenever ANY coarse pointer is present (useInputCapabilities.ts's
+   `data-any-pointer-coarse`, mirrored onto <html>) — width-independent,
+   layered on TOP of (not replacing) the existing mobile rule, which still
+   covers narrow touch phones the same as before. */
+:root[data-any-pointer-coarse] .analyzer {
+  --vgl-resizer-size: 30px;
+}
+:root[data-any-pointer-coarse] .analyzer .vgl-layout {
+  --vgl-resizer-size: 30px;
+}
+:root[data-any-pointer-coarse] .analyzer .vgl-item__resizer {
+  touch-action: none;
+}
