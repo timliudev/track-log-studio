@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { createPinia, setActivePinia } from 'pinia'
 import TrackMap from '@/features/analyzer/TrackMap.vue'
 import { vTooltip } from '@/directives/tooltip'
 import zhHant from '@/i18n/locales/zh-Hant'
@@ -71,6 +72,32 @@ function mountMap(track: GpsTrack) {
   })
   return wrapper
 }
+
+/** B30b — TrackMap now reads `useInputCapabilities()` (for the map-hover hit
+ *  radius), which pulls in `useSettingsStore()` (a persisted-to-localStorage
+ *  Pinia store); happy-dom doesn't provide a working `localStorage` unless
+ *  something stubs it in, so every mount needs both an active Pinia AND this
+ *  stub — same pattern used by GearPanel's tests. */
+function installMemoryLocalStorage(): void {
+  let store = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => {
+      store.set(k, v)
+    },
+    removeItem: (k: string) => {
+      store.delete(k)
+    },
+    clear: () => {
+      store = new Map<string, string>()
+    },
+  })
+}
+
+beforeEach(() => {
+  installMemoryLocalStorage()
+  setActivePinia(createPinia())
+})
 
 afterEach(() => {
   wrapper?.unmount()
