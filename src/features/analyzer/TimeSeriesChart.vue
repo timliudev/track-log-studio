@@ -66,7 +66,7 @@ const { xAxis } = storeToRefs(analyzer)
 const lapStore = useLapStore()
 const settings = useSettingsStore()
 const drivetrain = useDrivetrainStore()
-const { tzOverride } = storeToRefs(settings)
+const { tzOverride, centreCursorMode } = storeToRefs(settings)
 
 const PALETTE = ['#e23b3b', '#3b82e2', '#2ea043', '#e2a33b', '#9b3be2', '#3bd6e2']
 const color = (i: number): string => PALETTE[i % PALETTE.length]
@@ -497,6 +497,22 @@ function removeChannel(name: string): void {
       {{ unavailableDerivedMessage }}
     </p>
 
+    <!-- B28 fix: xBounds must describe THIS chart's own data extent, not the
+         session's. UPlotChart's applyXRange() falls back to xBounds (via
+         dataXBounds()) whenever xRange is null (B9) — and xRange IS null
+         whenever hasSelection is true (see the x-range binding below), since
+         the overlay's lap-relative grid is structurally unrelated to the
+         shared session xRange. Passing the full SESSION span here
+         unconditionally (as before) made that B9 fallback re-zoom every
+         selection-mode chart out to the whole session on every lap
+         (re)selection — the overlay data (only ~lap-duration wide) then
+         rendered as a sliver, i.e. "the chart didn't zoom to the lap" (B28).
+         Only the no-selection full-session view's `data` is a
+         downsampled/visible-range SUBSET of the session that genuinely needs
+         this session-wide clamp for touch pan/pinch and the null-xRange
+         fallback; the overlay view's `data` already IS its own full extent,
+         so dataXBounds() should derive straight from `props.data[0]` there
+         (its no-xBounds path) instead. -->
     <UPlotChart
       v-if="canRender"
       class="chart-fill"
@@ -506,7 +522,8 @@ function removeChannel(name: string): void {
       :x-range="!hasSelection ? xRange : null"
       :external-cursor="effectiveCursor"
       :fill-height="fillHeight"
-      :x-bounds="xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
+      :centre-cursor-mode="centreCursorMode"
+      :x-bounds="!hasSelection && xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
       @cursor="onCursor"
       @x-zoom="onXZoom"
       @plot-width="plotWidth = $event"
@@ -564,6 +581,14 @@ function removeChannel(name: string): void {
 .remove:hover {
   color: var(--color-accent);
   border-color: var(--color-accent);
+}
+/* B35 — §8 layer 3: capability signal (useInputCapabilities.ts, mirrored onto
+   <html data-any-pointer-coarse>), not a viewport-width guess — grows the
+   remove-chart button ("close" this card's content) to a >=44px touch
+   target on any coarse-pointer device. */
+:root[data-any-pointer-coarse] .remove {
+  min-height: 44px;
+  padding: 12px 16px;
 }
 .chips {
   display: flex;

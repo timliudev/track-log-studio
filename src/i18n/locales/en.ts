@@ -138,7 +138,7 @@ export default {
     comparisonClear: 'Clear comparisons',
     pickChannel: 'Pick channels to plot from above',
     addChart: 'Add chart',
-    addScatterChart: 'Add XY scatter chart',
+    addScatterChart: 'Add scatter chart',
     removeChart: 'Remove',
     lapCount: 'Laps: {n}',
     lapCountExcluded: 'Laps: {n} ({x} excluded)',
@@ -207,10 +207,6 @@ export default {
     chartZoomHint: 'Drag to box-zoom, hold Shift and drag (or use two fingers) to pan, double-click or Reset zoom to restore the full view',
     maximizeMap: 'Maximize track map',
     minimizeMap: 'Restore track map',
-    trackOverlayTitle: 'Overlay tracks',
-    trackOverlayHint:
-      'Tick other loaded logs to draw their racing lines faintly on the map for comparison; the active log stays on top at full opacity.',
-    trackOverlayClear: 'Clear all',
     sectorAutoDetect: 'Auto-detect corners',
     sectorRedetectConfirm:
       'Re-detecting will overwrite your manually-adjusted sector gates. Continue?',
@@ -400,7 +396,7 @@ export default {
       cardSuspension: 'Suspension calibration',
       cardCurrentValues: 'Current values',
       cardChart: 'Chart {n}',
-      cardScatterChart: 'XY scatter {n}',
+      cardScatterChart: 'Scatter {n}',
       collapse: 'Collapse',
       expand: 'Expand',
       pin: 'Pin (stays fixed at the top while scrolling — only one card at a time)',
@@ -453,6 +449,16 @@ export default {
   language: {
     label: 'Language',
     auto: 'Auto',
+  },
+  inputMode: {
+    label: 'Input mode',
+    auto: 'Auto',
+    touch: 'Touch-first',
+    pointer: 'Pointer-first',
+  },
+  centreCursor: {
+    label: 'Fixed centre-needle mode',
+    hint: 'Charts show a fixed vertical line at their centre — drag the chart itself to scroll the data under it; whatever lands on the needle becomes the current cursor (synced to the map / current-values card / other charts).',
   },
   converter: {
     suspensionToggle: 'Suspension calibration (click to expand)',

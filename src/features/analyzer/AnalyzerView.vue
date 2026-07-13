@@ -25,6 +25,7 @@ import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceFromLaunch, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { buildComparisonLapHighlights } from '@/domain/analysis/crossSessionLapHighlight'
+import { buildComparisonExtremaMarkers } from '@/domain/analysis/crossSessionExtrema'
 import {
   STATIC_CARD_IDS,
   STATIC_CARD_TITLE_KEYS,
@@ -203,6 +204,32 @@ const { trackExtrema, mapExtremaMarkers, trackChannelChosen } = useTrackExtrema(
   markMinima,
   markMaxima,
 )
+
+// B33: track-channel min/max markers for a lap selected on a COMPARISON file
+// (not just the primary — `focusedLap`/`mapExtremaMarkers` above only ever
+// look at the primary session's own `lapStore.selected`, so a comparison
+// file's lap selection never lit up markers at all). Same "resolve a
+// cross-file lap selection to something drawable on that file's own track"
+// shape as `comparisonLapHighlights` below, but for extrema markers — see
+// `buildComparisonExtremaMarkers`'s doc for the per-file single-lap rule.
+const comparisonExtremaMarkers = computed(() =>
+  buildComparisonExtremaMarkers(
+    lapStore.selectedAcrossSessions,
+    comparisonSessions.value.map((cs) => ({
+      fileId: cs.id,
+      track: cs.track,
+      channelData: trackChannel.value ? (cs.session.get(trackChannel.value)?.data ?? null) : null,
+      laps: cs.laps,
+    })),
+    markMinima.value,
+    markMaxima.value,
+  ),
+)
+
+// Merged marker set actually drawn on the map: the primary session's own
+// (lap-scoped or whole-track-fallback) markers plus every qualifying
+// comparison file's own lap-scoped markers, side by side.
+const allExtremaMarkers = computed(() => [...mapExtremaMarkers.value, ...comparisonExtremaMarkers.value])
 
 // --- Acceleration/drag test (Phase 7, 加速測試): whole-SESSION search, not
 // a per-lap metric — see accelTest.ts's module doc for why. Speed channel
@@ -867,7 +894,7 @@ function titleForItemId(id: string): string {
                 :color-values="colorValues"
                 :colormap="trackColormap"
                 :gates="mapGates"
-                :extrema-markers="mapExtremaMarkers"
+                :extrema-markers="allExtremaMarkers"
                 :overlay-tracks="overlayTracks"
                 @cursor="analyzer.setCursor"
                 @update:line="lapStore.setLine($event)"
@@ -1635,7 +1662,29 @@ function titleForItemId(id: string): string {
    native `title` box). Recolor to the theme accent and round the corner
    where the two border edges meet (`border-radius` on the bottom-right,
    matching the card's own `--radius`) so it reads as a deliberate grab
-   affordance rather than a stray box corner. */
+   affordance rather than a stray box corner.
+
+   B18b — these three `--vgl-resizer-*` values are also the shared "resize
+   handle" design tokens DashboardCard.vue's `.pin-resize-handle` reuses (see
+   its own CSS doc) so the pinned floating card's resize grip looks and sizes
+   IDENTICALLY to every grid card's, instead of the bespoke 90°-corner icon it
+   used to draw. grid-layout-plus's own `.vgl-layout{...}` rule sets its OWN
+   `--vgl-resizer-size`/`--vgl-resizer-border-color`/`--vgl-resizer-border-
+   width` directly on that element, which shadows whatever `.analyzer` would
+   otherwise inherit down to it — so the `:deep(.vgl-layout)` overrides below
+   stay (they're what the GRID's own resizer actually sees). The pinned card
+   lives in `#dashboard-pinned-anchor`, a SIBLING of `.vgl-layout` (see the
+   template, above the grid) rather than a descendant of it, so it can't pick
+   up those `:deep(.vgl-layout)`-scoped values through inheritance either —
+   this second copy on plain `.analyzer` (an ancestor of BOTH the grid and the
+   pinned anchor) is what the pinned handle actually inherits. Duplicated
+   rather than restructured because overriding a value a descendant element
+   re-declares itself isn't expressible as a single CSS custom-property rule. */
+.analyzer {
+  --vgl-resizer-size: 10px;
+  --vgl-resizer-border-color: var(--color-accent);
+  --vgl-resizer-border-width: 2px;
+}
 .analyzer :deep(.vgl-layout) {
   --vgl-resizer-border-color: var(--color-accent);
   --vgl-resizer-border-width: 2px;
@@ -1652,8 +1701,13 @@ function titleForItemId(id: string): string {
    tappable there; `touch-action: none` stops the browser's own scroll
    gesture from hijacking the drag before interactjs sees it (grid-layout-plus
    only sets this at the ITEM level for Android — see grid-item.vue's
-   `no-touch` class — not on the resizer itself, and not for iOS at all). */
+   `no-touch` class — not on the resizer itself, and not for iOS at all).
+   B18b — the plain `.analyzer` override (not just `:deep(.vgl-layout)`) is
+   what lets the pinned handle grow to the same 30px touch target here too. */
 @media (max-width: 768px) {
+  .analyzer {
+    --vgl-resizer-size: 30px;
+  }
   .analyzer :deep(.vgl-layout) {
     --vgl-resizer-size: 30px;
   }

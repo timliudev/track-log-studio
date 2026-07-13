@@ -200,4 +200,83 @@ describe('SessionLapComparison', () => {
     expect(rows[0].text()).toContain('⚡')
     expect(rows[0].text()).not.toContain('🐢')
   })
+
+  // B1c: the comparison table now has the SAME ⦸ manual-exclude toggle as
+  // the primary LapTable — user changed their mind ("先前說比較檔不可排除，
+  // 現在要跟主檔一致").
+  describe('manual lap exclusion (B1c)', () => {
+    it('renders a ⦸ toggle in every comparison row, off by default', () => {
+      const wrapper = mountWith()
+      const rows = wrapper.findAll('tbody tr')
+      const toggle = rows[0].find('.exclude')
+      expect(toggle.exists()).toBe(true)
+      expect(toggle.attributes('aria-pressed')).toBe('false')
+      expect(rows[0].classes()).not.toContain('excluded')
+    })
+
+    it('clicking ⦸ manually excludes the comparison lap, dims the row, and does not affect the primary/other comparisons', async () => {
+      const lapStore = useLapStore()
+      const wrapper = mountWith()
+      const rows = wrapper.findAll('tbody tr')
+
+      await rows[0].find('.exclude').trigger('click')
+
+      expect(lapStore.isSessionManuallyExcluded(2, 0)).toBe(true)
+      expect(rows[0].classes()).toContain('excluded')
+      expect(rows[0].find('.exclude').attributes('aria-pressed')).toBe('true')
+      // Row click (overlay toggle) still works independently of exclusion —
+      // clicking ⦸ must not have bubbled into a row-click via stopPropagation.
+      expect(lapStore.isSessionLapSelected(2, 0)).toBe(false)
+
+      await rows[0].find('.exclude').trigger('click')
+      expect(lapStore.isSessionManuallyExcluded(2, 0)).toBe(false)
+      expect(rows[0].classes()).not.toContain('excluded')
+    })
+
+    it('excluding the fastest comparison lap moves the delta reference to the next-fastest lap', async () => {
+      const wrapper = mountWith()
+      // Lap 0 (61s) is fastest; excluding it should make lap 1 (62s) the new
+      // fastest/only included lap, and the header delta reflects THAT lap.
+      const rows = wrapper.findAll('tbody tr')
+      expect(rows[0].text()).toContain('⚡')
+
+      await rows[0].find('.exclude').trigger('click')
+
+      const afterRows = wrapper.findAll('tbody tr')
+      expect(afterRows[1].text()).toContain('⚡')
+      // Delta header now compares the comparison's new best lap (62s) against
+      // the primary's best (60s) => +2.000 s.
+      expect(wrapper.find('.delta').text()).toContain('+2.000')
+    })
+
+    it('a lap auto-excluded by the shared valid-lap band cannot be manually un-excluded', async () => {
+      const lapStore = useLapStore()
+      lapStore.setLapTimeBand({ minSec: 55, maxSec: 61.5 }) // lap 1 (62s) is out of band
+      const wrapper = mountWith()
+      const rows = wrapper.findAll('tbody tr')
+      const toggle = rows[1].find('.exclude')
+
+      expect(toggle.classes()).toContain('auto-disabled')
+      expect(toggle.attributes('aria-disabled')).toBe('true')
+
+      await toggle.trigger('click')
+      // Clicking the disabled toggle must not flip the manual facet.
+      expect(lapStore.isSessionManuallyExcluded(2, 1)).toBe(false)
+      expect(rows[1].classes()).toContain('excluded')
+    })
+
+    it('keeps manual exclusions independent per comparison recording', async () => {
+      const lapStore = useLapStore()
+      const wrapper = mountWith([comparison(), comparison(undefined, { id: 3, name: 'other.loga' })])
+
+      const firstTableRows = wrapper.findAll('.recording-laps')[0].findAll('tbody tr')
+      await firstTableRows[0].find('.exclude').trigger('click')
+
+      expect(lapStore.isSessionManuallyExcluded(2, 0)).toBe(true)
+      expect(lapStore.isSessionManuallyExcluded(3, 0)).toBe(false)
+
+      const secondTableRows = wrapper.findAll('.recording-laps')[1].findAll('tbody tr')
+      expect(secondTableRows[0].classes()).not.toContain('excluded')
+    })
+  })
 })

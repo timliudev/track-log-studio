@@ -1,4 +1,6 @@
 <script lang="ts">
+import { nearestXIndex } from '@/domain/analysis/timelineData'
+
 /**
  * T1 — plot-area height for `fillHeight` mode: the HOST's measured height
  * minus uPlot's own HTML legend (which lives INSIDE the host, below the
@@ -40,6 +42,89 @@ export function isZoomed(
   const eps = span > 0 ? span * epsFraction : 0
   return range.min > bounds.min + eps || range.max < bounds.max - eps
 }
+
+/**
+ * B35 — §8 layer 2 ("逐事件判斷，不是逐裝置"): whether a `PointerEvent` of the
+ * given `pointerType` should be handled by this chart's OWN touch pan/pinch
+ * gesture code, versus left alone for uPlot's native mouse-based drag-zoom
+ * (and this file's own Shift+drag pan, see `onHostMouseDown`).
+ *
+ * `touch` → true (finger drag pans, two-finger pinch zooms — uPlot has no
+ * native handling for it at all). `mouse` and `pen` → false: a pen input is
+ * DELIBERATELY treated identically to a mouse here, not lumped in with touch
+ * — a stylus drag box-zooms like a mouse drag (its hover support already
+ * gives it the rest of the mouse-like experience for free), rather than
+ * panning like a finger. Any other/future pointerType also falls back to
+ * `false` (native path) rather than being silently swallowed as a touch
+ * gesture.
+ *
+ * Plain-script export (same pattern as `fillPlotHeight`/`isZoomed` above) so
+ * the branch is unit-testable without mounting uPlot or dispatching real
+ * PointerEvents.
+ */
+export function isTouchGesturePointer(pointerType: string): boolean {
+  return pointerType === 'touch'
+}
+
+/**
+ * B31b — pixel→value mapping for a LINEAR x scale (this app never uses a log
+ * scale, see buildOptions' `scales: { x: { time: false } }`): given a pixel
+ * offset `xPixel` from the plot area's LEFT edge and `plotWidth` (both in CSS
+ * px — e.g. straight from `getBoundingClientRect()`, NOT `u.bbox`, which is
+ * device-pixel-scaled by `devicePixelRatio` and would misread by that same
+ * factor on a HiDPI screen), returns the data value at that pixel for the
+ * given scale `range`. Centre-needle mode always evaluates this at
+ * `xPixel = plotWidth / 2` (see `centreCursorIndex` below) — factored out so
+ * the pixel→value math is independently unit-testable.
+ */
+export function valueAtPlotX(
+  xPixel: number,
+  plotWidth: number,
+  range: { min: number; max: number },
+): number {
+  if (!(plotWidth > 0)) return range.min
+  return range.min + (xPixel / plotWidth) * (range.max - range.min)
+}
+
+/**
+ * B31b — the fixed needle's CSS-px offset from `wrap`'s left edge: the exact
+ * horizontal CENTRE of uPlot's OWN plot area (`plotLeft` .. `plotLeft +
+ * plotWidth`), NOT `wrap`/`host`'s own centre — uPlot reserves a left-side
+ * axis-label gutter, so the plot area is narrower than, and offset from, the
+ * full chart width. Both inputs must already be CSS px (`getBoundingClientRect()`,
+ * not `u.bbox`) for the same HiDPI reason as `valueAtPlotX` above — this
+ * value feeds directly into a plain CSS `left` style on a DOM overlay, which
+ * is always in CSS px regardless of `devicePixelRatio`.
+ */
+export function needleOffsetX(plotLeft: number, plotWidth: number): number {
+  return plotLeft + plotWidth / 2
+}
+
+/**
+ * B31 — RaceChrono-style fixed centre-needle mode: the sample index whose X
+ * value is closest to the exact horizontal MIDPOINT of `range` (the chart's
+ * current visible window) — i.e. "what the fixed needle is currently
+ * pointing at". The needle always sits at the plot area's horizontal centre
+ * (`needleOffsetX`'s `plotWidth / 2`), and for a linear scale (see
+ * `valueAtPlotX` above) that pixel's value is exactly `range`'s midpoint — no
+ * live uPlot instance / `posToVal` call needed, which keeps this pure and
+ * unit-testable like `isZoomed`/`isTouchGesturePointer` above. Recomputed (via
+ * the `setScale` hook) on every visible-range change while centre-needle mode
+ * is active — a user drag/scrub, a synced `xRange` update from another chart,
+ * or a zoom — and the result is emitted onward as this chart's `cursor` so
+ * the rest of the app (current-values card, map, other synced charts) tracks
+ * the scrub.
+ */
+export function centreCursorIndex(
+  xs: ArrayLike<number>,
+  range: { min: number; max: number },
+): number | null {
+  if (xs.length === 0) return null
+  // Evaluated at the midpoint of a unit-width plot (xPixel=0.5, plotWidth=1)
+  // — valueAtPlotX only ever uses the xPixel/plotWidth RATIO, so any concrete
+  // plot width gives the same result; 1 keeps this call self-evident.
+  return nearestXIndex(xs, valueAtPlotX(0.5, 1, range))
+}
 </script>
 
 <script setup lang="ts">
@@ -73,6 +158,41 @@ const props = defineProps<{
   externalCursor?: number | null
   /** Full X extent when `data` is a visible-range/downsampled subset. */
   xBounds?: { min: number; max: number } | null
+  /**
+   * B31 — RaceChrono-style fixed centre-needle mode (global Settings toggle,
+   * `settingsStore.centreCursorMode`, forwarded down by callers that care
+   * about cross-chart cursor sync — currently only `TimeSeriesChart.vue`;
+   * `GearPanel.vue`/`SessionMergePanel.vue`'s standalone charts simply never
+   * pass this prop, so they're entirely unaffected). When true:
+   *  - An always-visible fixed vertical needle is drawn at the plot's own
+   *    horizontal centre (a plain CSS overlay — NOT uPlot's native cursor
+   *    crosshair, which is disabled in this mode via `cursor.x/y: false`).
+   *  - A drag from ANY pointer type (touch/mouse/pen — deliberately ONE
+   *    gesture for every input, per DESIGN.md §8 layer 1, rather than
+   *    overloading the existing touch-pan-vs-mouse-box-zoom split) pans the
+   *    visible X range under the fixed needle, reusing the exact same
+   *    `dataXBounds`/`currentXRange`/`panRange`/`emitXRange` pipeline the
+   *    touch-pan gesture already uses — so this mode is a clearly separated
+   *    ADDITIONAL branch in the existing pointer handlers, not a rewrite.
+   *  - Whatever sample lands under the needle after any visible-range change
+   *    (drag, or a synced `xRange` update from elsewhere) is emitted as this
+   *    chart's `cursor` (see `centreCursorIndex` above) — this is what feeds
+   *    the current-values card / map / other synced charts. The native
+   *    hover-driven cursor emit and the `externalCursor` prop's "snap to
+   *    another chart's hover" behaviour are both suppressed in this mode
+   *    (see the `setCursor` hook and the `externalCursor` watcher below) —
+   *    there is no meaningful "hover position" once the cursor is pinned to
+   *    the centre. Cross-chart sync in this mode instead comes for free from
+   *    the EXISTING shared `xRange` (analyzerStore.xRange / a lap overlay's
+   *    local scale): dragging one centre-mode chart pans that shared range,
+   *    which every other chart bound to the same range already re-renders
+   *    against — so their needles end up pointing at the same instant too.
+   *    (Multi-touch pinch-zoom is intentionally NOT part of this mode — one
+   *    single-pointer drag gesture only, per the "pick ONE gesture" brief.)
+   *  - Default false/undefined: every existing chart's pan/zoom/cursor-sync
+   *    behaviour is completely unchanged.
+   */
+  centreCursorMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -84,6 +204,19 @@ const emit = defineEmits<{
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
+/** B31 — outer wrapper (already `position: relative`, same element the
+ *  reset-zoom button is positioned against) — the centre-needle overlay is
+ *  positioned relative to THIS, not `host`, since `host` is uPlot's own mount
+ *  target (its internal `.u-wrap`/`.u-over`/legend are appended directly
+ *  inside `host` outside Vue's template tracking — adding our own child
+ *  there too would be fragile). */
+const wrap = ref<HTMLDivElement | null>(null)
+/** B31 — the needle's `left` offset in px relative to `wrap`, i.e. the
+ *  horizontal centre of uPlot's OWN plot area (`plot.over`) — which is
+ *  narrower than `host`'s full width once axis label gutters are accounted
+ *  for. `null` (hidden) whenever centre-needle mode is off or the plot/host
+ *  aren't measurable yet. */
+const needleLeft = ref<number | null>(null)
 let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
@@ -167,10 +300,43 @@ function buildOptions(width: number): uPlot.Options {
     axes,
     legend: { show: true },
     scales: { x: { time: false } },
-    cursor: { focus: { prox: 16 } },
+    // B31 — centre-needle mode draws its OWN always-visible fixed needle (a
+    // plain CSS overlay, see the template/`updateNeedlePos` below) instead of
+    // uPlot's native hover crosshair, so the native one is turned off here to
+    // avoid two conflicting cursor indicators.
+    //
+    // B31b fix — `cursor.x/y: false` ONLY suppresses drawing the crosshair;
+    // it does NOT touch `cursor.drag`, which defaults to `{ x: true, setScale:
+    // true }` INDEPENDENTLY of `cursor.x/y` (see uPlot's `cursorOpts.drag` —
+    // confirmed by reading its `mouseUp` handler, which calls its own
+    // `_setScale(xScaleKey, posToVal(...), posToVal(...))` off the drag-select
+    // box whenever `drag.setScale && hasSelect && chgSelect`, with NO
+    // dependency on `cursor.x`/`cursor.y` at all). So a plain mouse drag in
+    // this mode was ALWAYS *also* still starting uPlot's own native
+    // drag-to-box-zoom on `.u-over` (real `mousedown`/`mousemove`/`mouseup` —
+    // NOT synthesized "compatibility" events for a real mouse, so this
+    // component's own `pointerdown` handler calling `preventDefault()` does
+    // NOT suppress them, unlike for touch/pen) — fighting our own
+    // `onCentrePointerMove` pan on every single drag: our pan would move the
+    // range, then uPlot's OWN mouseup handler would immediately stomp it back
+    // to whatever box the mouse happened to sweep out in screen pixels. THIS
+    // was the "一點用都沒有、還是歪的" bug (B31b) — not the needle's own
+    // position (which was already correct — see `needleOffsetX` — nor the
+    // sample-under-needle read, which is mathematically identical to
+    // `posToVal` for this app's always-linear x scale — see `valueAtPlotX`).
+    // Disabling `drag` entirely here lets our own onCentrePointerDown/Move/Up
+    // handlers be the ONLY thing driving the x range while this mode is on.
+    cursor: props.centreCursorMode
+      ? { focus: { prox: 16 }, x: false, y: false, drag: { setScale: false, x: false, y: false } }
+      : { focus: { prox: 16 } },
     hooks: {
       setCursor: [
         (u: uPlot) => {
+          // B31 — in centre-needle mode the emitted cursor comes from the
+          // FIXED centre (see the `setScale` hook below + `emitCentreCursor`),
+          // never from wherever the pointer happens to be hovering — so the
+          // native hover-driven emit is suppressed here entirely.
+          if (props.centreCursorMode) return
           if (!applyingCursor) emit('cursor', u.cursor.idx ?? null)
         },
       ],
@@ -181,6 +347,19 @@ function buildOptions(width: number): uPlot.Options {
           if (min == null || max == null) return
           updateZoomed(min, max)
           if (!applyingRange) emit('xZoom', { min, max })
+          // B31 — whatever sample now sits at this chart's fixed centre
+          // needle. Reads `u`/`min`/`max` from THIS hook invocation (not the
+          // module-level `plot`/its current `.scales.x`) — the hook fires via
+          // a queued microtask (see the big comment on `applyingRange`
+          // above), so if `create()` happened to run again before it fires
+          // (recreating `plot`), reading the closure variable instead of the
+          // hook's own params could emit a cursor from the WRONG (new)
+          // instance's data. `u.data[0]` is assumed finite/ascending X — same
+          // assumption the `externalCursor` watcher below already makes.
+          if (props.centreCursorMode) {
+            const xs = u.data[0] as number[]
+            emit('cursor', centreCursorIndex(xs, { min, max }))
+          }
         },
       ],
     },
@@ -254,6 +433,24 @@ function create(): void {
     // regression this closes.
     void nextTick(resize)
   }
+  updateNeedlePos()
+}
+
+/** B31 — recompute the fixed needle's `left` offset from uPlot's OWN plot
+ *  area (`plot.over`), relative to `wrap`. Called after every layout change
+ *  that could move/resize the plot area (create/recreate, resize, including
+ *  axis-width changes from a channel add/remove) — mirrors how `resize()`
+ *  already re-measures `targetHeight()` on the same triggers. A no-op
+ *  (leaves `needleLeft` at whatever it was) when centre-needle mode is off,
+ *  the plot doesn't exist yet, or `wrap` isn't mounted. */
+function updateNeedlePos(): void {
+  if (!props.centreCursorMode || !plot || !wrap.value) {
+    needleLeft.value = null
+    return
+  }
+  const wrapRect = wrap.value.getBoundingClientRect()
+  const overRect = plot.over.getBoundingClientRect()
+  needleLeft.value = needleOffsetX(overRect.left - wrapRect.left, overRect.width)
 }
 
 function destroy(): void {
@@ -261,15 +458,22 @@ function destroy(): void {
   plot = null
 }
 
-// ── touch gestures (#8) ──────────────────────────────────────────────────────
-// uPlot's built-in drag-box zoom only binds mouse events, so touch/pen input is
+// ── touch gestures (#8, B35) ─────────────────────────────────────────────────
+// uPlot's built-in drag-box zoom only binds mouse events, so touch input is
 // dead on this chart by default. We add our own Pointer Event handling for
-// touch/pen only (mouse is left to uPlot's native mousedown/mousemove/mouseup
-// drag-zoom + hover-scrub, untouched) and translate gestures into X-range
-// changes via the same `xZoom` event the mouse drag-zoom path already emits —
-// so the shared X range still has a single owner (analyzerStore.xRange, or a
-// local xRange for callers that don't sync one), rather than each chart
-// maintaining its own touch-only zoom state.
+// touch ONLY — per §8 layer 2 ("逐事件判斷，不是逐裝置"), pen is deliberately
+// treated the SAME as mouse (bailing out below, same as mouse does) rather
+// than lumped in with touch: a stylus drag should box-zoom like a mouse drag
+// (and Shift+drag should pan like a mouse, via onHostMouseDown below), not pan
+// like a finger — S Pen's hover support means it already gets the mouse-like
+// experience for free once it's routed through the same path. Since neither
+// mouse nor pen calls preventDefault() here, the browser's own compatibility
+// mousedown/mousemove/mouseup events still fire for them, which is exactly
+// what uPlot's native drag-zoom listens to — untouched. Touch gestures
+// translate into X-range changes via the same `xZoom` event the mouse
+// drag-zoom path already emits — so the shared X range still has a single
+// owner (analyzerStore.xRange, or a local xRange for callers that don't sync
+// one), rather than each chart maintaining its own touch-only zoom state.
 const touchPointers = new Map<number, { x: number; y: number }>()
 type TouchMode = 'idle' | 'pan' | 'pinch'
 let touchMode: TouchMode = 'idle'
@@ -363,6 +567,15 @@ function onMousePanUp(): void {
 }
 
 function onHostMouseDown(e: MouseEvent): void {
+  // B31 — centre-needle mode replaces Shift+drag-pan with its own unified
+  // drag-to-scrub gesture (see onPointerDown's centreCursorMode branch); a
+  // plain mouse drag already pans in that mode, so Shift+drag would be
+  // redundant — and since a real mouse's compatibility `mousedown` never even
+  // fires once onPointerDown has called `preventDefault()` on the priming
+  // `pointerdown`, this guard is mostly defensive/explicit rather than load-
+  // bearing, but keeps this handler correct even if that browser behaviour
+  // ever changes.
+  if (props.centreCursorMode) return
   if (e.button !== 0 || !e.shiftKey || !plot) return
   e.preventDefault()
   e.stopPropagation() // capture phase — keeps uPlot's own listener on .u-over from ever seeing this mousedown
@@ -396,8 +609,55 @@ function overPos(e: PointerEvent): { x: number; y: number } | null {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
 
+// ── B31 centre-needle scrub gesture ─────────────────────────────────────────
+// ONE drag gesture for EVERY pointer type (touch/mouse/pen — per DESIGN.md §8
+// layer 1, every interaction must be reachable by every input method) while
+// centre-needle mode is active: reuses the exact same
+// dataXBounds/currentXRange/panRange/emitXRange pipeline the touch-pan
+// gesture above already uses, just without the touch-only pointerType gate
+// and without pinch (a single active pointer only — "pick ONE gesture" per
+// the brief). Kept as its own small set of functions (rather than folding
+// into the touch-gesture branches above) so the existing touch/mouse/pen
+// pointer handling is untouched when this mode is off.
+let centreScrubPointerId: number | null = null
+let centreScrubLastX = 0
+
+function onCentrePointerDown(e: PointerEvent): void {
+  if (centreScrubPointerId != null) return // one active drag at a time
+  const pos = overPos(e)
+  if (!pos || !plot) return
+  centreScrubPointerId = e.pointerId
+  centreScrubLastX = pos.x
+  ;(e.target as Element).setPointerCapture?.(e.pointerId)
+  e.preventDefault()
+}
+
+function onCentrePointerMove(e: PointerEvent): void {
+  if (centreScrubPointerId !== e.pointerId || !plot) return
+  const pos = overPos(e)
+  if (!pos) return
+  const bounds = dataXBounds()
+  if (!bounds) return
+  const range = currentXRange() ?? bounds
+  const prevVal = plot.posToVal(centreScrubLastX, 'x')
+  const curVal = plot.posToVal(pos.x, 'x')
+  const deltaX = curVal - prevVal // > 0 when the pointer moves right
+  // Content follows the pointer, same convention as the touch-pan gesture
+  // above (drag right → window shifts left, i.e. -deltaX).
+  emitXRange(panRange(range, deltaX, bounds))
+  centreScrubLastX = pos.x
+}
+
+function onCentrePointerUp(e: PointerEvent): void {
+  if (centreScrubPointerId === e.pointerId) centreScrubPointerId = null
+}
+
 function onPointerDown(e: PointerEvent): void {
-  if (e.pointerType === 'mouse') return // mouse keeps uPlot's native drag-zoom
+  if (props.centreCursorMode) {
+    onCentrePointerDown(e)
+    return
+  }
+  if (!isTouchGesturePointer(e.pointerType)) return // mouse AND pen keep uPlot's native drag-zoom (B35 §8 layer 2)
   const pos = overPos(e)
   if (!pos || !plot) return
   touchPointers.set(e.pointerId, pos)
@@ -415,7 +675,11 @@ function onPointerDown(e: PointerEvent): void {
 }
 
 function onPointerMove(e: PointerEvent): void {
-  if (e.pointerType === 'mouse') return
+  if (props.centreCursorMode) {
+    onCentrePointerMove(e)
+    return
+  }
+  if (!isTouchGesturePointer(e.pointerType)) return
   if (!touchPointers.has(e.pointerId)) return
   const pos = overPos(e)
   if (!pos || !plot) return
@@ -453,7 +717,11 @@ function onPointerMove(e: PointerEvent): void {
 }
 
 function onPointerUp(e: PointerEvent): void {
-  if (e.pointerType === 'mouse') return
+  if (props.centreCursorMode) {
+    onCentrePointerUp(e)
+    return
+  }
+  if (!isTouchGesturePointer(e.pointerType)) return
   touchPointers.delete(e.pointerId)
 
   if (touchMode === 'pinch') {
@@ -479,6 +747,7 @@ function resize(): void {
   if (plot && host.value) {
     emit('plotWidth', host.value.clientWidth)
     plot.setSize({ width: host.value.clientWidth, height: targetHeight() })
+    updateNeedlePos()
   }
 }
 
@@ -542,6 +811,14 @@ watch(
 watch(
   () => props.externalCursor,
   (idx) => {
+    // B31 — centre-needle mode has no meaningful "hover position" to snap
+    // to: the needle is pinned to the chart's own centre, and cross-chart
+    // sync in this mode comes from the shared xRange instead (see the
+    // `centreCursorMode` prop doc). Applying an external cursor here would
+    // move uPlot's native crosshair, which is already turned off in this
+    // mode (see buildOptions' `cursor.x/y`) — so this is a no-op guard for
+    // clarity/robustness rather than a visible fix on its own.
+    if (props.centreCursorMode) return
     if (!plot || idx == null) return
     const xVal = (plot.data[0] as number[])[idx]
     if (!Number.isFinite(xVal)) return
@@ -552,10 +829,19 @@ watch(
     applyingCursor = false
   },
 )
+
+// B31 — toggling centre-needle mode changes buildOptions()'s baked-in
+// `cursor.x/y` config, which only takes effect on (re)construction — so
+// recreate the chart, same precedent as the theme-change MutationObserver
+// above (`themeObs`) recreating for a baked-in colour config change.
+watch(
+  () => props.centreCursorMode,
+  () => create(),
+)
 </script>
 
 <template>
-  <div class="uplot-wrap" :class="{ fill: fillHeight }">
+  <div ref="wrap" class="uplot-wrap" :class="{ fill: fillHeight }">
     <div
       ref="host"
       class="uplot-host"
@@ -565,6 +851,12 @@ watch(
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
     />
+    <!-- B31 — always-visible fixed centre needle (replaces uPlot's own hover
+         crosshair in this mode, see buildOptions' cursor.x/y). Plain CSS
+         overlay positioned against `wrap`, NOT a child of `host` — see
+         `wrap`'s doc for why. `pointer-events: none` so it never steals the
+         drag gesture from the host underneath it. -->
+    <div v-if="centreCursorMode && needleLeft != null" class="centre-needle" :style="{ left: `${needleLeft}px` }" />
     <!-- B9 — reset-zoom control: only shown while actually zoomed (see the
          `zoomed` ref's doc), so it doesn't clutter the chart at the default
          full view. Double-click also resets (uPlot's own default dblclick
@@ -591,6 +883,18 @@ watch(
   flex: 1;
   min-width: 0;
 }
+/* B31 — fixed centre needle: a plain vertical line, NOT uPlot's native
+   cursor crosshair (disabled in this mode via buildOptions' cursor.x/y) —
+   stays put while the user drags the chart underneath it. */
+.centre-needle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--color-accent);
+  pointer-events: none;
+  z-index: 1;
+}
 .reset-zoom {
   position: absolute;
   top: 4px;
@@ -606,6 +910,17 @@ watch(
 }
 .reset-zoom:hover {
   border-color: var(--color-text-muted);
+}
+/* B35 — §8 layer 3: any coarse pointer present (not a viewport-width guess —
+   see useInputCapabilities.ts, mirrored onto <html data-any-pointer-coarse>)
+   grows this to a comfortable >=44px touch target. Unlike the icon-only
+   buttons elsewhere (which keep their small visual size and grow only their
+   invisible hit area), this button already carries a text label, so growing
+   the visible box itself reads fine here. */
+:root[data-any-pointer-coarse] .reset-zoom {
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  min-height: 44px;
 }
 .uplot-host {
   width: 100%;

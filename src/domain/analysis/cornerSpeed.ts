@@ -186,3 +186,60 @@ export function resolveSpeedChannel(session: LogSession): string | null {
   if (session.has('Vehicle_Speed')) return 'Vehicle_Speed'
   return null
 }
+
+/** A channel extremum normalised for map display (map-ready shape, no Vue
+ *  dependency) — `useTrackExtrema.ts`'s `TrackExtremaMarker` re-exports this
+ *  type; the composable stays the single Vue-facing name so existing
+ *  consumers (TrackMap.vue's prop, TrackChannelPanel.vue) are unaffected. */
+export interface NormalizedChannelExtremum {
+  lat: number
+  lon: number
+  value: number
+  /** Value normalised within the current extrema set (0..1), for the map's green/red gradient. */
+  valueFrac: number
+  kind: 'min' | 'max'
+  /** `value` pre-formatted for display (e.g. next to the marker on TrackMap). */
+  label: string
+}
+
+/**
+ * Format a channel extremum's value for display (map label / list value).
+ * Magnitude-adaptive decimals so both tiny (e.g. G-force ~1.2) and large (e.g.
+ * RPM ~8500) channels read sensibly without a fixed, wrong-for-someone
+ * precision: < 10 → 2dp, < 100 → 1dp, else whole numbers. Non-finite → em dash.
+ */
+export function formatExtremumValue(v: number): string {
+  if (!Number.isFinite(v)) return '—'
+  const a = Math.abs(v)
+  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
+}
+
+/**
+ * Normalise a set of channel extrema into map-ready markers: `valueFrac` is
+ * computed relative to THIS set's own min/max (a degenerate single-value set
+ * — zero span — falls back to 1, not NaN), and `label` is pre-formatted via
+ * {@link formatExtremumValue}. Pure — shared by `useTrackExtrema.ts` (primary
+ * session's own lap/whole-track extrema) and B33's cross-session comparison
+ * markers (`crossSessionExtrema.ts`), which each normalise their own file's
+ * extrema set independently before merging the resulting marker arrays — a
+ * marker's colour gradient must stay meaningful within its own lap's range
+ * even when several files' markers are drawn on the same map at once.
+ */
+export function normalizeChannelExtrema(extrema: ChannelExtremum[]): NormalizedChannelExtremum[] {
+  if (extrema.length === 0) return []
+  let min = Infinity
+  let max = -Infinity
+  for (const e of extrema) {
+    if (e.value < min) min = e.value
+    if (e.value > max) max = e.value
+  }
+  const span = max - min
+  return extrema.map((e) => ({
+    lat: e.lat,
+    lon: e.lon,
+    value: e.value,
+    valueFrac: span > 1e-6 ? (e.value - min) / span : 1,
+    kind: e.kind,
+    label: formatExtremumValue(e.value),
+  }))
+}

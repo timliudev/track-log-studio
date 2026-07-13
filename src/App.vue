@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
+import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
 import GithubStarButton from '@/components/GithubStarButton.vue'
@@ -25,6 +26,10 @@ const { t } = useI18n()
 // selectors themselves now live in the Settings tab — B4).
 useTheme()
 useLocale()
+// B35 — §8 觸控友善四層政策: mirrors live pointer-capability signals onto
+// <html data-*> (see useInputCapabilities.ts) once for the whole app, same
+// singleton-side-effect pattern as useTheme/useLocale above.
+useInputCapabilities()
 
 type Tab = 'converter' | 'analyzer' | 'settings'
 const tabOrder: Tab[] = ['converter', 'analyzer', 'settings']
@@ -196,6 +201,12 @@ const buildDate = __BUILD_DATE__
   flex: 1;
   min-width: 0;
   padding: calc(var(--space) * 2);
+  /* Reserve room at the bottom for BottomNav.vue's fixed tab bar so it never
+     overlaps scrolled content. `--bottom-nav-height` (theme.css) is 0px on
+     desktop/tablet, so this is a no-op there. */
+  padding-bottom: calc(
+    var(--space) * 2 + var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)
+  );
   /* Non-linear transition support: the view container establishes the
      positioning context that slide-enter/leave transforms animate within. */
   position: relative;
@@ -210,16 +221,18 @@ const buildDate = __BUILD_DATE__
    got this same protection. BottomNav is `position: fixed; z-index: 40`
    (see BottomNav.vue), so whenever a page's content is short enough that
    the footer lands at the very bottom of the viewport, the fixed bar covers
-   part or all of it. Give the footer the SAME reserved space as `.content`. */
+   part or all of it. Give the footer the SAME reserved space as `.content`.
+   B38: this used to also set `.site-footer` padding-bottom here, but the
+   unconditional `.site-footer` rule further down (padding shorthand) has
+   equal specificity and comes later in source order, so it silently won on
+   mobile too and cancelled this override. Fixed by driving both paddings
+   off the shared `--bottom-nav-height` var (theme.css) instead, which is
+   0px on desktop/tablet and 56px under this same breakpoint — so a single
+   unconditional declaration on `.site-footer` (below) is correct at every
+   width and there's nothing left for this block to override. */
 @media (max-width: 768px) {
   .tabs {
     display: none;
-  }
-  .content {
-    padding-bottom: calc(var(--space) * 2 + 56px + env(safe-area-inset-bottom, 0px));
-  }
-  .site-footer {
-    padding-bottom: calc(var(--space) * 2 + 56px + env(safe-area-inset-bottom, 0px));
   }
 }
 
@@ -270,6 +283,13 @@ const buildDate = __BUILD_DATE__
   align-items: center;
   gap: 4px;
   padding: calc(var(--space) * 2);
+  /* B38: give the footer the same bottom-nav clearance as `.content` (see
+     comment above the `@media (max-width: 768px)` block) — a single
+     unconditional declaration driven by `--bottom-nav-height` so there's no
+     separate mobile-only rule to be silently overridden by source order. */
+  padding-bottom: calc(
+    var(--space) * 2 + var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)
+  );
   border-top: 1px solid var(--color-border);
 }
 .build-stamp {

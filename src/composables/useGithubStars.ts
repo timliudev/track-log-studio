@@ -71,7 +71,17 @@ export function useGithubStars(repo: string): { stars: Ref<number | null> } {
 
   onMounted(() => {
     const isStale = !cached || Date.now() - cached.ts > CACHE_TTL_MS
-    if (isStale) void refresh()
+    if (!isStale) return
+    // B40: this button renders unconditionally in App.vue's header, so an
+    // eager onMounted fetch would compete with critical-path resources for
+    // network/connections during initial load. Defer to idle time (with a
+    // setTimeout fallback for Safari, which lacks requestIdleCallback) —
+    // the star count is a "nice to have" that can arrive a beat late.
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(() => void refresh())
+    } else {
+      setTimeout(() => void refresh(), 1)
+    }
   })
 
   return { stars }

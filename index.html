@@ -15,6 +15,32 @@
       name="description"
       content="Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry. Fully client-side, installable as a PWA."
     />
+    <!-- SEO: canonical + Open Graph / Twitter Card (B39). Domain is the
+         confirmed custom production domain (docs/DESIGN.md §10); the
+         workers.dev host is a duplicate origin for the same Worker and
+         301-redirects here (B39d). -->
+    <link rel="canonical" href="https://tracklogstudio.timliudev.com/" />
+    <meta property="og:title" content="Track Log Studio" />
+    <meta
+      property="og:description"
+      content="Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry. Fully client-side, installable as a PWA."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://tracklogstudio.timliudev.com/" />
+    <meta property="og:image" content="https://tracklogstudio.timliudev.com/pwa-512x512.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Track Log Studio" />
+    <meta
+      name="twitter:description"
+      content="Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry. Fully client-side, installable as a PWA."
+    />
+    <meta name="twitter:image" content="https://tracklogstudio.timliudev.com/pwa-512x512.png" />
+    <!-- B40(1): warm the connections for the two third-party hosts hit on
+         initial load (Cloudflare Web Analytics beacon below, GitHub star
+         count fetched by GithubStarButton) so the actual request that
+         follows skips DNS/TLS/TCP setup. -->
+    <link rel="preconnect" href="https://static.cloudflareinsights.com" />
+    <link rel="preconnect" href="https://api.github.com" />
     <!-- Static fallback for browsers that read HTML meta instead of the
          manifest's theme_color; kept in sync with src/theme/theme.css's
          --color-bg for :root (light) and [data-theme='dark']. Only reacts to

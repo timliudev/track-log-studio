@@ -11,6 +11,7 @@ import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import LapTableView from './LapTableView.vue'
+import LapExcludeToggle from './LapExcludeToggle.vue'
 
 const props = defineProps<{
   primaryLaps: Lap[]
@@ -30,6 +31,13 @@ interface ComparisonTable {
   deltaMs: number | null
   lapCount: number
   rows: LapTableRow[]
+  /** Lap indices excluded because they're out of the shared valid-lap-time
+   *  band (B2) — kept alongside `rows` so the ⦸ toggle (B1c) can tell a
+   *  band-auto-excluded lap apart from a manually-excluded one, same
+   *  distinction lapStore.exclusionReason draws for the primary table. */
+  timeBandExcluded: number[]
+  /** Same as `timeBandExcluded`, for the shared valid-lap-distance band. */
+  distBandExcluded: number[]
 }
 
 // The fastest INCLUDED primary lap, used as the delta reference for each
@@ -48,14 +56,19 @@ const tables = computed<ComparisonTable[]>(() =>
   props.comparisons.map((c) => {
     const cumDistM = cumulativeDistanceM(c.track.lat, c.track.lon, c.track.valid)
 
-    // B2: the SAME valid lap-time/-distance band configured for the primary
-    // recording applies to this comparison's OWN laps/track — read-only (no
-    // toggle here; comparisons carry no manual exclusion state), just the
-    // same dimmed/struck-through visual mark the primary table uses.
+    // B1c: the comparison table now carries its OWN manual exclusion facet
+    // (lapStore.manualExcludedBySession, keyed by this recording's fileId),
+    // unioned with the SAME valid lap-time/-distance band the primary
+    // recording configures (B2) — same union rule as the primary table's
+    // `excluded` computed, just without the sector/gate term (comparisons
+    // don't push laps/track into this store's sectorInvalid derivation).
+    const timeBandExcluded = outOfBandLapIndices(c.laps, lapStore.lapTimeBand)
+    const distBandExcluded = outOfBandDistanceLapIndices(c.laps, c.track, lapStore.lapDistanceBand)
     const excluded = [
       ...new Set([
-        ...outOfBandLapIndices(c.laps, lapStore.lapTimeBand),
-        ...outOfBandDistanceLapIndices(c.laps, c.track, lapStore.lapDistanceBand),
+        ...(lapStore.manualExcludedBySession[c.id] ?? []),
+        ...timeBandExcluded,
+        ...distBandExcluded,
       ]),
     ]
 
@@ -73,6 +86,8 @@ const tables = computed<ComparisonTable[]>(() =>
       fastestMs,
       deltaMs: fastestMs != null && primaryBest.value != null ? fastestMs - primaryBest.value : null,
       lapCount: c.laps.length,
+      timeBandExcluded,
+      distBandExcluded,
       rows: buildLapTableRows(
         c.laps,
         { session: c.session, cumDistM, sectorTimings, bestLapTimeMs: fastestMs },
@@ -82,6 +97,39 @@ const tables = computed<ComparisonTable[]>(() =>
     }
   }),
 )
+
+/**
+ * Why comparison `table`'s lap `index` is excluded — the comparison-table
+ * analogue of lapStore.exclusionReason (there's no 'sector' term here: a
+ * comparison's own gate-crossing validity isn't derived on this store, see
+ * the `excluded` union above). Same precedence as the primary: 'manual'
+ * wins when a lap is BOTH manually excluded and out of band, since it's the
+ * one thing the user can still directly undo.
+ */
+function exclusionReasonFor(table: ComparisonTable, index: number): 'manual' | 'timeBand' | 'distBand' | null {
+  if (lapStore.isSessionManuallyExcluded(table.id, index)) return 'manual'
+  if (table.timeBandExcluded.includes(index)) return 'timeBand'
+  if (table.distBandExcluded.includes(index)) return 'distBand'
+  return null
+}
+
+/** Whether comparison `table`'s lap `index` is disabled from manual ⦸
+ *  toggling — the same rule as the primary table's `excludeDisabled`
+ *  (LapTable.vue): a lap auto-excluded by the shared valid-lap band can't be
+ *  un-excluded by hand while the band still applies. */
+function excludeDisabled(table: ComparisonTable, index: number): boolean {
+  const reason = exclusionReasonFor(table, index)
+  return reason === 'timeBand' || reason === 'distBand'
+}
+
+/** Localized ⦸-toggle tooltip/label for comparison `table`'s lap `index`,
+ *  mirroring LapTable.vue's `excludeLabel` — same i18n keys. */
+function excludeLabel(table: ComparisonTable, index: number): string {
+  const reason = exclusionReasonFor(table, index)
+  if (reason === 'timeBand') return t('analyzer.excludedByBand')
+  if (reason === 'distBand') return t('analyzer.excludedByDistanceBand')
+  return reason === 'manual' ? t('analyzer.includeLap') : t('analyzer.excludeLap')
+}
 
 function delta(value: number | null): string {
   if (value == null) return '—'
@@ -145,6 +193,12 @@ function resetChartOffset(id: number): void {
       >
         <template #lead="{ row }">
           <div class="lap-cell">
+            <LapExcludeToggle
+              :excluded="row.isExcluded"
+              :disabled="excludeDisabled(table, row.index)"
+              :label="excludeLabel(table, row.index)"
+              @toggle="lapStore.toggleSessionExcluded(table.id, row.index)"
+            />
             <span
               v-if="lapStore.isSessionLapSelected(table.id, row.index)"
               class="swatch"
@@ -195,19 +249,36 @@ h4 { margin: 0 0 6px; font-size: .85rem; color: var(--color-text-muted); }
 .chart-align input { width: 68px; padding: 2px 4px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); }
 .chart-align button { padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
 .chart-align button:hover { border-color: var(--color-accent); color: var(--color-accent); }
+/* B35 — §8 layer 3: capability signal (useInputCapabilities.ts, mirrored onto
+   <html data-any-pointer-coarse>), not a viewport-width guess — grows the
+   ±/reset nudge buttons to a >=44px touch target on any coarse-pointer
+   device, tablets running the full desktop layout included. */
+:root[data-any-pointer-coarse] .chart-align button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 14px;
+}
 
 .lap-offset { display: inline-flex; align-items: center; gap: 4px; }
 .lap-offset button { padding: 1px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
 .lap-offset button:hover { border-color: var(--color-accent); color: var(--color-accent); }
 /* Selected-row offset controls sit on the accent background — keep them legible. */
 .lap-offset.row-selected button { background: var(--color-surface); color: var(--color-text); }
+/* B35 — §8 layer 3: same capability-driven touch-target bump as .chart-align
+   button above, for the per-lap offset ± buttons. */
+:root[data-any-pointer-coarse] .lap-offset button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 12px;
+}
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Same lead-cell rhythm as the primary LapTable.vue's .lap-cell/.swatch (kept
    as a scoped duplicate, not a shared import, matching this file's existing
-   .recording-heading/.recording-swatch convention) — just without the
-   exclude toggle, since comparison recordings carry no manual exclusion
-   state (B1b). */
+   .recording-heading/.recording-swatch convention). The ⦸ exclude toggle
+   itself (B1c — comparison recordings now carry their own manual-exclusion
+   facet, same as the primary) is the shared LapExcludeToggle.vue component,
+   not duplicated here. */
 .lap-cell { display: flex; align-items: center; gap: 6px; }
 .swatch {
   display: inline-block;

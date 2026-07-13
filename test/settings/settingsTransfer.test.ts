@@ -11,7 +11,13 @@ import type { MtFormState } from '@/stores/drivetrainStore'
 import { defaultLayout } from '@/domain/layout/dashboardLayout'
 import { defaultPanelState } from '@/domain/layout/panelState'
 
-const APPEARANCE = { themePref: 'dark' as const, localePref: 'en' as const, tzOverride: 480 }
+const APPEARANCE = {
+  themePref: 'dark' as const,
+  localePref: 'en' as const,
+  tzOverride: 480,
+  inputModePref: 'touch' as const,
+  centreCursorMode: false,
+}
 
 const SAMPLE_MT: MtFormState = {
   primaryReduction: 2.833,
@@ -98,11 +104,25 @@ describe('settingsTransfer — parseImportBundle', () => {
 
   it('sanitizes garbage appearance fields field-by-field rather than rejecting the whole bundle', () => {
     const result = parseImportBundle(
-      JSON.stringify({ appearance: { themePref: 'not-a-theme', localePref: 'en', tzOverride: 'nonsense' } }),
+      JSON.stringify({
+        appearance: {
+          themePref: 'not-a-theme',
+          localePref: 'en',
+          tzOverride: 'nonsense',
+          inputModePref: 'not-a-mode',
+          centreCursorMode: 'not-a-bool',
+        },
+      }),
     )
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.bundle.appearance).toEqual({ themePref: 'auto', localePref: 'en', tzOverride: 'auto' })
+    expect(result.bundle.appearance).toEqual({
+      themePref: 'auto',
+      localePref: 'en',
+      tzOverride: 'auto',
+      inputModePref: 'auto',
+      centreCursorMode: false,
+    })
   })
 
   it('defaults drivetrain.kind to "mt" for anything other than the literal "cvt"', () => {

@@ -18,6 +18,7 @@ import type { Lap } from '@/domain/model/Lap'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import SessionLapComparison from './SessionLapComparison.vue'
+import LapExcludeToggle from './LapExcludeToggle.vue'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 
 const props = defineProps<{
@@ -250,18 +251,12 @@ const rows = computed(() =>
     >
       <template #lead="{ row }">
         <div class="lap-cell">
-          <button
-            type="button"
-            class="exclude"
-            :class="{ on: lapStore.isExcluded(row.index), 'auto-disabled': excludeDisabled(row.index) }"
-            v-tooltip="excludeLabel(row.index)"
-            :aria-label="excludeLabel(row.index)"
-            :aria-pressed="lapStore.isExcluded(row.index)"
-            :aria-disabled="excludeDisabled(row.index)"
-            @click.stop="!excludeDisabled(row.index) && lapStore.toggleExcluded(row.index)"
-          >
-            ⦸
-          </button>
+          <LapExcludeToggle
+            :excluded="lapStore.isExcluded(row.index)"
+            :disabled="excludeDisabled(row.index)"
+            :label="excludeLabel(row.index)"
+            @toggle="lapStore.toggleExcluded(row.index)"
+          />
           <span
             v-if="lapStore.isSelected(row.index)"
             class="swatch"
@@ -435,39 +430,6 @@ const rows = computed(() =>
   display: flex;
   align-items: center;
   gap: 6px;
-}
-.exclude {
-  background: transparent;
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  padding: 0;
-  font-size: 0.85rem;
-  line-height: 1;
-  cursor: pointer;
-}
-.exclude:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-.exclude.on {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-bg);
-}
-/* Auto-excluded (band/sector rule) laps show the same "on" look so the ⦸
-   state reads consistently, but muted + non-interactive cursor since the
-   user can't toggle it off by hand while the rule still applies. */
-.exclude.auto-disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.exclude.auto-disabled:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
 }
 .swatch {
   display: inline-block;

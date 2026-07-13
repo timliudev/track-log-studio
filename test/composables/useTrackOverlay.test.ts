@@ -34,41 +34,17 @@ function noGpsSession(n = 20): LogSession {
 beforeEach(() => setActivePinia(createPinia()))
 
 describe('useTrackOverlay', () => {
-  it('lists ready GPS sessions other than the active one as candidates', () => {
+  it('overlayTracks reflects only sessions toggled on via analyzerStore.selectedSessions', () => {
     const fileStore = useFileStore()
     const analyzer = useAnalyzerStore()
     const aId = fileStore.addMergedSession('a.nmea', gpsSession())
     const bId = fileStore.addMergedSession('b.nmea', gpsSession(20, 26, 122))
     analyzer.activeFileId = aId
 
-    const { candidates } = useTrackOverlay()
-    expect(candidates.value.map((c) => c.id)).toEqual([bId])
-    expect(candidates.value[0].active).toBe(false)
-  })
-
-  it('excludes sessions with no usable GPS track from candidates', () => {
-    const fileStore = useFileStore()
-    const analyzer = useAnalyzerStore()
-    const aId = fileStore.addMergedSession('a.nmea', gpsSession())
-    fileStore.addMergedSession('no-gps.loga', noGpsSession())
-    analyzer.activeFileId = aId
-
-    const { candidates } = useTrackOverlay()
-    expect(candidates.value).toHaveLength(0)
-  })
-
-  it('toggle() flips a candidate on/off and overlayTracks reflects only the ON ones', () => {
-    const fileStore = useFileStore()
-    const analyzer = useAnalyzerStore()
-    const aId = fileStore.addMergedSession('a.nmea', gpsSession())
-    const bId = fileStore.addMergedSession('b.nmea', gpsSession(20, 26, 122))
-    analyzer.activeFileId = aId
-
-    const { candidates, overlayTracks, toggle } = useTrackOverlay()
+    const { overlayTracks } = useTrackOverlay()
     expect(overlayTracks.value).toHaveLength(0)
 
-    toggle(bId)
-    expect(candidates.value.find((c) => c.id === bId)?.active).toBe(true)
+    analyzer.toggleSessionComparison(bId)
     expect(overlayTracks.value.map((o) => o.id)).toEqual([bId])
     expect(overlayTracks.value[0].label).toBe('b.nmea')
     expect(overlayTracks.value[0].color).toBe(categoricalColor(bId))
@@ -76,7 +52,19 @@ describe('useTrackOverlay', () => {
     analyzer.nudgeSessionOffset(bId, 'mapY', -1)
     expect(overlayTracks.value[0].offset).toEqual({ x: 2.5, y: -1 })
 
-    toggle(bId)
+    analyzer.toggleSessionComparison(bId)
+    expect(overlayTracks.value).toHaveLength(0)
+  })
+
+  it('excludes a toggled-on session with no usable GPS track from overlayTracks', () => {
+    const fileStore = useFileStore()
+    const analyzer = useAnalyzerStore()
+    const aId = fileStore.addMergedSession('a.nmea', gpsSession())
+    const bId = fileStore.addMergedSession('no-gps.loga', noGpsSession())
+    analyzer.activeFileId = aId
+
+    const { overlayTracks } = useTrackOverlay()
+    analyzer.toggleSessionComparison(bId)
     expect(overlayTracks.value).toHaveLength(0)
   })
 
@@ -87,8 +75,8 @@ describe('useTrackOverlay', () => {
     const bId = fileStore.addMergedSession('b.nmea', gpsSession(5000, 26, 122))
     analyzer.activeFileId = aId
 
-    const { overlayTracks, toggle } = useTrackOverlay()
-    toggle(bId)
+    const { overlayTracks } = useTrackOverlay()
+    analyzer.toggleSessionComparison(bId)
     expect(overlayTracks.value[0].track.lat.length).toBeLessThan(5000)
   })
 
@@ -99,15 +87,15 @@ describe('useTrackOverlay', () => {
     const bId = fileStore.addMergedSession('b.nmea', gpsSession(20, 26, 122))
     analyzer.activeFileId = aId
 
-    const { overlayTracks, toggle } = useTrackOverlay()
-    toggle(bId)
+    const { overlayTracks } = useTrackOverlay()
+    analyzer.toggleSessionComparison(bId)
     expect(overlayTracks.value.map((o) => o.id)).toEqual([bId])
 
     analyzer.activeFileId = bId
     expect(overlayTracks.value).toHaveLength(0)
   })
 
-  it('clear() turns every overlay off', () => {
+  it('clearSessionComparisons() turns every overlay off', () => {
     const fileStore = useFileStore()
     const analyzer = useAnalyzerStore()
     const aId = fileStore.addMergedSession('a.nmea', gpsSession())
@@ -115,11 +103,11 @@ describe('useTrackOverlay', () => {
     const cId = fileStore.addMergedSession('c.nmea', gpsSession(20, 27, 123))
     analyzer.activeFileId = aId
 
-    const { overlayTracks, toggle, clear } = useTrackOverlay()
-    toggle(bId)
-    toggle(cId)
+    const { overlayTracks } = useTrackOverlay()
+    analyzer.toggleSessionComparison(bId)
+    analyzer.toggleSessionComparison(cId)
     expect(overlayTracks.value).toHaveLength(2)
-    clear()
+    analyzer.clearSessionComparisons()
     expect(overlayTracks.value).toHaveLength(0)
   })
 
@@ -130,8 +118,8 @@ describe('useTrackOverlay', () => {
     const bId = fileStore.addMergedSession('b.nmea', gpsSession(20, 26, 122))
     analyzer.activeFileId = aId
 
-    const { overlayTracks, toggle } = useTrackOverlay()
-    toggle(bId)
+    const { overlayTracks } = useTrackOverlay()
+    analyzer.toggleSessionComparison(bId)
     expect(overlayTracks.value).toHaveLength(1)
 
     fileStore.removeFile(bId)

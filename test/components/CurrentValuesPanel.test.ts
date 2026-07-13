@@ -69,4 +69,49 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
     const shortCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('Short'))!
     expect(shortCell.find('.value-number').text()).toBe('—')
   })
+
+  // B44 — low-contrast pulse when a cell's DISPLAYED value actually changes.
+  describe('B44 — value-change pulse', () => {
+    function rpmCellOf(wrapper: ReturnType<typeof mountPanel>) {
+      return wrapper.findAll('.value-cell').find((c) => c.text().includes('RPM'))!
+    }
+
+    it('does not pulse any cell on the initial render', () => {
+      const s = session([channel('Time', [0, 1000, 2000]), channel('RPM', [1000, 2000, 3000])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      expect(wrapper.find('.value-cell--pulse').exists()).toBe(false)
+    })
+
+    it('adds the pulse class to a cell whose formatted value changed', async () => {
+      const s = session([channel('Time', [0, 1000, 2000]), channel('RPM', [1000, 2000, 3000])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.setProps({ cursorIdx: 1 })
+      expect(rpmCellOf(wrapper).classes()).toContain('value-cell--pulse')
+    })
+
+    it('does not pulse a cell whose formatted value stayed the same', async () => {
+      // "Steady" holds the same value at every sample index, so its
+      // displayed text is identical before/after the cursor move — only RPM
+      // (which genuinely changes) should pulse.
+      const s = session([
+        channel('Time', [0, 1000, 2000]),
+        channel('RPM', [1000, 2000, 3000]),
+        channel('Steady', [7, 7, 7]),
+      ])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.setProps({ cursorIdx: 1 })
+      const steadyCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('Steady'))!
+      expect(steadyCell.classes()).not.toContain('value-cell--pulse')
+      // Sanity: RPM (which DID change) still pulses in this same render pass.
+      expect(rpmCellOf(wrapper).classes()).toContain('value-cell--pulse')
+    })
+
+    it('never pulses the synthetic time cell even though it changes every render', async () => {
+      const s = session([channel('Time', [0, 1000, 2000]), channel('RPM', [1000, 2000, 3000])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.setProps({ cursorIdx: 1 })
+      const timeCell = wrapper.find('.value-cell--time')
+      expect(timeCell.classes()).not.toContain('value-cell--pulse')
+    })
+  })
 })

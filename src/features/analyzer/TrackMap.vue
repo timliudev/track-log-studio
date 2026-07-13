@@ -5,8 +5,24 @@ import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LapLine } from '@/domain/analysis/laps'
 import { colormapSwatches, type ColormapId } from '@/domain/analysis/colormap'
 import type { TrackOverlayEntry } from '@/domain/analysis/trackOverlay'
+import {
+  bucketHeatmapSegments,
+  clampPanAxis,
+  computeCheckeredBand,
+  computeFocusFit,
+  computeZoomAbout,
+  extremumColor,
+  firstValidRefPoint,
+  mergeBBox,
+  metresOffsetToPixelShift,
+  projectSamples,
+  resolveHighlightSegments,
+  type BBox,
+  type HighlightSegment,
+} from '@/domain/analysis/trackMapGeometry'
 import { fitProjection, type MapProjection } from './projection'
-import { nearestSample } from './trackNearestSample'
+import { nearestSample, resolveTrackHitRadius } from './trackNearestSample'
+import { useInputCapabilities } from '@/composables/useInputCapabilities'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -137,6 +153,14 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+// B30b(b) — capability-driven hit-radius (see trackNearestSample.ts's doc);
+// `anyPointerCoarse` is already read live elsewhere via App.vue's single
+// top-level useInputCapabilities() call (which mirrors it onto <html
+// data-any-pointer-coarse> for CSS), but the hit-test below needs the actual
+// JS boolean, not just a CSS hook, so this component reads its own reactive
+// copy the normal composable way.
+const { anyPointerCoarse } = useInputCapabilities()
+
 const canvas = ref<HTMLCanvasElement | null>(null)
 let ro: ResizeObserver | null = null
 
@@ -205,23 +229,21 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'
 }
 
-/** Simple 2-colour lerp for extrema markers: red (frac=0) -> green (frac=1).
- *  Deliberately independent of the heatmap colormaps (turbo/viridis/…) so
- *  markers stay legible over any active heatmap. */
-function extremumColor(frac: number): string {
-  const t = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0
-  const r = Math.round(220 - 160 * t)
-  const g = Math.round(60 + 140 * t)
-  const b = 60
-  return `rgb(${r}, ${g}, ${b})`
-}
+// ── draw() steps ─────────────────────────────────────────────────────────
+// draw() (below, at the bottom of this section) is the orchestrator: it
+// projects the active + overlay tracks via the pure helpers imported from
+// trackMapGeometry.ts, then calls these small, single-purpose canvas-drawing
+// steps in painter's-order (overlay tracks -> active path -> lap highlights
+// -> comparison highlights -> start/finish line -> gates -> extrema markers
+// -> cursor). Each step owns exactly one visual element from the original
+// god-function; none of them read component state directly (only their
+// arguments), so they stay easy to reason about independent of draw()'s own
+// zoom/pan/canvas bookkeeping.
 
-function draw(): void {
-  const cv = canvas.value
-  if (!cv) return
-  const ctx = cv.getContext('2d')
-  if (!ctx) return
-
+/** DPR-aware canvas frame setup: resizes the backing store to match the CSS
+ *  size at devicePixelRatio, resets the transform, and clears. Returns the
+ *  CSS (logical) width/height draw() continues to work in. */
+function setupCanvasFrame(cv: HTMLCanvasElement, ctx: CanvasRenderingContext2D): { w: number; h: number } {
   const dpr = window.devicePixelRatio || 1
   const w = cv.clientWidth
   const h = cv.clientHeight
@@ -229,39 +251,13 @@ function draw(): void {
   cv.height = Math.round(h * dpr)
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, w, h)
+  return { w, h }
+}
 
-  const track = props.track
-  if (!track) {
-    projection = null
-    return
-  }
-
-  // Multi-file overlay (賽道地圖多檔疊圖): fit the projection to the COMBINED
-  // bounds of the active track + every overlaid session, not just the active
-  // one — otherwise an overlay whose bbox extends past the active track's own
-  // would draw (partly) off-canvas. See fitProjection's multi-track doc.
-  const overlayTracks = props.overlayTracks ?? []
-  const base = fitProjection(
-    overlayTracks.length ? [track, ...overlayTracks.map((o) => o.track)] : track,
-    w,
-    h,
-    PAD,
-  )
-  if (!base) {
-    projection = null
-    return
-  }
-
-  // Compose the base fit with the current zoom/pan into the view projection. The
-  // composition is affine (uniform scale + translate of an affine fit), so every
-  // downstream pixel calculation — polyline, line band, handles, lap offsets —
-  // works unchanged in screen space, and lap-offset pixel shifts scale with zoom.
-  lastW = w
-  lastH = h
-  const z = zoom.value
-  const tx = panX.value
-  const ty = panY.value
-  const view: MapProjection = {
+/** Composes the base (zoom-1 / pan-0) fit with the current zoom/pan into the
+ *  view projection used for drawing AND line/gate hit-testing/dragging. */
+function composeViewProjection(base: MapProjection, z: number, tx: number, ty: number): MapProjection {
+  return {
     toPixel(lat, lon) {
       const p = base.toPixel(lat, lon)
       return { x: p.x * z + tx, y: p.y * z + ty }
@@ -270,200 +266,100 @@ function draw(): void {
       return base.toGeo((sx - tx) / z, (sy - ty) / z)
     },
   }
-  projection = view
-  const proj = view
+}
 
-  const n = track.valid.length
-  px = new Float64Array(n)
-  py = new Float64Array(n)
-  // Track the base-pixel bbox while projecting so panning can be clamped, and
-  // (when a focusRange is present) that span's own base-pixel bbox for #7's
-  // auto-fit.
-  let bMinX = Infinity
-  let bMaxX = -Infinity
-  let bMinY = Infinity
-  let bMaxY = -Infinity
-  const focusBBox = props.focusRange
-  let fMinX = Infinity
-  let fMaxX = -Infinity
-  let fMinY = Infinity
-  let fMaxY = -Infinity
-  for (let i = 0; i < n; i++) {
-    if (!track.valid[i]) {
-      px[i] = NaN
-      py[i] = NaN
+/** Strokes the polyline over sample range [lo, hi] (inclusive), breaking the
+ *  path across gaps (NaN) so missing fixes don't draw bogus connectors.
+ *  (dx, dy) is a constant pixel shift applied to this stroke (#9 lap offset). */
+function drawPlainSegment(
+  ctx: CanvasRenderingContext2D,
+  px: Float64Array,
+  py: Float64Array,
+  lo: number,
+  hi: number,
+  dx = 0,
+  dy = 0,
+): void {
+  ctx.beginPath()
+  let on = false
+  for (let i = lo; i <= hi; i++) {
+    if (Number.isNaN(px[i])) {
+      on = false
       continue
     }
-    const p = base.toPixel(track.lat[i], track.lon[i])
-    if (p.x < bMinX) bMinX = p.x
-    if (p.x > bMaxX) bMaxX = p.x
-    if (p.y < bMinY) bMinY = p.y
-    if (p.y > bMaxY) bMaxY = p.y
-    if (focusBBox && i >= focusBBox.startIdx && i <= focusBBox.endIdx) {
-      if (p.x < fMinX) fMinX = p.x
-      if (p.x > fMaxX) fMaxX = p.x
-      if (p.y < fMinY) fMinY = p.y
-      if (p.y > fMaxY) fMaxY = p.y
+    if (!on) {
+      ctx.moveTo(px[i] + dx, py[i] + dy)
+      on = true
+    } else {
+      ctx.lineTo(px[i] + dx, py[i] + dy)
     }
-    px[i] = p.x * z + tx
-    py[i] = p.y * z + ty
   }
-  if (bMinX <= bMaxX) {
-    baseMinX = bMinX
-    baseMaxX = bMaxX
-    baseMinY = bMinY
-    baseMaxY = bMaxY
-  }
-  if (fMinX <= fMaxX) {
-    focusMinX = fMinX
-    focusMaxX = fMaxX
-    focusMinY = fMinY
-    focusMaxY = fMaxY
-  } else {
-    focusMinX = NaN
-    focusMaxX = NaN
-    focusMinY = NaN
-    focusMaxY = NaN
-  }
+  ctx.stroke()
+}
 
-  // Multi-file overlay: project each OTHER session's track NOW (so its bbox
-  // folds into bMinX/Y..bMaxX/Y above, keeping panning clamped to whatever's
-  // actually drawn) but STROKE it later — right before the active track's own
-  // polyline below — so painter's-order keeps the active session on top.
-  const overlayPixels: {
-    color: string
-    xs: Float64Array
-    ys: Float64Array
-    offset?: { x: number; y: number }
-  }[] = []
-  for (const entry of overlayTracks) {
-    const ot = entry.track
-    const on = ot.lat.length
-    const oxs = new Float64Array(on)
-    const oys = new Float64Array(on)
-    for (let i = 0; i < on; i++) {
-      if (!ot.valid[i]) {
-        oxs[i] = NaN
-        oys[i] = NaN
-        continue
-      }
-      const p = base.toPixel(ot.lat[i], ot.lon[i])
-      if (p.x < bMinX) bMinX = p.x
-      if (p.x > bMaxX) bMaxX = p.x
-      if (p.y < bMinY) bMinY = p.y
-      if (p.y > bMaxY) bMaxY = p.y
-      oxs[i] = p.x * z + tx
-      oys[i] = p.y * z + ty
-    }
-    overlayPixels.push({ color: entry.color, xs: oxs, ys: oys, offset: entry.offset })
+/** Strokes [lo, hi) segment-by-segment, gradient-coloured by `colorVals` via
+ *  {@link bucketHeatmapSegments} — bounded to at most `swatches.length`
+ *  strokes regardless of sample count. A segment is skipped if either
+ *  endpoint is a gap (NaN px) or has no colour (NaN value): folded into one
+ *  NaN rule by masking `colorVals` with any pixel gap before bucketing. */
+function drawHeatmapSegment(
+  ctx: CanvasRenderingContext2D,
+  px: Float64Array,
+  py: Float64Array,
+  colorVals: Float64Array,
+  swatches: string[],
+  lo: number,
+  hi: number,
+  width: number,
+  dx = 0,
+  dy = 0,
+): void {
+  const masked = new Float64Array(colorVals.length)
+  for (let i = 0; i < colorVals.length; i++) {
+    masked[i] = Number.isNaN(px[i]) ? NaN : colorVals[i]
   }
-  // Re-derive the pan-clamp bbox now that overlay tracks may have widened it
-  // (the assignment above already ran before overlays were folded in).
-  if (bMinX <= bMaxX) {
-    baseMinX = bMinX
-    baseMaxX = bMaxX
-    baseMinY = bMinY
-    baseMaxY = bMaxY
-  }
-
-  // Helper: stroke the polyline over sample range [lo, hi] (inclusive), breaking
-  // the path across gaps (NaN) so missing fixes don't draw bogus connectors.
-  // (dx, dy) is a constant pixel shift applied to this stroke (for #9 lap offset).
-  const strokeRange = (lo: number, hi: number, dx = 0, dy = 0): void => {
+  const buckets = bucketHeatmapSegments(masked, lo, hi, swatches.length)
+  ctx.lineWidth = width
+  for (let b = 0; b < swatches.length; b++) {
+    const seg = buckets[b]
+    if (seg.length === 0) continue
+    ctx.strokeStyle = swatches[b]
     ctx.beginPath()
-    let on = false
-    for (let i = lo; i <= hi; i++) {
-      if (Number.isNaN(px![i])) {
-        on = false
-        continue
-      }
-      if (!on) {
-        ctx.moveTo(px![i] + dx, py![i] + dy)
-        on = true
-      } else {
-        ctx.lineTo(px![i] + dx, py![i] + dy)
-      }
+    for (const i of seg) {
+      ctx.moveTo(px[i] + dx, py[i] + dy)
+      ctx.lineTo(px[i + 1] + dx, py[i + 1] + dy)
     }
     ctx.stroke()
   }
+}
 
-  // Reference geo point + cos(lat) for converting a metres offset to a CONSTANT
-  // pixel shift. The projection is affine, so a fixed geo delta maps to a fixed
-  // pixel delta regardless of where it's measured; project a ref point and the
-  // ref point + delta, and take the pixel difference.
-  let refLat = 0
-  let refLon = 0
-  let cosRefLat = 1
-  for (let i = 0; i < n; i++) {
-    if (track.valid[i]) {
-      refLat = track.lat[i]
-      refLon = track.lon[i]
-      cosRefLat = Math.cos((refLat * Math.PI) / 180) || 1
-      break
-    }
-  }
-  const M_PER_DEG = 111320
-  const pixelShift = (off?: { x: number; y: number }): [number, number] => {
-    if (!off || (off.x === 0 && off.y === 0)) return [0, 0]
-    const dLat = off.y / M_PER_DEG
-    const dLon = off.x / (M_PER_DEG * cosRefLat)
-    const p0 = proj.toPixel(refLat, refLon)
-    const p1 = proj.toPixel(refLat + dLat, refLon + dLon)
-    return [p1.x - p0.x, p1.y - p0.y]
-  }
-
-  // Heatmap: stroke [lo, hi] gradient-coloured by props.colorValues. Segments are
-  // bucketed by their (quantised) value so we issue at most HEAT_BUCKETS strokes
-  // instead of one per segment. A segment is skipped if either endpoint is a gap
-  // (NaN px) or has no colour (NaN value).
-  const colorVals = props.colorValues
-  const swatches = colorVals ? colormapSwatches(props.colormap ?? 'turbo', HEAT_BUCKETS) : []
-  const strokeHeatmap = (lo: number, hi: number, width: number, dx = 0, dy = 0): void => {
-    if (!colorVals) return
-    const buckets: number[][] = Array.from({ length: HEAT_BUCKETS }, () => [])
-    for (let i = lo; i < hi; i++) {
-      if (Number.isNaN(px![i]) || Number.isNaN(px![i + 1])) continue
-      const va = colorVals[i]
-      const vb = colorVals[i + 1]
-      if (Number.isNaN(va) || Number.isNaN(vb)) continue
-      const b = Math.min(HEAT_BUCKETS - 1, Math.max(0, Math.round(((va + vb) / 2) * (HEAT_BUCKETS - 1))))
-      buckets[b].push(i)
-    }
-    ctx.lineWidth = width
-    for (let b = 0; b < HEAT_BUCKETS; b++) {
-      const seg = buckets[b]
-      if (seg.length === 0) continue
-      ctx.strokeStyle = swatches[b]
-      ctx.beginPath()
-      for (const i of seg) {
-        ctx.moveTo(px![i] + dx, py![i] + dy)
-        ctx.lineTo(px![i + 1] + dx, py![i + 1] + dy)
-      }
-      ctx.stroke()
-    }
-  }
-
-  // Multi-file overlay: stroke every OTHER session's track now, faint (see
-  // OVERLAY_ALPHA/OVERLAY_LINE_WIDTH), BEFORE anything belonging to the
-  // active session below — painter's-order keeps the active track (and its
-  // heatmap/highlight/start-finish/gates/extrema/cursor) drawn on top, so it
-  // always reads as the prominent one regardless of how many overlays are on.
-  for (const { color, xs, ys, offset } of overlayPixels) {
+/** Multi-file overlay: strokes every OTHER session's track, faint (see
+ *  OVERLAY_ALPHA/OVERLAY_LINE_WIDTH). Always called BEFORE anything
+ *  belonging to the active session — painter's-order keeps the active track
+ *  (and its heatmap/highlight/start-finish/gates/extrema/cursor) drawn on
+ *  top, so it always reads as the prominent one regardless of how many
+ *  overlays are on. */
+function drawOverlayTracks(
+  ctx: CanvasRenderingContext2D,
+  overlays: { color: string; xs: Float64Array; ys: Float64Array; offset?: { x: number; y: number } }[],
+  pixelShift: (off?: { x: number; y: number }) => [number, number],
+): void {
+  for (const { color, xs, ys, offset } of overlays) {
     const [dx, dy] = pixelShift(offset)
     ctx.save()
     ctx.globalAlpha = OVERLAY_ALPHA
     ctx.strokeStyle = color
     ctx.lineWidth = OVERLAY_LINE_WIDTH
     ctx.beginPath()
-    let onSeg = false
+    let on = false
     for (let i = 0; i < xs.length; i++) {
       if (Number.isNaN(xs[i])) {
-        onSeg = false
+        on = false
         continue
       }
-      if (!onSeg) {
+      if (!on) {
         ctx.moveTo(xs[i] + dx, ys[i] + dy)
-        onSeg = true
+        on = true
       } else {
         ctx.lineTo(xs[i] + dx, ys[i] + dy)
       }
@@ -471,59 +367,81 @@ function draw(): void {
     ctx.stroke()
     ctx.restore()
   }
+}
 
-  // Emphasis segments: an explicit lap SELECTION takes precedence (enforced
-  // by the caller — AnalyzerView nulls `focusRange` whenever `highlightLaps`
-  // is non-empty), else a chart-zoom-follow `focusRange` (#7) becomes a
-  // single emphasized segment in the same faint-track + bright-segment style,
-  // coloured with the accent colour so it reads as "in-progress view", not a
-  // lap identity.
-  const focus = props.focusRange
-  const highlightLaps =
-    props.highlightLaps?.length
-      ? props.highlightLaps
-      : focus
-        ? [{ startIdx: focus.startIdx, endIdx: focus.endIdx, color: cssVar('--color-accent') }]
-        : []
-  const comparisonHighlights = props.comparisonLapHighlights ?? []
-  const anySelection = highlightLaps.length > 0 || comparisonHighlights.length > 0
-  const heat = !!colorVals
-
-  // Full-track polyline. With no selection it's the normal muted track (or the
-  // heatmap if active); with a selection (same-file OR cross-file) we draw it
-  // faint (border color) for context and let the selected laps stand out, per
-  // "only show selected laps".
-  if (heat && !anySelection) {
-    strokeHeatmap(0, n - 1, 2.5)
+/** Full-track polyline. With no selection it's the normal muted track (or
+ *  the heatmap if active); with a selection (same-file OR cross-file) it's
+ *  drawn faint (border color) for context and the selected laps stand out,
+ *  per "only show selected laps". */
+function drawTrackPath(
+  ctx: CanvasRenderingContext2D,
+  px: Float64Array,
+  py: Float64Array,
+  n: number,
+  heat: boolean,
+  anySelection: boolean,
+  colorVals: Float64Array | null | undefined,
+  swatches: string[],
+): void {
+  if (heat && !anySelection && colorVals) {
+    drawHeatmapSegment(ctx, px, py, colorVals, swatches, 0, n - 1, 2.5)
   } else {
     ctx.strokeStyle = cssVar(anySelection ? '--color-border' : '--color-text-muted')
     ctx.lineWidth = 2
-    strokeRange(0, n - 1)
+    drawPlainSegment(ctx, px, py, 0, n - 1)
   }
+}
 
-  // Selected laps (or the focus segment): each [startIdx, endIdx] span,
-  // thicker. Heatmap-coloured by value when a heatmap channel is chosen, else
-  // its identity color (lap colour, or the accent colour for a focus range).
-  for (const lap of highlightLaps) {
+/** Selected laps (or the focus segment): each [startIdx, endIdx] span,
+ *  thicker. Heatmap-coloured by value when a heatmap channel is chosen, else
+ *  its identity color (lap colour, or the accent colour for a focus range). */
+function drawLapHighlights(
+  ctx: CanvasRenderingContext2D,
+  laps: HighlightSegment[],
+  px: Float64Array,
+  py: Float64Array,
+  n: number,
+  heat: boolean,
+  colorVals: Float64Array | null | undefined,
+  swatches: string[],
+  pixelShift: (off?: { x: number; y: number }) => [number, number],
+): void {
+  for (const lap of laps) {
     const lo = Math.max(0, Math.min(lap.startIdx, lap.endIdx))
     const hi = Math.min(n - 1, Math.max(lap.startIdx, lap.endIdx))
     const [dx, dy] = pixelShift(lap.offset)
-    if (heat) {
-      strokeHeatmap(lo, hi, 3, dx, dy)
+    if (heat && colorVals) {
+      drawHeatmapSegment(ctx, px, py, colorVals, swatches, lo, hi, 3, dx, dy)
     } else {
       ctx.strokeStyle = lap.color
       ctx.lineWidth = 3
-      strokeRange(lo, hi, dx, dy)
+      drawPlainSegment(ctx, px, py, lo, hi, dx, dy)
     }
   }
+}
 
-  // Cross-file selected laps: same visual weight (3px, identity color) as the
-  // loop above, but projected from EACH entry's OWN track rather than the
-  // module-scoped px/py (which only holds `props.track`'s projected pixels).
-  // Never heatmap-coloured — the active heatmap channel's data belongs to the
-  // PRIMARY session, not a comparison one, so identity color is always used
-  // (matching how the faint overlay-track loop above also ignores the heatmap).
-  for (const hl of comparisonHighlights) {
+/** Cross-file selected laps: same visual weight (3px, identity color) as
+ *  drawLapHighlights, but projected from EACH entry's OWN track rather than
+ *  the active track's px/py. Never heatmap-coloured — the active heatmap
+ *  channel's data belongs to the PRIMARY session, not a comparison one, so
+ *  identity color is always used (matching how drawOverlayTracks also
+ *  ignores the heatmap). */
+function drawComparisonHighlights(
+  ctx: CanvasRenderingContext2D,
+  highlights: {
+    track: GpsTrack
+    startIdx: number
+    endIdx: number
+    color: string
+    offset?: { x: number; y: number }
+  }[],
+  base: MapProjection,
+  z: number,
+  tx: number,
+  ty: number,
+  pixelShift: (off?: { x: number; y: number }) => [number, number],
+): void {
+  for (const hl of highlights) {
     const hn = hl.track.valid.length
     const lo = Math.max(0, Math.min(hl.startIdx, hl.endIdx))
     const hi = Math.min(hn - 1, Math.max(hl.startIdx, hl.endIdx))
@@ -549,83 +467,70 @@ function draw(): void {
     }
     ctx.stroke()
   }
+}
 
-  // start/finish line + draggable endpoints. Drawn as a checkered-flag band
-  // (the universal start/finish marker) in the text/surface two-tone so it has
-  // contrast in both themes and reads completely differently from the round red
-  // (--color-accent) cursor dot and the colourful track/heatmap — the #3 fix.
-  const line = props.line
-  if (line) {
-    const a = proj.toPixel(line.a.lat, line.a.lon)
-    const b = proj.toPixel(line.b.lat, line.b.lon)
-    const dark = cssVar('--color-text')
-    const light = cssVar('--color-surface')
+/** Start/finish line + draggable endpoints. Drawn as a checkered-flag band
+ *  (the universal start/finish marker) in the text/surface two-tone so it
+ *  has contrast in both themes and reads completely differently from the
+ *  round red (--color-accent) cursor dot and the colourful track/heatmap —
+ *  the #3 fix. The band's polygon geometry itself comes from
+ *  computeCheckeredBand (trackMapGeometry.ts); this only fills/strokes it. */
+function drawStartFinishLine(ctx: CanvasRenderingContext2D, proj: MapProjection, line: LapLine | null | undefined): void {
+  if (!line) return
+  const a = proj.toPixel(line.a.lat, line.a.lon)
+  const b = proj.toPixel(line.b.lat, line.b.lon)
+  const dark = cssVar('--color-text')
+  const light = cssVar('--color-surface')
 
-    // Checkered band: two rows of alternating squares laid along the line.
-    const dx = b.x - a.x
-    const dy = b.y - a.y
-    const len = Math.hypot(dx, dy)
-    if (len > 1) {
-      const ux = dx / len
-      const uy = dy / len
-      const nx = -uy // unit perpendicular to the line
-      const ny = ux
-      const SQ = 6 // target checker square size (px)
-      const cols = Math.max(2, Math.round(len / SQ))
-      const sq = len / cols // exact size so squares tile the line end-to-end
-      const corner = (along: number, perp: number): [number, number] => [
-        a.x + ux * along + nx * perp,
-        a.y + uy * along + ny * perp,
-      ]
-      for (let c = 0; c < cols; c++) {
-        for (let r = 0; r < 2; r++) {
-          // r = 0 sits above the centre line (perp −sq..0), r = 1 below (0..sq)
-          const a0 = c * sq
-          const a1 = (c + 1) * sq
-          const p0 = (r - 1) * sq
-          const p1 = r * sq
-          ctx.fillStyle = (c + r) % 2 === 0 ? dark : light
-          ctx.beginPath()
-          ctx.moveTo(...corner(a0, p0))
-          ctx.lineTo(...corner(a1, p0))
-          ctx.lineTo(...corner(a1, p1))
-          ctx.lineTo(...corner(a0, p1))
-          ctx.closePath()
-          ctx.fill()
-        }
-      }
-      // Outline so the band stays delineated against either theme background.
-      ctx.strokeStyle = dark
-      ctx.lineWidth = 1
+  const SQ = 6 // target checker square size (px)
+  const band = computeCheckeredBand(a, b, SQ)
+  if (band) {
+    for (const square of band.squares) {
+      ctx.fillStyle = square.dark ? dark : light
       ctx.beginPath()
-      ctx.moveTo(...corner(0, -sq))
-      ctx.lineTo(...corner(len, -sq))
-      ctx.lineTo(...corner(len, sq))
-      ctx.lineTo(...corner(0, sq))
+      ctx.moveTo(...square.corners[0])
+      ctx.lineTo(...square.corners[1])
+      ctx.lineTo(...square.corners[2])
+      ctx.lineTo(...square.corners[3])
       ctx.closePath()
-      ctx.stroke()
+      ctx.fill()
     }
-
-    // Grab handles: a 2×2-checker square (surface + text) at each endpoint. The
-    // square shape + checker tie them to the start/finish line and keep them
-    // distinct from the round red cursor/track dots.
-    for (const p of [a, b]) {
-      const s = HANDLE_R // half-side
-      ctx.fillStyle = light
-      ctx.fillRect(p.x - s, p.y - s, s * 2, s * 2)
-      ctx.fillStyle = dark
-      ctx.fillRect(p.x - s, p.y - s, s, s) // top-left
-      ctx.fillRect(p.x, p.y, s, s) // bottom-right
-      ctx.lineWidth = 2
-      ctx.strokeStyle = dark
-      ctx.strokeRect(p.x - s, p.y - s, s * 2, s * 2)
-    }
+    // Outline so the band stays delineated against either theme background.
+    ctx.strokeStyle = dark
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(...band.outline[0])
+    ctx.lineTo(...band.outline[1])
+    ctx.lineTo(...band.outline[2])
+    ctx.lineTo(...band.outline[3])
+    ctx.closePath()
+    ctx.stroke()
   }
 
-  // Sector gates: a short perpendicular segment + numbered marker at each
-  // gate's midpoint — deliberately smaller/thinner than the checkered
-  // start/finish band so the two never get confused.
-  const gates = props.gates ?? []
+  // Grab handles: a 2×2-checker square (surface + text) at each endpoint. The
+  // square shape + checker tie them to the start/finish line and keep them
+  // distinct from the round red cursor/track dots.
+  for (const p of [a, b]) {
+    const s = HANDLE_R // half-side
+    ctx.fillStyle = light
+    ctx.fillRect(p.x - s, p.y - s, s * 2, s * 2)
+    ctx.fillStyle = dark
+    ctx.fillRect(p.x - s, p.y - s, s, s) // top-left
+    ctx.fillRect(p.x, p.y, s, s) // bottom-right
+    ctx.lineWidth = 2
+    ctx.strokeStyle = dark
+    ctx.strokeRect(p.x - s, p.y - s, s * 2, s * 2)
+  }
+}
+
+/** Sector gates: a short perpendicular segment + numbered marker at each
+ *  gate's midpoint — deliberately smaller/thinner than the checkered
+ *  start/finish band so the two never get confused. */
+function drawSectorGates(
+  ctx: CanvasRenderingContext2D,
+  proj: MapProjection,
+  gates: { line: LapLine; confirmed: boolean }[],
+): void {
   gates.forEach((g, i) => {
     const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
     const b = proj.toPixel(g.line.b.lat, g.line.b.lon)
@@ -653,30 +558,42 @@ function draw(): void {
     ctx.textBaseline = 'middle'
     ctx.fillText(String(i + 1), mx, my)
   })
+}
 
-  // A9 — unified extrema markers: numbered markers colour-graded green->red
-  // by valueFrac. MIN markers are filled circles (round, unlike the square
-  // gate/start-finish handles) — same visual as the old corner-apex markers.
-  // MAX markers are filled diamonds so the two kinds stay visually distinct
-  // at a glance when both are shown together on the same lap. Numbering is
-  // independent per kind (each starts at 1) so a "min #2" and "max #2" can
-  // coexist without implying an order between the two sets.
-  //
-  // RaceChrono-style value label: the marker's own formatted value (e.g. an
-  // apex speed) drawn as small text just above it, so the number reads
-  // directly off the map instead of only via the side-panel list. Themed
-  // text colour (--color-text) with a stroked halo in the surface colour for
-  // contrast against any track/heatmap colour underneath — same halo
-  // technique used for the numbered marker glyph, just inverted (dark text +
-  // light halo instead of white text + no halo) since this label sits OUTSIDE
-  // the coloured marker, over the track/background rather than over the
-  // marker's own fill.
-  const extrema = props.extremaMarkers ?? []
+/** A9 — unified extrema markers: numbered markers colour-graded green->red
+ *  by valueFrac. MIN markers are filled circles (round, unlike the square
+ *  gate/start-finish handles) — same visual as the old corner-apex markers.
+ *  MAX markers are filled diamonds so the two kinds stay visually distinct
+ *  at a glance when both are shown together on the same lap. Numbering is
+ *  independent per kind (each starts at 1) so a "min #2" and "max #2" can
+ *  coexist without implying an order between the two sets.
+ *
+ *  RaceChrono-style value label: the marker's own formatted value (e.g. an
+ *  apex speed) drawn as small text just above it, so the number reads
+ *  directly off the map instead of only via the side-panel list. Themed
+ *  text colour (--color-text) with a stroked halo in the surface colour for
+ *  contrast against any track/heatmap colour underneath — same halo
+ *  technique used for the numbered marker glyph, just inverted (dark text +
+ *  light halo instead of white text + no halo) since this label sits OUTSIDE
+ *  the coloured marker, over the track/background rather than over the
+ *  marker's own fill. */
+function drawExtremaMarkers(
+  ctx: CanvasRenderingContext2D,
+  proj: MapProjection,
+  markers: {
+    lat: number
+    lon: number
+    value: number
+    valueFrac: number
+    kind: 'min' | 'max'
+    label: string
+  }[],
+): void {
   let minSeen = 0
   let maxSeen = 0
   const MARK_R = 9
   const LABEL_OFFSET_Y = MARK_R + 11 // clears the marker glyph, sits just above it
-  extrema.forEach((m) => {
+  markers.forEach((m) => {
     const p = proj.toPixel(m.lat, m.lon)
     const numberLabel = m.kind === 'min' ? String(++minSeen) : String(++maxSeen)
     ctx.fillStyle = extremumColor(m.valueFrac)
@@ -714,22 +631,132 @@ function draw(): void {
     ctx.fillStyle = cssVar('--color-text')
     ctx.fillText(m.label, p.x, ly)
   })
+}
 
-  // cursor marker
-  const ci = props.cursorIdx
-  if (ci != null && ci >= 0 && ci < n && !Number.isNaN(px[ci])) {
-    ctx.fillStyle = cssVar('--color-accent')
-    ctx.beginPath()
-    ctx.arc(px[ci], py[ci], 5, 0, Math.PI * 2)
-    ctx.fill()
+/** Cursor marker: a filled accent-colour dot at the current sample index, or
+ *  nothing when out of range / on a gap (no fix at that sample). */
+function drawCursorMarker(
+  ctx: CanvasRenderingContext2D,
+  px: Float64Array,
+  py: Float64Array,
+  cursorIdx: number | null | undefined,
+  n: number,
+): void {
+  if (cursorIdx == null || cursorIdx < 0 || cursorIdx >= n || Number.isNaN(px[cursorIdx])) return
+  ctx.fillStyle = cssVar('--color-accent')
+  ctx.beginPath()
+  ctx.arc(px[cursorIdx], py[cursorIdx], 5, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+function draw(): void {
+  const cv = canvas.value
+  if (!cv) return
+  const ctx = cv.getContext('2d')
+  if (!ctx) return
+
+  const { w, h } = setupCanvasFrame(cv, ctx)
+
+  const track = props.track
+  if (!track) {
+    projection = null
+    return
   }
+
+  // Multi-file overlay (賽道地圖多檔疊圖): fit the projection to the COMBINED
+  // bounds of the active track + every overlaid session, not just the active
+  // one — otherwise an overlay whose bbox extends past the active track's own
+  // would draw (partly) off-canvas. See fitProjection's multi-track doc.
+  const overlayTracks = props.overlayTracks ?? []
+  const base = fitProjection(
+    overlayTracks.length ? [track, ...overlayTracks.map((o) => o.track)] : track,
+    w,
+    h,
+    PAD,
+  )
+  if (!base) {
+    projection = null
+    return
+  }
+
+  // Compose the base fit with the current zoom/pan into the view projection. The
+  // composition is affine (uniform scale + translate of an affine fit), so every
+  // downstream pixel calculation — polyline, line band, handles, lap offsets —
+  // works unchanged in screen space, and lap-offset pixel shifts scale with zoom.
+  lastW = w
+  lastH = h
+  const z = zoom.value
+  const tx = panX.value
+  const ty = panY.value
+  const view = composeViewProjection(base, z, tx, ty)
+  projection = view
+  const proj = view
+
+  // Project the active track (+ the focusRange sub-bbox for #7's auto-fit)
+  // and every overlay track through the SAME base projection in one pass
+  // each, then fold every bbox together so panning stays clamped to
+  // whatever's actually drawn (multi-file overlay). Overlay pixels are
+  // captured now but STROKED later (drawOverlayTracks, below) — right before
+  // the active track's own polyline — so painter's-order keeps the active
+  // session on top.
+  const n = track.valid.length
+  const activeProjected = projectSamples(track.lat, track.lon, track.valid, base.toPixel, z, tx, ty, props.focusRange)
+  px = activeProjected.px
+  py = activeProjected.py
+  let bbox: BBox | null = activeProjected.bbox
+
+  const overlayPixels = overlayTracks.map((entry) => {
+    const projected = projectSamples(entry.track.lat, entry.track.lon, entry.track.valid, base.toPixel, z, tx, ty)
+    bbox = mergeBBox(bbox, projected.bbox)
+    return { color: entry.color, xs: projected.px, ys: projected.py, offset: entry.offset }
+  })
+
+  if (bbox) {
+    baseMinX = bbox.minX
+    baseMaxX = bbox.maxX
+    baseMinY = bbox.minY
+    baseMaxY = bbox.maxY
+  }
+  if (activeProjected.rangeBbox) {
+    focusMinX = activeProjected.rangeBbox.minX
+    focusMaxX = activeProjected.rangeBbox.maxX
+    focusMinY = activeProjected.rangeBbox.minY
+    focusMaxY = activeProjected.rangeBbox.maxY
+  } else {
+    focusMinX = NaN
+    focusMaxX = NaN
+    focusMinY = NaN
+    focusMaxY = NaN
+  }
+
+  // Reference geo point + cos(lat) for converting a metres offset (#9 lap
+  // alignment) to a constant pixel shift via the view projection.
+  const ref = firstValidRefPoint(track.lat, track.lon, track.valid)
+  const pixelShift = (off?: { x: number; y: number }): [number, number] =>
+    metresOffsetToPixelShift(off, ref, ref.cosRefLat, proj.toPixel)
+
+  // Heatmap swatches: bucketed by props.colorValues, at most HEAT_BUCKETS
+  // strokes issued per stroked range regardless of sample count.
+  const colorVals = props.colorValues
+  const swatches = colorVals ? colormapSwatches(props.colormap ?? 'turbo', HEAT_BUCKETS) : []
+  const heat = !!colorVals
+
+  drawOverlayTracks(ctx, overlayPixels, pixelShift)
+
+  const highlightLaps = resolveHighlightSegments(props.highlightLaps, props.focusRange, cssVar('--color-accent'))
+  const comparisonHighlights = props.comparisonLapHighlights ?? []
+  const anySelection = highlightLaps.length > 0 || comparisonHighlights.length > 0
+
+  drawTrackPath(ctx, px, py, n, heat, anySelection, colorVals, swatches)
+  drawLapHighlights(ctx, highlightLaps, px, py, n, heat, colorVals, swatches, pixelShift)
+  drawComparisonHighlights(ctx, comparisonHighlights, base, z, tx, ty, pixelShift)
+  drawStartFinishLine(ctx, proj, props.line)
+  drawSectorGates(ctx, proj, props.gates ?? [])
+  drawExtremaMarkers(ctx, proj, props.extremaMarkers ?? [])
+  drawCursorMarker(ctx, px, py, props.cursorIdx, n)
 }
 
 // ── zoom / pan ──────────────────────────────────────────────────────────────
-
-function clampZoom(z: number): number {
-  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z))
-}
 
 /**
  * Keep the track from being dragged entirely off-screen: each axis is clamped so
@@ -741,23 +768,16 @@ const PAN_MARGIN = 48
 function clampPan(): void {
   if (!lastW || !lastH || Number.isNaN(baseMinX)) return
   const z = zoom.value
-  const clampAxis = (p: number, bmin: number, bmax: number, size: number): number => {
-    const lo = PAN_MARGIN - bmax * z
-    const hi = size - PAN_MARGIN - bmin * z
-    if (lo > hi) return (lo + hi) / 2
-    return Math.min(hi, Math.max(lo, p))
-  }
-  panX.value = clampAxis(panX.value, baseMinX, baseMaxX, lastW)
-  panY.value = clampAxis(panY.value, baseMinY, baseMaxY, lastH)
+  panX.value = clampPanAxis(panX.value, baseMinX, baseMaxX, lastW, z, PAN_MARGIN)
+  panY.value = clampPanAxis(panY.value, baseMinY, baseMaxY, lastH, z, PAN_MARGIN)
 }
 
 /** Zoom by `factor` while keeping the geo point under screen (sx, sy) fixed. */
 function zoomAbout(sx: number, sy: number, factor: number): void {
-  const z2 = clampZoom(zoom.value * factor)
-  const f = z2 / zoom.value
-  panX.value = sx - (sx - panX.value) * f
-  panY.value = sy - (sy - panY.value) * f
-  zoom.value = z2
+  const next = computeZoomAbout(sx, sy, factor, zoom.value, panX.value, panY.value, MIN_ZOOM, MAX_ZOOM)
+  zoom.value = next.zoom
+  panX.value = next.panX
+  panY.value = next.panY
   clampPan()
 }
 
@@ -792,27 +812,20 @@ const FOCUS_FIT_MIN_FRACTION = 0.4
  */
 function fitToFocus(): void {
   if (!lastW || !lastH || Number.isNaN(focusMinX) || Number.isNaN(baseMinX)) return
-  const fw = focusMaxX - focusMinX
-  const fh = focusMaxY - focusMinY
-  // Degenerate bbox (e.g. a single point / straight line with ~0 extent on
-  // one axis) — still worth centring/zooming on, so only bail on truly empty.
-  if (fw < 0 || fh < 0) return
-
-  const bw = Math.max(baseMaxX - baseMinX, 1e-9)
-  const bh = Math.max(baseMaxY - baseMinY, 1e-9)
-  if (fw >= bw * FOCUS_FIT_MIN_FRACTION && fh >= bh * FOCUS_FIT_MIN_FRACTION) return
-
-  const availW = Math.max(lastW - 2 * FOCUS_FIT_PAD, 1)
-  const availH = Math.max(lastH - 2 * FOCUS_FIT_PAD, 1)
-  const scaleX = fw > 1e-9 ? availW / fw : MAX_ZOOM
-  const scaleY = fh > 1e-9 ? availH / fh : MAX_ZOOM
-  const z2 = clampZoom(Math.min(scaleX, scaleY))
-
-  const cx = (focusMinX + focusMaxX) / 2
-  const cy = (focusMinY + focusMaxY) / 2
-  zoom.value = z2
-  panX.value = lastW / 2 - cx * z2
-  panY.value = lastH / 2 - cy * z2
+  const fit = computeFocusFit(
+    { minX: focusMinX, maxX: focusMaxX, minY: focusMinY, maxY: focusMaxY },
+    { minX: baseMinX, maxX: baseMaxX, minY: baseMinY, maxY: baseMaxY },
+    lastW,
+    lastH,
+    FOCUS_FIT_PAD,
+    FOCUS_FIT_MIN_FRACTION,
+    MIN_ZOOM,
+    MAX_ZOOM,
+  )
+  if (!fit) return
+  zoom.value = fit.zoom
+  panX.value = fit.panX
+  panY.value = fit.panY
   clampPan()
 }
 
@@ -983,8 +996,16 @@ function onPointerMove(e: PointerEvent): void {
   if (!px || !py) return
   const pos = clientPos(e)
   if (!pos) return
-  const HIT = 24
-  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT))
+  // B30b(a) — prefer snapping onto a currently highlighted/selected SAME-FILE
+  // lap's own samples (see nearestSample's doc for why: overlapping laps on a
+  // closed-loop track can otherwise steal the nearest-point hit and silently
+  // break the overlay chart's cursor mapping, which only follows a sample
+  // that's actually inside a selected lap). `highlightLaps` indexes into
+  // THIS track's own samples (unlike `comparisonLapHighlights`, which indexes
+  // into other sessions' tracks — never valid ranges here).
+  const preferredRanges = (props.highlightLaps ?? []).map((l) => ({ startIdx: l.startIdx, endIdx: l.endIdx }))
+  const HIT = resolveTrackHitRadius(anyPointerCoarse.value)
+  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT, preferredRanges))
 }
 
 function onPointerUp(e: PointerEvent): void {
@@ -1016,6 +1037,45 @@ function onPointerLeave(): void {
   if (mode === 'idle') emit('cursor', null)
 }
 
+// B30 — coalesce cursorIdx-driven redraws to at most one per animation frame.
+// `draw()` re-renders the WHOLE canvas every time (full track polyline,
+// heatmap buckets, highlight/comparison segments, gates, extrema
+// labels/strokeText, start/finish band — see the function above), not just
+// the cursor dot. `watch(() => props.cursorIdx, () => draw())` used to call
+// that full pipeline SYNCHRONOUSLY on every single hover-driven cursor
+// change — i.e. on every mousemove pixel, since map→chart cursor forwarding
+// (TrackMap's own idle-hover branch in onPointerMove below) emits a new
+// cursorIdx on every pointermove. On a real multi-lap/heatmap track (tens of
+// thousands of samples, HEAT_BUCKETS strokes, per-marker strokeText/fillText)
+// a single draw() can take long enough that a fast mouse move floods the main
+// thread with a backlog of queued draw() calls it can't keep up with — from
+// the user's POV the map cursor "freezes" near wherever it first landed while
+// the backlog slowly (or never, in practice) catches up, exactly matching the
+// "only the first touched point registers, not continuous" symptom. This
+// doesn't reproduce on a small synthetic track (draw() is cheap enough there
+// to always keep up), which is why it wasn't caught by a plain small-fixture
+// component test.
+//
+// scheduleDraw() fixes this the standard way: coalesce however many
+// cursorIdx changes land within one frame into a SINGLE draw() call that
+// reads props.cursorIdx fresh (not a captured stale value) — so the render
+// loop can never fall behind the input rate, capping redraw work to the
+// display's own refresh rate regardless of how fast the pointer moves. Only
+// used for the two purely-hover-driven triggers below (the cursorIdx prop
+// watch, and onPointerLeave's clear-to-null) — every OTHER draw() call site
+// (zoom/pan, line/gate drag, resize, focusRange fit) stays synchronous and
+// unchanged, since those either need draw()'s side effects (focusMinX/Y etc.)
+// available immediately afterward, or aren't high-frequency enough to matter.
+let cursorDrawScheduled = false
+function scheduleDraw(): void {
+  if (cursorDrawScheduled) return
+  cursorDrawScheduled = true
+  requestAnimationFrame(() => {
+    cursorDrawScheduled = false
+    draw()
+  })
+}
+
 onMounted(() => {
   draw()
   ro = new ResizeObserver(() => draw())
@@ -1032,7 +1092,7 @@ onBeforeUnmount(() => {
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
 watch(() => props.track, () => resetView())
-watch(() => props.cursorIdx, () => draw())
+watch(() => props.cursorIdx, () => scheduleDraw())
 watch(() => props.line, () => draw())
 watch(() => props.highlightLaps, () => draw())
 watch(() => props.comparisonLapHighlights, () => draw())

@@ -163,4 +163,35 @@ describe('useAutoFlip', () => {
 
     expect(rectSpy).not.toHaveBeenCalled()
   })
+
+  // B32b — regression test for the debounced-re-attach race: re-enabling
+  // (e.g. unpinning) schedules `attach()` PIN_FLIP_DURATION_MS+40ms later (see
+  // the composable's own doc on `enabled`), deliberately deferred so it
+  // doesn't measure a baseline mid-flight. If `enabled` flips OFF again
+  // (re-pinned) before that timer fires, the stale timer must not still fire
+  // and re-arm the observer — a prior version left the `window.setTimeout`
+  // uncancelled, so it ran regardless of the CURRENT `enabled` value.
+  it('does not re-attach from a stale debounced timer when re-disabled before it fires (rapid pin -> unpin -> re-pin)', async () => {
+    const wrapper = mount(Host, { props: { enabled: true } })
+    const el = wrapper.find('.target').element as HTMLElement
+    const parent = el.parentElement!
+    const rectSpy = vi.spyOn(el, 'getBoundingClientRect')
+
+    await wrapper.setProps({ enabled: false }) // pin: detach, no timer scheduled
+    await wrapper.setProps({ enabled: true }) // unpin: schedules a debounced re-attach
+    await wrapper.setProps({ enabled: false }) // re-pin, well before the debounce fires
+
+    rectSpy.mockClear()
+    // Past PIN_FLIP_DURATION_MS + 40 — the stale timer from the first
+    // unpin would fire around here if left uncancelled.
+    await new Promise((resolve) => setTimeout(resolve, PIN_FLIP_DURATION_MS + 100))
+
+    // Re-attaching would call getBoundingClientRect (to seed lastRect) and
+    // start observing `parent` again — assert neither happened, i.e. the
+    // card is still correctly disabled (pinned).
+    expect(rectSpy).not.toHaveBeenCalled()
+    parent.style.transform = 'translate(0px, 999px)'
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(el.style.transform).toBe('')
+  })
 })

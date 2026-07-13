@@ -729,6 +729,49 @@ describe('reconcileLayout', () => {
     const map = next.find((it) => it.i === STATIC_CARD_IDS.map)!
     expect(map).toEqual(layout[0]) // untouched — no compaction ran
   })
+
+  // B34 — an older persisted layout (saved before a static card type existed,
+  // e.g. before B15's 目前數值 card) must self-heal by gaining that card, not
+  // silently omit it forever just because it isn't in defaultLayout()'s
+  // one-time snapshot.
+  describe('B34 — migrates in a static card type missing from an older persisted layout', () => {
+    it('appends a missing static card (currentValues) below the existing layout', () => {
+      const layout = defaultLayout().filter((it) => it.i !== STATIC_CARD_IDS.currentValues)
+      expect(layout.some((it) => it.i === STATIC_CARD_IDS.currentValues)).toBe(false)
+      const next = reconcileLayout(layout, [1])
+      const added = next.find((it) => it.i === STATIC_CARD_IDS.currentValues)
+      expect(added).toBeDefined()
+      expect(added!.w).toBeGreaterThan(0)
+      expect(added!.h).toBeGreaterThan(0)
+    })
+
+    it('does not overlap any existing card when appending the missing static card', () => {
+      const layout = defaultLayout().filter((it) => it.i !== STATIC_CARD_IDS.currentValues)
+      const next = reconcileLayout(layout, [])
+      const added = next.find((it) => it.i === STATIC_CARD_IDS.currentValues)!
+      for (const other of next) {
+        if (other.i === added.i) continue
+        const overlap =
+          added.x < other.x + other.w && other.x < added.x + added.w && added.y < other.y + other.h && other.y < added.y + added.h
+        expect(overlap).toBe(false)
+      }
+    })
+
+    it('leaves an already-complete layout untouched (same reference) once migrated', () => {
+      const layout = defaultLayout()
+      const next = reconcileLayout(layout, [1])
+      expect(next).toBe(layout)
+    })
+
+    it('preserves existing cards positions unchanged while adding the missing one', () => {
+      const layout = defaultLayout()
+        .filter((it) => it.i !== STATIC_CARD_IDS.currentValues)
+        .map((it) => (it.i === STATIC_CARD_IDS.map ? { ...it, x: 9, y: 3 } : it))
+      const next = reconcileLayout(layout, [1])
+      const map = next.find((it) => it.i === STATIC_CARD_IDS.map)!
+      expect(map).toEqual(layout.find((it) => it.i === STATIC_CARD_IDS.map))
+    })
+  })
 })
 
 describe('isItemDraggable / isItemResizable (lock + pin interplay)', () => {

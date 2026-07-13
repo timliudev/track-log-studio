@@ -172,6 +172,24 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - 多圖表 **X 軸同步**；軌跡圖同步顯示目前游標位置。
 - XY 軸可縮放；**重設縮放**鈕於縮放中出現，桌面另支援按住 Shift 拖曳平移（觸控維持單指拖曳
   平移 / 雙指縮放，見 B9）。
+- **B30b 地圖↔圖表游標連動（兩個修復）**：(a) 選圈後疊圈圖的 X 軸是「圈相對」座標（見上）——
+  地圖 hover 命中的樣本若落在某個已選圈的範圍內，`TimeSeriesChart.vue` 既有的
+  `overlayCursor.ts`（`gridIndexAtSampleIndex`/`lapContaining`）會把它換算成圈相對 grid X，
+  游標才跟得上；未選圈（或 hover 到非選取的軌跡段）時維持原始 session-index 直接對應。實際
+  回報的「游標常不動」根因其實是**命中錯圈**：賽道是閉環，不同圈的 GPS 軌跡常常只差幾個像素，
+  單純「全軌跡最近點」掃描容易吸到相鄰但**未選取**的圈，一旦命中樣本不在任何已選圈範圍內，
+  上述換算就找不到圈而不動——`TrackMap.vue` 現在會把目前高亮／已選圈的 [startIdx,endIdx]
+  範圍當作「優先範圍」丟給 `trackNearestSample.ts` 的 `nearestSample()`：範圍內只要在命中半徑
+  內就優先採用，即使全軌跡有更近的點在範圍外；範圍內找不到才退回全軌跡最近點（=今天的行為，
+  用於未選圈或 hover 非選取段的情況）。(b) 命中半徑同時放寬（`resolveTrackHitRadius()`，一般
+  指標 32px、任何觸控裝置在場則 48px，取自 `useInputCapabilities()` 的 `anyPointerCoarse`，同
+  §8 layer 3 慣例）。
+- **B46 XY 散佈圖 / G-G 圖縮放**：兩者共用同一顆 `GgChart.vue`（ECharts）元件——ScatterChart.vue
+  只是依資料決定 `axisMode`（訊號正負對稱→'square' 走 G-G 摩擦圓看法，否則'auto'）——縮放/平移
+  功能因此自動兩者一致，不需分別實作。X、Y 各掛一個 `dataZoom: {type:'inside'}`：滑鼠滾輪縮放
+  +拖曳平移，觸控原生支援雙指縮放/拖曳平移，不需額外手勢程式碼。同樣有「重設縮放」鈕，出現
+  /樣式規則與 B9 一致（沿用同一支 `resetZoom` i18n 字串），座標軸鎖 1:1（`equalAspect`/`square`）
+  下獨立縮放 X/Y 理論上會暫時偏離正圓，屬已知取捨，未特別處理。
 - **B8**：主時序圖不再有「時序 / 疊圈」模式切換——**疊圈是唯一的顯示方式**：沒有選圈時退回
   顯示整段 session（時間/距離軸連續資料，等同舊「時序」模式的畫面）；選了圈之後才切到
   各圈疊在共用「圈相對 X」（從 0 起算）上比較。跨檔 overlay（cross-session、每圈 offset）
@@ -187,7 +205,12 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   時間是未設定狀態，顯示「記錄結束時的狀態」比整卡破折號更有用。純函式見
   `domain/analysis/currentValues.ts`（`resolveCurrentValueIndex` / `buildCurrentValueFields` /
   `formatCurrentValueField`）——每格皆為 O(1) 索引存取，`timeSeconds()` 只依 session 快取一次，
-  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。
+  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。**B43**：卡片最窄可縮到
+  `minW:2`（與多數控制面板同一底線），格狀 `grid-template-columns` 用
+  `minmax(min(96px,100%),1fr)` 而非固定 `96px`，卡片窄到只容一欄時自動單列直排、不出現橫向捲動。
+  **B44**：任一格的**顯示字串**（非原始數值）相對上一次渲染改變時，該格背景做一次低對比（accent
+  10% 透明度、400ms、`color-mix`）脈衝提示；同一格連續變化只重啟動畫、不疊加；`目前時間`格排除在外
+  （每次都變，提示無意義）；`prefers-reduced-motion: reduce` 時停用動畫。
 - **B24 共用容器 `CardFillScroll.vue`**：卡片內「固定控制列 + 內容區自身伸縮捲動」的共用版型
   （`#header` 具名 slot 固定、預設 slot 填滿剩餘高度並自行 `overflow:auto`），取代個別元件各自
   土砲 `max-height` 寫死高度（例：加速測試區段列表原本卡在 260px，改用此容器後跟卡片一起縮放）；
@@ -233,6 +256,14 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - **響應式**：CSS 變數 + container queries；可手動切換版面與縮放，並持久化。
 - **日夜**：`prefers-color-scheme` + 手動覆蓋，CSS 變數主題。
 - **輸入**：Pointer Events 統一滑鼠 / 觸控 / 觸控板；可在設定調整。
+- **觸控友善四層政策（2026-07-13 拍板，B35；取代「以寬度判斷」，也不可「以裝置分類判斷」——同一台機器會換輸入方式：DeX/手機接藍牙鍵鼠、S Pen、平板純觸控、筆電觸控板皆為實際情境）**：
+  1. **互動設計輸入無關（根本解）**：任何功能不得只有單一輸入方式可達成——不准 hover-only（tooltip/游標連動要能點擊或拖曳觸發）、不准修飾鍵-only（Shift+拖曳平移要有觸控等價：觸控拖曳平移或平移模式鈕）。判斷錯了頂多不順，不會不能用。
+  2. **逐事件判斷，不是逐裝置**：行為分支一律看 `PointerEvent.pointerType`（`mouse`/`touch`/`pen`）——手指拖=平移、滑鼠拖=框選縮放，同一裝置混用輸入時各走各的，零模式切換；S Pen（`pen`，支援懸浮）自然獲得 hover 體驗；觸控板即 mouse+wheel。
+  3. **能力查詢只做預設密度**：`any-pointer: coarse`（存在任何觸控）→ 點擊目標 ≥44px、常駐把手；用 `matchMedia` change 監聽包成響應式 `useInputCapabilities()`（接上/拔掉滑鼠會即時重評），**不得**載入時判斷一次定案，**不得**以視窗寬度代替。
+  4. **設定手動覆蓋**：設定頁「操作模式：自動／觸控優先／指標優先」持久化，作為自動判斷的保險絲。
+  - **實作註記（B35 基礎建設，2026-07-13）**：`composables/useInputCapabilities.ts` 是唯一 primitive，包三條 `matchMedia`（`any-pointer: coarse`／`pointer: coarse`／`any-hover: none`，各自掛 change 監聽）+ `settingsStore.inputModePref`（層4覆蓋，'auto' 時原樣透傳、'touch'/'pointer' 時三個能力全部釘死）；在 App.vue 掛一次（同 useTheme/useLocale 模式），並鏡射成 `<html data-any-pointer-coarse|data-pointer-coarse|data-any-hover-none>` 三個 boolean attribute，讓純 CSS 用 `:root[data-any-pointer-coarse] .foo {...}` 就能吃到訊號，不必每個元件都 import 這個 composable。已遷移到能力訊號的點擊目標：`LapTable.vue` 的 ⦸ 排除鈕、`SessionLapComparison.vue` 的 offset ±／reset 鈕、`UPlotChart.vue` 的重設縮放鈕、`DashboardCard.vue` 的收折/釘選鈕、`TimeSeriesChart.vue`/`ScatterChart.vue` 的刪除圖表鈕；`theme.css` 另外用同一訊號補了一條全域規則把 grid-layout-plus 的 resize 把手（`.analyzer .vgl-item__resizer`）在寬螢幕+粗指標（如平板跑桌面版面）下也長到 30px——這個 30px 數值原本只掛在 `AnalyzerView.vue` 的 `@media (max-width: 768px)`（該檔案本輪未動,由另一支 agent 處理中）,兩條規則疊加、互不牴觸。真正屬於「版面」的寬度斷點（`BottomNav` 顯示切換、dashboard 單欄堆疊——`useDashboardLayout.ts` 的 `MOBILE_BREAKPOINT_PX`）維持寬度判斷不變,那些跟輸入能力無關。圖表手勢部分：`UPlotChart.vue` 觸控拖曳平移/雙指縮放本來就是逐事件 `pointerType`,並非寬度 gate；本輪修正的是 `pen` 誤入觸控分支的 bug（抽成可測的 `isTouchGesturePointer()`),改為與 `mouse` 同路（框選縮放 + Shift 平移),理由是 S Pen 已有懸浮能力,自然比照滑鼠體驗。
+  - **實作註記（B31 固定中線游標模式，2026-07-14）**：`settingsStore.centreCursorMode`（布林，預設 false，與 `inputModePref` 同一顆 store／同一份 B19 匯出匯入)，只由 `TimeSeriesChart.vue` 讀取並往下傳給 `UPlotChart.vue` 的新 prop `centreCursorMode`（`GearPanel.vue`/`SessionMergePanel.vue` 的獨立圖表沒傳這個 prop，完全不受影響——刻意的低風險 scoping)。開啟後：(1) 圖表水平中央畫一條常駐垂直線（純 CSS overlay，定位在 `wrap`——不是 `host`，因為 uPlot 自己的 `.u-wrap`/`.u-over` 是直接掛在 `host` 下、不受 Vue 模板追蹤，硬塞子節點進去太脆弱)，同時關閉 uPlot 原生 hover 十字準星（`cursor.x/y: false`，避免兩個游標指示器打架)；(2) **任何 pointerType 的拖曳都是同一個手勢**（`onPointerDown/Move/Up` 裡新增的 `centreCursorMode` 分支，早於既有 touch-only 分岐，off 時完全不影響既有觸控/滑鼠/pen 行為)，重用既有 `dataXBounds`/`currentXRange`/`panRange`/`emitXRange` pipeline 平移可視範圍（不含雙指縮放——刻意只挑一種手勢，見 prop 文件)；(3) 每次可視範圍變動（拖曳、或別的圖表同步過來的 `xRange`）都從 `setScale` hook 重新算「中線目前對到哪個 sample」（純函式 `centreCursorIndex`，見 `UPlotChart.vue` 開頭 + `test/units/uplotChartCentreCursor.test.ts`）並 emit 成這顆圖表的 `cursor`——跨圖表同步靠既有共用 `xRange` 機制順便達成（拖一顆圖表會連動全部同一個 xRange 的圖表)，`externalCursor` prop 在此模式下直接忽略（沒有「hover 位置」這回事)。設定頁核取方塊 + `zh-Hant`/`en` locale 皆已補上（`centreCursor.label`/`.hint`)。
+  - **修正記錄（B31b，2026-07-14 稍後）**：使用者實測回報「一點用都沒有、還是歪的」。查證後，指針自身像素位置（`needleOffsetX(plotLeft, plotWidth)`）與指針下取樣值（`valueAtPlotX`/`centreCursorIndex`，本 app 恆為線性 X scale，等價於 `posToVal(中心像素)`）皆早已正確，兩者都補上純函式 + 單元測試釘住（`test/units/uplotChartCentreCursor.test.ts`）。真正的根因是**拖曳完全沒作用**：`cursor.x: false`／`cursor.y: false` 只關掉 uPlot 原生十字準星的「畫」，並不會關掉 uPlot 自己獨立的 `cursor.drag`（預設 `{ x: true, setScale: true }`）——所以中線模式下，一般滑鼠拖曳仍會同時觸發 uPlot 自己原生的框選縮放（真滑鼠的 `mousedown`/`mousemove`/`mouseup` 是原生事件、不是從 pointer event 合成出來的「相容事件」，所以本元件自己 `pointerdown` 上呼叫的 `preventDefault()` 並不會抑制它們——只對 touch/pen 才有效)，兩邊同時搶著改同一個 x scale，使用者一放開滑鼠，畫面就被 uPlot 自己的框選縮放蓋掉，看起來「歪」且「沒用」。修法：`centreCursorMode` 開啟時 `cursor.drag` 也一併關閉（`{ setScale: false, x: false, y: false }`），讓本元件自己的 `onCentrePointerDown/Move/Up` 是唯一能改 x range 的路徑。用真的 `uplot` 套件（非 mock）+ 最小 fake DOM 直接發真實 mousedown/mousemove/mouseup 到 uPlot 自己的 `.u-over` 監聽器上釘住這個機制層級的迴歸測試：`test/units/uplotChartCentreDrag.test.ts`。
 
 ---
 
@@ -367,7 +398,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   CI/CD 每次部署自動更新。里程碑才鬆散打 tag。
 - **Cloudflare Workers（靜態資產）** 由使用者在後台接 Git（**Workers Builds**，prod=`main`、
   build `npm run build`、輸出 `dist`、Node 由 `.nvmrc`=22）；設定見 `wrangler.jsonc`，無需 repo 密鑰。
-  正式網址 `https://track-log-studio.timliudev.workers.dev`。（非 Pages——Pages 後台只有另一個專案。）
+  正式網址（自訂網域）**`https://tracklogstudio.timliudev.com`**；
+  `https://track-log-studio.timliudev.workers.dev` 為同一 Worker 的預設網址（重複主機），
+  SEO canonical 一律指自訂網域，workers.dev 以 301 轉往自訂網域（B39d）。
+  （非 Pages——Pages 後台只有另一個專案。）
 - **分析 / 廣告**（未來）：GA4 / Cloudflare Web Analytics / AdSense 用**公開 ID**(`VITE_*` env)，
   非密鑰；lazy-load、離線不載、守隱私。
 
@@ -419,7 +453,9 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 9. ~~**E 圈次分析**：手動 sector → 理論最佳圈(optimal) → delta time。~~ **DONE**：
    `sectorTiming.ts` 的 `computeSectorTimes`（逐圈 sector 時間）+ `computeOptimalLap`
    （逐 sector 取最小值組出理論最佳圈）；`gateOrder.ts` 的 `sortGatesByPosition` 讓手動加/拖曳的
-   gate 依實際圈上位置排序。
+   gate 依實際圈上位置排序。**B47**：理論最佳圈摘要放在 `SectorPanel.vue` 的 `CardFillScroll`
+   `#header`（自動偵測彎道／新增閘門控制列之後、閘門列表之前）而非隨閘門列表捲動，
+   卡片再矮也看得到；閘門列表仍在可捲動的預設 slot。
 10. **F 行動裝置驗收**：真機 + production build 查 Android 載入後偶發重整（疑記憶體壓力,桌面無法重現）。
     **診斷工具已備（`src/debug/diagnostics.ts`，feature/mobile-diagnostics）**：手機無 DevTools、
     重整又清 console，故 `?debug=1` 開啟一個純 DOM 自我診斷面板，把 `document.wasDiscarded`

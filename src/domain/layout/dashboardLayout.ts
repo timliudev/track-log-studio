@@ -83,10 +83,13 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.sessionMerge]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.suspension]: { minW: 2, minH: 3 },
-  // B15 — same floor as most control panels; the grid of value tiles scrolls
-  // (via CardFillScroll) below this, so there's no correctness reason to
-  // require more than a couple of rows to stay legible.
-  [STATIC_CARD_IDS.currentValues]: { minW: 3, minH: 3 },
+  // B15/B43 — same floor as most control panels (minW:2): the value grid
+  // itself (`.values-grid`'s `auto-fill minmax(min(96px,100%),1fr)` — see
+  // CurrentValuesPanel.vue) already collapses to a single column and scrolls
+  // (via CardFillScroll) once the card gets this narrow, so there's no
+  // correctness reason to hold this card to a wider floor than any other
+  // control panel.
+  [STATIC_CARD_IDS.currentValues]: { minW: 2, minH: 3 },
 }
 
 /** Chart cards (uPlot/echarts) need more room than a small control panel to
@@ -620,16 +623,38 @@ export function mobileLayout(
   })
 }
 
+/** B34 — default position/size for a STATIC card missing from a persisted
+ *  layout (an older layout saved before that card type existed, e.g. B15's
+ *  目前數值 card added only to `defaultLayout()` — see {@link reconcileLayout}'s
+ *  doc). Same "append below everything, at whatever size the card wants"
+ *  rule {@link defaultChartItem} uses for a newly added chart: looks up the
+ *  card's shape from `defaultLayout()` (falling back to its `minSizeFor` floor
+ *  if it's somehow not listed there) so it isn't squashed to an arbitrary
+ *  size, and places it full-width at column A's x so it doesn't need the
+ *  3-column split's exact geometry to avoid overlapping anything. */
+function defaultStaticItem(id: string, layout: DashboardLayoutItem[]): DashboardLayoutItem {
+  const template = defaultLayout().find((it) => it.i === id)
+  const { minW, minH } = minSizeFor(id)
+  const maxY = layout.reduce((m, it) => Math.max(m, it.y + it.h), 0)
+  return { i: id, x: 0, y: maxY, w: template?.w ?? minW, h: template?.h ?? minH }
+}
+
 /**
- * Reconcile a layout against the CURRENT set of chart ids (static card ids
- * never change, so only chart cards need reconciling): appends a default-
- * positioned item for any chart id missing from the layout (a newly added
- * chart), and drops any chart-card entry whose chart no longer exists (a
- * removed chart) — static-card entries are always kept even if momentarily
- * absent from `chartIds` (they're not chart ids, so they're untouched by
- * either pass). Called after loading a persisted layout AND after every
- * add/remove so the layout array and `analyzerStore.charts` never drift out
- * of sync (stale entries would otherwise accumulate in localStorage forever).
+ * Reconcile a layout against the CURRENT set of chart ids AND the current
+ * set of known static card ids: appends a default-positioned item for any
+ * chart id missing from the layout (a newly added chart) or any
+ * `STATIC_CARD_IDS` value missing from the layout (a static card type
+ * introduced AFTER this layout was first saved — B34: B15's 目前數值 card was
+ * added only to `defaultLayout()`, so every user with an already-persisted
+ * layout never received it; the same gap existed for every earlier static
+ * card added this way — see dashboardLayout's git history for `sessionMerge`/
+ * `suspension` — this is the first time it's actually been fixed rather than
+ * only affecting fresh installs), and drops any chart-card entry whose chart
+ * no longer exists (a removed chart). Called after loading a persisted layout
+ * AND after every add/remove so the layout array and `analyzerStore.charts`
+ * never drift out of sync (stale entries would otherwise accumulate in
+ * localStorage forever), and so a future new static card type self-heals the
+ * same way without needing its own bespoke migration.
  */
 export function reconcileLayout(
   layout: DashboardLayoutItem[],
@@ -638,6 +663,7 @@ export function reconcileLayout(
   const wantedChartItemIds = new Set(chartIds.map(chartItemId))
   const present = new Set(layout.map((it) => it.i))
   const missingChartIds = chartIds.filter((chartId) => !present.has(chartItemId(chartId)))
+  const missingStaticIds = Object.values(STATIC_CARD_IDS).filter((id) => !present.has(id))
   const hasStaleChartEntries = layout.some((it) => isChartItemId(it.i) && !wantedChartItemIds.has(it.i))
 
   // True no-op (nothing to drop, nothing to add) -> hand back the SAME array
@@ -650,7 +676,7 @@ export function reconcileLayout(
   // exactly like a real change would (see mergeLayoutPositions's doc for why
   // that identity matters — #4 crash fix: this is the OTHER write path into
   // `layout.value`, alongside the drag/gutter write-back).
-  if (!hasStaleChartEntries && missingChartIds.length === 0) return layout
+  if (!hasStaleChartEntries && missingChartIds.length === 0 && missingStaticIds.length === 0) return layout
 
   // Drop chart-card entries for charts that no longer exist; keep every
   // static-card entry (and any not-yet-recognised id) untouched.
@@ -668,6 +694,13 @@ export function reconcileLayout(
   const compactedKept = hasStaleChartEntries ? compactLayoutTopLeft(kept) : kept
 
   const result = [...compactedKept]
+  // Static cards are appended FIRST (in `STATIC_CARD_IDS`'s declared order)
+  // so a layout missing several new card types at once stacks them in a
+  // stable, predictable order rather than however `Object.values` interleaves
+  // with chart ids; each newly-added chart is then appended below that.
+  for (const id of missingStaticIds) {
+    result.push(defaultStaticItem(id, result))
+  }
   for (const chartId of missingChartIds) {
     result.push(defaultChartItem(chartItemId(chartId), result))
   }

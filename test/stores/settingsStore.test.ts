@@ -40,17 +40,39 @@ describe('mergeAppearanceSettings (B19 shared sanitizer)', () => {
   })
 
   it('accepts every valid field', () => {
-    expect(mergeAppearanceSettings({ themePref: 'dark', localePref: 'en', tzOverride: 480 })).toEqual({
+    expect(
+      mergeAppearanceSettings({
+        themePref: 'dark',
+        localePref: 'en',
+        tzOverride: 480,
+        inputModePref: 'touch',
+        centreCursorMode: true,
+      }),
+    ).toEqual({
       themePref: 'dark',
       localePref: 'en',
       tzOverride: 480,
+      inputModePref: 'touch',
+      centreCursorMode: true,
     })
   })
 
   it('sanitizes an invalid field to its default without rejecting the others', () => {
     expect(
-      mergeAppearanceSettings({ themePref: 'not-a-theme' as never, localePref: 'en', tzOverride: 60 }),
-    ).toEqual({ themePref: 'auto', localePref: 'en', tzOverride: 60 })
+      mergeAppearanceSettings({
+        themePref: 'not-a-theme' as never,
+        localePref: 'en',
+        tzOverride: 60,
+        inputModePref: 'not-a-mode' as never,
+        centreCursorMode: 'not-a-bool' as never,
+      }),
+    ).toEqual({ themePref: 'auto', localePref: 'en', tzOverride: 60, inputModePref: 'auto', centreCursorMode: false })
+  })
+
+  it('accepts a boolean centreCursorMode and rejects non-boolean garbage to its default', () => {
+    expect(mergeAppearanceSettings({ centreCursorMode: true }).centreCursorMode).toBe(true)
+    expect(mergeAppearanceSettings({ centreCursorMode: false }).centreCursorMode).toBe(false)
+    expect(mergeAppearanceSettings({ centreCursorMode: 'yes' as never }).centreCursorMode).toBe(false)
   })
 
   it('accepts tzOverride: "auto" as well as a number', () => {
@@ -61,11 +83,13 @@ describe('mergeAppearanceSettings (B19 shared sanitizer)', () => {
 })
 
 describe('settingsStore persistence', () => {
-  it('defaults to auto/auto/auto when nothing is persisted', () => {
+  it('defaults to auto/auto/auto/auto/false when nothing is persisted', () => {
     const s = useSettingsStore()
     expect(s.themePref).toBe('auto')
     expect(s.localePref).toBe('auto')
     expect(s.tzOverride).toBe('auto')
+    expect(s.inputModePref).toBe('auto')
+    expect(s.centreCursorMode).toBe(false)
   })
 
   it('auto-saves changes to localStorage', async () => {
@@ -98,15 +122,53 @@ describe('settingsStore persistence', () => {
     expect(s.themePref).toBe('auto')
   })
 
-  it('applyAppearance (B19 import) replaces all three fields and persists once', async () => {
+  it('applyAppearance (B19 import) replaces all five fields and persists once', async () => {
     const s = useSettingsStore()
-    s.applyAppearance({ themePref: 'dark', localePref: 'en', tzOverride: 60 })
+    s.applyAppearance({
+      themePref: 'dark',
+      localePref: 'en',
+      tzOverride: 60,
+      inputModePref: 'pointer',
+      centreCursorMode: true,
+    })
     expect(s.themePref).toBe('dark')
     expect(s.localePref).toBe('en')
     expect(s.tzOverride).toBe(60)
+    expect(s.inputModePref).toBe('pointer')
+    expect(s.centreCursorMode).toBe(true)
 
     await nextTick()
     const raw = localStorage.getItem(STORAGE_KEY)
-    expect(JSON.parse(raw as string)).toEqual({ themePref: 'dark', localePref: 'en', tzOverride: 60 })
+    expect(JSON.parse(raw as string)).toEqual({
+      themePref: 'dark',
+      localePref: 'en',
+      tzOverride: 60,
+      inputModePref: 'pointer',
+      centreCursorMode: true,
+    })
+  })
+
+  it('centreCursorMode auto-saves and round-trips through localStorage independently', async () => {
+    const s = useSettingsStore()
+    s.centreCursorMode = true
+    await nextTick()
+    const raw = localStorage.getItem(STORAGE_KEY)
+    expect(JSON.parse(raw as string).centreCursorMode).toBe(true)
+
+    setActivePinia(createPinia())
+    const s2 = useSettingsStore()
+    expect(s2.centreCursorMode).toBe(true)
+  })
+
+  it('inputModePref auto-saves and round-trips through localStorage independently', async () => {
+    const s = useSettingsStore()
+    s.inputModePref = 'touch'
+    await nextTick()
+    const raw = localStorage.getItem(STORAGE_KEY)
+    expect(JSON.parse(raw as string).inputModePref).toBe('touch')
+
+    setActivePinia(createPinia())
+    const s2 = useSettingsStore()
+    expect(s2.inputModePref).toBe('touch')
   })
 })

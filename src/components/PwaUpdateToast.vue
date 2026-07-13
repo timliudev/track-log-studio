@@ -48,7 +48,15 @@ const { toast, reload, dismiss } = usePwaUpdate()
 .pwa-toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--space) * 2 + env(safe-area-inset-bottom, 0px));
+  /* BottomNav.vue occupies a fixed strip at the very bottom on narrow
+     viewports (see its own `bottom-nav` rule and App.vue's `.content`/
+     `.site-footer` padding, which reserve the same amount) — lift the toast
+     above it via the shared `--bottom-nav-height` var (theme.css), which is
+     0px on desktop/tablet, so this single declaration is correct at every
+     width without a separate media query. */
+  bottom: calc(
+    var(--bottom-nav-height) + var(--space) * 2 + env(safe-area-inset-bottom, 0px)
+  );
   transform: translateX(-50%);
   z-index: 60;
   display: flex;
@@ -61,16 +69,6 @@ const { toast, reload, dismiss } = usePwaUpdate()
   background: var(--color-surface);
   color: var(--color-text);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-/* On narrow viewports BottomNav.vue occupies a fixed ~56px + safe-area strip
-   at the very bottom (see its own `bottom-nav` rule and App.vue's `.content`
-   padding, which reserves the same amount) — lift the toast above it so it
-   never overlaps the tab bar. */
-@media (max-width: 768px) {
-  .pwa-toast {
-    bottom: calc(56px + var(--space) * 2 + env(safe-area-inset-bottom, 0px));
-  }
 }
 
 .pwa-toast-message {
