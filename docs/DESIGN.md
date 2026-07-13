@@ -205,9 +205,16 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   時間是未設定狀態，顯示「記錄結束時的狀態」比整卡破折號更有用。純函式見
   `domain/analysis/currentValues.ts`（`resolveCurrentValueIndex` / `buildCurrentValueFields` /
   `formatCurrentValueField`）——每格皆為 O(1) 索引存取，`timeSeconds()` 只依 session 快取一次，
-  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。**B43**：卡片最窄可縮到
-  `minW:2`（與多數控制面板同一底線），格狀 `grid-template-columns` 用
-  `minmax(min(96px,100%),1fr)` 而非固定 `96px`，卡片窄到只容一欄時自動單列直排、不出現橫向捲動。
+  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。**B43**：格狀
+  `grid-template-columns` 改用 `minmax(min(96px,100%),1fr)` 而非固定 `96px`，卡片窄到只容一欄時
+  自動單列直排、不出現橫向捲動。**B43b**（B43 的 `minW:2` 底線不夠低）：12 欄網格下，`minW:2` 在任何
+  合理桌面視窗寬度都仍容得下兩個 96px 格子並排（例：1280px 視窗欄寬≈93.7px，`w:2`≈199px 外寬／
+  扣掉卡片 12px+12px `.body` padding 後內容區≈175px，逼近但仍略低於兩欄所需的 96*2+8(gap)=200px；
+  更寬的視窗則明顯超過），導致卡片其實從未真正縮到單欄。底線改為 `minW:1`（見
+  `domain/layout/dashboardLayout.ts` 的 `STATIC_MIN_SIZE`，低於其他控制面板的 `minW:2`）：`w:1` 內容區
+  在 1280px 視窗≈70px、1920px≈123px、2560px≈176px，皆穩定低於 200px 門檻，沿用既有的
+  `minmax(min(96px,100%),1fr)`（無需再調降 96px 底線）即可穩定單欄直排、垂直捲動、無橫向捲軸/裁切
+  （僅在視窗寬達~3600px 以上這種極端情形才會再度容下兩欄，此時額外空間拿來排第二欄不算 bug）。
   **B44**：任一格的**顯示字串**（非原始數值）相對上一次渲染改變時，該格背景做一次低對比（accent
   10% 透明度、400ms、`color-mix`）脈衝提示；同一格連續變化只重啟動畫、不疊加；`目前時間`格排除在外
   （每次都變，提示無意義）；`prefers-reduced-motion: reduce` 時停用動畫。

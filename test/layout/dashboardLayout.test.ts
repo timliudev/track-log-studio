@@ -83,6 +83,15 @@ describe('minSizeFor (B6 — resize floor per card kind)', () => {
     expect(minH).toBeGreaterThan(0)
   })
 
+  // B43b: minW:2 was still wide enough for two 96px value cells side by side
+  // at any realistic desktop window width, so the card could never actually
+  // reach the single-column layout its own grid CSS supports. Lowered to
+  // minW:1 (below every other control panel's minW:2) so a true single-column
+  // squeeze is reachable.
+  it('allows the current-values card down to minW:1 (B43b)', () => {
+    expect(minSizeFor(STATIC_CARD_IDS.currentValues)).toEqual({ minW: 1, minH: 3 })
+  })
+
   it('every card in defaultLayout already meets its own minimum size', () => {
     for (const it of defaultLayout()) {
       const { minW, minH } = minSizeFor(it.i)
