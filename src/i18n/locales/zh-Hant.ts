@@ -238,6 +238,17 @@ export default {
     currentValues: {
       time: '目前時間',
       noSession: '請先載入記錄以顯示目前數值。',
+      editFields: '編輯欄位',
+      doneEditing: '完成',
+      sortLabel: '排序方式',
+      sortOriginal: '原始頻道順序',
+      sortAlphabetical: '名稱字母序',
+      sortCustom: '自訂順序',
+      moveUp: '上移 {name}',
+      moveDown: '下移 {name}',
+      showField: '顯示 {name}',
+      hideField: '隱藏 {name}',
+      allHidden: '所有欄位皆已隱藏，點擊上方勾選框以重新顯示。',
     },
     gear: {
       heading: '變速齒比計算器',

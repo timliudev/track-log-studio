@@ -215,6 +215,21 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   在 1280px 視窗≈70px、1920px≈123px、2560px≈176px，皆穩定低於 200px 門檻，沿用既有的
   `minmax(min(96px,100%),1fr)`（無需再調降 96px 底線）即可穩定單欄直排、垂直捲動、無橫向捲軸/裁切
   （僅在視窗寬達~3600px 以上這種極端情形才會再度容下兩欄，此時額外空間拿來排第二欄不算 bug）。
+  **B49 欄位排列控制**：header 有一顆「編輯欄位」切換鈕；平時（非編輯模式）格狀維持乾淨（僅
+  label+數值），編輯模式才出現：(1) 排序方式三選一（原始頻道順序 / 名稱字母序 / 自訂順序，segmented
+  control）；(2) 每個非時間欄位一個顯示/隱藏 checkbox；(3) 僅當排序方式為「自訂順序」時，每格額外出現
+  上移/下移鈕（`.move-btn`，桌面 24px，`:root[data-any-pointer-coarse]` 下依 DESIGN.md §8 觸控政策長到
+  44px）。隱藏的欄位在編輯模式中仍列出（半透明 `.value-cell--hidden`，checkbox 可勾回），離開編輯模式後
+  才真正從格狀消失；若所有頻道都被隱藏，格狀外顯示提示文字（時間格恆存在）。**目前時間永遠第一格、不可
+  隱藏、不可移動**——編輯控制只出現在非時間欄位上。純函式集中在
+  `domain/analysis/currentValuesFieldPrefs.ts`（`arrangeCurrentValueFields` 給一般顯示用、
+  `currentValuesEditableFields` 給編輯模式用兩者共用同一套排序邏輯只差是否過濾隱藏欄位；
+  `reconcileCurrentValuesFieldPrefs` 在 session 換頻道時清掉不存在的 hidden/order 並把新頻道接到
+  order 尾端；`moveFieldInOrder`/`toggleFieldHidden`/`setCurrentValuesSortMode` 皆為純函式，回傳同一
+  物件參考代表 no-op）；持久化透過 `useCurrentValuesFieldPrefs.ts`（與 `usePanelState.ts` 同一
+  global-slot localStorage 慣例，key 為 `aracer-loga.currentValuesFieldPrefs.v1`），並併入 B19 設定
+  匯出/匯入 bundle 的 `layout.currentValuesFieldPrefs`（同樣走「包含版面配置」勾選開關，`settingsTransfer.ts`
+  對缺欄位/壞資料一律降級回預設值，不整包拒絕）。
   **B44**：任一格的**顯示字串**（非原始數值）相對上一次渲染改變時，該格背景做一次低對比（accent
   10% 透明度、400ms、`color-mix`）脈衝提示；同一格連續變化只重啟動畫、不疊加；`目前時間`格排除在外
   （每次都變，提示無意義）；`prefers-reduced-motion: reduce` 時停用動畫。
@@ -251,7 +266,7 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - 小設定（主題 / 語言 / 時區 / 傳動系統 / dashboard 版面等）→ **localStorage**，各自一組 `aracer-loga.*.v1` key（`settingsStore`／`drivetrainStore`／`domain/layout/dashboardLayout.ts`／`panelState.ts`／`layoutLock.ts`），未走過一層共用的 `SettingsRepository` 抽象——每個 store/模組自行管的 key 數量還不多，先不引入額外抽象層。
 - 大資料（上傳的底圖、完整 preset 集合）→ **IndexedDB**（localStorage 約 5MB 上限會爆）。
 - **匯出 / 匯入（B19，已實作）**：設定頁「設定匯出 / 匯入」卡片，序列化成單一 JSON 檔下載 / 上傳還原，邏輯集中在 `src/domain/settings/settingsTransfer.ts`（純函式，另有單元測試）：
-  - 範圍固定包含「外觀」（主題／語言／時區）與「傳動系統」（齒比、輪胎規格等）；「dashboard 版面配置」（grid 位置 + 卡片收合/釘選/手機排序）另有一個「包含版面配置」勾選開關，預設勾選。
+  - 範圍固定包含「外觀」（主題／語言／時區）與「傳動系統」（齒比、輪胎規格等）；「dashboard 版面配置」（grid 位置 + 卡片收合/釘選/手機排序 + **B49** 現值卡欄位排序/隱藏/自訂順序）另有一個「包含版面配置」勾選開關，預設勾選。
   - 匯出檔含 `schemaVersion`／`exportedAt` 供未來遷移與除錯。
   - 匯入為覆寫性操作：解析＋逐欄位驗證（未知欄位容忍、缺欄位補預設值），套用前跳出確認對話框；外觀／傳動系統套用後透過 Pinia 響應式 refs 立即生效，若含版面配置則因 dashboard grid 只在掛載時讀取一次 localStorage，改為寫回 localStorage 後自動重新整理頁面以生效。
 
