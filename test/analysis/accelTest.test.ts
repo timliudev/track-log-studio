@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { fastestDistanceFromLaunch, fastestSpeedSegment } from '@/domain/analysis/accelTest'
+import type { AccelSegment } from '@/domain/analysis/accelTest'
+import { fastestDistanceFromLaunch, fastestSpeedSegment, sortSegmentsByTime } from '@/domain/analysis/accelTest'
 
 /**
  * Build synthetic time/distance/speed arrays for a constant-acceleration ramp
@@ -297,5 +298,38 @@ describe('fastestSpeedSegment', () => {
     const cumDistM = new Float64Array([0, 1, 2, 3])
     const results = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
     expect(results).toEqual([])
+  })
+})
+
+// B48: the panel displays results fastest-to-slowest; the search functions
+// above stay chronological (asserted above), so the UI applies this separate
+// sort on top.
+describe('sortSegmentsByTime (B48)', () => {
+  function seg(startIdx: number, timeMs: number, isFastest = false): AccelSegment {
+    return { startIdx, endIdx: startIdx + 1, timeMs, distanceM: 100, entrySpeedKmh: 0, exitSpeedKmh: 100, isFastest }
+  }
+
+  it('sorts ascending by timeMs, fastest first', () => {
+    const chronological = [seg(0, 8000), seg(10, 4000, true), seg(20, 6000)]
+    const sorted = sortSegmentsByTime(chronological)
+    expect(sorted.map((s) => s.startIdx)).toEqual([10, 20, 0])
+    expect(sorted[0].isFastest).toBe(true)
+  })
+
+  it('does not mutate the input array', () => {
+    const chronological = [seg(0, 8000), seg(10, 4000, true)]
+    const copy = [...chronological]
+    sortSegmentsByTime(chronological)
+    expect(chronological).toEqual(copy)
+  })
+
+  it('is stable for equal timeMs values (keeps chronological order among ties)', () => {
+    const chronological = [seg(0, 5000), seg(10, 5000), seg(20, 5000)]
+    const sorted = sortSegmentsByTime(chronological)
+    expect(sorted.map((s) => s.startIdx)).toEqual([0, 10, 20])
+  })
+
+  it('returns an empty array unchanged', () => {
+    expect(sortSegmentsByTime([])).toEqual([])
   })
 })
