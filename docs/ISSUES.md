@@ -82,8 +82,8 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
-- [~] **M2** (agent working, bundled with M3) Clean dead code: `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n (superseded by the FileBar 「加入分析」 checkbox).
-- [~] **M3** (agent working, bundled with M2) Refactor `TrackMap.draw()` (≈500-line god-function) into smaller units.
+- [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `d002573`
+- [x] **M3** `TrackMap.draw()` split: pure geometry to `domain/analysis/trackMapGeometry.ts` (projection/bbox/heatmap-bucketing/highlights/zoom-pan math, 30 unit tests) + 12 named canvas steps; draw() now a ~100-line painter's-order skeleton. Behaviour pinned by 3 pre-refactor canvas-recording tests (assertions unchanged across the refactor). — `4d811c1`
 - [ ] **M4** Optional: screenshot user manual.
 
 ## Done (recent)
