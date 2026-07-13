@@ -450,6 +450,10 @@ export default {
     touch: '觸控優先',
     pointer: '指標優先',
   },
+  centreCursor: {
+    label: '固定中線游標模式',
+    hint: '圖表中央固定一條垂直線，拖曳圖表本身來捲動資料；捲到中線上的數值即成為目前游標（連動地圖／目前數值卡／其他圖表）。',
+  },
   converter: {
     suspensionToggle: '避震校正（點擊展開）',
     notes: {

@@ -19,7 +19,7 @@ import {
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
-const { tzOverride, themePref, localePref, inputModePref } = storeToRefs(settingsStore)
+const { tzOverride, themePref, localePref, inputModePref, centreCursorMode } = storeToRefs(settingsStore)
 const drivetrainStore = useDrivetrainStore()
 
 // Whole-hour offsets UTC-12 .. UTC+14; value is offset minutes east of UTC.
@@ -121,6 +121,7 @@ function exportSettings(): void {
       localePref: localePref.value,
       tzOverride: tzOverride.value,
       inputModePref: inputModePref.value,
+      centreCursorMode: centreCursorMode.value,
     },
     drivetrain: {
       kind: drivetrainStore.kind,
@@ -248,6 +249,14 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
           <option value="pointer">{{ t('inputMode.pointer') }}</option>
         </select>
       </label>
+      <!-- B31 — global toggle (not per-chart, see UPlotChart.vue's
+           centreCursorMode prop doc) for the RaceChrono-style fixed
+           centre-needle chart mode. -->
+      <label class="control checkbox-control">
+        <input v-model="centreCursorMode" type="checkbox" name="centreCursorMode" />
+        <span>{{ t('centreCursor.label') }}</span>
+      </label>
+      <p class="transfer-description">{{ t('centreCursor.hint') }}</p>
     </div>
 
     <div class="card">

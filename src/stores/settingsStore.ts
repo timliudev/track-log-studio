@@ -24,6 +24,17 @@ export interface AppearanceSettings {
   localePref: LocalePref
   tzOverride: TzOverride
   inputModePref: InputModePref
+  /** B31 — RaceChrono-style fixed centre-needle chart mode: when true, every
+   *  time-series chart (`UPlotChart.vue`, wired through `TimeSeriesChart.vue`)
+   *  shows an always-visible fixed vertical cursor at its own horizontal
+   *  centre; dragging the chart (any pointer type) pans the data under it
+   *  instead of the usual pan/box-zoom split, and whatever sample lands under
+   *  the needle becomes the app-wide cursor. Deliberately a GLOBAL toggle
+   *  (not per-chart) — see UPlotChart.vue's centreCursorMode prop doc for why
+   *  a per-chart toggle would fragment the cross-chart cursor sync B30/B30b
+   *  just fixed. Default false keeps every chart's existing pan/zoom/cursor
+   *  behaviour unchanged. */
+  centreCursorMode: boolean
 }
 
 const VALID_THEME_PREFS: readonly ThemePref[] = ['auto', 'light', 'dark']
@@ -31,7 +42,13 @@ const VALID_LOCALE_PREFS: readonly LocalePref[] = ['auto', 'zh-Hant', 'en']
 const VALID_INPUT_MODE_PREFS: readonly InputModePref[] = ['auto', 'touch', 'pointer']
 
 export function defaultAppearanceSettings(): AppearanceSettings {
-  return { themePref: 'auto', localePref: 'auto', tzOverride: 'auto', inputModePref: 'auto' }
+  return {
+    themePref: 'auto',
+    localePref: 'auto',
+    tzOverride: 'auto',
+    inputModePref: 'auto',
+    centreCursorMode: false,
+  }
 }
 
 /**
@@ -61,7 +78,9 @@ export function mergeAppearanceSettings(
   const inputModePref = VALID_INPUT_MODE_PREFS.includes(partial.inputModePref as InputModePref)
     ? (partial.inputModePref as InputModePref)
     : def.inputModePref
-  return { themePref, localePref, tzOverride, inputModePref }
+  const centreCursorMode =
+    typeof partial.centreCursorMode === 'boolean' ? partial.centreCursorMode : def.centreCursorMode
+  return { themePref, localePref, tzOverride, inputModePref, centreCursorMode }
 }
 
 function loadPersisted(): AppearanceSettings {
@@ -86,13 +105,15 @@ export const useSettingsStore = defineStore('settings', () => {
   const localePref = ref<LocalePref>(persisted.localePref)
   const tzOverride = ref<TzOverride>(persisted.tzOverride)
   const inputModePref = ref<InputModePref>(persisted.inputModePref)
+  const centreCursorMode = ref<boolean>(persisted.centreCursorMode)
 
-  watch([themePref, localePref, tzOverride, inputModePref], () => {
+  watch([themePref, localePref, tzOverride, inputModePref, centreCursorMode], () => {
     const data: AppearanceSettings = {
       themePref: themePref.value,
       localePref: localePref.value,
       tzOverride: tzOverride.value,
       inputModePref: inputModePref.value,
+      centreCursorMode: centreCursorMode.value,
     }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -101,7 +122,7 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   })
 
-  /** Replace all four appearance fields at once (B19 import) — a single
+  /** Replace all five appearance fields at once (B19 import) — a single
    *  assignment per ref so the `watch` above only fires (and persists) once
    *  rather than once per field. */
   function applyAppearance(next: AppearanceSettings): void {
@@ -109,7 +130,8 @@ export const useSettingsStore = defineStore('settings', () => {
     localePref.value = next.localePref
     tzOverride.value = next.tzOverride
     inputModePref.value = next.inputModePref
+    centreCursorMode.value = next.centreCursorMode
   }
 
-  return { themePref, localePref, tzOverride, inputModePref, applyAppearance }
+  return { themePref, localePref, tzOverride, inputModePref, centreCursorMode, applyAppearance }
 })

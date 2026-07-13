@@ -16,6 +16,7 @@ const APPEARANCE = {
   localePref: 'en' as const,
   tzOverride: 480,
   inputModePref: 'touch' as const,
+  centreCursorMode: false,
 }
 
 const SAMPLE_MT: MtFormState = {
@@ -104,7 +105,13 @@ describe('settingsTransfer — parseImportBundle', () => {
   it('sanitizes garbage appearance fields field-by-field rather than rejecting the whole bundle', () => {
     const result = parseImportBundle(
       JSON.stringify({
-        appearance: { themePref: 'not-a-theme', localePref: 'en', tzOverride: 'nonsense', inputModePref: 'not-a-mode' },
+        appearance: {
+          themePref: 'not-a-theme',
+          localePref: 'en',
+          tzOverride: 'nonsense',
+          inputModePref: 'not-a-mode',
+          centreCursorMode: 'not-a-bool',
+        },
       }),
     )
     expect(result.ok).toBe(true)
@@ -114,6 +121,7 @@ describe('settingsTransfer — parseImportBundle', () => {
       localePref: 'en',
       tzOverride: 'auto',
       inputModePref: 'auto',
+      centreCursorMode: false,
     })
   })
 
