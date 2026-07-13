@@ -91,9 +91,9 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 
 ## Acceptance round 3 — 2026-07-14 morning (user tested develop 51e40fa)
 - [x] **B31b** Root cause: neither needle position nor value readout — uPlot's NATIVE drag-to-zoom stayed active (`cursor.x:false` only hides the crosshair; `cursor.drag` defaults on, and mouse events bypass the pointer-handler preventDefault), so every mouse pan got overwritten by a box-zoom on mouseup. Fixed with `drag:{setScale:false,x:false,y:false}` in centre mode; needle/readout math extracted to pure `needleOffsetX`/`valueAtPlotX` + tests against REAL uplot reproducing the fight. Touch path unified too. — `133c691`
-- [ ] **B48** Accel-test segment list: sort results fastest→slowest (currently appearance order with only a ⚡ mark).
-- [ ] **B43b** (B43 insufficient) Current-values card STILL can't reach a single column — at minW 2 the 96px cells still fit two columns. Allow minW 1 for this card and/or make the grid collapse to one column below a width threshold; verify a true single-column narrow card renders cleanly.
-- [ ] **B49** Current-values card: user wants control over field arrangement. Scope decided (proposed to user, no objection): (a) sort options — original channel order / alphabetical / custom — plus (c) per-field hide toggle; custom order via simple up/down or drag within an edit mode; persist in localStorage (and include in the B19 export bundle). Keep 目前時間 always first.
+- [x] **B48** Accel-test results sorted fastest→slowest via pure `sortSegmentsByTime` (render-side only; domain return order unchanged for existing callers); B26 focus keys unaffected. — `d96afeb`
+- [x] **B43b** `STATIC_MIN_SIZE[currentValues].minW` 2→1 (measured: minW 2 content width ≈175px still fit two 96px cells; minW 1 stays below the 200px two-column threshold) — true single column with existing minmax CSS. — `904a018`
+- [x] **B49** Current-values field arrangement: sort original/alphabetical/custom + per-field hide + up/down in an 編輯欄位 mode (44px on coarse); 目前時間 pinned first; prefs persisted (`currentValuesFieldPrefs`, reconciled on session change) and included in the B19 export bundle. — `3dbda93`
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
