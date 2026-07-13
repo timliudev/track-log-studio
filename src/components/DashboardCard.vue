@@ -546,34 +546,52 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-/* B18 — pinned-card resize handle: a small corner grip, bottom-right, shown
-   only while pinned + not collapsed (see the template's `v-if`). Dragging it
-   sets an explicit pixel width/height on the card (`pinnedSize`/`cardStyle`
+/* B18b — pinned-card resize handle: bottom-right corner grip, shown only
+   while pinned + not collapsed (see the template's `v-if`). Dragging it sets
+   an explicit pixel width/height on the card (`pinnedSize`/`cardStyle`
    above), overriding both the aspect-ratio default and the `max-height: 45vh`
    / anchor `width: min(560px, 100%)` ceilings — `clampPinnedSize` keeps the
-   result sane instead. */
+   result sane instead.
+   Previously this drew its OWN bespoke 90°-corner icon (fixed 18px box,
+   plain `--color-text-muted` border, hover-only opacity) — a different
+   affordance from the one every GRID card already has for the exact same
+   gesture (grid-layout-plus's own `.vgl-item__resizer`, themed in
+   AnalyzerView.vue). Restyled to be henceforth STRUCTURALLY the same element
+   grid-layout-plus draws (position/size via the identical `--vgl-resizer-*`
+   custom properties, a `::before`-drawn corner via the same
+   border-right/border-bottom-on-an-inset-box technique, same accent color,
+   same rounded corner) rather than reinventing it — the resize gesture itself
+   stays this component's own pointerdown/move/up handlers (a pinned card's
+   real content has been Teleported out of the grid entirely — see this
+   file's module doc — so there's no grid-layout-plus resize algorithm here
+   to plug into, only its VISUAL affordance is shared). AnalyzerView.vue
+   defines `--vgl-resizer-size`/`--vgl-resizer-border-color`/`--vgl-resizer-
+   border-width` on `.analyzer` (an ancestor of both the grid and the pinned
+   anchor this card Teleports into) specifically so this rule and the grid's
+   own resizer read the SAME values, including the mobile 30px touch-target
+   bump — see that file's own comment for why the value has to be declared
+   twice. Falls back to grid-layout-plus's own un-themed defaults (10px /
+   `--color-accent` / 2px) if ever rendered outside `.analyzer`. */
 .pin-resize-handle {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 18px;
-  height: 18px;
-  cursor: nwse-resize;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  width: var(--vgl-resizer-size, 10px);
+  height: var(--vgl-resizer-size, 10px);
+  cursor: se-resize;
   touch-action: none;
-  border-radius: 0 0 calc(var(--radius) * 1.5) 0;
 }
-.pin-resize-handle::after {
-  content: '';
+.pin-resize-handle::before {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid var(--color-text-muted);
-  border-bottom: 2px solid var(--color-text-muted);
-  opacity: 0.6;
-}
-.pin-resize-handle:hover::after {
-  opacity: 1;
+  top: 0;
+  right: 3px;
+  bottom: 3px;
+  left: 0;
+  content: '';
+  border: 0 solid var(--vgl-resizer-border-color, var(--color-accent));
+  border-right-width: var(--vgl-resizer-border-width, 2px);
+  border-bottom-width: var(--vgl-resizer-border-width, 2px);
+  border-radius: 0 0 var(--radius) 0;
 }
 </style>
