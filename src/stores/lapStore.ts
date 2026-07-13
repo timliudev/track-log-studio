@@ -71,6 +71,14 @@ export const useLapStore = defineStore('lap', () => {
   // "cut" lap) so they don't pollute best-lap / future optimal-time & delta
   // computations. Order is irrelevant (membership only), unlike `selected`.
   const manualExcluded = ref<number[]>([])
+  // Same per-lap "garbage" facet as `manualExcluded`, but for a COMPARISON
+  // recording's own laps (B1c) — keyed by that recording's fileId, since a
+  // comparison table has no session of its own to hang store state off.
+  // Comparisons carry no laps/track/gates state on this store (unlike the
+  // primary), so unlike `excluded` there is no cross-store band/sector union
+  // to compute here; SessionLapComparison.vue unions this with the band
+  // exclusion it already derives locally, same as the primary's `excluded`.
+  const manualExcludedBySession = ref<Record<number, number[]>>({})
   // The currently-detected laps, kept here so the store can derive validity-based
   // exclusions (out-of-band laps) from lap times. Pushed in by `useLaps`; the
   // single feed for the time-band filter and the sector-completeness rule below.
@@ -153,9 +161,13 @@ export const useLapStore = defineStore('lap', () => {
    * refs into THIS session's laps — would silently point at the wrong laps
    * (or an out-of-range index) once the source changes. Clear both (B5);
    * manual exclusions are untouched (they're independent of which source
-   * detected the laps). Re-clicking the already-active source is a true
-   * no-op — nothing to invalidate — so the selection is only cleared when
-   * the source actually changes.
+   * detected the laps) — this applies equally to the primary's
+   * `manualExcluded` and a comparison recording's `manualExcludedBySession`
+   * (B1c): comparison recordings re-derive their laps from this SAME shared
+   * `source`/`line` (see useSessionComparison.ts), so their manual
+   * exclusions are just as source-independent as the primary's. Re-clicking
+   * the already-active source is a true no-op — nothing to invalidate — so
+   * the selection is only cleared when the source actually changes.
    */
   function setSource(s: LapSource): void {
     if (source.value === s) return
@@ -191,9 +203,42 @@ export const useLapStore = defineStore('lap', () => {
     return selectedAcrossSessions.value.some((ref) => ref.fileId === fileId && ref.index === index)
   }
 
+  /**
+   * Clear the cross-session overlay selection for one comparison recording
+   * (or all of them when `fileId` is omitted) — called when a comparison
+   * stops being compared (toggled off / replaced as primary / removed
+   * entirely, see FileBar.vue & useSessionComparison.ts). The recording's
+   * manual lap exclusions (B1c) are session-scoped state too, so they're
+   * dropped in lockstep: once a recording is no longer in the comparison
+   * set, its excluded-lap markings would otherwise linger as dead state
+   * keyed by an id nothing renders anymore.
+   */
   function clearSessionSelection(fileId?: number): void {
-    if (fileId == null) selectedAcrossSessions.value = []
-    else selectedAcrossSessions.value = selectedAcrossSessions.value.filter((ref) => ref.fileId !== fileId)
+    if (fileId == null) {
+      selectedAcrossSessions.value = []
+      manualExcludedBySession.value = {}
+    } else {
+      selectedAcrossSessions.value = selectedAcrossSessions.value.filter((ref) => ref.fileId !== fileId)
+      if (fileId in manualExcludedBySession.value) {
+        const next = { ...manualExcludedBySession.value }
+        delete next[fileId]
+        manualExcludedBySession.value = next
+      }
+    }
+  }
+
+  /** Manually mark comparison recording `fileId`'s lap `index` as garbage, or
+   *  un-mark it when already manually excluded — the comparison-table analogue
+   *  of {@link toggleExcluded} for the primary recording (B1c). */
+  function toggleSessionExcluded(fileId: number, index: number): void {
+    const current = manualExcludedBySession.value[fileId] ?? []
+    const next = current.includes(index) ? current.filter((x) => x !== index) : [...current, index]
+    manualExcludedBySession.value = { ...manualExcludedBySession.value, [fileId]: next }
+  }
+
+  /** Whether comparison recording `fileId`'s lap `index` is manually excluded. */
+  function isSessionManuallyExcluded(fileId: number, index: number): boolean {
+    return (manualExcludedBySession.value[fileId] ?? []).includes(index)
   }
 
   function sessionLapOffsetOf(fileId: number, index: number, axis: XAxis): number {
@@ -389,6 +434,7 @@ export const useLapStore = defineStore('lap', () => {
     selectedAcrossSessions,
     excluded,
     manualExcluded,
+    manualExcludedBySession,
     bandExcluded,
     distanceBandExcluded,
     sectorInvalid,
@@ -415,6 +461,8 @@ export const useLapStore = defineStore('lap', () => {
     isExcluded,
     exclusionReason,
     clearExcluded,
+    toggleSessionExcluded,
+    isSessionManuallyExcluded,
     setLaps,
     setTrack,
     setLapTimeBand,
