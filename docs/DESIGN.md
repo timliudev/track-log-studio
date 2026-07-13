@@ -187,7 +187,9 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   時間是未設定狀態，顯示「記錄結束時的狀態」比整卡破折號更有用。純函式見
   `domain/analysis/currentValues.ts`（`resolveCurrentValueIndex` / `buildCurrentValueFields` /
   `formatCurrentValueField`）——每格皆為 O(1) 索引存取，`timeSeconds()` 只依 session 快取一次，
-  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。
+  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。**B43**：卡片最窄可縮到
+  `minW:2`（與多數控制面板同一底線），格狀 `grid-template-columns` 用
+  `minmax(min(96px,100%),1fr)` 而非固定 `96px`，卡片窄到只容一欄時自動單列直排、不出現橫向捲動。
 - **B24 共用容器 `CardFillScroll.vue`**：卡片內「固定控制列 + 內容區自身伸縮捲動」的共用版型
   （`#header` 具名 slot 固定、預設 slot 填滿剩餘高度並自行 `overflow:auto`），取代個別元件各自
   土砲 `max-height` 寫死高度（例：加速測試區段列表原本卡在 260px，改用此容器後跟卡片一起縮放）；

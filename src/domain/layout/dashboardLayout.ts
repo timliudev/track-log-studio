@@ -83,10 +83,13 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.sessionMerge]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.suspension]: { minW: 2, minH: 3 },
-  // B15 — same floor as most control panels; the grid of value tiles scrolls
-  // (via CardFillScroll) below this, so there's no correctness reason to
-  // require more than a couple of rows to stay legible.
-  [STATIC_CARD_IDS.currentValues]: { minW: 3, minH: 3 },
+  // B15/B43 — same floor as most control panels (minW:2): the value grid
+  // itself (`.values-grid`'s `auto-fill minmax(min(96px,100%),1fr)` — see
+  // CurrentValuesPanel.vue) already collapses to a single column and scrolls
+  // (via CardFillScroll) once the card gets this narrow, so there's no
+  // correctness reason to hold this card to a wider floor than any other
+  // control panel.
+  [STATIC_CARD_IDS.currentValues]: { minW: 2, minH: 3 },
 }
 
 /** Chart cards (uPlot/echarts) need more room than a small control panel to

@@ -69,7 +69,13 @@ const fields = computed(() => {
 }
 .values-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  /* B43 — `min(96px, 100%)` (rather than a bare `96px` floor) lets the track
+     shrink below 96px when the card itself is resized narrower than that:
+     a bare 96px floor would force a track wider than the available space,
+     triggering a horizontal scrollbar instead of the single-column stack a
+     narrow card should show. At >=96px-wide cards this is identical to the
+     previous behaviour (min(96px, 100%) === 96px once 100% >= 96px). */
+  grid-template-columns: repeat(auto-fill, minmax(min(96px, 100%), 1fr));
   gap: 8px;
   align-content: start;
 }
