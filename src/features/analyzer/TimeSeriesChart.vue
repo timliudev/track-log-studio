@@ -66,7 +66,7 @@ const { xAxis } = storeToRefs(analyzer)
 const lapStore = useLapStore()
 const settings = useSettingsStore()
 const drivetrain = useDrivetrainStore()
-const { tzOverride } = storeToRefs(settings)
+const { tzOverride, centreCursorMode } = storeToRefs(settings)
 
 const PALETTE = ['#e23b3b', '#3b82e2', '#2ea043', '#e2a33b', '#9b3be2', '#3bd6e2']
 const color = (i: number): string => PALETTE[i % PALETTE.length]
@@ -522,6 +522,7 @@ function removeChannel(name: string): void {
       :x-range="!hasSelection ? xRange : null"
       :external-cursor="effectiveCursor"
       :fill-height="fillHeight"
+      :centre-cursor-mode="centreCursorMode"
       :x-bounds="!hasSelection && xValues.length > 1 ? { min: xValues[0], max: xValues[xValues.length - 1] } : null"
       @cursor="onCursor"
       @x-zoom="onXZoom"
