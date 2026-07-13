@@ -21,7 +21,8 @@ import {
   type HighlightSegment,
 } from '@/domain/analysis/trackMapGeometry'
 import { fitProjection, type MapProjection } from './projection'
-import { nearestSample } from './trackNearestSample'
+import { nearestSample, resolveTrackHitRadius } from './trackNearestSample'
+import { useInputCapabilities } from '@/composables/useInputCapabilities'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -151,6 +152,14 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// B30b(b) — capability-driven hit-radius (see trackNearestSample.ts's doc);
+// `anyPointerCoarse` is already read live elsewhere via App.vue's single
+// top-level useInputCapabilities() call (which mirrors it onto <html
+// data-any-pointer-coarse> for CSS), but the hit-test below needs the actual
+// JS boolean, not just a CSS hook, so this component reads its own reactive
+// copy the normal composable way.
+const { anyPointerCoarse } = useInputCapabilities()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 let ro: ResizeObserver | null = null
@@ -987,8 +996,16 @@ function onPointerMove(e: PointerEvent): void {
   if (!px || !py) return
   const pos = clientPos(e)
   if (!pos) return
-  const HIT = 24
-  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT))
+  // B30b(a) — prefer snapping onto a currently highlighted/selected SAME-FILE
+  // lap's own samples (see nearestSample's doc for why: overlapping laps on a
+  // closed-loop track can otherwise steal the nearest-point hit and silently
+  // break the overlay chart's cursor mapping, which only follows a sample
+  // that's actually inside a selected lap). `highlightLaps` indexes into
+  // THIS track's own samples (unlike `comparisonLapHighlights`, which indexes
+  // into other sessions' tracks — never valid ranges here).
+  const preferredRanges = (props.highlightLaps ?? []).map((l) => ({ startIdx: l.startIdx, endIdx: l.endIdx }))
+  const HIT = resolveTrackHitRadius(anyPointerCoarse.value)
+  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT, preferredRanges))
 }
 
 function onPointerUp(e: PointerEvent): void {
