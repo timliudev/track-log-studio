@@ -156,6 +156,17 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
   let observer: MutationObserver | null = null
   let lastRect: FlipRect | null = null
   let cleanupPlay: (() => void) | null = null
+  // B32b — pending debounced re-attach timer (see the `watch(enabled, ...)`
+  // below). Tracked so a LATER `enabled` flip can cancel it: without this, a
+  // rapid pin -> unpin -> re-pin (well inside PIN_FLIP_DURATION_MS + 40, e.g.
+  // switching which card is pinned and then re-pinning the first one again)
+  // left the FIRST toggle's stale timer armed. It fired regardless of the
+  // CURRENT `enabled` state and unconditionally called `attach()`, which
+  // re-observes `target.value.parentElement` AS IT IS AT THAT LATER MOMENT —
+  // while pinned, that's `#dashboard-pinned-anchor` (the sticky anchor), not
+  // the grid `.vgl-item` wrapper — silently violating "auto-flip is disabled
+  // while pinned" and leaving a dangling observer nothing was meant to create.
+  let reattachTimer: ReturnType<typeof setTimeout> | null = null
 
   function isGesturing(): boolean {
     const parent = target.value?.parentElement
@@ -222,6 +233,14 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
 
   if (enabled) {
     watch(enabled, (next) => {
+      // B32b — cancel any PREVIOUS debounced re-attach before reacting to
+      // this flip: `enabled` toggling again before the old timer fires (e.g.
+      // pin -> unpin -> re-pin inside the debounce window) must not leave
+      // that stale timer armed — see `reattachTimer`'s own doc above.
+      if (reattachTimer != null) {
+        clearTimeout(reattachTimer)
+        reattachTimer = null
+      }
       if (!next) {
         detach()
         return
@@ -233,11 +252,22 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
       // NOW would capture the element still under that animation's inverted
       // transform rather than its true settled position. Waiting past that
       // animation's own duration guarantees a clean baseline.
-      window.setTimeout(attach, PIN_FLIP_DURATION_MS + 40)
+      reattachTimer = setTimeout(() => {
+        reattachTimer = null
+        // Re-check `enabled` at fire time (belt-and-braces on top of the
+        // cancellation above): only actually re-attach if still enabled, so a
+        // toggle sequence that raced past the `clearTimeout` above some other
+        // way still can't arm a wrongly-targeted observer.
+        if (isEnabled()) attach()
+      }, PIN_FLIP_DURATION_MS + 40)
     })
   }
 
   onBeforeUnmount(() => {
+    if (reattachTimer != null) {
+      clearTimeout(reattachTimer)
+      reattachTimer = null
+    }
     detach()
     cleanupPlay?.()
   })
