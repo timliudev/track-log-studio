@@ -34,6 +34,12 @@
       content="Track Log Studio — multi-format track telemetry analysis: import ECU and GPS logger recordings, convert between formats, and analyse laps & telemetry. Fully client-side, installable as a PWA."
     />
     <meta name="twitter:image" content="https://track-log-studio.timliudev.workers.dev/pwa-512x512.png" />
+    <!-- B40(1): warm the connections for the two third-party hosts hit on
+         initial load (Cloudflare Web Analytics beacon below, GitHub star
+         count fetched by GithubStarButton) so the actual request that
+         follows skips DNS/TLS/TCP setup. -->
+    <link rel="preconnect" href="https://static.cloudflareinsights.com" />
+    <link rel="preconnect" href="https://api.github.com" />
     <!-- Static fallback for browsers that read HTML meta instead of the
          manifest's theme_color; kept in sync with src/theme/theme.css's
          --color-bg for :root (light) and [data-theme='dark']. Only reacts to
