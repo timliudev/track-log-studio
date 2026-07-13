@@ -16,7 +16,22 @@
   --radius: 8px;
   --space: 8px;
 
+  /* Height reserved for BottomNav.vue's fixed iOS-style tab bar (see its own
+     `bottom-nav` rule, App.vue's `.content`/`.site-footer` bottom padding,
+     and PwaUpdateToast.vue) — 0 on desktop/tablet where BottomNav is
+     `display: none`, so anything using this var needs no separate
+     desktop/mobile branching (B38). */
+  --bottom-nav-height: 0px;
+
   color-scheme: light;
+}
+
+/* Must mirror BottomNav.vue's own `@media (max-width: 768px)` breakpoint,
+   where it switches from `display: none` to a fixed ~56px bar. */
+@media (max-width: 768px) {
+  :root {
+    --bottom-nav-height: 56px;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

@@ -24,7 +24,13 @@ function onSave(): void {
 
 <template>
   <section class="presetbar">
-    <h3>{{ t('converter.preset.heading') }}</h3>
+    <!-- B41: this is the first heading rendered in the converter tab on
+         initial load (ConvertResults' own h3 only appears after a
+         conversion — see its `v-if="results.length"`), so it sat directly
+         under App.vue's `<h1>` with no h2 in between, a heading-order skip.
+         Bumped to h2; CSS below now targets `h2` to keep the exact same
+         look (no visual change). -->
+    <h2>{{ t('converter.preset.heading') }}</h2>
 
     <div class="controls">
       <label class="field">
@@ -51,7 +57,11 @@ function onSave(): void {
 
     <div class="save-row">
       <span>{{ t('converter.preset.saveTo') }}</span>
-      <select v-model.number="saveIndex" name="save-slot">
+      <select
+        v-model.number="saveIndex"
+        name="save-slot"
+        :aria-label="t('converter.preset.saveTo')"
+      >
         <option v-for="i in 5" :key="i" :value="i - 1">{{ i }}</option>
       </select>
       <input
@@ -75,7 +85,7 @@ function onSave(): void {
   flex-direction: column;
   gap: 10px;
 }
-h3 {
+h2 {
   margin: 0;
   font-size: 1rem;
 }
