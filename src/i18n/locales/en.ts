@@ -207,10 +207,6 @@ export default {
     chartZoomHint: 'Drag to box-zoom, hold Shift and drag (or use two fingers) to pan, double-click or Reset zoom to restore the full view',
     maximizeMap: 'Maximize track map',
     minimizeMap: 'Restore track map',
-    trackOverlayTitle: 'Overlay tracks',
-    trackOverlayHint:
-      'Tick other loaded logs to draw their racing lines faintly on the map for comparison; the active log stays on top at full opacity.',
-    trackOverlayClear: 'Clear all',
     sectorAutoDetect: 'Auto-detect corners',
     sectorRedetectConfirm:
       'Re-detecting will overwrite your manually-adjusted sector gates. Continue?',
