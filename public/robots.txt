@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://track-log-studio.timliudev.workers.dev/sitemap.xml
+Sitemap: https://tracklogstudio.timliudev.com/sitemap.xml

@@ -389,7 +389,7 @@ Times shown in the Analyzer and Converter are converted according to the time zo
 
 ### 6.1 Diagnostics mode `?debug=1`
 
-If you hit an issue on mobile — for example, the page reloading itself right after loading a file — append `?debug=1` to the URL (e.g. `https://track-log-studio.timliudev.workers.dev/?debug=1`) to enable the **on-device diagnostics panel**:
+If you hit an issue on mobile — for example, the page reloading itself right after loading a file — append `?debug=1` to the URL (e.g. `https://tracklogstudio.timliudev.com/?debug=1`) to enable the **on-device diagnostics panel**:
 
 - It logs page lifecycle events (e.g. the tab being discarded by the OS — `wasDiscarded` — JS errors, memory usage trends) and displays them on screen *after* a reload happens, so issues can be reported even without a desktop DevTools connection.
 - Once enabled via `?debug=1`, the setting sticks (stored locally in the browser), so you don't need to add the parameter every time; use `?debug=0` to turn it off.
