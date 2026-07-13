@@ -656,4 +656,74 @@ describe('lapStore', () => {
     // The distance metric is untouched (it has no channel/agg to set).
     expect(s.columns[0].metric).toEqual({ kind: 'distance' })
   })
+
+  // B1c: comparison recordings get their own manual "garbage lap" facet,
+  // keyed by fileId — the comparison-table analogue of `manualExcluded`.
+  describe('per-comparison-session manual exclusion (B1c)', () => {
+    it('starts with no comparison recording manually excluded', () => {
+      const s = useLapStore()
+      expect(s.manualExcludedBySession).toEqual({})
+      expect(s.isSessionManuallyExcluded(10, 0)).toBe(false)
+    })
+
+    it('toggleSessionExcluded marks and un-marks a lap for one recording', () => {
+      const s = useLapStore()
+      s.toggleSessionExcluded(10, 2)
+      expect(s.isSessionManuallyExcluded(10, 2)).toBe(true)
+      expect(s.manualExcludedBySession[10]).toEqual([2])
+      s.toggleSessionExcluded(10, 2)
+      expect(s.isSessionManuallyExcluded(10, 2)).toBe(false)
+      expect(s.manualExcludedBySession[10]).toEqual([])
+    })
+
+    it('keeps each comparison recording\'s exclusions independent (no cross-fileId collision)', () => {
+      const s = useLapStore()
+      s.toggleSessionExcluded(10, 1)
+      s.toggleSessionExcluded(20, 1)
+      expect(s.isSessionManuallyExcluded(10, 1)).toBe(true)
+      expect(s.isSessionManuallyExcluded(20, 1)).toBe(true)
+      s.toggleSessionExcluded(10, 1)
+      expect(s.isSessionManuallyExcluded(10, 1)).toBe(false)
+      // The other recording's exclusion of the SAME lap index is untouched.
+      expect(s.isSessionManuallyExcluded(20, 1)).toBe(true)
+    })
+
+    it('clearSessionSelection(fileId) drops that recording\'s manual exclusions too', () => {
+      const s = useLapStore()
+      s.toggleSessionLap(10, 0)
+      s.toggleSessionExcluded(10, 1)
+      s.toggleSessionExcluded(20, 1)
+
+      s.clearSessionSelection(10)
+
+      expect(s.isSessionLapSelected(10, 0)).toBe(false)
+      expect(s.isSessionManuallyExcluded(10, 1)).toBe(false)
+      // A different recording's state is untouched.
+      expect(s.isSessionManuallyExcluded(20, 1)).toBe(true)
+    })
+
+    it('clearSessionSelection() (no fileId) drops every recording\'s manual exclusions', () => {
+      const s = useLapStore()
+      s.toggleSessionExcluded(10, 1)
+      s.toggleSessionExcluded(20, 2)
+
+      s.clearSessionSelection()
+
+      expect(s.manualExcludedBySession).toEqual({})
+    })
+
+    // B5: source switch invalidates lap selections (different lap set/count)
+    // but manual exclusions are source-independent — same rule as the
+    // primary's `manualExcluded`, applied here to the per-session facet.
+    it('setSource leaves per-comparison-session manual exclusions untouched', () => {
+      const s = useLapStore()
+      s.toggleSessionExcluded(10, 1)
+      s.toggleSessionLap(10, 2)
+
+      s.setSource('ecu')
+
+      expect(s.isSessionManuallyExcluded(10, 1)).toBe(true)
+      expect(s.isSessionLapSelected(10, 2)).toBe(false)
+    })
+  })
 })
