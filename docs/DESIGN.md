@@ -372,7 +372,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   CI/CD 每次部署自動更新。里程碑才鬆散打 tag。
 - **Cloudflare Workers（靜態資產）** 由使用者在後台接 Git（**Workers Builds**，prod=`main`、
   build `npm run build`、輸出 `dist`、Node 由 `.nvmrc`=22）；設定見 `wrangler.jsonc`，無需 repo 密鑰。
-  正式網址 `https://track-log-studio.timliudev.workers.dev`。（非 Pages——Pages 後台只有另一個專案。）
+  正式網址（自訂網域）**`https://tracklogstudio.timliudev.com`**；
+  `https://track-log-studio.timliudev.workers.dev` 為同一 Worker 的預設網址（重複主機），
+  SEO canonical 一律指自訂網域，workers.dev 以 301 轉往自訂網域（B39d）。
+  （非 Pages——Pages 後台只有另一個專案。）
 - **分析 / 廣告**（未來）：GA4 / Cloudflare Web Analytics / AdSense 用**公開 ID**(`VITE_*` env)，
   非密鑰；lazy-load、離線不載、守隱私。
 
