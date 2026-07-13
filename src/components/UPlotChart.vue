@@ -67,25 +67,63 @@ export function isTouchGesturePointer(pointerType: string): boolean {
 }
 
 /**
+ * B31b — pixel→value mapping for a LINEAR x scale (this app never uses a log
+ * scale, see buildOptions' `scales: { x: { time: false } }`): given a pixel
+ * offset `xPixel` from the plot area's LEFT edge and `plotWidth` (both in CSS
+ * px — e.g. straight from `getBoundingClientRect()`, NOT `u.bbox`, which is
+ * device-pixel-scaled by `devicePixelRatio` and would misread by that same
+ * factor on a HiDPI screen), returns the data value at that pixel for the
+ * given scale `range`. Centre-needle mode always evaluates this at
+ * `xPixel = plotWidth / 2` (see `centreCursorIndex` below) — factored out so
+ * the pixel→value math is independently unit-testable.
+ */
+export function valueAtPlotX(
+  xPixel: number,
+  plotWidth: number,
+  range: { min: number; max: number },
+): number {
+  if (!(plotWidth > 0)) return range.min
+  return range.min + (xPixel / plotWidth) * (range.max - range.min)
+}
+
+/**
+ * B31b — the fixed needle's CSS-px offset from `wrap`'s left edge: the exact
+ * horizontal CENTRE of uPlot's OWN plot area (`plotLeft` .. `plotLeft +
+ * plotWidth`), NOT `wrap`/`host`'s own centre — uPlot reserves a left-side
+ * axis-label gutter, so the plot area is narrower than, and offset from, the
+ * full chart width. Both inputs must already be CSS px (`getBoundingClientRect()`,
+ * not `u.bbox`) for the same HiDPI reason as `valueAtPlotX` above — this
+ * value feeds directly into a plain CSS `left` style on a DOM overlay, which
+ * is always in CSS px regardless of `devicePixelRatio`.
+ */
+export function needleOffsetX(plotLeft: number, plotWidth: number): number {
+  return plotLeft + plotWidth / 2
+}
+
+/**
  * B31 — RaceChrono-style fixed centre-needle mode: the sample index whose X
  * value is closest to the exact horizontal MIDPOINT of `range` (the chart's
  * current visible window) — i.e. "what the fixed needle is currently
- * pointing at". This app never uses a log X scale (`scales: { x: { time:
- * false } }` in buildOptions below), so the midpoint of a linear range IS the
- * data value under the centre pixel — no live uPlot instance / `posToVal`
- * needed, which keeps this pure and unit-testable like `isZoomed`/
- * `isTouchGesturePointer` above. Recomputed (via the `setScale` hook) on
- * every visible-range change while centre-needle mode is active — a user
- * drag/scrub, a synced `xRange` update from another chart, or a zoom — and
- * the result is emitted onward as this chart's `cursor` so the rest of the
- * app (current-values card, map, other synced charts) tracks the scrub.
+ * pointing at". The needle always sits at the plot area's horizontal centre
+ * (`needleOffsetX`'s `plotWidth / 2`), and for a linear scale (see
+ * `valueAtPlotX` above) that pixel's value is exactly `range`'s midpoint — no
+ * live uPlot instance / `posToVal` call needed, which keeps this pure and
+ * unit-testable like `isZoomed`/`isTouchGesturePointer` above. Recomputed (via
+ * the `setScale` hook) on every visible-range change while centre-needle mode
+ * is active — a user drag/scrub, a synced `xRange` update from another chart,
+ * or a zoom — and the result is emitted onward as this chart's `cursor` so
+ * the rest of the app (current-values card, map, other synced charts) tracks
+ * the scrub.
  */
 export function centreCursorIndex(
   xs: ArrayLike<number>,
   range: { min: number; max: number },
 ): number | null {
   if (xs.length === 0) return null
-  return nearestXIndex(xs, (range.min + range.max) / 2)
+  // Evaluated at the midpoint of a unit-width plot (xPixel=0.5, plotWidth=1)
+  // — valueAtPlotX only ever uses the xPixel/plotWidth RATIO, so any concrete
+  // plot width gives the same result; 1 keeps this call self-evident.
+  return nearestXIndex(xs, valueAtPlotX(0.5, 1, range))
 }
 </script>
 
@@ -266,8 +304,30 @@ function buildOptions(width: number): uPlot.Options {
     // plain CSS overlay, see the template/`updateNeedlePos` below) instead of
     // uPlot's native hover crosshair, so the native one is turned off here to
     // avoid two conflicting cursor indicators.
+    //
+    // B31b fix — `cursor.x/y: false` ONLY suppresses drawing the crosshair;
+    // it does NOT touch `cursor.drag`, which defaults to `{ x: true, setScale:
+    // true }` INDEPENDENTLY of `cursor.x/y` (see uPlot's `cursorOpts.drag` —
+    // confirmed by reading its `mouseUp` handler, which calls its own
+    // `_setScale(xScaleKey, posToVal(...), posToVal(...))` off the drag-select
+    // box whenever `drag.setScale && hasSelect && chgSelect`, with NO
+    // dependency on `cursor.x`/`cursor.y` at all). So a plain mouse drag in
+    // this mode was ALWAYS *also* still starting uPlot's own native
+    // drag-to-box-zoom on `.u-over` (real `mousedown`/`mousemove`/`mouseup` —
+    // NOT synthesized "compatibility" events for a real mouse, so this
+    // component's own `pointerdown` handler calling `preventDefault()` does
+    // NOT suppress them, unlike for touch/pen) — fighting our own
+    // `onCentrePointerMove` pan on every single drag: our pan would move the
+    // range, then uPlot's OWN mouseup handler would immediately stomp it back
+    // to whatever box the mouse happened to sweep out in screen pixels. THIS
+    // was the "一點用都沒有、還是歪的" bug (B31b) — not the needle's own
+    // position (which was already correct — see `needleOffsetX` — nor the
+    // sample-under-needle read, which is mathematically identical to
+    // `posToVal` for this app's always-linear x scale — see `valueAtPlotX`).
+    // Disabling `drag` entirely here lets our own onCentrePointerDown/Move/Up
+    // handlers be the ONLY thing driving the x range while this mode is on.
     cursor: props.centreCursorMode
-      ? { focus: { prox: 16 }, x: false, y: false }
+      ? { focus: { prox: 16 }, x: false, y: false, drag: { setScale: false, x: false, y: false } }
       : { focus: { prox: 16 } },
     hooks: {
       setCursor: [
@@ -390,7 +450,7 @@ function updateNeedlePos(): void {
   }
   const wrapRect = wrap.value.getBoundingClientRect()
   const overRect = plot.over.getBoundingClientRect()
-  needleLeft.value = overRect.left - wrapRect.left + overRect.width / 2
+  needleLeft.value = needleOffsetX(overRect.left - wrapRect.left, overRect.width)
 }
 
 function destroy(): void {
