@@ -193,12 +193,52 @@ function onTogglePinned(): void {
   }
 }
 
+// B32 fix — root cause (found by reading the actual interaction, since this
+// worktree's headless browser session cannot paint/composite at all: the tab
+// is permanently `document.hidden`, `prefers-reduced-motion: reduce` reads
+// true, `requestAnimationFrame` never fires and even an isolated minimal
+// `transitionend` repro never completes — confirmed genuinely environmental,
+// not app-specific, by testing on a blank `about:blank`-equivalent page too).
+//
+// Collapse/expand used to be a pure body-height change (see #9's doc above:
+// the card's own GridItem `h` was deliberately left untouched specifically
+// to avoid fighting anything). `dece43d` (collapse-reflow overlay,
+// `applyCollapsedHeights`/`compactVertical`) later made a collapsing card
+// shrink its OWN grid slot too (補位) — grid-layout-plus has NO built-in CSS
+// transition for a width/height change (only `left/top/right`/`transform`,
+// i.e. POSITION, are in its `transition-property` list — see
+// node_modules/grid-layout-plus's injected `.vgl-item{...}` rule), so that
+// slot resize lands INSTANTLY, and `.dashboard-card.collapsed{height:100%}`
+// means THIS card's root element snaps to the new size in the very same
+// frame. `useAutoFlip` (#20, generic "my grid slot moved" watcher) sees
+// exactly that instant snap on its OWN `.vgl-item` parent and — correctly by
+// its own contract, but WRONGLY for this specific case — FLIP-animates the
+// WHOLE root element (header included) with a non-uniform `scale()` (see
+// flip.ts's `computeFlipInvert`) from the old box to the new one, AT THE
+// SAME TIME `onBodyEnter`/`onBodyLeave` below are already animating the
+// BODY's real height. Two competing animations fire on the same toggle: one
+// correct (body height), one wrong (a whole-card squish that scales the
+// header too, since `scale()` isn't body-only) — which is what reads as
+// "the transition is gone/broken" rather than a clean height collapse.
+//
+// Fix: suppress the generic auto-flip specifically while THIS card's own
+// body-transition is in flight (`selfReflowing`, set for the exact duration
+// `animateBodyHeight` runs) — same treatment #20 already gives `pinned`
+// (whose Teleport move is animated explicitly elsewhere, so the generic
+// watcher must stay out of its way). A NEIGHBOUR card that gets pushed up to
+// fill the reclaimed rows (dece43d's 補位) has `selfReflowing === false` (it
+// didn't toggle its own collapse), so its OWN useAutoFlip still plays
+// normally — only the card that's the CAUSE of its own resize skips the
+// generic watcher, not every card the reflow touches.
+const selfReflowing = ref(false)
+
 // #20 — generic FLIP for any OTHER cause of this card's grid slot moving
 // (compaction settle, drag/resize settle, delete-compaction, breakpoint
-// switch) — see useFlipAnimation.ts's module doc. Disabled while pinned: the
+// switch) — see useFlipAnimation.ts's module doc. Disabled while pinned (the
 // Teleport move above is already animated explicitly, and the pinned anchor
-// isn't part of the compacted grid anyway.
-useAutoFlip(rootEl, { enabled: computed(() => !props.pinned) })
+// isn't part of the compacted grid anyway) and while this card's OWN
+// collapse/expand body transition is running (see `selfReflowing` above).
+useAutoFlip(rootEl, { enabled: computed(() => !props.pinned && !selfReflowing.value) })
 
 // #20 — smooth height transition for the collapse/expand body hide/show
 // (the card's own grid slot doesn't move — see #9's note — only the body's
@@ -215,6 +255,12 @@ function animateBodyHeight(el: HTMLElement, from: number, to: number, done: () =
     done()
     return
   }
+  // B32 — see `selfReflowing`'s doc above `useAutoFlip`: mark this card's own
+  // grid-slot resize (dece43d's collapse-reflow overlay) as self-caused
+  // BEFORE the DOM mutation lands, so useAutoFlip's MutationObserver
+  // (microtask-queued, fires strictly after this synchronous call returns)
+  // sees it disabled and skips FLIP-animating this same resize a second time.
+  selfReflowing.value = true
   // Flex items along the flex-direction's main axis (here: `.body`'s own
   // `flex: 1 1 auto` inside `.dashboard-card`'s column flex) grow/shrink to
   // fill available space regardless of an inline `height` — override that
@@ -252,13 +298,17 @@ function onBodyLeave(el: Element, done: () => void): void {
 /** Common `@after-enter`/`@after-leave`/`@enter-cancelled`/`@leave-cancelled`
  *  cleanup: release every inline style the animation above set, so the CSS
  *  class rules (`flex: 1 1 auto`, `overflow: auto`) govern again once the
- *  body is at its natural resting state. */
+ *  body is at its natural resting state. B32 — also clears `selfReflowing`,
+ *  re-arming useAutoFlip for the NEXT grid-slot move (a real reflow caused by
+ *  something else, e.g. a sibling card's own collapse), not just re-running
+ *  it here (this card's own resize is already finished by this point). */
 function onBodyAfterTransition(el: Element): void {
   const body = el as HTMLElement
   body.style.flex = ''
   body.style.overflow = ''
   body.style.height = ''
   body.style.transition = ''
+  selfReflowing.value = false
 }
 
 onBeforeUnmount(() => {
@@ -496,34 +546,52 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-/* B18 — pinned-card resize handle: a small corner grip, bottom-right, shown
-   only while pinned + not collapsed (see the template's `v-if`). Dragging it
-   sets an explicit pixel width/height on the card (`pinnedSize`/`cardStyle`
+/* B18b — pinned-card resize handle: bottom-right corner grip, shown only
+   while pinned + not collapsed (see the template's `v-if`). Dragging it sets
+   an explicit pixel width/height on the card (`pinnedSize`/`cardStyle`
    above), overriding both the aspect-ratio default and the `max-height: 45vh`
    / anchor `width: min(560px, 100%)` ceilings — `clampPinnedSize` keeps the
-   result sane instead. */
+   result sane instead.
+   Previously this drew its OWN bespoke 90°-corner icon (fixed 18px box,
+   plain `--color-text-muted` border, hover-only opacity) — a different
+   affordance from the one every GRID card already has for the exact same
+   gesture (grid-layout-plus's own `.vgl-item__resizer`, themed in
+   AnalyzerView.vue). Restyled to be henceforth STRUCTURALLY the same element
+   grid-layout-plus draws (position/size via the identical `--vgl-resizer-*`
+   custom properties, a `::before`-drawn corner via the same
+   border-right/border-bottom-on-an-inset-box technique, same accent color,
+   same rounded corner) rather than reinventing it — the resize gesture itself
+   stays this component's own pointerdown/move/up handlers (a pinned card's
+   real content has been Teleported out of the grid entirely — see this
+   file's module doc — so there's no grid-layout-plus resize algorithm here
+   to plug into, only its VISUAL affordance is shared). AnalyzerView.vue
+   defines `--vgl-resizer-size`/`--vgl-resizer-border-color`/`--vgl-resizer-
+   border-width` on `.analyzer` (an ancestor of both the grid and the pinned
+   anchor this card Teleports into) specifically so this rule and the grid's
+   own resizer read the SAME values, including the mobile 30px touch-target
+   bump — see that file's own comment for why the value has to be declared
+   twice. Falls back to grid-layout-plus's own un-themed defaults (10px /
+   `--color-accent` / 2px) if ever rendered outside `.analyzer`. */
 .pin-resize-handle {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 18px;
-  height: 18px;
-  cursor: nwse-resize;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  width: var(--vgl-resizer-size, 10px);
+  height: var(--vgl-resizer-size, 10px);
+  cursor: se-resize;
   touch-action: none;
-  border-radius: 0 0 calc(var(--radius) * 1.5) 0;
 }
-.pin-resize-handle::after {
-  content: '';
+.pin-resize-handle::before {
   position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid var(--color-text-muted);
-  border-bottom: 2px solid var(--color-text-muted);
-  opacity: 0.6;
-}
-.pin-resize-handle:hover::after {
-  opacity: 1;
+  top: 0;
+  right: 3px;
+  bottom: 3px;
+  left: 0;
+  content: '';
+  border: 0 solid var(--vgl-resizer-border-color, var(--color-accent));
+  border-right-width: var(--vgl-resizer-border-width, 2px);
+  border-bottom-width: var(--vgl-resizer-border-width, 2px);
+  border-radius: 0 0 var(--radius) 0;
 }
 </style>
