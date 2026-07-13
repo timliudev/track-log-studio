@@ -1016,6 +1016,45 @@ function onPointerLeave(): void {
   if (mode === 'idle') emit('cursor', null)
 }
 
+// B30 — coalesce cursorIdx-driven redraws to at most one per animation frame.
+// `draw()` re-renders the WHOLE canvas every time (full track polyline,
+// heatmap buckets, highlight/comparison segments, gates, extrema
+// labels/strokeText, start/finish band — see the function above), not just
+// the cursor dot. `watch(() => props.cursorIdx, () => draw())` used to call
+// that full pipeline SYNCHRONOUSLY on every single hover-driven cursor
+// change — i.e. on every mousemove pixel, since map→chart cursor forwarding
+// (TrackMap's own idle-hover branch in onPointerMove below) emits a new
+// cursorIdx on every pointermove. On a real multi-lap/heatmap track (tens of
+// thousands of samples, HEAT_BUCKETS strokes, per-marker strokeText/fillText)
+// a single draw() can take long enough that a fast mouse move floods the main
+// thread with a backlog of queued draw() calls it can't keep up with — from
+// the user's POV the map cursor "freezes" near wherever it first landed while
+// the backlog slowly (or never, in practice) catches up, exactly matching the
+// "only the first touched point registers, not continuous" symptom. This
+// doesn't reproduce on a small synthetic track (draw() is cheap enough there
+// to always keep up), which is why it wasn't caught by a plain small-fixture
+// component test.
+//
+// scheduleDraw() fixes this the standard way: coalesce however many
+// cursorIdx changes land within one frame into a SINGLE draw() call that
+// reads props.cursorIdx fresh (not a captured stale value) — so the render
+// loop can never fall behind the input rate, capping redraw work to the
+// display's own refresh rate regardless of how fast the pointer moves. Only
+// used for the two purely-hover-driven triggers below (the cursorIdx prop
+// watch, and onPointerLeave's clear-to-null) — every OTHER draw() call site
+// (zoom/pan, line/gate drag, resize, focusRange fit) stays synchronous and
+// unchanged, since those either need draw()'s side effects (focusMinX/Y etc.)
+// available immediately afterward, or aren't high-frequency enough to matter.
+let cursorDrawScheduled = false
+function scheduleDraw(): void {
+  if (cursorDrawScheduled) return
+  cursorDrawScheduled = true
+  requestAnimationFrame(() => {
+    cursorDrawScheduled = false
+    draw()
+  })
+}
+
 onMounted(() => {
   draw()
   ro = new ResizeObserver(() => draw())
@@ -1032,7 +1071,7 @@ onBeforeUnmount(() => {
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
 watch(() => props.track, () => resetView())
-watch(() => props.cursorIdx, () => draw())
+watch(() => props.cursorIdx, () => scheduleDraw())
 watch(() => props.line, () => draw())
 watch(() => props.highlightLaps, () => draw())
 watch(() => props.comparisonLapHighlights, () => draw())

@@ -1,37 +1,28 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
-import { detectChannelExtrema, findGlobalChannelExtremum, type ChannelExtremum } from '@/domain/analysis/cornerSpeed'
+import {
+  detectChannelExtrema,
+  findGlobalChannelExtremum,
+  normalizeChannelExtrema,
+  formatExtremumValue,
+  type ChannelExtremum,
+  type NormalizedChannelExtremum,
+} from '@/domain/analysis/cornerSpeed'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 
-/** A channel extremum (for the focused lap, or the whole track when no lap
- *  is focused) projected onto the map, normalised for colour. */
-export interface TrackExtremaMarker {
-  lat: number
-  lon: number
-  value: number
-  /** Value normalised within the current extrema set (0..1), for the map's green/red gradient. */
-  valueFrac: number
-  kind: 'min' | 'max'
-  /** `value` pre-formatted for display (e.g. next to the marker on TrackMap) —
-   *  see {@link formatExtremumValue}. */
-  label: string
-}
+// Re-exported so existing consumers (TrackChannelPanel.vue's `formatExtremumValue`
+// import) keep working unchanged — the implementation now lives in the domain
+// layer (cornerSpeed.ts) so B33's cross-session marker builder
+// (crossSessionExtrema.ts) can share it without a domain->composable dependency.
+export { formatExtremumValue }
 
-/**
- * Format a channel extremum's value for display (map label / list value).
- * Magnitude-adaptive decimals so both tiny (e.g. G-force ~1.2) and large (e.g.
- * RPM ~8500) channels read sensibly without a fixed, wrong-for-someone
- * precision: < 10 → 2dp, < 100 → 1dp, else whole numbers. Non-finite → em dash.
- * Pure — also used (as `fmtValue`) by TrackChannelPanel's extrema list, so
- * the map label and the side-panel list always agree on the same channel's
- * formatting.
- */
-export function formatExtremumValue(v: number): string {
-  if (!Number.isFinite(v)) return '—'
-  const a = Math.abs(v)
-  return v.toFixed(a < 10 ? 2 : a < 100 ? 1 : 0)
-}
+/** A channel extremum (for the focused lap, or the whole track when no lap
+ *  is focused) projected onto the map, normalised for colour. Alias of the
+ *  domain layer's `NormalizedChannelExtremum` — kept as a distinct exported
+ *  name since this composable is the established Vue-facing API consumers
+ *  (TrackMap.vue, TrackChannelPanel.vue) already know. */
+export type TrackExtremaMarker = NormalizedChannelExtremum
 
 /**
  * A9: unified track-channel extrema (generalised from the old speed-only
@@ -135,25 +126,7 @@ export function useTrackExtrema(
   // across the CURRENT extrema set only (one lap's, or the whole-track
   // fallback's — see trackExtremaIsLapScoped), never across the whole session
   // when a single lap is focused.
-  const mapExtremaMarkers = computed<TrackExtremaMarker[]>(() => {
-    const extrema = trackExtrema.value
-    if (!extrema || extrema.length === 0) return []
-    let min = Infinity
-    let max = -Infinity
-    for (const e of extrema) {
-      if (e.value < min) min = e.value
-      if (e.value > max) max = e.value
-    }
-    const span = max - min
-    return extrema.map((e) => ({
-      lat: e.lat,
-      lon: e.lon,
-      value: e.value,
-      valueFrac: span > 1e-6 ? (e.value - min) / span : 1,
-      kind: e.kind,
-      label: formatExtremumValue(e.value),
-    }))
-  })
+  const mapExtremaMarkers = computed<TrackExtremaMarker[]>(() => normalizeChannelExtrema(trackExtrema.value ?? []))
 
   // Whether a channel is picked at all — distinguishes TrackChannelPanel's "pick
   // a channel first" hint from its "no track data" hint.

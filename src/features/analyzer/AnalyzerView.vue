@@ -25,6 +25,7 @@ import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceFromLaunch, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
 import { buildComparisonLapHighlights } from '@/domain/analysis/crossSessionLapHighlight'
+import { buildComparisonExtremaMarkers } from '@/domain/analysis/crossSessionExtrema'
 import {
   STATIC_CARD_IDS,
   STATIC_CARD_TITLE_KEYS,
@@ -203,6 +204,32 @@ const { trackExtrema, mapExtremaMarkers, trackChannelChosen } = useTrackExtrema(
   markMinima,
   markMaxima,
 )
+
+// B33: track-channel min/max markers for a lap selected on a COMPARISON file
+// (not just the primary — `focusedLap`/`mapExtremaMarkers` above only ever
+// look at the primary session's own `lapStore.selected`, so a comparison
+// file's lap selection never lit up markers at all). Same "resolve a
+// cross-file lap selection to something drawable on that file's own track"
+// shape as `comparisonLapHighlights` below, but for extrema markers — see
+// `buildComparisonExtremaMarkers`'s doc for the per-file single-lap rule.
+const comparisonExtremaMarkers = computed(() =>
+  buildComparisonExtremaMarkers(
+    lapStore.selectedAcrossSessions,
+    comparisonSessions.value.map((cs) => ({
+      fileId: cs.id,
+      track: cs.track,
+      channelData: trackChannel.value ? (cs.session.get(trackChannel.value)?.data ?? null) : null,
+      laps: cs.laps,
+    })),
+    markMinima.value,
+    markMaxima.value,
+  ),
+)
+
+// Merged marker set actually drawn on the map: the primary session's own
+// (lap-scoped or whole-track-fallback) markers plus every qualifying
+// comparison file's own lap-scoped markers, side by side.
+const allExtremaMarkers = computed(() => [...mapExtremaMarkers.value, ...comparisonExtremaMarkers.value])
 
 // --- Acceleration/drag test (Phase 7, 加速測試): whole-SESSION search, not
 // a per-lap metric — see accelTest.ts's module doc for why. Speed channel
@@ -867,7 +894,7 @@ function titleForItemId(id: string): string {
                 :color-values="colorValues"
                 :colormap="trackColormap"
                 :gates="mapGates"
-                :extrema-markers="mapExtremaMarkers"
+                :extrema-markers="allExtremaMarkers"
                 :overlay-tracks="overlayTracks"
                 @cursor="analyzer.setCursor"
                 @update:line="lapStore.setLine($event)"
