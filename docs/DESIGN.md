@@ -184,6 +184,12 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   用於未選圈或 hover 非選取段的情況）。(b) 命中半徑同時放寬（`resolveTrackHitRadius()`，一般
   指標 32px、任何觸控裝置在場則 48px，取自 `useInputCapabilities()` 的 `anyPointerCoarse`，同
   §8 layer 3 慣例）。
+- **B46 XY 散佈圖 / G-G 圖縮放**：兩者共用同一顆 `GgChart.vue`（ECharts）元件——ScatterChart.vue
+  只是依資料決定 `axisMode`（訊號正負對稱→'square' 走 G-G 摩擦圓看法，否則'auto'）——縮放/平移
+  功能因此自動兩者一致，不需分別實作。X、Y 各掛一個 `dataZoom: {type:'inside'}`：滑鼠滾輪縮放
+  +拖曳平移，觸控原生支援雙指縮放/拖曳平移，不需額外手勢程式碼。同樣有「重設縮放」鈕，出現
+  /樣式規則與 B9 一致（沿用同一支 `resetZoom` i18n 字串），座標軸鎖 1:1（`equalAspect`/`square`）
+  下獨立縮放 X/Y 理論上會暫時偏離正圓，屬已知取捨，未特別處理。
 - **B8**：主時序圖不再有「時序 / 疊圈」模式切換——**疊圈是唯一的顯示方式**：沒有選圈時退回
   顯示整段 session（時間/距離軸連續資料，等同舊「時序」模式的畫面）；選了圈之後才切到
   各圈疊在共用「圈相對 X」（從 0 起算）上比較。跨檔 overlay（cross-session、每圈 offset）

@@ -294,13 +294,53 @@ export function formatAxisTick(value: number, span: number): string {
   const rounded = Number(value.toFixed(decimals))
   return String(rounded === 0 ? 0 : rounded)
 }
+
+/** B46 — the X/Y `dataZoom` window, as ECharts' own 0..100 PERCENTAGES of
+ *  each axis' full (pinned or auto) range. Kept as percentages — not data
+ *  values — because that's what ECharts' 'inside' dataZoom components report
+ *  via their `start`/`end` (see the `datazoom` event handler below), and
+ *  because it stays meaningful across a `square`/`equal` axis-range change
+ *  (a chart re-render whose numeric min/max shift for reasons unrelated to
+ *  the user's zoom, e.g. a resize recomputing the square grid box). */
+export interface ScatterZoomWindow {
+  xStart: number
+  xEnd: number
+  yStart: number
+  yEnd: number
+}
+
+export const FULL_ZOOM_WINDOW: ScatterZoomWindow = { xStart: 0, xEnd: 100, yStart: 0, yEnd: 100 }
+
+/**
+ * B46 — whether `window` is a real zoom relative to the full 0..100 range on
+ * EITHER axis. Same shape/purpose as UPlotChart's `isZoomed` (drives the
+ * reset-zoom button's visibility), just percentage- rather than data-range-
+ * based since that's the unit ECharts' inside dataZoom natively works in. A
+ * small epsilon guards float-precision noise from ECharts' own zoom/pan maths
+ * (mirrors `isZoomed`'s `epsFraction` guard).
+ */
+export function isScatterZoomed(window: ScatterZoomWindow, epsilon = 1e-6): boolean {
+  return (
+    window.xStart > epsilon ||
+    window.xEnd < 100 - epsilon ||
+    window.yStart > epsilon ||
+    window.yEnd < 100 - epsilon
+  )
+}
 </script>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import * as echarts from 'echarts/core'
 import { ScatterChart } from 'echarts/charts'
-import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
+import {
+  DataZoomComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  VisualMapComponent,
+} from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { colormapSwatches } from '@/domain/analysis/colormap'
 
@@ -310,6 +350,7 @@ echarts.use([
   TooltipComponent,
   VisualMapComponent,
   LegendComponent,
+  DataZoomComponent,
   CanvasRenderer,
 ])
 
@@ -361,10 +402,23 @@ const props = defineProps<{
   colorChannel?: string | null
 }>()
 
+const { t } = useI18n()
+
 const host = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
+
+// B46 — current X/Y dataZoom window (see ScatterZoomWindow's doc), synced
+// from ECharts' own 'datazoom' event (attached once per chart instance —
+// see attachZoomListener) and threaded back into buildOption()'s dataZoom
+// entries below so a render() triggered by something OTHER than the user's
+// own zoom gesture — a resize recomputing the square grid box, a channel/lap
+// change, a theme toggle — doesn't silently reset the user's current zoom.
+// Only resetZoom() (or a genuinely fresh chart instance) puts it back to
+// FULL_ZOOM_WINDOW.
+const zoomWindow = ref<ScatterZoomWindow>({ ...FULL_ZOOM_WINDOW })
+const zoomed = computed(() => isScatterZoomed(zoomWindow.value))
 
 function themeColor(name: string, fallback: string): string {
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
@@ -592,6 +646,33 @@ function buildOption(): echarts.EChartsCoreOption {
       // per-point distinction, so a lighter opacity would wash it out) is set.
       itemStyle: hasColor ? { opacity: 0.8 } : { color: s.color, opacity: 0.5 },
     })),
+    // B46 — zoom/pan on both axes: 'inside' gives free wheel-zoom + drag-pan
+    // on mouse, and native pinch-zoom/drag-pan on touch, with no extra
+    // gesture code needed (unlike TrackMap's/UPlotChart's hand-rolled pointer
+    // handling — ECharts' own zrender already wires this up for any 'inside'
+    // dataZoom). `start`/`end` are threaded from `zoomWindow` (not left at
+    // the option's own default 0/100) so a render() triggered by something
+    // OTHER than the zoom gesture itself doesn't reset it — see zoomWindow's
+    // doc. Index 0 = X axis, index 1 = Y axis (referenced by that position in
+    // resetZoom's dispatchAction batch below).
+    dataZoom: [
+      {
+        type: 'inside',
+        xAxisIndex: 0,
+        start: zoomWindow.value.xStart,
+        end: zoomWindow.value.xEnd,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+      },
+      {
+        type: 'inside',
+        yAxisIndex: 0,
+        start: zoomWindow.value.yStart,
+        end: zoomWindow.value.yEnd,
+        zoomOnMouseWheel: true,
+        moveOnMouseMove: true,
+      },
+    ],
   }
 }
 
@@ -611,10 +692,50 @@ function hostSize(): { width: number; height: number } {
   )
 }
 
+/** B46 — mirrors ECharts' own current dataZoom start/end (after a user wheel-
+ *  zoom/drag-pan/pinch gesture) back into `zoomWindow`, so the reset button's
+ *  visibility (`zoomed`) and every later render() (resize, data/channel
+ *  change, theme toggle) see the user's actual current window instead of
+ *  silently reverting to the full view. Attached once per chart instance
+ *  (`create()`, right after `echarts.init`) — `chart.on` listeners don't
+ *  survive `dispose()`, so there's nothing to detach separately in destroy().
+ */
+function attachZoomListener(): void {
+  chart?.on('datazoom', () => {
+    if (!chart) return
+    const opt = chart.getOption() as { dataZoom?: Array<{ start?: number; end?: number }> }
+    const dz = opt.dataZoom ?? []
+    zoomWindow.value = {
+      xStart: dz[0]?.start ?? 0,
+      xEnd: dz[0]?.end ?? 100,
+      yStart: dz[1]?.start ?? 0,
+      yEnd: dz[1]?.end ?? 100,
+    }
+  })
+}
+
+// B46 — reset-zoom control: same "only shown while actually zoomed" + same
+// action shape as UPlotChart's resetZoomLocal (B9), adapted to ECharts'
+// dataZoom API — dispatches both axes' 'inside' components back to the full
+// 0..100 window in one batched action, and mirrors that onto `zoomWindow`
+// immediately (rather than waiting for the resulting 'datazoom' event) so the
+// button hides right away.
+function resetZoom(): void {
+  zoomWindow.value = { ...FULL_ZOOM_WINDOW }
+  chart?.dispatchAction({
+    type: 'dataZoom',
+    batch: [
+      { dataZoomIndex: 0, start: 0, end: 100 },
+      { dataZoomIndex: 1, start: 0, end: 100 },
+    ],
+  })
+}
+
 function create(): void {
   if (!host.value) return
   destroy()
   chart = echarts.init(host.value, undefined, hostSize())
+  attachZoomListener()
   render()
 }
 
@@ -664,15 +785,43 @@ watch(
 </script>
 
 <template>
-  <div
-    ref="host"
-    class="gg-chart-host"
-    :class="{ fill: fillHeight }"
-    :style="fillHeight ? undefined : { height: `${props.height ?? 360}px` }"
-  />
+  <!-- B46 — wrapping div (not the host itself) is now the component ROOT so
+       the reset-zoom button can be positioned absolutely over the chart, same
+       structure as UPlotChart's `.uplot-wrap`/`.uplot-host` split. The parent
+       (ScatterChart.vue)'s `class="chart-fill"` lands on THIS root — see
+       `.gg-chart-wrap.fill` below, which now carries the flex sizing that
+       `.gg-chart-host.fill` alone used to. -->
+  <div class="gg-chart-wrap" :class="{ fill: fillHeight }">
+    <div
+      ref="host"
+      class="gg-chart-host"
+      :class="{ fill: fillHeight }"
+      :style="fillHeight ? undefined : { height: `${props.height ?? 360}px` }"
+    />
+    <button v-if="zoomed" type="button" class="reset-zoom" @click="resetZoom">
+      {{ t('analyzer.resetZoom') }}
+    </button>
+  </div>
 </template>
 
 <style scoped>
+.gg-chart-wrap {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+/* #8 — fillHeight mode: stretch to the parent's available height (a
+   dashboard grid item's card body) — see UPlotChart's `.fill` for the same
+   pattern. */
+.gg-chart-wrap.fill {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.gg-chart-wrap.fill .gg-chart-host {
+  flex: 1;
+  min-height: 0;
+}
 .gg-chart-host {
   width: 100%;
   /* #16: as a flex item (ScatterChart.vue's column flex root) this would
@@ -683,10 +832,28 @@ watch(
    * the matching fix one level up. */
   min-width: 0;
 }
-/* #8 — fillHeight mode: stretch to the parent's available height (a
-   dashboard grid item's card body) — see UPlotChart's `.fill` for the same
-   pattern. */
-.gg-chart-host.fill {
-  height: 100%;
+/* B46 — same look + placement as UPlotChart's reset-zoom button. */
+.reset-zoom {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  padding: 3px 9px;
+  font-size: 0.75rem;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.reset-zoom:hover {
+  border-color: var(--color-text-muted);
+}
+/* B35 — §8 layer 3: any coarse pointer present grows this to a comfortable
+   >=44px touch target — see UPlotChart's identical rule for the full doc. */
+:root[data-any-pointer-coarse] .reset-zoom {
+  padding: 12px 16px;
+  font-size: 0.85rem;
+  min-height: 44px;
 }
 </style>
