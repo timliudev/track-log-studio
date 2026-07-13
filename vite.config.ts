@@ -139,7 +139,16 @@ export default defineConfig(({ mode }) => {
           ],
         },
       }),
-      cloudflare(),
+      // B39d: `cloudflare()` now builds worker/index.ts as a real Worker
+      // environment (wrangler.jsonc gained a `main` entry for the
+      // workers.dev->custom-domain redirect). That extra environment's
+      // config is incompatible with the plain-node Vitest run below (its
+      // `resolve.external` node-builtins list trips the plugin's own
+      // validation) — and Vitest doesn't need it anyway, since
+      // worker/redirect.ts is tested as a plain pure function. Skip the
+      // plugin under `vitest` (which sets `process.env.VITEST`); it still
+      // runs for `vite dev`/`vite build`/`wrangler dev`.
+      ...(process.env.VITEST ? [] : [cloudflare()]),
     ],
     resolve: {
       alias: {

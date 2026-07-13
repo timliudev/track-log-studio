@@ -2,11 +2,23 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "track-log-studio",
   "compatibility_date": "2026-06-18",
+  // B39d: tiny entry script that 301s the workers.dev duplicate host to the
+  // custom domain, then falls through to the static assets for everything
+  // else. See worker/index.ts + worker/redirect.ts.
+  "main": "worker/index.ts",
   "observability": {
     "enabled": true
   },
   "assets": {
-    "not_found_handling": "single-page-application"
+    "not_found_handling": "single-page-application",
+    // Binds the static-assets fetcher as env.ASSETS so worker/index.ts can
+    // hand off non-redirected requests to it.
+    "binding": "ASSETS",
+    // Without this, the Assets Worker serves matching files *before*
+    // worker/index.ts ever runs, so the host check in worker/index.ts would
+    // never see asset requests (only 404s). `true` routes every request
+    // through the Worker first.
+    "run_worker_first": true
   },
   "compatibility_flags": [
     "nodejs_compat"
