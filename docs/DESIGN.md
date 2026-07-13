@@ -433,7 +433,9 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 9. ~~**E 圈次分析**：手動 sector → 理論最佳圈(optimal) → delta time。~~ **DONE**：
    `sectorTiming.ts` 的 `computeSectorTimes`（逐圈 sector 時間）+ `computeOptimalLap`
    （逐 sector 取最小值組出理論最佳圈）；`gateOrder.ts` 的 `sortGatesByPosition` 讓手動加/拖曳的
-   gate 依實際圈上位置排序。
+   gate 依實際圈上位置排序。**B47**：理論最佳圈摘要放在 `SectorPanel.vue` 的 `CardFillScroll`
+   `#header`（自動偵測彎道／新增閘門控制列之後、閘門列表之前）而非隨閘門列表捲動，
+   卡片再矮也看得到；閘門列表仍在可捲動的預設 slot。
 10. **F 行動裝置驗收**：真機 + production build 查 Android 載入後偶發重整（疑記憶體壓力,桌面無法重現）。
     **診斷工具已備（`src/debug/diagnostics.ts`，feature/mobile-diagnostics）**：手機無 DevTools、
     重整又清 console，故 `?debug=1` 開啟一個純 DOM 自我診斷面板，把 `document.wasDiscarded`

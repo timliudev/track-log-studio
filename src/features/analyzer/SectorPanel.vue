@@ -82,6 +82,35 @@ const hasOptimalData = computed(
           {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
         </span>
       </div>
+
+      <!-- B47 — theoretical-best (optimal) lap summary (§11 E): min per-sector
+           time across complete, non-excluded laps, and which lap owns each
+           best. Moved into the fixed `#header` (alongside the auto-detect/add-
+           gate controls, ABOVE the scrollable gate list) so it stays visible
+           even when the card is resized short enough that the gate list would
+           otherwise scroll it out of view — see CardFillScroll's module doc:
+           only the default slot scrolls, `#header` always renders at its
+           natural height. -->
+      <div v-if="gates.length > 0" class="optimal">
+        <div class="optimal-title">{{ t('analyzer.optimalLapTitle') }}</div>
+        <template v-if="hasOptimalData && optimalLap">
+          <div class="optimal-total">
+            {{ t('analyzer.optimalLapTime', { t: formatLapTime(optimalLap.optimalLapMs) }) }}
+          </div>
+          <ul class="optimal-sectors">
+            <li v-for="(s, i) in optimalLap.bestSectors" :key="i">
+              {{
+                t('analyzer.optimalLapSector', {
+                  n: i + 1,
+                  t: Number.isFinite(s.bestMs) ? formatLapTime(s.bestMs) : '—',
+                  lap: s.lapIndex != null ? s.lapIndex + 1 : '—',
+                })
+              }}
+            </li>
+          </ul>
+        </template>
+        <p v-else class="optimal-empty">{{ t('analyzer.optimalLapNoData') }}</p>
+      </div>
     </template>
 
     <ul v-if="gates.length > 0" class="gate-list">
@@ -98,29 +127,6 @@ const hasOptimalData = computed(
         </button>
       </li>
     </ul>
-
-    <!-- Theoretical-best (optimal) lap summary (§11 E): min per-sector time
-         across complete, non-excluded laps, and which lap owns each best. -->
-    <div v-if="gates.length > 0" class="optimal">
-      <div class="optimal-title">{{ t('analyzer.optimalLapTitle') }}</div>
-      <template v-if="hasOptimalData && optimalLap">
-        <div class="optimal-total">
-          {{ t('analyzer.optimalLapTime', { t: formatLapTime(optimalLap.optimalLapMs) }) }}
-        </div>
-        <ul class="optimal-sectors">
-          <li v-for="(s, i) in optimalLap.bestSectors" :key="i">
-            {{
-              t('analyzer.optimalLapSector', {
-                n: i + 1,
-                t: Number.isFinite(s.bestMs) ? formatLapTime(s.bestMs) : '—',
-                lap: s.lapIndex != null ? s.lapIndex + 1 : '—',
-              })
-            }}
-          </li>
-        </ul>
-      </template>
-      <p v-else class="optimal-empty">{{ t('analyzer.optimalLapNoData') }}</p>
-    </div>
   </CardFillScroll>
 </template>
 
