@@ -244,6 +244,7 @@ export default {
     accelResultCount: '{n} matching segments found',
     accelFastest: 'Fastest',
     accelEntryExit: '{entry} → {exit}',
+    accelPeakSpeed: 'peak {peak}',
     accelFocus: 'Focus this segment',
     accelUnfocus: 'Cancel focus',
     accelClearFocus: 'Clear focus',

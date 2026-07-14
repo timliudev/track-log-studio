@@ -7,7 +7,13 @@ import AccelTestPanel from '@/features/analyzer/AccelTestPanel.vue'
 import type { AccelSegment } from '@/domain/analysis/accelTest'
 import zhHant from '@/i18n/locales/zh-Hant'
 
-function seg(startIdx: number, endIdx: number, isFastest = false, timeMs = 1000): AccelSegment {
+function seg(
+  startIdx: number,
+  endIdx: number,
+  isFastest = false,
+  timeMs = 1000,
+  peakSpeedKmh = 100,
+): AccelSegment {
   return {
     startIdx,
     endIdx,
@@ -15,6 +21,7 @@ function seg(startIdx: number, endIdx: number, isFastest = false, timeMs = 1000)
     distanceM: 100,
     entrySpeedKmh: 0,
     exitSpeedKmh: 100,
+    peakSpeedKmh,
     isFastest,
   }
 }
@@ -130,5 +137,25 @@ describe('AccelTestPanel result ordering (B48)', () => {
     expect(results[1].classes()).toContain('focused')
     expect(results[0].classes()).not.toContain('focused')
     expect(results[2].classes()).not.toContain('focused')
+  })
+})
+
+// B53: entry/exit speed alone can misread as a bug when a run peaks
+// mid-window and brakes off before the mark resolves (real-log case:
+// faster time, lower end speed than another segment) — the panel now
+// shows the peak speed for exactly that shape, and stays quiet otherwise.
+describe('AccelTestPanel peak speed affordance (B53)', () => {
+  it('shows the peak speed when the run peaked well above its exit speed', () => {
+    // exitSpeedKmh defaults to 100 in the seg() helper; peakSpeedKmh=150
+    // here means the run braked off from 150 down to 100 before the mark.
+    const wrapper = mountPanel([seg(0, 10, true, 1000, 150)])
+    const peak = wrapper.find('.result-peak')
+    expect(peak.exists()).toBe(true)
+    expect(peak.text()).toContain('150.0 km/h')
+  })
+
+  it('stays quiet for a monotonic run whose peak equals its exit speed', () => {
+    const wrapper = mountPanel([seg(0, 10, true, 1000, 100)])
+    expect(wrapper.find('.result-peak').exists()).toBe(false)
   })
 })
