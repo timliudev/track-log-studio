@@ -120,6 +120,17 @@ function fmtSpeed(v: number): string {
 function fmtDist(v: number): string {
   return Number.isFinite(v) ? `${v.toFixed(1)} m` : '—'
 }
+
+// B53: entry/exit speed alone can misread as a bug — a run that peaks
+// mid-window and brakes off before the mark legitimately covers the
+// distance FASTER than a steadier run while ending slower (see
+// accelTest.ts's AccelSegment.peakSpeedKmh doc). Only surface the peak
+// when it's meaningfully above the exit speed (i.e. the run actually
+// slowed down before resolving) — a monotonic launch's peak equals its
+// exit speed, so showing it there would just be noise.
+function showsPeak(seg: AccelSegment): boolean {
+  return seg.peakSpeedKmh > seg.exitSpeedKmh + 1
+}
 </script>
 
 <template>
@@ -224,6 +235,9 @@ function fmtDist(v: number): string {
             entry: fmtSpeed(seg.entrySpeedKmh),
             exit: fmtSpeed(seg.exitSpeedKmh),
           }) }}
+        </span>
+        <span v-if="showsPeak(seg)" class="result-detail result-peak">
+          {{ t('analyzer.accelPeakSpeed', { peak: fmtSpeed(seg.peakSpeedKmh) }) }}
         </span>
         <button type="button" class="focus-btn" :class="{ active: isFocused(seg) }" @click="onFocusClick(seg)">
           {{ isFocused(seg) ? t('analyzer.accelUnfocus') : t('analyzer.accelFocus') }}
@@ -356,6 +370,10 @@ function fmtDist(v: number): string {
 .result-detail {
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+}
+.result-peak {
+  font-style: italic;
+  opacity: 0.85;
 }
 .focus-btn {
   margin-left: auto;

@@ -238,6 +238,7 @@ export default {
     accelResultCount: '共找到 {n} 個符合區段',
     accelFastest: '最速',
     accelEntryExit: '{entry} → {exit}',
+    accelPeakSpeed: '峰值 {peak}',
     accelFocus: '聚焦此區段',
     accelUnfocus: '取消聚焦',
     accelClearFocus: '清除聚焦',
