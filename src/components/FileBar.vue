@@ -51,14 +51,25 @@ function isAnalysisSelected(id: number): boolean {
 }
 
 function toggleAnalysisFile(id: number): void {
+  const prevPrimary = analyzer.activeFileId
   const wasComparison = analyzer.selectedSessions.includes(id)
   const next = toggleIncludedSession(selectionState(), id)
   applySelection(next)
   if (wasComparison && !next.comparisonIds.includes(id)) lapStore.clearSessionSelection(id)
+  // Unchecking the PRIMARY itself promotes the first comparison in its place
+  // (see toggleIncludedSession) — the promoted recording's own per-lap state
+  // needs to become the new primary-facet state, same migration `makePrimary`
+  // does below, but with no "fold the old primary back in" half since it's
+  // leaving the analysis set entirely, not staying as a comparison (B55).
+  if (id === prevPrimary && next.primaryId !== prevPrimary && next.primaryId != null) {
+    lapStore.swapPrimarySession(null, next.primaryId)
+  }
 }
 
 function makePrimary(id: number): void {
+  const prevPrimary = analyzer.activeFileId
   applySelection(promotePrimarySession(selectionState(), id))
+  if (prevPrimary != null) lapStore.swapPrimarySession(prevPrimary, id)
 }
 
 /** File input accept list, derived from the importer registry plus .zip. */
