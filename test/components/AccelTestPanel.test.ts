@@ -15,6 +15,7 @@ function seg(startIdx: number, endIdx: number, isFastest = false, timeMs = 1000)
     distanceM: 100,
     entrySpeedKmh: 0,
     exitSpeedKmh: 100,
+    peakSpeedKmh: 100,
     isFastest,
   }
 }
