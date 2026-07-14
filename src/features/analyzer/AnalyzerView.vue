@@ -490,6 +490,18 @@ const desktopVisibleLayout = computed<typeof layout.value>(() =>
   layout.value.filter((it) => isVisibleId(it.i)),
 )
 
+// B52 fix — the collapse-reflow DISPLAY layout (see applyCollapsedHeights),
+// shared by `activeLayout`'s getter below AND `gutterItems`: the gutter
+// overlay must be detected/positioned from the exact same rects the grid
+// actually renders, not the canonical (pre-collapse) `desktopVisibleLayout`.
+// Before this fix, `gutterItems` was built straight from
+// `desktopVisibleLayout`, so once any card collapsed, every gutter below/
+// beside it stayed at its stale pre-collapse position/size — the reported
+// "pink gutter indicator doesn't follow a collapsed card" bug.
+const desktopDisplayLayout = computed<typeof layout.value>(() =>
+  applyCollapsedHeights(desktopVisibleLayout.value, collapsedIds.value),
+)
+
 // --- Mobile layout (1-D order, persisted to panelState.v1's mobileOrder) ---
 // The mobile single-column layout is built by US (not the library's responsive
 // reflow) from the persisted `mobileOrder`, filtered to the visible cards and
@@ -563,11 +575,13 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
     // Collapse-reflow overlay: collapsed cards shrink to COLLAPSED_ROWS and the
     // layout re-packs top-left so neighbours fill the reclaimed rows (補位). The
     // canonical (expanded) heights stay in `layout` — this is display-only.
+    // Desktop reuses `desktopDisplayLayout` (also fed to `gutterItems` below)
+    // so the grid and the gutter overlay never disagree on where a card
+    // actually is.
     decorateForGrid(
-      applyCollapsedHeights(
-        isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value,
-        collapsedIds.value,
-      ),
+      isMobile.value
+        ? applyCollapsedHeights(mobileVisibleLayout.value, collapsedIds.value)
+        : desktopDisplayLayout.value,
     ),
   set: (next) => {
     if (isMobile.value) {
@@ -669,13 +683,23 @@ function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): vo
 // `gutterItems` — its grid slot is an inert Teleport placeholder (see the
 // template's pin-placeholder note), so a gutter touching it would visibly do
 // nothing.
+//
+// B52 fix — built from `desktopDisplayLayout` (the collapse-reflow DISPLAY
+// layout, same one fed to `<GridLayout>` by `activeLayout`'s getter), not the
+// canonical `desktopVisibleLayout`: pinned filtering now happens AFTER the
+// collapse overlay so it matches exactly what's on screen, whether or not
+// the pinned card is also collapsed.
 const gutterItems = computed<DashboardLayoutItem[]>(() =>
-  desktopVisibleLayout.value.filter((it) => !isPinned(it.i)),
+  desktopDisplayLayout.value.filter((it) => !isPinned(it.i)),
 )
 const gutterEnabled = computed(() => !isMobile.value && !isLocked.value)
 const gridGutters = useGridGutters({
   items: gutterItems,
   enabled: gutterEnabled,
+  // B52 — lets useGridGutters drop a gutter along a collapsed card's DISPLAY-
+  // only bottom edge (see gridGutter.ts's filterCollapsedGutters) so dragging
+  // never targets a height that's about to be reverted below.
+  collapsedIds,
   cols: GRID_COLS,
   rowHeight: GRID_ROW_HEIGHT,
   marginX: GRID_MARGIN[0],
@@ -691,8 +715,21 @@ const gridGutters = useGridGutters({
   // `onLayoutUpdated` merges back in — see gridGutter.ts's module doc for
   // why this round trip is safe (doesn't loop) rather than a hand-rolled
   // reflow living here.
+  //
+  // B52 fix — `next` is the FULL `gutterItems` array (display heights), so
+  // EVERY currently-collapsed card in it still carries its COLLAPSED_ROWS
+  // display height, not just the one card the drag actually resized. Without
+  // restoring those back to `layout.value`'s canonical height first,
+  // `mergeLayoutPositions` would see every collapsed card's `h` "changed"
+  // (COLLAPSED_ROWS vs. its real height) and freeze COLLAPSED_ROWS into the
+  // persisted layout for ALL of them — same canonical-height restore
+  // `activeLayout`'s setter already does for the native drag/resize path.
   onChange: (next) => {
-    layout.value = mergeLayoutPositions(layout.value, next)
+    const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
+    const restored = collapsedIds.value.size
+      ? next.map((it) => (collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it))
+      : next
+    layout.value = mergeLayoutPositions(layout.value, restored)
   },
 })
 const gutters = gridGutters.gutters

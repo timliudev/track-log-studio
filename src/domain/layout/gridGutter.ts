@@ -186,6 +186,29 @@ export function applyGutterDrag(
 }
 
 /**
+ * B52 fix — drop any gutter whose DRAGGED side (`aId`) is currently collapsed
+ * from a HORIZONTAL detection list. A collapsed card's on-screen height
+ * (`COLLAPSED_ROWS` — see dashboardLayout.ts's `applyCollapsedHeights`) is a
+ * DISPLAY-only overlay, not its real canonical height; letting a user grab
+ * that edge would drag against a floor/height that gets reverted the moment
+ * the drag's result is written back (AnalyzerView restores the canonical
+ * height for any collapsed card before persisting — see its `activeLayout`
+ * setter and useGridGutters' `onChange`), producing a drag that visibly does
+ * nothing. A VERTICAL gutter on a collapsed card's right edge is unaffected —
+ * collapse only overlays `h`, never `w` — so it stays fully draggable.
+ *
+ * Pure filter; callers pass the caller's own `collapsedIds` (see
+ * useGridGutters.ts's `collapsedIds` option).
+ */
+export function filterCollapsedGutters(
+  gutters: GridGutter[],
+  collapsedIds: ReadonlySet<string>,
+): GridGutter[] {
+  if (collapsedIds.size === 0) return gutters
+  return gutters.filter((g) => !(g.orientation === 'horizontal' && collapsedIds.has(g.aId)))
+}
+
+/**
  * Pixel metrics needed to place a gutter's hit-box and to convert a mouse
  * drag's pixel delta into a grid-unit delta — mirrors grid-layout-plus's OWN
  * internal position math EXACTLY (see its `calcColWidth`/`calcPosition` in
