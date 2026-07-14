@@ -23,6 +23,7 @@ import {
 import { fitProjection, type MapProjection } from './projection'
 import { nearestSample, resolveTrackHitRadius } from './trackNearestSample'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
+import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -908,6 +909,18 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 }
 
 function onPointerDown(e: PointerEvent): void {
+  // B36 — the map now bleeds to the true viewport edge on mobile (see
+  // `.track-wrap.fill`'s `--card-bleed-x` styling below), so a touch drag
+  // STARTING right at that edge would fight the OS/browser's own edge-swipe
+  // "go back" gesture (this canvas sets `touch-action: none`, i.e. it
+  // otherwise claims every touch gesture for itself). Only touch is gated
+  // (mouse/pen have no such OS gesture to protect, and only matters when a
+  // coarse pointer is actually present — see edgeGesture.ts's own doc) —
+  // bail out WITHOUT capturing/preventing so the platform's own gesture
+  // recognizer still gets first look at the touch.
+  if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
+    return
+  }
   const pos = clientPos(e)
   if (!pos) return
   pointers.set(e.pointerId, pos)
@@ -1185,6 +1198,16 @@ watch(() => props.overlayTracks, () => draw())
      would be circular. Basis 0 + grow 1 = "whatever the text rows leave". */
   flex: 1 1 0;
   min-height: 120px;
+  /* B36 — 手機單欄模式地圖出血貼邊: same `--card-bleed-x` mechanism as
+     UPlotChart.vue's `.uplot-wrap.fill` (see its own, more detailed doc) —
+     0 everywhere except inside a non-pinned DashboardCard on mobile, so this
+     is a total no-op wherever the map is used outside the dashboard grid.
+     `.track`'s own 1px border still shows right at the true edge once
+     bled — a deliberate "framed edge-to-edge" look, not something this
+     removes. */
+  margin-left: calc(-1 * var(--card-bleed-x, 0px));
+  margin-right: calc(-1 * var(--card-bleed-x, 0px));
+  width: calc(100% + 2 * var(--card-bleed-x, 0px));
 }
 .track {
   display: block;

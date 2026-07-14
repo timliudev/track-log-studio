@@ -65,6 +65,18 @@ const suspensionOpen = ref(false)
   flex-direction: column;
   gap: calc(var(--space) * 2);
 }
+/* B36 — App.vue's `.content` zeroes its own left/right padding below the
+   mobile breakpoint so the ANALYZER tab's dashboard cards can go edge-to-
+   edge (see that file's own B36 comment). Converter isn't part of that
+   full-bleed ask — it's a form/table layout, not chart/map real estate — so
+   it restores the same horizontal gutter here instead, keeping its own
+   look unchanged at every width. */
+@media (max-width: 768px) {
+  .converter {
+    padding-left: calc(var(--space) * 2);
+    padding-right: calc(var(--space) * 2);
+  }
+}
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

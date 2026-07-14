@@ -395,6 +395,51 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   overflow: hidden;
+  /* B36 — the card body's own horizontal padding, factored out as a custom
+     property (rather than hardcoded in `.body`'s `padding` below) so the
+     mobile override further down can shrink JUST this axis, and so fill-
+     height chart/map children (UPlotChart.vue's `.uplot-wrap.fill`,
+     TrackMap.vue's `.track-wrap.fill`) can read the SAME value to size an
+     exact negative margin that cancels it back out to true edge-to-edge —
+     see those files' own B36 notes. Default matches the padding this always
+     had (`calc(var(--space) * 1.5)`) so desktop/tablet are byte-for-byte
+     unchanged. */
+  --card-body-pad-x: calc(var(--space) * 1.5);
+  /* B36 — how far a FILL-HEIGHT chart/map child (UPlotChart.vue's
+     `.uplot-wrap.fill`, TrackMap.vue's `.track-wrap.fill`) should bleed past
+     this card's own body padding via a negative margin — see those files'
+     own doc. 0 by default (no bleed) everywhere except the mobile,
+     non-pinned override below; consumed with a `var(--card-bleed-x, 0px)`
+     fallback so components using UPlotChart OUTSIDE a DashboardCard (e.g.
+     GearPanel.vue/SessionMergePanel.vue's standalone charts, which never set
+     this variable at all) are completely unaffected. */
+  --card-bleed-x: 0px;
+}
+/* B36 — 手機單欄模式卡片滿版: below the mobile breakpoint, a stacked column
+   of full-width cards reads better as flush "grouped-list" sections than as
+   floating boxes with their own side borders/rounded corners eating into an
+   already-narrow screen (see DESIGN.md §6.4). Left/right border + radius are
+   dropped; the header's existing `border-bottom` (and this rule's own
+   top/bottom border, kept below) still separate one card from the next as a
+   plain horizontal divider. `--card-body-pad-x` is also reduced to a small
+   fixed minimum here — NOT zero, so non-chart cards (control panels, lap
+   tables, band-filter inputs, …) keep just enough breathing room to stay
+   legible — the actual edge-to-edge bleed for chart/map content is a
+   negative margin those specific children apply THEMSELVES against this
+   (now small) padding, not a zero here (see UPlotChart.vue/TrackMap.vue).
+   Excluded for `.pinned`: a pinned card is a deliberately FLOATING element
+   (see this component's own module doc — it's Teleported out of the grid
+   into a sticky anchor), so it keeps its full card chrome — border, radius,
+   the wider padding — at every breakpoint; only grid-resident cards become
+   flush list sections. */
+@media (max-width: 768px) {
+  .dashboard-card:not(.pinned) {
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+    --card-body-pad-x: 4px;
+    --card-bleed-x: 4px;
+  }
 }
 /* Collapsed: shrink the card itself to just its header. On desktop the
    GridItem slot (h) is untouched (see module doc), so this leaves the page
@@ -509,7 +554,10 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: calc(var(--space) * 1.5);
+  /* B36 — horizontal padding driven off `--card-body-pad-x` (see
+     `.dashboard-card`'s own doc above) so the mobile override can shrink
+     just this axis while top/bottom stays the original comfortable value. */
+  padding: calc(var(--space) * 1.5) var(--card-body-pad-x);
   /* T1 — the body is a flex COLUMN so a fill-height chart/map child can take
      `flex: 1 1 auto` (the remaining space) while its sibling text rows
      (legend/hints/inputs) keep their natural height and stay VISIBLE at any

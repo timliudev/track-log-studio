@@ -383,6 +383,18 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
   gap: calc(var(--space) * 2);
   max-width: 820px;
 }
+/* B36 — App.vue's `.content` zeroes its own left/right padding below the
+   mobile breakpoint so the ANALYZER tab's dashboard cards can go edge-to-
+   edge (see that file's own B36 comment). Settings isn't part of that
+   full-bleed ask — it's a form layout, not chart/map real estate — so it
+   restores the same horizontal gutter here instead, keeping its own look
+   unchanged at every width. */
+@media (max-width: 768px) {
+  .settings {
+    padding-left: calc(var(--space) * 2);
+    padding-right: calc(var(--space) * 2);
+  }
+}
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
