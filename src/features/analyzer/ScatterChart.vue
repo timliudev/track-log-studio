@@ -100,6 +100,16 @@ function setColorChannel(name: string | null): void {
   analyzer.setChartColorChannel(props.chart.id, name)
 }
 
+// B51 — 3D-only outlier-robust axis ranging escape hatch: false (default)
+// clamps each of the 3D scatter's X/Y/Z axes to their 0.5-99.5 percentile
+// band (see domain/analysis/scatter3d.ts's computeAxisRanges); true restores
+// the full data-extent ranging. Persisted alongside the chart's other
+// settings (same "one field, one setter" contract as setChartEqualAspect).
+const includeOutliers = computed(() => props.chart.includeOutliers)
+function setIncludeOutliers(on: boolean): void {
+  analyzer.setChartIncludeOutliers(props.chart.id, on)
+}
+
 // Scale is only meaningful for aRacer's milli-g force channels; any other
 // channel pair plots in its native units (raw scale = 1). `looksLikeForce`
 // is shared with analyzerStore's addChart/chartConfigs' backfill — see
@@ -197,6 +207,18 @@ const axisMode = computed<'square' | 'auto'>(() => {
   const ySigned = yMin < 0 && yMax > 0
   return xSigned && ySigned ? 'square' : 'auto'
 })
+
+// B50 — the 1:1/自動 buttons are shared between the 2D and 3D chart, but what
+// "1:1" scales (X/Y pixels vs X/Y/Z grid3D box proportions — see
+// Scatter3dChart.vue's equalAspectBoxSize) differs enough to warrant a
+// distinct hint per mode, so the tooltip never implies a 2D-only meaning
+// while a Z channel is active.
+const aspectEqualHint = computed(() =>
+  is3d.value ? t('analyzer.gg.aspectEqualHint3d') : t('analyzer.gg.aspectEqualHint'),
+)
+const aspectAutoHint = computed(() =>
+  is3d.value ? t('analyzer.gg.aspectAutoHint3d') : t('analyzer.gg.aspectAutoHint'),
+)
 </script>
 
 <template>
@@ -222,7 +244,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
         <button
           type="button"
           :class="{ active: equalAspect }"
-          v-tooltip="t('analyzer.gg.aspectEqualHint')"
+          v-tooltip="aspectEqualHint"
           @click="setEqualAspect(true)"
         >
           {{ t('analyzer.gg.aspectEqual') }}
@@ -230,12 +252,20 @@ const axisMode = computed<'square' | 'auto'>(() => {
         <button
           type="button"
           :class="{ active: !equalAspect }"
-          v-tooltip="t('analyzer.gg.aspectAutoHint')"
+          v-tooltip="aspectAutoHint"
           @click="setEqualAspect(false)"
         >
           {{ t('analyzer.gg.aspectAuto') }}
         </button>
       </div>
+      <label v-if="is3d" class="toggle outliers" v-tooltip="t('analyzer.gg.includeOutliersHint')">
+        <input
+          type="checkbox"
+          :checked="includeOutliers"
+          @change="setIncludeOutliers(($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ t('analyzer.gg.includeOutliers') }}</span>
+      </label>
       <button type="button" class="remove" @click="analyzer.removeChart(chart.id)">
         {{ t('analyzer.removeChart') }}
       </button>
@@ -250,6 +280,8 @@ const axisMode = computed<'square' | 'auto'>(() => {
       :y-name="yChannel"
       :z-name="colorChannel"
       :fill-height="fillHeight"
+      :equal-aspect="equalAspect"
+      :include-outliers="includeOutliers"
     />
     <GgChart
       v-else
@@ -335,6 +367,25 @@ const axisMode = computed<'square' | 'auto'>(() => {
 .aspect button.active {
   background: var(--color-accent);
   color: var(--color-accent-text);
+}
+/* B51 — the 3D-only "include outliers" escape hatch, styled like
+   TrackChannelPanel's `.toggle` checkbox+label pattern. */
+.toggle.outliers {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  align-self: flex-end;
+  padding-bottom: 6px;
+}
+/* B35 — §8 layer 3: any coarse pointer present grows the checkbox itself to
+   a >=44px touch target, same pattern as CurrentValuesPanel's `.hide-toggle
+   input` — see that file's identical rule for the full doc. */
+:root[data-any-pointer-coarse] .toggle.outliers input {
+  width: 44px;
+  height: 44px;
 }
 .remove {
   background: var(--color-bg);
