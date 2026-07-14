@@ -190,6 +190,12 @@ export default {
     trackChannelTitle: 'Track channel markers',
     trackChannel: 'Channel',
     trackColor: 'Track colour',
+    mapBackground: {
+      title: 'Base map', layer: 'Layer', none: 'No base map', image: 'Uploaded image', osm: 'OpenStreetMap streets', satellite: 'Satellite (Mapbox)',
+      upload: 'Upload image (PNG/JPEG/WebP, max 10 MB)', uploadTypeError: 'Only PNG, JPEG, or WebP images are accepted.', uploadSizeError: 'The image must be larger than 0 and no more than 10 MB.',
+      localOnly: 'Images are stored in local IndexedDB; the satellite key stays only in localStorage.', mapboxKey: 'Mapbox API key', dragAlign: 'Drag to align image',
+      up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right', zoomIn: 'Zoom image in', zoomOut: 'Zoom image out', reset: 'Reset image alignment',
+    },
     colormap: 'Colormap',
     markMinima: 'Mark minima',
     markMaxima: 'Mark maxima',
@@ -325,7 +331,7 @@ export default {
     gg: {
       xAxis: 'X-axis channel',
       yAxis: 'Y-axis channel',
-      colorAxis: 'Colour axis (3rd channel)',
+      zAxis: 'Z-axis channel (3rd channel)',
       pickBoth: 'Pick a channel for both X and Y.',
       session: 'Whole session',
       lapSeries: 'Lap {n}',

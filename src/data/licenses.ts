@@ -47,6 +47,12 @@ export const thirdPartyLicenses: ThirdPartyLicense[] = [
     license: 'Apache-2.0',
     url: 'https://www.npmjs.com/package/echarts',
   },
+  {
+    name: 'echarts-gl',
+    version: '2.1.0',
+    license: 'BSD-3-Clause',
+    url: 'https://www.npmjs.com/package/echarts-gl',
+  },
   { name: 'uplot', version: '1.6.32', license: 'MIT', url: 'https://www.npmjs.com/package/uplot' },
   {
     name: 'grid-layout-plus',
