@@ -2,6 +2,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, typ
 import type { Breakpoints } from 'grid-layout-plus'
 import {
   GRID_COLS,
+  GRID_MARGIN,
   defaultLayout,
   loadLayout,
   reconcileLayout,
@@ -66,6 +67,10 @@ export function useDashboardLayout(
   isMobile: ComputedRef<boolean>
   isDraggable: ComputedRef<boolean>
   isResizable: ComputedRef<boolean>
+  /** B36 — the grid's own `margin` prop (grid-layout-plus bakes this in as
+   *  BOTH the inter-item gutter AND the left/right inset of the whole grid,
+   *  see this getter's own doc below), reactive to breakpoint. */
+  gridMargin: ComputedRef<[number, number]>
   resetLayout: () => void
 } {
   const layout = ref<DashboardLayoutItem[]>(reconcileLayout(loadLayout(), chartIds.value))
@@ -140,6 +145,29 @@ export function useDashboardLayout(
     layout.value = reconcileLayout(defaultLayout(), chartIds.value)
   }
 
+  // B36 — 手機單欄模式卡片滿版: grid-layout-plus computes EVERY item's left
+  // offset/width straight from `margin[0]` (see grid-item.vue's own
+  // `calcColWidth`/position math: `left = col * colWidth + (col + 1) *
+  // margin[0]`) — i.e. GRID_MARGIN[0] isn't just the gutter BETWEEN cards,
+  // it's baked in as the grid's own left/right edge inset too. On mobile
+  // there's only ever ONE column, so that inset is the ENTIRE reason a
+  // full-width card still sits ~12px off the true edge even after every
+  // other layer of padding (App.vue's `.content`, DashboardCard's border/
+  // body padding) is stripped — see AnalyzerView.vue/DashboardCard.vue's own
+  // B36 notes for those layers. Zeroing margin[0] specifically on mobile
+  // (never affects desktop, where cards sit side-by-side and DO need a real
+  // gutter) closes that last gap; margin[1] (the VERTICAL gap between
+  // stacked mobile cards) is untouched — that spacing is still wanted.
+  // grid-item.vue watches `margin`/`margin[0]`/`margin[1]` reactively (see
+  // its own `watch([() => margin, () => margin[0], () => margin[1]], ...)`)
+  // and grid-layout.vue watches `margin[1]` for its own height calc, so
+  // handing GridLayout a reactive tuple here — rather than a static
+  // GRID_MARGIN constant — reflows correctly the instant the breakpoint
+  // flips, with no extra wiring needed on the caller's side.
+  const gridMargin = computed<[number, number]>(() =>
+    isMobile.value ? [0, GRID_MARGIN[1]] : GRID_MARGIN,
+  )
+
   return {
     layout,
     cols: COLS,
@@ -148,6 +176,7 @@ export function useDashboardLayout(
     isMobile,
     isDraggable,
     isResizable,
+    gridMargin,
     resetLayout,
   }
 }

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
-import { mergeLayoutPositions } from '@/domain/layout/dashboardLayout'
+import { GRID_MARGIN, mergeLayoutPositions } from '@/domain/layout/dashboardLayout'
 
 /** Node's default test environment has no real localStorage; this file opts
  *  into happy-dom (for `window`) but still needs the same in-memory stub
@@ -70,6 +70,30 @@ describe('useDashboardLayout — isMobile breakpoint (#9 fix)', () => {
     const { layout } = mountHarness()
     expect(layout.isMobile.value).toBe(false)
     expect(layout.colNum.value).toBe(12)
+  })
+})
+
+/**
+ * B36 — 手機單欄模式卡片滿版: grid-layout-plus bakes `margin[0]` in as BOTH the
+ * inter-item gutter AND the whole grid's own left/right edge inset (see
+ * `gridMargin`'s own doc in useDashboardLayout.ts) — on mobile's single
+ * column that inset is pure dead space eating into an already-narrow
+ * screen, so it's zeroed there while the desktop 2-D grid (which genuinely
+ * needs a gutter between side-by-side cards) keeps the full constant
+ * unchanged. `margin[1]` (the VERTICAL gap between stacked cards) is never
+ * touched at either breakpoint.
+ */
+describe('useDashboardLayout — gridMargin (B36 mobile full-bleed)', () => {
+  it('zeroes only the horizontal margin on mobile, keeping the vertical gap', () => {
+    window.innerWidth = 375
+    const { layout } = mountHarness()
+    expect(layout.gridMargin.value).toEqual([0, GRID_MARGIN[1]])
+  })
+
+  it('uses the full GRID_MARGIN constant unchanged on desktop', () => {
+    window.innerWidth = 1280
+    const { layout } = mountHarness()
+    expect(layout.gridMargin.value).toEqual(GRID_MARGIN)
   })
 })
 

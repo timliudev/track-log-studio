@@ -133,8 +133,13 @@ import { useI18n } from 'vue-i18n'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { panRange, pinchRange, type XRange } from '@/features/analyzer/xRangeGesture'
+import { useInputCapabilities } from '@/composables/useInputCapabilities'
+import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 
 const { t } = useI18n()
+// B36 — edge-gesture guard for the mobile full-bleed chart (see this file's
+// own `.uplot-wrap.fill` styling + onPointerDown below).
+const { anyPointerCoarse } = useInputCapabilities()
 
 const props = defineProps<{
   data: uPlot.AlignedData
@@ -653,6 +658,18 @@ function onCentrePointerUp(e: PointerEvent): void {
 }
 
 function onPointerDown(e: PointerEvent): void {
+  // B36 — this chart now bleeds to the true viewport edge on mobile (see
+  // `.uplot-wrap.fill`'s `--card-bleed-x` styling below), so a touch drag
+  // STARTING right at that edge would fight the OS/browser's own edge-swipe
+  // "go back" gesture. Only touch is gated (mouse/pen have no such OS
+  // gesture to protect — see edgeGesture.ts's own doc), and only checked
+  // when a coarse pointer is actually present. Applies before BOTH the
+  // centre-needle scrub branch and the plain touch-pan/pinch branch below —
+  // either one would otherwise claim the drag via `preventDefault()`/
+  // `setPointerCapture()`.
+  if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
+    return
+  }
   if (props.centreCursorMode) {
     onCentrePointerDown(e)
     return
@@ -878,6 +895,23 @@ watch(
   height: 100%;
   display: flex;
   flex-direction: column;
+  /* B36 — 手機單欄模式圖表出血貼邊: `--card-bleed-x` is 0 everywhere except
+     inside a NON-pinned DashboardCard on mobile (see DashboardCard.vue's own
+     doc on the variable) — a plain CSS custom-property cascade, so this
+     works unconditionally with no media query of its own here and is a
+     total no-op for every OTHER caller of this component (GearPanel.vue,
+     SessionMergePanel.vue, any fixed-height, non-dashboard chart), which
+     never sets the variable at all and falls back to `0px`. The Y-axis
+     label gutter uPlot itself reserves stays readable even flush to the
+     true edge (it's drawn well inside the plot area, not clipped by this).
+     Negative margin + matching width overshoot (rather than relying on this
+     flex item's own `align-items: stretch`, which a plain `width: 100%`
+     below already opts out of) is what actually reaches the true edge — see
+     edgeGesture.ts's sibling doc on the JS-side touch dead-zone this pairs
+     with. */
+  margin-left: calc(-1 * var(--card-bleed-x, 0px));
+  margin-right: calc(-1 * var(--card-bleed-x, 0px));
+  width: calc(100% + 2 * var(--card-bleed-x, 0px));
 }
 .uplot-wrap.fill .uplot-host {
   flex: 1;

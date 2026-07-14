@@ -286,6 +286,34 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **實作註記（B35 基礎建設，2026-07-13）**：`composables/useInputCapabilities.ts` 是唯一 primitive，包三條 `matchMedia`（`any-pointer: coarse`／`pointer: coarse`／`any-hover: none`，各自掛 change 監聽）+ `settingsStore.inputModePref`（層4覆蓋，'auto' 時原樣透傳、'touch'/'pointer' 時三個能力全部釘死）；在 App.vue 掛一次（同 useTheme/useLocale 模式），並鏡射成 `<html data-any-pointer-coarse|data-pointer-coarse|data-any-hover-none>` 三個 boolean attribute，讓純 CSS 用 `:root[data-any-pointer-coarse] .foo {...}` 就能吃到訊號，不必每個元件都 import 這個 composable。已遷移到能力訊號的點擊目標：`LapTable.vue` 的 ⦸ 排除鈕、`SessionLapComparison.vue` 的 offset ±／reset 鈕、`UPlotChart.vue` 的重設縮放鈕、`DashboardCard.vue` 的收折/釘選鈕、`TimeSeriesChart.vue`/`ScatterChart.vue` 的刪除圖表鈕；`theme.css` 另外用同一訊號補了一條全域規則把 grid-layout-plus 的 resize 把手（`.analyzer .vgl-item__resizer`）在寬螢幕+粗指標（如平板跑桌面版面）下也長到 30px——這個 30px 數值原本只掛在 `AnalyzerView.vue` 的 `@media (max-width: 768px)`（該檔案本輪未動,由另一支 agent 處理中）,兩條規則疊加、互不牴觸。真正屬於「版面」的寬度斷點（`BottomNav` 顯示切換、dashboard 單欄堆疊——`useDashboardLayout.ts` 的 `MOBILE_BREAKPOINT_PX`）維持寬度判斷不變,那些跟輸入能力無關。圖表手勢部分：`UPlotChart.vue` 觸控拖曳平移/雙指縮放本來就是逐事件 `pointerType`,並非寬度 gate；本輪修正的是 `pen` 誤入觸控分支的 bug（抽成可測的 `isTouchGesturePointer()`),改為與 `mouse` 同路（框選縮放 + Shift 平移),理由是 S Pen 已有懸浮能力,自然比照滑鼠體驗。
   - **實作註記（B31 固定中線游標模式，2026-07-14）**：`settingsStore.centreCursorMode`（布林，預設 false，與 `inputModePref` 同一顆 store／同一份 B19 匯出匯入)，只由 `TimeSeriesChart.vue` 讀取並往下傳給 `UPlotChart.vue` 的新 prop `centreCursorMode`（`GearPanel.vue`/`SessionMergePanel.vue` 的獨立圖表沒傳這個 prop，完全不受影響——刻意的低風險 scoping)。開啟後：(1) 圖表水平中央畫一條常駐垂直線（純 CSS overlay，定位在 `wrap`——不是 `host`，因為 uPlot 自己的 `.u-wrap`/`.u-over` 是直接掛在 `host` 下、不受 Vue 模板追蹤，硬塞子節點進去太脆弱)，同時關閉 uPlot 原生 hover 十字準星（`cursor.x/y: false`，避免兩個游標指示器打架)；(2) **任何 pointerType 的拖曳都是同一個手勢**（`onPointerDown/Move/Up` 裡新增的 `centreCursorMode` 分支，早於既有 touch-only 分岐，off 時完全不影響既有觸控/滑鼠/pen 行為)，重用既有 `dataXBounds`/`currentXRange`/`panRange`/`emitXRange` pipeline 平移可視範圍（不含雙指縮放——刻意只挑一種手勢，見 prop 文件)；(3) 每次可視範圍變動（拖曳、或別的圖表同步過來的 `xRange`）都從 `setScale` hook 重新算「中線目前對到哪個 sample」（純函式 `centreCursorIndex`，見 `UPlotChart.vue` 開頭 + `test/units/uplotChartCentreCursor.test.ts`）並 emit 成這顆圖表的 `cursor`——跨圖表同步靠既有共用 `xRange` 機制順便達成（拖一顆圖表會連動全部同一個 xRange 的圖表)，`externalCursor` prop 在此模式下直接忽略（沒有「hover 位置」這回事)。設定頁核取方塊 + `zh-Hant`/`en` locale 皆已補上（`centreCursor.label`/`.hint`)。
   - **修正記錄（B31b，2026-07-14 稍後）**：使用者實測回報「一點用都沒有、還是歪的」。查證後，指針自身像素位置（`needleOffsetX(plotLeft, plotWidth)`）與指針下取樣值（`valueAtPlotX`/`centreCursorIndex`，本 app 恆為線性 X scale，等價於 `posToVal(中心像素)`）皆早已正確，兩者都補上純函式 + 單元測試釘住（`test/units/uplotChartCentreCursor.test.ts`）。真正的根因是**拖曳完全沒作用**：`cursor.x: false`／`cursor.y: false` 只關掉 uPlot 原生十字準星的「畫」，並不會關掉 uPlot 自己獨立的 `cursor.drag`（預設 `{ x: true, setScale: true }`）——所以中線模式下，一般滑鼠拖曳仍會同時觸發 uPlot 自己原生的框選縮放（真滑鼠的 `mousedown`/`mousemove`/`mouseup` 是原生事件、不是從 pointer event 合成出來的「相容事件」，所以本元件自己 `pointerdown` 上呼叫的 `preventDefault()` 並不會抑制它們——只對 touch/pen 才有效)，兩邊同時搶著改同一個 x scale，使用者一放開滑鼠，畫面就被 uPlot 自己的框選縮放蓋掉，看起來「歪」且「沒用」。修法：`centreCursorMode` 開啟時 `cursor.drag` 也一併關閉（`{ setScale: false, x: false, y: false }`），讓本元件自己的 `onCentrePointerDown/Move/Up` 是唯一能改 x range 的路徑。用真的 `uplot` 套件（非 mock）+ 最小 fake DOM 直接發真實 mousedown/mousemove/mouseup 到 uPlot 自己的 `.u-over` 監聽器上釘住這個機制層級的迴歸測試：`test/units/uplotChartCentreDrag.test.ts`。
+  - **實作註記（B36 手機單欄模式卡片滿版，2026-07-14）**：手機單欄（`useDashboardLayout.ts` 的
+    `MOBILE_BREAKPOINT_PX`——這是版面寬度斷點，依本節政策仍以寬度判斷，跟輸入能力無關）下，
+    頁邊距＋卡片邊框＋卡片內距層層疊加，在 360px 螢幕上吃掉整體寬度的兩成以上；本輪把這疊插起來
+    的邊距逐層拆開：(1) `App.vue` 的 `.content` 在手機斷點下左右 padding 歸零——但只在**分析器**
+    分頁生效，`ConverterView.vue`/`SettingsView.vue` 各自在自己的根元素補回同樣的水平間距，
+    外觀完全不變（決議：這兩頁是表單/表格內容，不是使用者要拿回空間的圖表/地圖，維持原樣風險
+    最低）。(2) `DashboardCard.vue` 在手機斷點下移除左右 border／圓角（上下 border 保留當作卡片
+    間的分隔線），卡片本體從「浮起的卡」變成「滿版區段」；`--card-body-pad-x`（卡片內距的水平
+    分量，factor 成 CSS 變數）同時縮到 4px 的最小值——非零，讓文字類卡片（控制面板、圈表、
+    band 篩選輸入）仍保有可讀的呼吸空間。**釘選 (pinned) 卡片排除在外**：pinned 是刻意浮動的
+    元素（Teleport 到獨立 sticky anchor），手機下仍保留完整卡片外觀（border/圓角/較寬內距）；
+    `AnalyzerView.vue` 的 `.pinned-anchor` 相應補回一點水平內距，避免 pinned 卡片邊框貼齊真實
+    螢幕邊緣。(3) grid-layout-plus 的 `margin[0]`（`GRID_MARGIN`）本身就內建成整個網格的左右邊緣
+    inset，不只是卡片間的溝——`useDashboardLayout.ts` 新增 `gridMargin` computed，手機單欄下把
+    水平分量歸零（垂直分量、也就是堆疊卡片間的縱向間距，維持不變），桌面 2-D 網格完全不受影響。
+    (4) 圖表/地圖本體貼邊：`UPlotChart.vue` 的 `.uplot-wrap.fill` 與 `TrackMap.vue` 的
+    `.track-wrap.fill` 讀取 DashboardCard 定義的 `--card-bleed-x` CSS 變數（手機非 pinned 卡片下
+    為 4px，其餘情況為 0——包含 `GearPanel.vue`/`SessionMergePanel.vue` 等在儀表板外使用這兩顆
+    元件的呼叫端，完全不受影響），套用負邊距 + 對應寬度補償，貼到卡片（也就是螢幕）真實邊緣；
+    uPlot 的 Y 軸標籤本身有留白，貼邊後仍可讀。(5) **邊緣手勢緩衝**：圖表/地圖互動層貼邊後，
+    觸控裝置從螢幕邊緣起始的拖曳會與 Android/iOS 系統的「邊緣滑動返回」手勢衝突——新增純函式
+    `isEdgeGestureZone(clientX, viewportWidth, insetPx=8)`（`domain/layout/edgeGesture.ts`，同
+    `xRangeGesture.ts` 風格，可離線單元測試），`UPlotChart.vue`/`TrackMap.vue` 的
+    `onPointerDown` 在 `pointerType === 'touch'` 且 `anyPointerCoarse`（B35 訊號）且落在螢幕左右
+    8px 內時直接不呼叫 `preventDefault()`/`setPointerCapture()`，讓事件原封不動地交還給
+    OS/瀏覽器自己的手勢辨識——視覺仍貼邊，只有這 8px 是「我方手勢的死區」。此為行為層級的緩解
+    （逐事件判斷、可單元測試該判斷本身），實際與真實系統手勢辨識器的互動仍需真機驗證，見下方
+    真機驗收清單。
 
 ---
 

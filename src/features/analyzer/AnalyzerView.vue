@@ -451,7 +451,7 @@ const { isLocked, toggleLocked } = useLayoutLock()
 
 // --- #8: draggable/resizable dashboard grid (grid-layout-plus) ---
 const chartIds = computed(() => charts.value.map((c) => c.id))
-const { layout, colNum, isMobile, isDraggable, isResizable, resetLayout } =
+const { layout, colNum, isMobile, isDraggable, isResizable, gridMargin, resetLayout } =
   useDashboardLayout(chartIds, isLocked)
 
 // --- #9: per-card collapse (all breakpoints) + single cross-breakpoint pin
@@ -841,7 +841,7 @@ function titleForItemId(id: string): string {
         :is-resizable="isResizable"
         :responsive="false"
         :row-height="GRID_ROW_HEIGHT"
-        :margin="GRID_MARGIN"
+        :margin="gridMargin"
         :vertical-compact="true"
         :use-css-transforms="true"
         @layout-updated="onLayoutUpdated"
@@ -1269,6 +1269,19 @@ function titleForItemId(id: string): string {
   flex-direction: column;
   gap: calc(var(--space) * 2);
 }
+/* B36 — App.vue's `.content` zeroes its own horizontal padding on mobile so
+   the dashboard grid below (`.grid-wrap`/`.pinned-anchor`, i.e. the actual
+   DashboardCard content) can go edge-to-edge — see that file's own comment.
+   Loose (non-card) rows that sit directly in `.analyzer` — the toolbar and
+   the "no files" message — aren't cards at all, just text/buttons, so they
+   get a small inset of their own back rather than sitting flush against the
+   true screen edge. */
+@media (max-width: 768px) {
+  .empty,
+  .toolbar {
+    padding: 0 calc(var(--space) * 1.5);
+  }
+}
 .empty {
   color: var(--color-text-muted);
 }
@@ -1614,7 +1627,7 @@ function titleForItemId(id: string): string {
    mobile (#9 fix) the 560px cap left dead space on either side of the card
    on any viewport wider than 560px — including exactly 768px, the phone
    breakpoint itself — so the mobile media query below overrides back to a
-   full-width card, matching every other card's edge-to-edge mobile layout. */
+   full-width card. */
 .pinned-anchor :deep(.dashboard-card) {
   width: min(560px, 100%);
   margin: 0 auto calc(var(--space) * 1.5);
@@ -1622,6 +1635,20 @@ function titleForItemId(id: string): string {
 @media (max-width: 768px) {
   .pinned-anchor :deep(.dashboard-card) {
     width: 100%;
+  }
+  /* B36 — grid-resident cards go genuinely edge-to-edge on mobile (App.vue's
+     `.content` drops its own horizontal padding for exactly this — see its
+     comment), but a PINNED card deliberately keeps its full floating chrome
+     (border/radius/shadow — see DashboardCard.vue's `:not(.pinned)` bleed
+     exclusion): it's a floating element, not a flush list section. Without
+     its own inset here it would otherwise inherit `.analyzer`'s now-zero
+     ambient padding and sit border-to-screen-edge, which reads as a
+     misaligned card rather than a deliberately floating one. Restoring a
+     small gutter on the ANCHOR (rather than the card itself) means the
+     card's own `width: 100%` above still correctly fills 100% of this now-
+     inset content box. */
+  .pinned-anchor {
+    padding: 0 calc(var(--space) * 1.5);
   }
 }
 .pin-placeholder {
