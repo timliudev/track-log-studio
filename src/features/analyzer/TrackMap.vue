@@ -24,6 +24,8 @@ import { fitProjection, type MapProjection } from './projection'
 import { nearestSample, resolveTrackHitRadius } from './trackNearestSample'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
+import { useMapBackground } from '@/composables/useMapBackground'
+import MapBackgroundControls from './MapBackgroundControls.vue'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -153,6 +155,63 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const background = useMapBackground()
+const alignBackground = ref(false)
+
+const tileImages = new Map<string, HTMLImageElement>()
+const loadingTiles = new Set<string>()
+function lonToTileX(lon: number, z: number): number { return ((lon + 180) / 360) * 2 ** z }
+function latToTileY(lat: number, z: number): number {
+  const r = (Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI) / 180
+  return ((1 - Math.asinh(Math.tan(r)) / Math.PI) / 2) * 2 ** z
+}
+function tileXToLon(x: number, z: number): number { return (x / 2 ** z) * 360 - 180 }
+function tileYToLat(y: number, z: number): number { return (Math.atan(Math.sinh(Math.PI * (1 - 2 * y / 2 ** z))) * 180) / Math.PI }
+
+/** Draw geo-referenced OSM/Mapbox tiles before every canvas overlay. Tile loads
+ * redraw on completion; keys are never persisted or sent anywhere except the
+ * selected satellite provider's tile request. */
+function drawTileBackground(ctx: CanvasRenderingContext2D, base: MapProjection, zView: number, tx: number, ty: number, w: number, h: number): void {
+  const kind = background.settings.value.kind
+  const key = background.settings.value.satelliteApiKey
+  if (kind !== 'osm' && (kind !== 'satellite' || !key)) return
+  const corners = [base.toGeo((0 - tx) / zView, (0 - ty) / zView), base.toGeo((w - tx) / zView, (h - ty) / zView)]
+  const lonSpan = Math.abs(corners[1].lon - corners[0].lon) || 0.001
+  const zoomLevel = Math.max(1, Math.min(19, Math.round(Math.log2((w * 360) / (256 * lonSpan)))))
+  const max = 2 ** zoomLevel
+  const x0 = Math.floor(Math.min(lonToTileX(corners[0].lon, zoomLevel), lonToTileX(corners[1].lon, zoomLevel)))
+  const x1 = Math.floor(Math.max(lonToTileX(corners[0].lon, zoomLevel), lonToTileX(corners[1].lon, zoomLevel)))
+  const y0 = Math.floor(Math.min(latToTileY(corners[0].lat, zoomLevel), latToTileY(corners[1].lat, zoomLevel)))
+  const y1 = Math.floor(Math.max(latToTileY(corners[0].lat, zoomLevel), latToTileY(corners[1].lat, zoomLevel)))
+  for (let y = Math.max(0, y0); y <= Math.min(max - 1, y1); y++) for (let x = x0; x <= x1; x++) {
+    const wrappedX = ((x % max) + max) % max
+    const cacheKey = `${kind}/${zoomLevel}/${wrappedX}/${y}`
+    let image = tileImages.get(cacheKey)
+    if (!image && !loadingTiles.has(cacheKey)) {
+      loadingTiles.add(cacheKey)
+      image = new Image()
+      image.onload = () => { tileImages.set(cacheKey, image!); loadingTiles.delete(cacheKey); draw() }
+      image.onerror = () => loadingTiles.delete(cacheKey)
+      image.src = kind === 'osm'
+        ? `https://tile.openstreetmap.org/${zoomLevel}/${wrappedX}/${y}.png`
+        : `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/${zoomLevel}/${wrappedX}/${y}?access_token=${encodeURIComponent(key)}`
+    }
+    if (!image) continue
+    const nw = base.toPixel(tileYToLat(y, zoomLevel), tileXToLon(x, zoomLevel))
+    const se = base.toPixel(tileYToLat(y + 1, zoomLevel), tileXToLon(x + 1, zoomLevel))
+    ctx.drawImage(image, nw.x * zView + tx, nw.y * zView + ty, (se.x - nw.x) * zView, (se.y - nw.y) * zView)
+  }
+}
+
+function drawImageBackground(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  if (background.settings.value.kind !== 'image' || !background.image.value) return
+  const image = background.image.value
+  const a = background.settings.value.alignment
+  const factor = Math.min(w / image.naturalWidth, h / image.naturalHeight) * a.scale
+  const iw = image.naturalWidth * factor
+  const ih = image.naturalHeight * factor
+  ctx.drawImage(image, (w - iw) / 2 + a.x, (h - ih) / 2 + a.y, iw, ih)
+}
 
 // B30b(b) — capability-driven hit-radius (see trackNearestSample.ts's doc);
 // `anyPointerCoarse` is already read live elsewhere via App.vue's single
@@ -693,6 +752,9 @@ function draw(): void {
   projection = view
   const proj = view
 
+  drawTileBackground(ctx, base, z, tx, ty, w, h)
+  drawImageBackground(ctx, w, h)
+
   // Project the active track (+ the focusRange sub-bbox for #7's auto-fit)
   // and every overlay track through the SAME base projection in one pass
   // each, then fold every bbox together so panning stays clamped to
@@ -843,7 +905,7 @@ function onWheel(e: WheelEvent): void {
 // Active pointers (by id) and the current interaction mode. 'idle' means hover
 // (mouse, no button) → scrub the nearest sample; a press picks line / pan / pinch.
 const pointers = new Map<number, { x: number; y: number }>()
-type Mode = 'idle' | 'line' | 'pan' | 'pinch'
+type Mode = 'idle' | 'line' | 'pan' | 'pinch' | 'background'
 let mode: Mode = 'idle'
 // Which handle is being dragged in 'line' mode, and on what target: the
 // start/finish line, or a gate (by index into props.gates). Reuses the exact
@@ -938,6 +1000,12 @@ function onPointerDown(e: PointerEvent): void {
 
   // Single pointer: grab a start/finish or confirmed-gate handle if one is
   // under it, else pan.
+  if (alignBackground.value && background.settings.value.kind === 'image') {
+    mode = 'background'
+    panLast = pos
+    e.preventDefault()
+    return
+  }
   const h = handleAt(pos.x, pos.y)
   if (h) {
     mode = 'line'
@@ -999,6 +1067,15 @@ function onPointerMove(e: PointerEvent): void {
     panY.value += pos.y - panLast.y
     panLast = pos
     clampPan()
+    draw()
+    return
+  }
+
+  if (mode === 'background') {
+    const pos = clientPos(e)
+    if (!pos || !panLast) return
+    background.nudgeImage(pos.x - panLast.x, pos.y - panLast.y)
+    panLast = pos
     draw()
     return
   }
@@ -1133,6 +1210,8 @@ watch(() => props.extremaMarkers, () => draw())
 // re-fit only matters at zoom 1, and clampPan keeps any current pan legal
 // against the new bbox on the next gesture).
 watch(() => props.overlayTracks, () => draw())
+watch(background.settings, () => draw(), { deep: true })
+watch(background.image, () => draw())
 </script>
 
 <template>
@@ -1155,6 +1234,21 @@ watch(() => props.overlayTracks, () => draw())
       @wheel.prevent="onWheel"
       @dblclick="resetView"
     />
+    <MapBackgroundControls
+      class="background-control"
+      :settings="background.settings.value"
+      :has-image="Boolean(background.image)"
+      @upload="async (file) => await background.upload(file)"
+      @kind="background.setKind"
+      @satellite-key="background.setSatelliteKey"
+      @nudge="background.nudgeImage"
+      @scale="background.scaleImage"
+      @reset="background.resetImageAlignment"
+    />
+    <label v-if="background.settings.value.kind === 'image'" class="align-background">
+      <input v-model="alignBackground" type="checkbox" /> {{ t('analyzer.mapBackground.dragAlign') }}
+    </label>
+    <a v-if="background.settings.value.kind === 'osm'" class="osm-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a>
     <button v-if="showReset" type="button" class="reset-view" @click="resetView">
       {{ t('analyzer.resetView') }}
     </button>
@@ -1224,6 +1318,10 @@ watch(() => props.overlayTracks, () => draw())
   flex: 1 1 auto;
   min-height: 0;
 }
+.background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; }
+.align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
+.osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: 10px; }
+:root[data-any-pointer-coarse] .align-background { min-height: 44px; display: flex; align-items: center; }
 .reset-view {
   position: absolute;
   top: 8px;
