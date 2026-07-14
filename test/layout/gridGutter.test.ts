@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   detectGutters,
+  filterCollapsedGutters,
   gutterKey,
   clampGutterDeltaUnits,
   applyGutterDrag,
@@ -15,7 +16,12 @@ import {
   type GridGutter,
   type GridMetrics,
 } from '@/domain/layout/gridGutter'
-import { STATIC_CARD_IDS, chartItemId, type DashboardLayoutItem } from '@/domain/layout/dashboardLayout'
+import {
+  applyCollapsedHeights,
+  STATIC_CARD_IDS,
+  chartItemId,
+  type DashboardLayoutItem,
+} from '@/domain/layout/dashboardLayout'
 
 describe('detectGutters', () => {
   it('finds a vertical gutter between two side-by-side cards of equal height', () => {
@@ -90,6 +96,35 @@ describe('gutterKey', () => {
     expect(gutterKey(v)).toBe(gutterKey({ ...v }))
     expect(gutterKey(v)).not.toBe(gutterKey(h))
     expect(gutterKey(v)).not.toBe(gutterKey({ ...v, bId: 'c' }))
+  })
+})
+
+describe('filterCollapsedGutters (B52 — a collapsed card\'s DISPLAY-only bottom edge is not draggable)', () => {
+  const vertical: GridGutter = { orientation: 'vertical', aId: 'a', bId: 'b', edge: 4, start: 0, end: 6 }
+  const horizontalFromA: GridGutter = { orientation: 'horizontal', aId: 'a', bId: 'b', edge: 6, start: 0, end: 4 }
+  const horizontalFromB: GridGutter = { orientation: 'horizontal', aId: 'b', bId: 'c', edge: 12, start: 0, end: 4 }
+
+  it('is a no-op when no ids are collapsed', () => {
+    const gutters = [vertical, horizontalFromA, horizontalFromB]
+    expect(filterCollapsedGutters(gutters, new Set())).toBe(gutters)
+  })
+
+  it('drops a HORIZONTAL gutter whose dragged side (aId) is collapsed', () => {
+    const gutters = [vertical, horizontalFromA, horizontalFromB]
+    const out = filterCollapsedGutters(gutters, new Set(['a']))
+    expect(out).toEqual([vertical, horizontalFromB])
+  })
+
+  it('keeps a VERTICAL gutter on a collapsed card\'s edge — collapse only overlays height, not width', () => {
+    const gutters = [vertical]
+    expect(filterCollapsedGutters(gutters, new Set(['a']))).toEqual([vertical])
+  })
+
+  it('keeps a horizontal gutter whose dragged side is NOT the collapsed one (only bId is collapsed)', () => {
+    const gutters = [horizontalFromA]
+    // 'b' is collapsed here, but the gutter's aId is 'a' — dragging still
+    // resizes 'a', which isn't collapsed, so it stays draggable.
+    expect(filterCollapsedGutters(gutters, new Set(['b']))).toEqual([horizontalFromA])
   })
 })
 
@@ -280,5 +315,43 @@ describe('detectGutters + applyGutterDrag round-trip against a realistic layout'
     const chart = next.find((it) => it.i === chartItemId(1))!
     expect(map.w).toBe(5)
     expect(chart).toEqual(items[1])
+  })
+})
+
+describe('B52 regression — detectGutters against applyCollapsedHeights\'s DISPLAY layout follows a collapsed card\'s reflow', () => {
+  it('a gutter below a collapsed card moves up to the reflowed position, not the stale pre-collapse one', () => {
+    // Single column: top (collapses), mid, bottom — stacked.
+    const canonical: DashboardLayoutItem[] = [
+      { i: 'top', x: 0, y: 0, w: 4, h: 8 },
+      { i: 'mid', x: 0, y: 8, w: 4, h: 6 },
+      { i: 'bottom', x: 0, y: 14, w: 4, h: 6 },
+    ]
+    // Pre-collapse: the top/mid gutter sits at y=8.
+    const gutterBefore = detectGutters(canonical).find((g) => g.aId === 'top' && g.bId === 'mid')
+    expect(gutterBefore?.edge).toBe(8)
+
+    // Once 'top' collapses, AnalyzerView feeds the grid (and — this is the
+    // fix — the gutter overlay) applyCollapsedHeights's DISPLAY layout, where
+    // 'top' shrinks to COLLAPSED_ROWS and 'mid'/'bottom' pack up to fill the
+    // reclaimed rows.
+    const display = applyCollapsedHeights(canonical, new Set(['top']))
+    const gutterAfter = detectGutters(display).find((g) => g.aId === 'top' && g.bId === 'mid')
+    // top is now COLLAPSED_ROWS (2) tall, so the shared edge moved up to y=2 —
+    // this is exactly what stayed stuck at the stale y=8 before the fix.
+    expect(gutterAfter?.edge).toBe(2)
+
+    // The mid/bottom gutter also follows mid's now-higher position.
+    const midBottomAfter = detectGutters(display).find((g) => g.aId === 'mid' && g.bId === 'bottom')
+    expect(midBottomAfter?.edge).toBe(8) // 2 (top) + 6 (mid) = 8, was 14 pre-collapse
+  })
+
+  it('the collapsed card\'s own bottom (DISPLAY-only) edge is excluded from the draggable set entirely', () => {
+    const canonical: DashboardLayoutItem[] = [
+      { i: 'top', x: 0, y: 0, w: 4, h: 8 },
+      { i: 'mid', x: 0, y: 8, w: 4, h: 6 },
+    ]
+    const display = applyCollapsedHeights(canonical, new Set(['top']))
+    const gutters = filterCollapsedGutters(detectGutters(display), new Set(['top']))
+    expect(gutters.find((g) => g.aId === 'top' && g.bId === 'mid')).toBeUndefined()
   })
 })
