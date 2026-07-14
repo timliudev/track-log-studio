@@ -340,6 +340,12 @@ watch(
     const activeExists = analyzer.activeFileId != null && readyIds.has(analyzer.activeFileId)
     if (!activeExists) {
       const nextPrimary = comparisons[0] ?? files[0]?.id ?? null
+      // B55 — the outgoing primary's file is GONE (removed/failed), so
+      // there's nothing to fold it back into; but if a comparison recording
+      // is being promoted in its place, that recording's own per-lap state
+      // should become the new primary-facet state, same as an explicit
+      // FileBar makePrimary swap (see lapStore.swapPrimarySession).
+      if (nextPrimary != null) lapStore.swapPrimarySession(null, nextPrimary)
       analyzer.activeFileId = nextPrimary
       analyzer.selectedSessions = comparisons.filter((id) => id !== nextPrimary)
     } else if (comparisons.length !== analyzer.selectedSessions.length) {

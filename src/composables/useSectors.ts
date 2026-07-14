@@ -81,8 +81,14 @@ export function useSectors(laps: ComputedRef<Lap[]>): {
     sectorStore.setGates(sorted)
   }
 
+  // B55 — sector gates are GEO lines like the start/finish line, not tied to
+  // one recording (comparisons re-walk the SAME shared `sectorStore.gates`
+  // against their own track — see SessionLapComparison.vue), so an explicit
+  // primary swap within the same loaded set (`lapStore.primarySwapPending`,
+  // see useLaps.ts's matching guard for the full rationale) has no reason to
+  // clear them; only a genuinely different recording taking over does.
   watch(track, (next, prev) => {
-    if (prev && next !== prev) sectorStore.clearAll()
+    if (prev && next !== prev && !lapStore.primarySwapPending) sectorStore.clearAll()
   })
 
   return { runAutoDetect, addGateAtCursor, reorderGates }
