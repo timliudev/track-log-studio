@@ -336,6 +336,10 @@ export default {
       aspectAuto: '自動',
       aspectEqualHint: '等比例：X、Y 軸相同數值跨度佔相同像素（圓形資料畫出來就是圓形）。',
       aspectAutoHint: '自動縮放：兩軸各自依資料範圍鋪滿卡片。',
+      aspectEqualHint3d: '等比例：X、Y、Z 三軸相同數值跨度佔相同視覺長度（球狀資料畫出來就是球狀，不是橢球）。',
+      aspectAutoHint3d: '自動縮放：三軸各自依資料範圍獨立鋪滿立方體。',
+      includeOutliers: '包含離群值',
+      includeOutliersHint: '預設將每軸範圍收斂到 0.5–99.5 百分位，避免少數極端雜訊點把整團點雲壓扁；開啟後改用完整資料範圍（含離群值）。',
     },
     trackFile: {
       export: '匯出賽道設定',

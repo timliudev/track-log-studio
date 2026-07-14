@@ -342,6 +342,10 @@ export default {
       aspectAuto: 'Auto',
       aspectEqualHint: 'Equal axis scaling — the same value span covers the same pixels on X and Y (a circle plots as a circle).',
       aspectAutoHint: 'Auto scaling — each axis ranges independently to fill the card.',
+      aspectEqualHint3d: 'Equal scale — X, Y, and Z all map the same value span to the same visual length (a spherical cluster plots as a sphere, not an ellipsoid).',
+      aspectAutoHint3d: 'Auto scaling — each of the three axes ranges independently to fill the box.',
+      includeOutliers: 'Include outliers',
+      includeOutliersHint: 'By default each axis clamps to the 0.5-99.5 percentile band so a few extreme noise samples don\'t squash the whole point cloud. Turn this on to use the full data range instead.',
     },
     trackFile: {
       export: 'Export track setup',
