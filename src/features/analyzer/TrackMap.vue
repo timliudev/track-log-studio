@@ -26,6 +26,18 @@ import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 import { useMapBackground } from '@/composables/useMapBackground'
 import MapBackgroundControls from './MapBackgroundControls.vue'
+import {
+  OSM_MAX_ZOOM,
+  OSM_MIN_ZOOM,
+  TileLruCache,
+  computeTileRange,
+  findAncestorPlaceholder,
+  selectTileZoom,
+  tileKey,
+  tileXToLon,
+  tileYToLat,
+  wrapTileX,
+} from '@/domain/analysis/mapTiles'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -158,48 +170,139 @@ const { t } = useI18n()
 const background = useMapBackground()
 const alignBackground = ref(false)
 
-const tileImages = new Map<string, HTMLImageElement>()
-const loadingTiles = new Set<string>()
-function lonToTileX(lon: number, z: number): number { return ((lon + 180) / 360) * 2 ** z }
-function latToTileY(lat: number, z: number): number {
-  const r = (Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI) / 180
-  return ((1 - Math.asinh(Math.tan(r)) / Math.PI) / 2) * 2 ** z
-}
-function tileXToLon(x: number, z: number): number { return (x / 2 ** z) * 360 - 180 }
-function tileYToLat(y: number, z: number): number { return (Math.atan(Math.sinh(Math.PI * (1 - 2 * y / 2 ** z))) * 180) / Math.PI }
+// B54 — tile cache/loading state. `tileCache` is capacity-bounded (LRU) so a
+// long session panning/zooming across many OSM zoom levels doesn't grow
+// without bound; capped entries also stay around as ANCESTOR placeholders
+// (see findAncestorPlaceholder below) for tiles at nearby zoom levels, which
+// is exactly what keeps the background from flashing blank while zooming.
+const TILE_CACHE_CAPACITY = 400
+const tileCache = new TileLruCache<HTMLImageElement>(TILE_CACHE_CAPACITY)
+// Keys currently queued or in-flight — checked before enqueueing again.
+const pendingTiles = new Set<string>()
+// Keys that failed to load at least once: never retried (no retry storm) —
+// the ancestor-placeholder fallback below covers the visual gap permanently,
+// same as a slow/never-arriving tile would.
+const failedTiles = new Set<string>()
+// Simple FIFO queue + concurrency gate so a viewport with many missing tiles
+// doesn't fire them all at once (modest parallelism, in keeping with OSM's
+// tile usage policy — browsers cap real concurrency per-origin anyway, but
+// this keeps OUR intent explicit and easy to reason about/test).
+const MAX_CONCURRENT_TILE_REQUESTS = 6
+let activeTileRequests = 0
+let tileRequestQueue: { key: string; url: string }[] = []
 
-/** Draw geo-referenced OSM/Mapbox tiles before every canvas overlay. Tile loads
- * redraw on completion; keys are never persisted or sent anywhere except the
- * selected satellite provider's tile request. */
+function pumpTileQueue(): void {
+  while (activeTileRequests < MAX_CONCURRENT_TILE_REQUESTS && tileRequestQueue.length > 0) {
+    const next = tileRequestQueue.shift()!
+    activeTileRequests++
+    pendingTiles.add(next.key)
+    const image = new Image()
+    image.onload = () => {
+      tileCache.set(next.key, image)
+      pendingTiles.delete(next.key)
+      activeTileRequests--
+      pumpTileQueue()
+      draw()
+    }
+    image.onerror = () => {
+      failedTiles.add(next.key)
+      pendingTiles.delete(next.key)
+      activeTileRequests--
+      pumpTileQueue()
+    }
+    image.src = next.url
+  }
+}
+
+// B54 — settle debounce: a fast zoom (many wheel ticks) or drag recomputes
+// the needed tile set on every draw(), but only actually ENQUEUES fetches
+// once the viewport signature stops changing for TILE_SETTLE_MS (or the
+// gesture ends and stops calling draw() at all) — never on every tick.
+// Purely-hover-driven redraws (cursor scrub) don't touch this at all: the
+// signature comparison below is a no-op whenever the viewport itself hasn't
+// moved, so hovering the map never delays or re-triggers a fetch pass.
+const TILE_SETTLE_MS = 250
+let pendingTileSignature: string | null = null
+let tileSettleTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleTileFetch(
+  kind: string,
+  zoomLevel: number,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  urlFor: (z: number, x: number, y: number) => string,
+): void {
+  const signature = `${kind}/${zoomLevel}/${x0}/${x1}/${y0}/${y1}`
+  if (signature === pendingTileSignature) return
+  pendingTileSignature = signature
+  if (tileSettleTimer !== null) clearTimeout(tileSettleTimer)
+  tileSettleTimer = setTimeout(() => {
+    tileSettleTimer = null
+    // Drop any not-yet-started requests from a previous (now stale) settle —
+    // in-flight ones can't be cancelled but are left to finish (their result
+    // still lands in the cache and helps if the viewport has drifted back).
+    tileRequestQueue = []
+    const max = 2 ** zoomLevel
+    for (let y = Math.max(0, y0); y <= Math.min(max - 1, y1); y++) {
+      for (let x = x0; x <= x1; x++) {
+        const wrappedX = wrapTileX(x, zoomLevel)
+        const key = tileKey(kind, zoomLevel, wrappedX, y)
+        if (tileCache.has(key) || pendingTiles.has(key) || failedTiles.has(key)) continue
+        tileRequestQueue.push({ key, url: urlFor(zoomLevel, wrappedX, y) })
+      }
+    }
+    pumpTileQueue()
+  }, TILE_SETTLE_MS)
+}
+
+/** Draw geo-referenced OSM/Mapbox tiles before every canvas overlay. Missing
+ * tiles fall back to the nearest cached lower-zoom ANCESTOR tile, cropped and
+ * stretched to fill the cell — the standard "coarser tile scaled up while the
+ * exact one loads" placeholder, so zooming never flashes to blank — and new
+ * fetches are only enqueued once the viewport settles (see scheduleTileFetch)
+ * rather than on every wheel tick. Tile loads redraw on completion; keys are
+ * never persisted or sent anywhere except the selected provider's own tile
+ * request. */
 function drawTileBackground(ctx: CanvasRenderingContext2D, base: MapProjection, zView: number, tx: number, ty: number, w: number, h: number): void {
   const kind = background.settings.value.kind
-  const key = background.settings.value.satelliteApiKey
-  if (kind !== 'osm' && (kind !== 'satellite' || !key)) return
+  const apiKey = background.settings.value.satelliteApiKey
+  if (kind !== 'osm' && (kind !== 'satellite' || !apiKey)) return
   const corners = [base.toGeo((0 - tx) / zView, (0 - ty) / zView), base.toGeo((w - tx) / zView, (h - ty) / zView)]
   const lonSpan = Math.abs(corners[1].lon - corners[0].lon) || 0.001
-  const zoomLevel = Math.max(1, Math.min(19, Math.round(Math.log2((w * 360) / (256 * lonSpan)))))
+  const zoomLevel = selectTileZoom(w, lonSpan, OSM_MIN_ZOOM, OSM_MAX_ZOOM)
+  const { x0, x1, y0, y1 } = computeTileRange(zoomLevel, corners[0].lon, corners[0].lat, corners[1].lon, corners[1].lat)
   const max = 2 ** zoomLevel
-  const x0 = Math.floor(Math.min(lonToTileX(corners[0].lon, zoomLevel), lonToTileX(corners[1].lon, zoomLevel)))
-  const x1 = Math.floor(Math.max(lonToTileX(corners[0].lon, zoomLevel), lonToTileX(corners[1].lon, zoomLevel)))
-  const y0 = Math.floor(Math.min(latToTileY(corners[0].lat, zoomLevel), latToTileY(corners[1].lat, zoomLevel)))
-  const y1 = Math.floor(Math.max(latToTileY(corners[0].lat, zoomLevel), latToTileY(corners[1].lat, zoomLevel)))
+
+  const urlFor = (z: number, x: number, y: number): string =>
+    kind === 'osm'
+      ? `https://tile.openstreetmap.org/${z}/${x}/${y}.png`
+      : `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/${z}/${x}/${y}?access_token=${encodeURIComponent(apiKey)}`
+  scheduleTileFetch(kind, zoomLevel, x0, x1, y0, y1, urlFor)
+
   for (let y = Math.max(0, y0); y <= Math.min(max - 1, y1); y++) for (let x = x0; x <= x1; x++) {
-    const wrappedX = ((x % max) + max) % max
-    const cacheKey = `${kind}/${zoomLevel}/${wrappedX}/${y}`
-    let image = tileImages.get(cacheKey)
-    if (!image && !loadingTiles.has(cacheKey)) {
-      loadingTiles.add(cacheKey)
-      image = new Image()
-      image.onload = () => { tileImages.set(cacheKey, image!); loadingTiles.delete(cacheKey); draw() }
-      image.onerror = () => loadingTiles.delete(cacheKey)
-      image.src = kind === 'osm'
-        ? `https://tile.openstreetmap.org/${zoomLevel}/${wrappedX}/${y}.png`
-        : `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/${zoomLevel}/${wrappedX}/${y}?access_token=${encodeURIComponent(key)}`
-    }
-    if (!image) continue
+    const wrappedX = wrapTileX(x, zoomLevel)
+    const cacheKey = tileKey(kind, zoomLevel, wrappedX, y)
     const nw = base.toPixel(tileYToLat(y, zoomLevel), tileXToLon(x, zoomLevel))
     const se = base.toPixel(tileYToLat(y + 1, zoomLevel), tileXToLon(x + 1, zoomLevel))
-    ctx.drawImage(image, nw.x * zView + tx, nw.y * zView + ty, (se.x - nw.x) * zView, (se.y - nw.y) * zView)
+    const dx = nw.x * zView + tx
+    const dy = nw.y * zView + ty
+    const dw = (se.x - nw.x) * zView
+    const dh = (se.y - nw.y) * zView
+
+    const image = tileCache.get(cacheKey)
+    if (image) {
+      ctx.drawImage(image, dx, dy, dw, dh)
+      continue
+    }
+    // Not loaded yet (or failed) — draw the nearest cached ancestor tile's
+    // covering sub-region, scaled up, so this cell never goes blank.
+    const placeholder = findAncestorPlaceholder(zoomLevel, wrappedX, y, (az, ax, ay) => tileCache.has(tileKey(kind, az, ax, ay)))
+    if (!placeholder) continue
+    const ancestorImage = tileCache.get(tileKey(kind, placeholder.z, placeholder.x, placeholder.y))
+    if (!ancestorImage) continue
+    ctx.drawImage(ancestorImage, placeholder.srcX, placeholder.srcY, placeholder.srcSize, placeholder.srcSize, dx, dy, dw, dh)
   }
 }
 
@@ -1178,6 +1281,12 @@ onBeforeUnmount(() => {
   ro?.disconnect()
   window.removeEventListener('resize', draw)
   window.removeEventListener('keydown', onMaximizedKeydown)
+  // B54 — a pending settle-debounced tile fetch must not fire (and call
+  // draw() on a torn-down canvas) after this component is gone.
+  if (tileSettleTimer !== null) {
+    clearTimeout(tileSettleTimer)
+    tileSettleTimer = null
+  }
 })
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
