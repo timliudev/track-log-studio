@@ -54,10 +54,10 @@ export default defineConfig(({ mode }) => {
         // runtime and never cached.
         workbox: {
           globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2,wasm}'],
-          // These two chunks are intentionally dynamic-import()ed (see
-          // ScatterChart.vue's GgChart loader and parseRcnx.ts's sql.js
-          // loader) so they never block the initial page render — but
-          // GenerateSW's default globPatterns precaches EVERY built asset
+          // These chunks are intentionally dynamic-import()ed (see
+          // ScatterChart.vue's GgChart/Scatter3dChart loaders and
+          // parseRcnx.ts's sql.js loader) so they never block the initial
+          // page render — but GenerateSW's default globPatterns precaches EVERY built asset
           // regardless of how it's loaded at runtime, which silently
           // re-eagerfies them: the service worker would fetch both
           // (~480 kB echarts + ~700 kB sql.js/wasm, combined over 1 MB)
@@ -69,6 +69,8 @@ export default defineConfig(({ mode }) => {
           globIgnores: [
             '**/GgChart-*.js',
             '**/GgChart-*.css',
+            '**/Scatter3dChart-*.js',
+            '**/Scatter3dChart-*.css',
             '**/sql-wasm-*.js',
             '**/sql-wasm-*.wasm',
           ],
@@ -80,7 +82,7 @@ export default defineConfig(({ mode }) => {
               // must be excluded from precache and caught here exactly like
               // its .js chunk — otherwise it would be silently re-eagerfied
               // via the default {js,css,...} globPattern above.
-              urlPattern: /\/assets\/(GgChart|sql-wasm)-.*\.(js|css|wasm)$/,
+              urlPattern: /\/assets\/(GgChart|Scatter3dChart|sql-wasm)-.*\.(js|css|wasm)$/,
               handler: 'CacheFirst',
               options: {
                 cacheName: 'lazy-chunks',

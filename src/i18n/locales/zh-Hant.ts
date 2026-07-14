@@ -319,7 +319,7 @@ export default {
     gg: {
       xAxis: 'X 軸頻道',
       yAxis: 'Y 軸頻道',
-      colorAxis: '顏色軸（第三軸）',
+      zAxis: 'Z 軸頻道（第三軸）',
       pickBoth: '請選擇 X 與 Y 軸的頻道。',
       session: '整份記錄',
       lapSeries: '第 {n} 圈',

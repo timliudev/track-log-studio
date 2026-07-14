@@ -325,7 +325,7 @@ export default {
     gg: {
       xAxis: 'X-axis channel',
       yAxis: 'Y-axis channel',
-      colorAxis: 'Colour axis (3rd channel)',
+      zAxis: 'Z-axis channel (3rd channel)',
       pickBoth: 'Pick a channel for both X and Y.',
       session: 'Whole session',
       lapSeries: 'Lap {n}',
