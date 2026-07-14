@@ -79,16 +79,22 @@ function dispatchWindowPointerUp(pointerId: number): void {
   window.dispatchEvent(evt)
 }
 
-function mountHarness(initialItems: DashboardLayoutItem[], initialEnabled = true) {
+function mountHarness(
+  initialItems: DashboardLayoutItem[],
+  initialEnabled = true,
+  initialCollapsedIds: ReadonlySet<string> = new Set(),
+) {
   let result!: ReturnType<typeof useGridGutters>
   const itemsRef = ref(initialItems)
   const enabledRef = ref(initialEnabled)
+  const collapsedIdsRef = ref(initialCollapsedIds)
   const onChange = vi.fn()
   const Harness = defineComponent({
     setup() {
       result = useGridGutters({
         items: computed(() => itemsRef.value),
         enabled: computed(() => enabledRef.value),
+        collapsedIds: computed(() => collapsedIdsRef.value),
         cols: COLS,
         rowHeight: ROW_HEIGHT,
         marginX: MARGIN_X,
@@ -99,7 +105,7 @@ function mountHarness(initialItems: DashboardLayoutItem[], initialEnabled = true
     },
   })
   const wrapper = mount(Harness)
-  return { wrapper, result, itemsRef, enabledRef, onChange }
+  return { wrapper, result, itemsRef, enabledRef, collapsedIdsRef, onChange }
 }
 
 /** Column/row step in px — the pixel distance that maps to exactly 1 grid-unit
@@ -170,6 +176,70 @@ describe('useGridGutters — gutters computed', () => {
     itemsRef.value = [{ i: chartItemId(1), x: 4, y: 0, w: 4, h: 6 }]
     await nextTick()
     expect(result.gutters.value).toEqual([])
+  })
+
+  it('works without a collapsedIds option at all (optional — no filtering)', async () => {
+    let result!: ReturnType<typeof useGridGutters>
+    const Harness = defineComponent({
+      setup() {
+        result = useGridGutters({
+          items: computed(() => [
+            { i: 'a', x: 0, y: 0, w: 4, h: 6 },
+            { i: 'b', x: 4, y: 0, w: 4, h: 6 },
+          ]),
+          enabled: computed(() => true),
+          cols: COLS,
+          rowHeight: ROW_HEIGHT,
+          marginX: MARGIN_X,
+          marginY: MARGIN_Y,
+          onChange: vi.fn(),
+        })
+        return () => h('div')
+      },
+    })
+    mount(Harness)
+    result.containerRef.value = document.createElement('div')
+    await nextTick()
+    expect(result.gutters.value).toHaveLength(1)
+  })
+
+  // B52 — the pink gutter overlay must never offer a drag along a collapsed
+  // card's DISPLAY-only bottom edge (see gridGutter.ts's
+  // filterCollapsedGutters): AnalyzerView already feeds `items` the
+  // collapse-reflowed rects, so this only needs to drop the horizontal gutter
+  // whose dragged side (aId) is in `collapsedIds`.
+  it('drops a horizontal gutter whose dragged side is currently collapsed', async () => {
+    const { result, collapsedIdsRef } = mountHarness(
+      [
+        { i: 'top', x: 0, y: 0, w: 4, h: 2 }, // already reflowed to COLLAPSED_ROWS by the caller
+        { i: 'bottom', x: 0, y: 2, w: 4, h: 6 },
+      ],
+      true,
+      new Set(['top']),
+    )
+    result.containerRef.value = document.createElement('div')
+    await nextTick()
+    expect(result.gutters.value).toEqual([])
+
+    collapsedIdsRef.value = new Set()
+    await nextTick()
+    expect(result.gutters.value).toHaveLength(1)
+    expect(result.gutters.value[0]).toMatchObject({ orientation: 'horizontal', aId: 'top', bId: 'bottom' })
+  })
+
+  it('keeps a VERTICAL gutter on a collapsed card\'s edge (collapse only overlays height, not width)', async () => {
+    const { result } = mountHarness(
+      [
+        { i: 'left', x: 0, y: 0, w: 4, h: 2 },
+        { i: 'right', x: 4, y: 0, w: 4, h: 6 },
+      ],
+      true,
+      new Set(['left']),
+    )
+    result.containerRef.value = document.createElement('div')
+    await nextTick()
+    expect(result.gutters.value).toHaveLength(1)
+    expect(result.gutters.value[0]).toMatchObject({ orientation: 'vertical', aId: 'left', bId: 'right' })
   })
 })
 
