@@ -21,11 +21,11 @@ import {
  * component that actually owns each card's position) writes its computed
  * `transform`/`width`/`height` into the SAME inline `style` attribute on the
  * `<section class="vgl-item">` wrapper that is this card's own parent
- * element (see grid-item.vue's `createStyle()`/`:style="state.style"`) — so
- * a `MutationObserver` on that one attribute, on that one element, is a
- * reliable "this card's slot just changed" signal regardless of WHAT caused
- * it, without DashboardCard needing to know about `layout`/`compactLayoutTopLeft`/
- * grid-layout-plus at all.
+ * element (see grid-item.vue's `createStyle()`/`:style="state.style"`). The
+ * wrapper is also the stable geometry source: FLIP writes a temporary
+ * transform on the card itself, so using the card's rect as the next baseline
+ * would mistake that in-flight visual transform for a later grid move and
+ * restart the animation whenever the wrapper rewrites its style.
  */
 
 /** True when the user has asked the OS/browser for reduced motion — every
@@ -134,10 +134,10 @@ export interface AutoFlipOptions {
  * Auto-FLIP a card's root element whenever its PARENT's inline `style`
  * attribute changes shape (grid-layout-plus repositioning/resizing the
  * `.vgl-item` wrapper this card lives in) — see this module's doc for why a
- * `MutationObserver` on that one attribute is the right signal. `target`
- * itself is animated (not the parent) since DashboardCard fills 100% of its
- * grid-item wrapper, so animating the child reads identically without this
- * composable needing to touch a DOM node it doesn't own.
+ * `MutationObserver` on that one attribute is the right signal. Geometry is
+ * always measured from the unanimated wrapper; `target` itself is animated
+ * since DashboardCard fills that wrapper, so the visual result is identical
+ * without this composable needing to mutate a DOM node it does not own.
  *
  * Skips while:
  *  - `prefers-reduced-motion: reduce` is active (checked BEFORE measuring
@@ -180,8 +180,14 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
     if (prefersReducedMotion()) return
 
     const el = target.value
-    if (!el) return
-    const rect = el.getBoundingClientRect()
+    const parent = el?.parentElement
+    if (!el || !parent) return
+    // Do not measure `el` here. During an in-flight FLIP it carries the
+    // inverse transform written by playFlipTransition(), while the wrapper
+    // remains at its true grid position. Feeding that transient child rect
+    // back into `lastRect` turns harmless/redundant wrapper style writes into
+    // a repeated invert -> release cycle.
+    const rect = parent.getBoundingClientRect()
 
     if (isGesturing()) {
       lastRect = rect
@@ -209,7 +215,7 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
     detach()
     const el = target.value
     if (!el?.parentElement) return
-    lastRect = el.getBoundingClientRect()
+    lastRect = el.parentElement.getBoundingClientRect()
     observer = new MutationObserver(onMutate)
     observer.observe(el.parentElement, { attributes: true, attributeFilter: ['style'] })
   }

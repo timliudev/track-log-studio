@@ -105,7 +105,8 @@ describe('useAutoFlip', () => {
     const wrapper = mount(Host)
     const el = wrapper.find('.target').element as HTMLElement
     const parent = el.parentElement!
-    const rectSpy = mockRectSequence(el, [{ top: 0 }, { top: 150 }])
+    const parentRectSpy = mockRectSequence(parent, [{ top: 150 }])
+    mockRectSequence(el, [{ top: 150 }])
 
     // Simulate grid-layout-plus rewriting the parent's inline style, exactly
     // as its own `createStyle()` does on every layout-array change.
@@ -113,8 +114,9 @@ describe('useAutoFlip', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 80))
     expect(el.style.transform).toBe('')
-    // Attach (mount) + the mutation's own measurement.
-    expect(rectSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+    // Attach (mount) + the mutation's own measurement are both taken from
+    // the unanimated grid wrapper, never from the FLIP-transformed card.
+    expect(parentRectSpy).toHaveBeenCalled()
   })
 
   it('does not animate while the parent carries a dragging/resizing modifier class — only resyncs', async () => {
@@ -122,7 +124,7 @@ describe('useAutoFlip', () => {
     const el = wrapper.find('.target').element as HTMLElement
     const parent = el.parentElement!
     parent.classList.add('vgl-item--dragging')
-    mockRectSequence(el, [{ top: 0 }, { top: 400 }])
+    mockRectSequence(parent, [{ top: 0 }, { top: 400 }])
 
     parent.style.transform = 'translate(0px, 400px)'
     await new Promise((resolve) => setTimeout(resolve, 40))
@@ -130,6 +132,25 @@ describe('useAutoFlip', () => {
     // No animation was ever started for a mid-gesture mutation — this is a
     // synchronous guarantee (the invert/play path is never reached), not a
     // timing-dependent "it finished already" observation.
+    expect(el.style.transform).toBe('')
+  })
+
+  it('does not replay FLIP when only the card has an in-flight inverse transform', async () => {
+    const wrapper = mount(Host)
+    const el = wrapper.find('.target').element as HTMLElement
+    const parent = el.parentElement!
+    // The wrapper did not move. The child rect deliberately looks shifted,
+    // as it would while a previous FLIP animation is releasing its transform.
+    const stableParentRect = parent.getBoundingClientRect()
+    vi.spyOn(parent, 'getBoundingClientRect').mockReturnValue(stableParentRect)
+    const childRectSpy = vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => rect({ top: 150 }))
+
+    parent.style.transform = 'translate(0px, 0px)'
+    await new Promise((resolve) => setTimeout(resolve, 40))
+
+    // Measuring the child here would falsely detect a 150px move and start a
+    // new animation. The stable wrapper baseline keeps this a genuine no-op.
+    expect(childRectSpy).not.toHaveBeenCalled()
     expect(el.style.transform).toBe('')
   })
 
@@ -142,7 +163,7 @@ describe('useAutoFlip', () => {
     const wrapper = mount(Host)
     const el = wrapper.find('.target').element as HTMLElement
     const parent = el.parentElement!
-    const rectSpy = vi.spyOn(el, 'getBoundingClientRect')
+    const rectSpy = vi.spyOn(parent, 'getBoundingClientRect')
 
     parent.style.transform = 'translate(0px, 90px)'
     await new Promise((resolve) => setTimeout(resolve, 40))
@@ -155,7 +176,7 @@ describe('useAutoFlip', () => {
     const wrapper = mount(Host, { props: { enabled: true } })
     const el = wrapper.find('.target').element as HTMLElement
     const parent = el.parentElement!
-    const rectSpy = vi.spyOn(el, 'getBoundingClientRect')
+    const rectSpy = vi.spyOn(parent, 'getBoundingClientRect')
 
     await wrapper.setProps({ enabled: false })
     parent.style.transform = 'translate(0px, 60px)'
@@ -175,7 +196,7 @@ describe('useAutoFlip', () => {
     const wrapper = mount(Host, { props: { enabled: true } })
     const el = wrapper.find('.target').element as HTMLElement
     const parent = el.parentElement!
-    const rectSpy = vi.spyOn(el, 'getBoundingClientRect')
+    const rectSpy = vi.spyOn(parent, 'getBoundingClientRect')
 
     await wrapper.setProps({ enabled: false }) // pin: detach, no timer scheduled
     await wrapper.setProps({ enabled: true }) // unpin: schedules a debounced re-attach
