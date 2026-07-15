@@ -38,6 +38,28 @@ export function prefersReducedMotion(): boolean {
 }
 
 /**
+ * Return a grid item's geometry in its positioning context rather than the
+ * viewport. `getBoundingClientRect()` alone changes whenever the page (or a
+ * scrolling ancestor) moves, even if the item has not moved within the grid.
+ * GridLayout's item wrapper is absolutely positioned inside `.vgl-layout`, so
+ * subtracting its offset parent's viewport rect keeps the FLIP baseline fixed
+ * across scrolling while preserving real grid x/y/width/height changes.
+ */
+export function offsetParentRelativeRect(el: HTMLElement): FlipRect {
+  const rect = el.getBoundingClientRect()
+  const offsetParent = el.offsetParent
+  if (!(offsetParent instanceof HTMLElement)) return rect
+
+  const origin = offsetParent.getBoundingClientRect()
+  return {
+    left: rect.left - origin.left,
+    top: rect.top - origin.top,
+    width: rect.width,
+    height: rect.height,
+  }
+}
+
+/**
  * Play the "invert, then play" half of a FLIP transition on `el`: `el` is
  * assumed to ALREADY be at its new/final position (`after`, measured fresh
  * inside this call) — this applies the inverted transform so it briefly
@@ -61,12 +83,12 @@ export function prefersReducedMotion(): boolean {
 export function playFlipTransition(
   el: HTMLElement,
   before: FlipRect,
-  options: { durationMs?: number; easing?: string } = {},
+  options: { durationMs?: number; easing?: string; after?: FlipRect } = {},
 ): () => void {
   const durationMs = options.durationMs ?? PIN_FLIP_DURATION_MS
   const easing = options.easing ?? PIN_FLIP_EASING
 
-  const after = el.getBoundingClientRect()
+  const after = options.after ?? el.getBoundingClientRect()
   const t = computeFlipInvert(before, after)
   if (isFlipNoop(t)) return () => {}
 
@@ -187,7 +209,7 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
     // remains at its true grid position. Feeding that transient child rect
     // back into `lastRect` turns harmless/redundant wrapper style writes into
     // a repeated invert -> release cycle.
-    const rect = parent.getBoundingClientRect()
+    const rect = offsetParentRelativeRect(parent)
 
     if (isGesturing()) {
       lastRect = rect
@@ -202,7 +224,7 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
     if (isFlipNoop(t)) return
 
     cleanupPlay?.()
-    cleanupPlay = playFlipTransition(el, before)
+    cleanupPlay = playFlipTransition(el, before, { after: rect })
   }
 
   function detach(): void {
@@ -215,7 +237,7 @@ export function useAutoFlip(target: Ref<HTMLElement | null>, options: AutoFlipOp
     detach()
     const el = target.value
     if (!el?.parentElement) return
-    lastRect = el.parentElement.getBoundingClientRect()
+    lastRect = offsetParentRelativeRect(el.parentElement)
     observer = new MutationObserver(onMutate)
     observer.observe(el.parentElement, { attributes: true, attributeFilter: ['style'] })
   }
