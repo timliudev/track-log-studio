@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { defineComponent, h, ref, computed } from 'vue'
 import { mount } from '@vue/test-utils'
-import { playFlipTransition, useAutoFlip } from '@/composables/useFlipAnimation'
+import { offsetParentRelativeRect, playFlipTransition, useAutoFlip } from '@/composables/useFlipAnimation'
 import { PIN_FLIP_DURATION_MS, type FlipRect } from '@/domain/layout/flip'
 
 /** A DOMRect-shaped object with just the fields `computeFlipInvert` reads. */
@@ -75,6 +75,21 @@ describe('playFlipTransition', () => {
     // Cancel before the rAF/transition phase ever runs — must not throw and
     // must not leave a dangling timer that fires later and touches `el`.
     expect(() => cleanup()).not.toThrow()
+  })
+})
+
+describe('offsetParentRelativeRect', () => {
+  it('keeps grid geometry stable when the page scrolls', () => {
+    const grid = document.createElement('div')
+    const item = document.createElement('div')
+    Object.defineProperty(item, 'offsetParent', { value: grid })
+    mockRectSequence(item, [{ top: 400 }, { top: 240 }])
+    mockRectSequence(grid, [{ top: 300 }, { top: 140 }])
+
+    // The grid and its item both moved by 160px in viewport coordinates;
+    // their relative grid position did not move at all.
+    expect(offsetParentRelativeRect(item)).toMatchObject({ top: 100, left: 0, width: 100, height: 50 })
+    expect(offsetParentRelativeRect(item)).toMatchObject({ top: 100, left: 0, width: 100, height: 50 })
   })
 })
 
