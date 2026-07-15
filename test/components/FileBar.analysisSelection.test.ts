@@ -52,6 +52,36 @@ describe('FileBar analyzer selection', () => {
     expect(analyzer.selectedSessions).toEqual([first])
   })
 
+  // B55 — the pill-name click is a real trigger but its only discovery cue
+  // was a hover tooltip; there must also be an explicit, always-visible
+  // "make primary" button so touch users (and anyone who doesn't hover) can
+  // find the action at all (DESIGN.md §8).
+  it('shows an explicit make-primary button on every non-primary ready file, and it swaps the primary', async () => {
+    const files = useFileStore()
+    const analyzer = useAnalyzerStore()
+    const first = files.addMergedSession('first.loga', session())
+    const second = files.addMergedSession('second.loga', session())
+    analyzer.activeFileId = first
+
+    const wrapper = mount(FileBar, {
+      props: { analyzerMode: true },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', messages: { 'zh-Hant': zhHant } })],
+        directives: { tooltip: () => undefined },
+      },
+    })
+
+    // Only the non-primary file gets the explicit button.
+    const buttons = wrapper.findAll<HTMLButtonElement>('.make-primary-btn')
+    expect(buttons).toHaveLength(1)
+
+    await buttons[0].trigger('click')
+    expect(analyzer.activeFileId).toBe(second)
+    expect(analyzer.selectedSessions).toEqual([first])
+    // After the swap, the button moved to the now-non-primary first file.
+    expect(wrapper.findAll('.make-primary-btn')).toHaveLength(1)
+  })
+
   it('does not show analysis checkboxes in converter mode', () => {
     useFileStore().addMergedSession('one.loga', session())
     const wrapper = mount(FileBar, {

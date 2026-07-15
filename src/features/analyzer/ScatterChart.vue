@@ -32,6 +32,20 @@ const GgChart = defineAsyncComponent({
   delay: 200,
 })
 
+// B25b — `echarts-gl` is only pulled in by this component's async boundary.
+// Ordinary X/Y scatters therefore keep the existing, smaller ECharts chunk;
+// selecting a Z channel switches to the genuine WebGL scatter3D renderer.
+const Scatter3dChart = defineAsyncComponent({
+  loader: () => import('./Scatter3dChart.vue'),
+  loadingComponent: {
+    setup() {
+      const { t } = useI18n()
+      return () => h('p', { class: 'hint' }, t('analyzer.gg.loading'))
+    },
+  },
+  delay: 200,
+})
+
 const MILLI_G_SCALE = 0.001
 const MAX_POINTS = 5000
 
@@ -78,13 +92,22 @@ function setEqualAspect(on: boolean): void {
   analyzer.setChartEqualAspect(props.chart.id, on)
 }
 
-// Colour-axis feature — an optional THIRD channel mapped to point colour via
-// a continuous colormap (a 3D-plot alternative — see GgChart.vue's
-// visualMap). Persisted alongside X/Y/equalAspect (same "one field, one
-// setter" contract) — see analyzerStore's setChartColorChannel.
+// B25b — an optional THIRD channel is the Z axis of a genuine WebGL XYZ
+// scatter. Persisted alongside X/Y/equalAspect (same "one field, one setter"
+// contract) — see analyzerStore's setChartColorChannel.
 const colorChannel = computed(() => props.chart.colorChannel)
 function setColorChannel(name: string | null): void {
   analyzer.setChartColorChannel(props.chart.id, name)
+}
+
+// B51 — 3D-only outlier-robust axis ranging escape hatch: false (default)
+// clamps each of the 3D scatter's X/Y/Z axes to their 0.5-99.5 percentile
+// band (see domain/analysis/scatter3d.ts's computeAxisRanges); true restores
+// the full data-extent ranging. Persisted alongside the chart's other
+// settings (same "one field, one setter" contract as setChartEqualAspect).
+const includeOutliers = computed(() => props.chart.includeOutliers)
+function setIncludeOutliers(on: boolean): void {
+  analyzer.setChartIncludeOutliers(props.chart.id, on)
 }
 
 // Scale is only meaningful for aRacer's milli-g force channels; any other
@@ -92,6 +115,7 @@ function setColorChannel(name: string | null): void {
 // is shared with analyzerStore's addChart/chartConfigs' backfill — see
 // ggData.ts's doc for why the equal-aspect default now uses the same rule.
 const useMilliG = computed(() => looksLikeForce(xChannel.value) && looksLikeForce(yChannel.value))
+const is3d = computed(() => colorChannel.value !== null)
 
 const ggSeries = computed<GgSeries[]>(() => {
   const s = props.session
@@ -103,9 +127,6 @@ const ggSeries = computed<GgSeries[]>(() => {
   if (!xCh || !yCh) return []
   const scale = useMilliG.value ? MILLI_G_SCALE : 1
   const comparisons = props.comparisonSessions ?? []
-  // Session identity owns hue while multi-session comparison is active. A
-  // continuous colour-axis would erase that encoding, so it remains available
-  // only in the existing single-session path.
   if (comparisons.length > 0) {
     return buildMultiSessionScatter([
       {
@@ -118,10 +139,8 @@ const ggSeries = computed<GgSeries[]>(() => {
     ], xName, yName, MAX_POINTS, colorChannel.value)
   }
 
-  // Colour-axis feature — resolved once here (not per-lap below) so a stale
-  // colorChannel pick from a previously loaded session (channel no longer
-  // exists) degrades to "no colour axis" for every series, same as
-  // x/yChannel's existing "renders empty until valid" degrade.
+  // The selected Z channel is resolved once here (not per lap). A stale
+  // persisted pick degrades to an empty 3D chart rather than inventing data.
   const colorCh = colorChannel.value ? s.get(colorChannel.value) : null
 
   if (props.selectedLaps.length === 0) {
@@ -130,7 +149,7 @@ const ggSeries = computed<GgSeries[]>(() => {
         scale,
         maxPoints: MAX_POINTS,
       })
-      return [{ points, colorValues, color: '#4363d8', name: t('analyzer.gg.session') }]
+      return [{ points, colorValues, color: categoricalColor(props.primaryFileId ?? 0), name: t('analyzer.gg.session') }]
     }
     const points = buildGgPoints(xCh.data, yCh.data, { scale, maxPoints: MAX_POINTS })
     return [{ points, color: '#4363d8', name: t('analyzer.gg.session') }]
@@ -138,7 +157,9 @@ const ggSeries = computed<GgSeries[]>(() => {
 
   return props.selectedLaps.map((lap, order) => {
     const name = t('analyzer.gg.lapSeries', { n: lap.index + 1 })
-    const color = lapColor(order)
+    // In XYZ mode hue identifies the FILE, not the selected lap. The 2D path
+    // deliberately retains its established per-lap colours.
+    const color = colorCh ? categoricalColor(props.primaryFileId ?? 0) : lapColor(order)
     if (colorCh) {
       const { points, colorValues } = buildGgPointsWithColor(xCh.data, yCh.data, colorCh.data, {
         scale,
@@ -186,6 +207,18 @@ const axisMode = computed<'square' | 'auto'>(() => {
   const ySigned = yMin < 0 && yMax > 0
   return xSigned && ySigned ? 'square' : 'auto'
 })
+
+// B50 — the 1:1/自動 buttons are shared between the 2D and 3D chart, but what
+// "1:1" scales (X/Y pixels vs X/Y/Z grid3D box proportions — see
+// Scatter3dChart.vue's equalAspectBoxSize) differs enough to warrant a
+// distinct hint per mode, so the tooltip never implies a 2D-only meaning
+// while a Z channel is active.
+const aspectEqualHint = computed(() =>
+  is3d.value ? t('analyzer.gg.aspectEqualHint3d') : t('analyzer.gg.aspectEqualHint'),
+)
+const aspectAutoHint = computed(() =>
+  is3d.value ? t('analyzer.gg.aspectAutoHint3d') : t('analyzer.gg.aspectAutoHint'),
+)
 </script>
 
 <template>
@@ -200,7 +233,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
         <SearchableSelect :model-value="yChannel" :options="allChannels" @update:model-value="setY" />
       </div>
       <div class="picker">
-        <span class="picker-label">{{ t('analyzer.gg.colorAxis') }}</span>
+        <span class="picker-label">{{ t('analyzer.gg.zAxis') }}</span>
         <SearchableSelect
           :model-value="colorChannel"
           :options="allChannels"
@@ -211,7 +244,7 @@ const axisMode = computed<'square' | 'auto'>(() => {
         <button
           type="button"
           :class="{ active: equalAspect }"
-          v-tooltip="t('analyzer.gg.aspectEqualHint')"
+          v-tooltip="aspectEqualHint"
           @click="setEqualAspect(true)"
         >
           {{ t('analyzer.gg.aspectEqual') }}
@@ -219,18 +252,37 @@ const axisMode = computed<'square' | 'auto'>(() => {
         <button
           type="button"
           :class="{ active: !equalAspect }"
-          v-tooltip="t('analyzer.gg.aspectAutoHint')"
+          v-tooltip="aspectAutoHint"
           @click="setEqualAspect(false)"
         >
           {{ t('analyzer.gg.aspectAuto') }}
         </button>
       </div>
+      <label v-if="is3d" class="toggle outliers" v-tooltip="t('analyzer.gg.includeOutliersHint')">
+        <input
+          type="checkbox"
+          :checked="includeOutliers"
+          @change="setIncludeOutliers(($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ t('analyzer.gg.includeOutliers') }}</span>
+      </label>
       <button type="button" class="remove" @click="analyzer.removeChart(chart.id)">
         {{ t('analyzer.removeChart') }}
       </button>
     </div>
 
     <p v-if="!xChannel || !yChannel" class="hint">{{ t('analyzer.gg.pickBoth') }}</p>
+    <Scatter3dChart
+      v-if="is3d"
+      class="chart-fill"
+      :series="ggSeries"
+      :x-name="xChannel"
+      :y-name="yChannel"
+      :z-name="colorChannel"
+      :fill-height="fillHeight"
+      :equal-aspect="equalAspect"
+      :include-outliers="includeOutliers"
+    />
     <GgChart
       v-else
       class="chart-fill"
@@ -240,7 +292,6 @@ const axisMode = computed<'square' | 'auto'>(() => {
       :y-name="yChannel"
       :fill-height="fillHeight"
       :equal-aspect="equalAspect"
-      :color-channel="colorChannel"
     />
   </section>
 </template>
@@ -316,6 +367,25 @@ const axisMode = computed<'square' | 'auto'>(() => {
 .aspect button.active {
   background: var(--color-accent);
   color: var(--color-accent-text);
+}
+/* B51 — the 3D-only "include outliers" escape hatch, styled like
+   TrackChannelPanel's `.toggle` checkbox+label pattern. */
+.toggle.outliers {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  align-self: flex-end;
+  padding-bottom: 6px;
+}
+/* B35 — §8 layer 3: any coarse pointer present grows the checkbox itself to
+   a >=44px touch target, same pattern as CurrentValuesPanel's `.hide-toggle
+   input` — see that file's identical rule for the full doc. */
+:root[data-any-pointer-coarse] .toggle.outliers input {
+  width: 44px;
+  height: 44px;
 }
 .remove {
   background: var(--color-bg);

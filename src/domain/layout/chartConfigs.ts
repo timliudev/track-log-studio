@@ -67,6 +67,15 @@ export interface ScatterChartConfig {
    *  backfill below) means "no colour axis", i.e. the existing flat per-lap
    *  `GgSeries.color` styling. */
   colorChannel: string | null
+  /** B51 — the 3D scatter's outlier-robust axis ranging escape hatch: false
+   *  (default, including pre-feature persisted charts — see `parseCharts`'s
+   *  backfill below) clamps each of the X/Y/Z axes to their 0.5–99.5
+   *  percentile band (see `computeAxisRanges` in domain/analysis/scatter3d.ts)
+   *  so a handful of extreme outlier/noise samples don't squash the rest of
+   *  the point cloud; true restores the full data-extent ranging that shipped
+   *  before B51. Only meaningful in 3D (a colour-axis channel picked) — the
+   *  2D scatter's own axis ranging is unaffected either way. */
+  includeOutliers: boolean
 }
 
 /** One chart on the analyzer dashboard, discriminated on `kind`. */
@@ -136,6 +145,12 @@ export function parseCharts(raw: string | null): ChartConfig[] | null {
           // this field existed) backfills to null ("no colour axis"), same
           // "degrade to off" spirit as the other optional scatter fields.
           colorChannel: typeof it.colorChannel === 'string' ? it.colorChannel : null,
+          // B51 — missing/invalid (any chart persisted before this field
+          // existed) backfills to false, i.e. outlier-robust ranging ON —
+          // the new default behaviour, not a blanket "keep old behaviour"
+          // backfill (unlike `equalAspect`'s channel-pair-derived default,
+          // there's no equivalent old value to infer this from).
+          includeOutliers: typeof it.includeOutliers === 'boolean' ? it.includeOutliers : false,
         })
         seen.add(id)
       }

@@ -35,9 +35,35 @@ export interface AccelSegment {
   distanceM: number
   entrySpeedKmh: number
   exitSpeedKmh: number
+  /**
+   * The highest speed (km/h) observed anywhere within [startIdx, endIdx]
+   * (inclusive, raw samples — not interpolated at the edges). For a
+   * monotonic launch this equals `exitSpeedKmh`, but it's entirely normal
+   * for a run to peak mid-window and then slow down before the
+   * distance/speed target resolves (e.g. hard acceleration onto a short
+   * straight followed by braking for the corner at the end of it) — in
+   * that case `exitSpeedKmh` alone understates how fast the segment
+   * actually got, which is why B53's "faster time but lower end speed"
+   * result looked like a bug when it was actually a real brake-before-the-
+   * mark run. See the module doc and accelTest.test.ts's "peak speed"
+   * cases.
+   */
+  peakSpeedKmh: number
   /** True for the single fastest (lowest `timeMs`) segment among all the
    *  segments returned by the same search call; false for the rest. */
   isFastest: boolean
+}
+
+/** Highest finite speed in `speedKmh[lo..hi]` (inclusive raw samples).
+ *  Falls back to `speedKmh[lo]` when every sample in range is non-finite
+ *  (shouldn't happen for a resolved segment, but keeps this total). */
+function peakSpeedInRange(speedKmh: ArrayLike<number>, lo: number, hi: number): number {
+  let peak = -Infinity
+  for (let i = lo; i <= hi; i++) {
+    const v = speedKmh[i]
+    if (Number.isFinite(v) && v > peak) peak = v
+  }
+  return Number.isFinite(peak) ? peak : speedKmh[lo]
 }
 
 /** Mark the minimum-`timeMs` element of `segments` as `isFastest`, in place.
@@ -51,6 +77,21 @@ function markFastest(segments: AccelSegment[]): AccelSegment[] {
   }
   segments[fastest].isFastest = true
   return segments
+}
+
+/**
+ * Sort a list of found segments fastest-to-slowest (ascending `timeMs`),
+ * for display purposes only (Track Log Studio issue B48) — the search
+ * functions above deliberately return chronological order (ascending
+ * `startIdx`, see the module doc) since that's the natural scan order and
+ * some tests/consumers rely on it, so this is a separate, non-mutating step
+ * the UI applies on top rather than a change to the search contract. Returns
+ * a NEW array (does not mutate `segments`); the input's `isFastest` flags are
+ * untouched, so the fastest segment ends up first both by flag and by
+ * position. `Array.prototype.sort` is stable, so segments with equal
+ * `timeMs` keep their relative (chronological) order. */
+export function sortSegmentsByTime(segments: AccelSegment[]): AccelSegment[] {
+  return [...segments].sort((a, b) => a.timeMs - b.timeMs)
 }
 
 export interface FastestDistanceFromLaunchOptions {
@@ -214,6 +255,7 @@ export function fastestDistanceFromLaunch(
       distanceM,
       entrySpeedKmh: startSpeedKmh,
       exitSpeedKmh,
+      peakSpeedKmh: peakSpeedInRange(speedKmh, startI, end),
       isFastest: false,
     })
   }
@@ -342,6 +384,7 @@ export function fastestSpeedSegment(
         distanceM: endDistM - startDistM,
         entrySpeedKmh,
         exitSpeedKmh: toKmh,
+        peakSpeedKmh: peakSpeedInRange(speedKmh, startI, i),
         isFastest: false,
       })
     }

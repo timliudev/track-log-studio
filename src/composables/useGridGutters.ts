@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, ref, watch, type ComputedRef, type Ref } from 'vue'
 import {
   detectGutters,
+  filterCollapsedGutters,
   gutterKey,
   gutterRect,
   applyGutterDrag,
@@ -38,6 +39,14 @@ export interface UseGridGuttersOptions {
    *  false, {@link gutters} is always empty and
    *  {@link UseGridGuttersReturn.onGutterPointerDown} is a no-op. */
   enabled: Ref<boolean> | ComputedRef<boolean>
+  /** B52 — ids currently collapsed (see dashboardLayout.ts's
+   *  `applyCollapsedHeights` / panelState's `collapsed`), so this composable
+   *  can drop a gutter it would otherwise offer to drag along a collapsed
+   *  card's DISPLAY-only bottom edge (see gridGutter.ts's
+   *  `filterCollapsedGutters` for why). Optional — defaults to an empty set
+   *  (no filtering) so callers without a collapse concept aren't forced to
+   *  pass one. */
+  collapsedIds?: Ref<ReadonlySet<string>> | ComputedRef<ReadonlySet<string>>
   /** Same three numbers AnalyzerView passes to `<GridLayout>` — see
    *  dashboardLayout.ts's `GRID_COLS`/`GRID_ROW_HEIGHT`/`GRID_MARGIN`, kept
    *  as one shared source so this composable's pixel math can never drift
@@ -98,8 +107,10 @@ export interface UseGridGuttersReturn {
  * gesture. `onMove` only reads `e.clientX`/`e.clientY`, so which element the
  * event nominally targets never matters.
  */
+const EMPTY_COLLAPSED_IDS: ReadonlySet<string> = new Set()
+
 export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersReturn {
-  const { items, enabled, cols, rowHeight, marginX, marginY, onChange } = options
+  const { items, enabled, collapsedIds, cols, rowHeight, marginX, marginY, onChange } = options
 
   const containerRef = ref<HTMLElement | null>(null)
   const containerWidthPx = ref(0)
@@ -133,7 +144,8 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
 
   const gutters = computed<GutterHandle[]>(() => {
     if (!enabled.value || containerWidthPx.value <= 0) return []
-    return detectGutters(items.value).map((g) => ({
+    const detected = filterCollapsedGutters(detectGutters(items.value), collapsedIds?.value ?? EMPTY_COLLAPSED_IDS)
+    return detected.map((g) => ({
       ...g,
       key: gutterKey(g),
       rect: gutterRect(g, metrics.value),

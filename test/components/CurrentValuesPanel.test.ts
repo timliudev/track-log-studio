@@ -1,11 +1,35 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import CurrentValuesPanel from '@/features/analyzer/CurrentValuesPanel.vue'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import zhHant from '@/i18n/locales/zh-Hant'
+
+// B49 persists field-arrangement prefs to localStorage — happy-dom doesn't
+// reliably expose a native `localStorage` global, so stub an in-memory one,
+// same convention as SuspensionCard.test.ts / dashboardLayout.test.ts.
+function installMemoryLocalStorage(): void {
+  let store = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => {
+      store.set(k, v)
+    },
+    removeItem: (k: string) => {
+      store.delete(k)
+    },
+    clear: () => {
+      store = new Map<string, string>()
+    },
+  })
+}
+
+beforeEach(() => {
+  installMemoryLocalStorage()
+  localStorage.clear()
+})
 
 function channel(name: string, data: number[]): Channel {
   return { name, rawName: name, description: undefined, data: new Float32Array(data) }
@@ -112,6 +136,132 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
       await wrapper.setProps({ cursorIdx: 1 })
       const timeCell = wrapper.find('.value-cell--time')
       expect(timeCell.classes()).not.toContain('value-cell--pulse')
+    })
+  })
+
+  // B49 — field arrangement: sort mode, per-field hide, edit-mode custom
+  // reorder. Time field ('目前時間') must stay first, unhideable, unmovable
+  // throughout.
+  describe('B49 — field arrangement', () => {
+    function cellLabels(wrapper: ReturnType<typeof mountPanel>): string[] {
+      return wrapper.findAll('.value-label').map((n) => n.attributes('title')!)
+    }
+
+    it('defaults to the original channel order with no edit controls shown', () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2]), channel('Throttle', [3])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'RPM', 'GPS_Speed', 'Throttle'])
+      expect(wrapper.find('.edit-controls').exists()).toBe(false)
+      expect(wrapper.find('.sort-mode-group').exists()).toBe(false)
+    })
+
+    it('switches to alphabetical order via the sort-mode control', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2]), channel('Throttle', [3])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      const buttons = wrapper.findAll('.sort-mode-group button')
+      await buttons[1].trigger('click') // alphabetical
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS_Speed', 'RPM', 'Throttle'])
+    })
+
+    it('hides a field via its edit-mode checkbox, and it disappears outside edit mode', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+
+      const rpmCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('RPM'))!
+      await rpmCell.find('input[type="checkbox"]').setValue(false)
+      expect(rpmCell.classes()).toContain('value-cell--hidden')
+
+      // Leave edit mode: the hidden field is gone from the grid entirely.
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS_Speed'])
+    })
+
+    it('re-shows a hidden field by checking its box again', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      const rpmCell = () => wrapper.findAll('.value-cell').find((c) => c.text().includes('RPM'))!
+      await rpmCell().find('input[type="checkbox"]').setValue(false)
+      await rpmCell().find('input[type="checkbox"]').setValue(true)
+      expect(rpmCell().classes()).not.toContain('value-cell--hidden')
+    })
+
+    it('shows hidden fields (dimmed, still checkable) while in edit mode', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      await wrapper
+        .findAll('.value-cell')
+        .find((c) => c.text().includes('RPM'))!
+        .find('input[type="checkbox"]')
+        .setValue(false)
+      // Still in edit mode: RPM stays listed (dimmed), not removed.
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'RPM', 'GPS_Speed'])
+    })
+
+    it('only shows up/down move buttons once sortMode is custom', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      expect(wrapper.find('.move-buttons').exists()).toBe(false)
+
+      await wrapper.findAll('.sort-mode-group button')[2].trigger('click') // custom
+      expect(wrapper.findAll('.move-buttons').length).toBeGreaterThan(0)
+    })
+
+    it('reorders fields with the up/down buttons in custom mode', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2]), channel('Throttle', [3])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      await wrapper.findAll('.sort-mode-group button')[2].trigger('click') // custom
+
+      // Move GPS_Speed (currently 2nd non-time field) up one place.
+      const gpsCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('GPS_Speed'))!
+      await gpsCell.find('.move-btn:first-child').trigger('click')
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS_Speed', 'RPM', 'Throttle'])
+    })
+
+    it('disables the up button for the first field and the down button for the last', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      await wrapper.findAll('.sort-mode-group button')[2].trigger('click') // custom
+
+      const rpmCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('RPM'))!
+      const gpsCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('GPS_Speed'))!
+      expect(rpmCell.find('.move-btn:first-child').attributes('disabled')).toBeDefined()
+      expect(gpsCell.findAll('.move-btn')[1].attributes('disabled')).toBeDefined()
+    })
+
+    it('shows a hint when every field is hidden (outside edit mode)', async () => {
+      const s = session([channel('RPM', [1])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      await wrapper.find('input[type="checkbox"]').setValue(false)
+      await wrapper.find('.edit-toggle-btn').trigger('click') // leave edit mode
+      expect(wrapper.text()).toContain('所有欄位皆已隱藏')
+      // Time cell is still shown even though every channel is hidden.
+      expect(cellLabels(wrapper)).toEqual(['目前時間'])
+    })
+
+    it('never renders edit controls for the time field', async () => {
+      const s = session([channel('RPM', [1])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      const timeCell = wrapper.find('.value-cell--time')
+      expect(timeCell.find('.edit-controls').exists()).toBe(false)
+    })
+
+    it('persists prefs across remounts (localStorage)', async () => {
+      const s = session([channel('RPM', [1]), channel('GPS_Speed', [2])])
+      const wrapper1 = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper1.find('.edit-toggle-btn').trigger('click')
+      await wrapper1.findAll('.sort-mode-group button')[1].trigger('click') // alphabetical
+
+      const wrapper2 = mountPanel({ session: s, cursorIdx: 0 })
+      expect(cellLabels(wrapper2)).toEqual(['目前時間', 'GPS_Speed', 'RPM'])
     })
   })
 })

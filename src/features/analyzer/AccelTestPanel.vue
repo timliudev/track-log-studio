@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AccelSegment } from '@/domain/analysis/accelTest'
+import { sortSegmentsByTime } from '@/domain/analysis/accelTest'
 import type { AccelCondition } from '@/stores/analyzerStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { formatLapTime } from '@/domain/analysis/format'
@@ -69,6 +70,13 @@ watch(
   () => clearFocus(),
 )
 
+// B48: displayed fastest-to-slowest (the search functions themselves stay
+// chronological — see sortSegmentsByTime's doc) so the quickest run is always
+// at the top, with the ⚡ fastest badge landing on row #1 as a result. Focus
+// state keys off `startIdx-endIdx` (segKey/isFocused below), not array index,
+// so re-sorting never disturbs which row is highlighted as focused.
+const sortedResults = computed(() => sortSegmentsByTime(props.results))
+
 const condition = computed(() => analyzer.accelCondition)
 const isDistance = computed(() => condition.value.kind === 'distance')
 
@@ -111,6 +119,17 @@ function fmtSpeed(v: number): string {
 
 function fmtDist(v: number): string {
   return Number.isFinite(v) ? `${v.toFixed(1)} m` : '—'
+}
+
+// B53: entry/exit speed alone can misread as a bug — a run that peaks
+// mid-window and brakes off before the mark legitimately covers the
+// distance FASTER than a steadier run while ending slower (see
+// accelTest.ts's AccelSegment.peakSpeedKmh doc). Only surface the peak
+// when it's meaningfully above the exit speed (i.e. the run actually
+// slowed down before resolving) — a monotonic launch's peak equals its
+// exit speed, so showing it there would just be noise.
+function showsPeak(seg: AccelSegment): boolean {
+  return seg.peakSpeedKmh > seg.exitSpeedKmh + 1
 }
 </script>
 
@@ -202,7 +221,7 @@ function fmtDist(v: number): string {
 
     <ul v-if="props.speedAvailable && props.results.length > 0" class="result-list">
       <li
-        v-for="(seg, i) in props.results"
+        v-for="(seg, i) in sortedResults"
         :key="`${seg.startIdx}-${seg.endIdx}`"
         class="result"
         :class="{ fastest: seg.isFastest, focused: isFocused(seg) }"
@@ -216,6 +235,9 @@ function fmtDist(v: number): string {
             entry: fmtSpeed(seg.entrySpeedKmh),
             exit: fmtSpeed(seg.exitSpeedKmh),
           }) }}
+        </span>
+        <span v-if="showsPeak(seg)" class="result-detail result-peak">
+          {{ t('analyzer.accelPeakSpeed', { peak: fmtSpeed(seg.peakSpeedKmh) }) }}
         </span>
         <button type="button" class="focus-btn" :class="{ active: isFocused(seg) }" @click="onFocusClick(seg)">
           {{ isFocused(seg) ? t('analyzer.accelUnfocus') : t('analyzer.accelFocus') }}
@@ -348,6 +370,10 @@ function fmtDist(v: number): string {
 .result-detail {
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+}
+.result-peak {
+  font-style: italic;
+  opacity: 0.85;
 }
 .focus-btn {
   margin-left: auto;

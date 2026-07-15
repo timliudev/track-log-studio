@@ -156,6 +156,26 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - 可上傳自訂底圖，手動拖放 / 縮放對齊軌跡。
 - 軌跡圖**持續顯示**於畫面（所有視圖都看得到目前位置）。
 
+**B22 實作記錄（2026-07-14）**：`TrackMap.vue` 的 canvas painter 在所有軌跡
+繪圖步驟之前新增底圖步驟；上傳圖片走 `useMapBackground.ts`，圖片 Blob 存獨立
+IndexedDB、圖層選擇／對位值／衛星 key 則存 localStorage。圖片僅接受 PNG、JPEG、
+WebP，且須大於 0、至多 10 MB，驗證發生在解碼與寫入前；手動對位可用「拖曳對齊
+圖片」模式，也有可觸控的方向／縮放微調鈕。OSM 與 Mapbox 衛星底圖以目前的 GPS
+視窗計算 Web Mercator 圖磚，非預快取、成功載入才重繪 canvas；OSM 固定顯示
+attribution。Mapbox key 不會進入設定匯出或我方後端，僅在使用者選取衛星圖時隨瀏覽器
+到 Mapbox 的圖磚請求送出（取得該第三方服務的必要範圍）。
+
+**B54 修正記錄**：縮放/平移時圖磚不會即時重抓、停在縮放前解析度被放大顯示的問題。
+純數學（zoom 層級選擇、可視範圍 tile x/y 計算、LRU 快取、上層 tile 佔位裁切）抽到
+`src/domain/analysis/mapTiles.ts`（有獨立單元測試），`TrackMap.vue` 只負責：(a)
+**穩定後才抓取**——每次 draw() 都會即時算出目前該用的 z/x/y 範圍並立刻用快取內容重繪，
+但只有當這組範圍持續 ~250ms 沒再變化（滾輪/拖曳已停）才真正送出新的圖磚請求，避免
+連續滾輪每一格都各自發一批請求；(b) **佔位圖磚**——目標 z/x/y 尚未載入完成時，改畫最
+接近的已快取「上層」（較低 zoom）圖磚裁切後放大填滿該格，不會整片空白；(c) **容量上限
+快取**（400 張，近期最少使用者先淘汰）取代原本無上限的 Map；(d) **失敗不重試**——單一
+圖磚請求失敗會記一個 flag，之後同一格不再重試（僅是保留佔位圖磚），避免任何持續失敗
+的圖磚每個動畫影格都被重新請求，造成請求風暴。
+
 ### 6.2 切圈 / 起終點線（**決議：線段**）
 - 以**一條線段（兩個可拖曳端點）**定義起終點，軌跡穿越即計圈。
 - 觸控：點兩下放端點 + 拖曳把手（命中區 ≥44px）；滑鼠：按下拖曳成線。共用同一資料。
@@ -165,6 +185,10 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 ### 6.3 底圖對位（**決議：兩種都開放**）
 - **免費**：使用者上傳底圖（手動對位）＋ OpenStreetMap 街道圖磚（免金鑰）。
 - **衛星圖（付費）**：使用者**自帶 API key**（Mapbox / Google 等），key 存本地、不外流；未填則僅免費選項。
+
+目前衛星實作選用 **Mapbox** 的 satellite 圖磚 URL；未填 key 時不發請求、不顯示
+衛星底圖。若要增加其他供應商，應把 tile URL 策略抽成獨立 adapter，不能在 UI 中散落
+供應商分支。
 
 ### 6.4 圖表
 - X 軸：時間或距離（距離由 GPS haversine 累積）。
@@ -190,6 +214,33 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   +拖曳平移，觸控原生支援雙指縮放/拖曳平移，不需額外手勢程式碼。同樣有「重設縮放」鈕，出現
   /樣式規則與 B9 一致（沿用同一支 `resetZoom` i18n 字串），座標軸鎖 1:1（`equalAspect`/`square`）
   下獨立縮放 X/Y 理論上會暫時偏離正圓，屬已知取捨，未特別處理。
+- **B25b XYZ 散佈圖**：第三通道改為真實 `scatter3D`（`Scatter3dChart.vue`），不再以
+  連續色階模擬深度。採 `echarts-gl@2.1.0`，其 peer dependency 明確支援目前的
+  `echarts@6.1.0`；元件和 GL 依賴均以 async component lazy-load，且 Workbox 排除
+  預快取、改成首次實際使用才快取。未選 Z 軸時仍由 `GgChart.vue` 繪製既有 2D 圖。
+  XYZ 模式中，Z 是所選頻道，顏色恢復檔案識別色 `categoricalColor`（同檔的選圈不再
+  分色）；ECharts GL view control 提供滑鼠旋轉／滾輪縮放與觸控旋轉／縮放，仍需真機
+  驗收。
+- **B50 3D 1:1 縮放**：驗收發現「1:1／自動」按鈕在切到 XYZ 模式後完全沒有作用——
+  舊版 `ScatterChart.vue` 只把 `equalAspect` 傳給 2D 的 `GgChart`，`Scatter3dChart`
+  完全沒收到這個 prop，grid3D 的箱體尺寸永遠是寫死的 `boxWidth:120 / boxHeight:100 /
+  boxDepth:100`。改為真正實作：`echarts-gl` 的 `grid3D` 三個箱體邊長
+  （`boxWidth`/`boxHeight`/`boxDepth`，依 `grid3DCreator.js` 分別對應 X/Z/Y 軸）
+  各自獨立可設，1:1 時依三軸「目前實際使用的範圍」（見下方 B51——與 outlier 模式
+  一致）等比例縮放三邊長（最大跨度那一軸取滿 `maxSize`，見
+  `domain/analysis/scatter3d.ts` 的 `equalAspectBoxSize`），讓「相同資料單位＝相同
+  視覺長度」在三軸上都成立（球狀點雲畫出來是球，不是橢球）；自動模式維持原本寫死
+  箱體（各軸獨立鋪滿），行為不變。按鈕的 hover 提示文字依 2D/3D 動態切換
+  （`aspectEqualHint`/`aspectEqualHint3d` 等）。
+- **B51 3D 離群值穩健縮放**：驗收回報 3D 座標軸永遠自動縮放到「完整」資料範圍，
+  少數極端雜訊/離群樣本會把其餘點雲擠壓成一條扁線。新增
+  `domain/analysis/scatter3d.ts` 的 `computeAxisRanges`：預設每軸各自收斂到
+  0.5–99.5 百分位（`robustAxisRange`／`percentile`），範圍外的點不從資料裡剔除，
+  只是被 grid3D 箱體邊界裁掉不顯示（tooltip／其他消費者仍拿到完整點集，不受影響）；
+  卡片上新增「包含離群值」勾選（`ScatterChartConfig.includeOutliers`，隨其他散佈圖
+  設定一起持久化），開啟後改用完整範圍（`fullAxisRange`，即 B51 之前的行為）。2D
+  散佈圖（`GgChart.vue`）刻意不受影響——沒有回報同樣的壓扁問題，且已有自己的
+  1:1 實作（`squareAxisRanges`/`squareGridBox`），維持現狀。
 - **B8**：主時序圖不再有「時序 / 疊圈」模式切換——**疊圈是唯一的顯示方式**：沒有選圈時退回
   顯示整段 session（時間/距離軸連續資料，等同舊「時序」模式的畫面）；選了圈之後才切到
   各圈疊在共用「圈相對 X」（從 0 起算）上比較。跨檔 overlay（cross-session、每圈 offset）
@@ -205,9 +256,31 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   時間是未設定狀態，顯示「記錄結束時的狀態」比整卡破折號更有用。純函式見
   `domain/analysis/currentValues.ts`（`resolveCurrentValueIndex` / `buildCurrentValueFields` /
   `formatCurrentValueField`）——每格皆為 O(1) 索引存取，`timeSeconds()` 只依 session 快取一次，
-  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。**B43**：卡片最窄可縮到
-  `minW:2`（與多數控制面板同一底線），格狀 `grid-template-columns` 用
-  `minmax(min(96px,100%),1fr)` 而非固定 `96px`，卡片窄到只容一欄時自動單列直排、不出現橫向捲動。
+  游標移動不會整條 channel 陣列重算。跟其他靜態卡片一樣可拖曳/縮放/收折/釘選。**B43**：格狀
+  `grid-template-columns` 改用 `minmax(min(96px,100%),1fr)` 而非固定 `96px`，卡片窄到只容一欄時
+  自動單列直排、不出現橫向捲動。**B43b**（B43 的 `minW:2` 底線不夠低）：12 欄網格下，`minW:2` 在任何
+  合理桌面視窗寬度都仍容得下兩個 96px 格子並排（例：1280px 視窗欄寬≈93.7px，`w:2`≈199px 外寬／
+  扣掉卡片 12px+12px `.body` padding 後內容區≈175px，逼近但仍略低於兩欄所需的 96*2+8(gap)=200px；
+  更寬的視窗則明顯超過），導致卡片其實從未真正縮到單欄。底線改為 `minW:1`（見
+  `domain/layout/dashboardLayout.ts` 的 `STATIC_MIN_SIZE`，低於其他控制面板的 `minW:2`）：`w:1` 內容區
+  在 1280px 視窗≈70px、1920px≈123px、2560px≈176px，皆穩定低於 200px 門檻，沿用既有的
+  `minmax(min(96px,100%),1fr)`（無需再調降 96px 底線）即可穩定單欄直排、垂直捲動、無橫向捲軸/裁切
+  （僅在視窗寬達~3600px 以上這種極端情形才會再度容下兩欄，此時額外空間拿來排第二欄不算 bug）。
+  **B49 欄位排列控制**：header 有一顆「編輯欄位」切換鈕；平時（非編輯模式）格狀維持乾淨（僅
+  label+數值），編輯模式才出現：(1) 排序方式三選一（原始頻道順序 / 名稱字母序 / 自訂順序，segmented
+  control）；(2) 每個非時間欄位一個顯示/隱藏 checkbox；(3) 僅當排序方式為「自訂順序」時，每格額外出現
+  上移/下移鈕（`.move-btn`，桌面 24px，`:root[data-any-pointer-coarse]` 下依 DESIGN.md §8 觸控政策長到
+  44px）。隱藏的欄位在編輯模式中仍列出（半透明 `.value-cell--hidden`，checkbox 可勾回），離開編輯模式後
+  才真正從格狀消失；若所有頻道都被隱藏，格狀外顯示提示文字（時間格恆存在）。**目前時間永遠第一格、不可
+  隱藏、不可移動**——編輯控制只出現在非時間欄位上。純函式集中在
+  `domain/analysis/currentValuesFieldPrefs.ts`（`arrangeCurrentValueFields` 給一般顯示用、
+  `currentValuesEditableFields` 給編輯模式用兩者共用同一套排序邏輯只差是否過濾隱藏欄位；
+  `reconcileCurrentValuesFieldPrefs` 在 session 換頻道時清掉不存在的 hidden/order 並把新頻道接到
+  order 尾端；`moveFieldInOrder`/`toggleFieldHidden`/`setCurrentValuesSortMode` 皆為純函式，回傳同一
+  物件參考代表 no-op）；持久化透過 `useCurrentValuesFieldPrefs.ts`（與 `usePanelState.ts` 同一
+  global-slot localStorage 慣例，key 為 `aracer-loga.currentValuesFieldPrefs.v1`），並併入 B19 設定
+  匯出/匯入 bundle 的 `layout.currentValuesFieldPrefs`（同樣走「包含版面配置」勾選開關，`settingsTransfer.ts`
+  對缺欄位/壞資料一律降級回預設值，不整包拒絕）。
   **B44**：任一格的**顯示字串**（非原始數值）相對上一次渲染改變時，該格背景做一次低對比（accent
   10% 透明度、400ms、`color-mix`）脈衝提示；同一格連續變化只重啟動畫、不疊加；`目前時間`格排除在外
   （每次都變，提示無意義）；`prefers-reduced-motion: reduce` 時停用動畫。
@@ -244,7 +317,7 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
 - 小設定（主題 / 語言 / 時區 / 傳動系統 / dashboard 版面等）→ **localStorage**，各自一組 `aracer-loga.*.v1` key（`settingsStore`／`drivetrainStore`／`domain/layout/dashboardLayout.ts`／`panelState.ts`／`layoutLock.ts`），未走過一層共用的 `SettingsRepository` 抽象——每個 store/模組自行管的 key 數量還不多，先不引入額外抽象層。
 - 大資料（上傳的底圖、完整 preset 集合）→ **IndexedDB**（localStorage 約 5MB 上限會爆）。
 - **匯出 / 匯入（B19，已實作）**：設定頁「設定匯出 / 匯入」卡片，序列化成單一 JSON 檔下載 / 上傳還原，邏輯集中在 `src/domain/settings/settingsTransfer.ts`（純函式，另有單元測試）：
-  - 範圍固定包含「外觀」（主題／語言／時區）與「傳動系統」（齒比、輪胎規格等）；「dashboard 版面配置」（grid 位置 + 卡片收合/釘選/手機排序）另有一個「包含版面配置」勾選開關，預設勾選。
+  - 範圍固定包含「外觀」（主題／語言／時區）與「傳動系統」（齒比、輪胎規格等）；「dashboard 版面配置」（grid 位置 + 卡片收合/釘選/手機排序 + **B49** 現值卡欄位排序/隱藏/自訂順序）另有一個「包含版面配置」勾選開關，預設勾選。
   - 匯出檔含 `schemaVersion`／`exportedAt` 供未來遷移與除錯。
   - 匯入為覆寫性操作：解析＋逐欄位驗證（未知欄位容忍、缺欄位補預設值），套用前跳出確認對話框；外觀／傳動系統套用後透過 Pinia 響應式 refs 立即生效，若含版面配置則因 dashboard grid 只在掛載時讀取一次 localStorage，改為寫回 localStorage 後自動重新整理頁面以生效。
 
@@ -264,6 +337,34 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **實作註記（B35 基礎建設，2026-07-13）**：`composables/useInputCapabilities.ts` 是唯一 primitive，包三條 `matchMedia`（`any-pointer: coarse`／`pointer: coarse`／`any-hover: none`，各自掛 change 監聽）+ `settingsStore.inputModePref`（層4覆蓋，'auto' 時原樣透傳、'touch'/'pointer' 時三個能力全部釘死）；在 App.vue 掛一次（同 useTheme/useLocale 模式），並鏡射成 `<html data-any-pointer-coarse|data-pointer-coarse|data-any-hover-none>` 三個 boolean attribute，讓純 CSS 用 `:root[data-any-pointer-coarse] .foo {...}` 就能吃到訊號，不必每個元件都 import 這個 composable。已遷移到能力訊號的點擊目標：`LapTable.vue` 的 ⦸ 排除鈕、`SessionLapComparison.vue` 的 offset ±／reset 鈕、`UPlotChart.vue` 的重設縮放鈕、`DashboardCard.vue` 的收折/釘選鈕、`TimeSeriesChart.vue`/`ScatterChart.vue` 的刪除圖表鈕；`theme.css` 另外用同一訊號補了一條全域規則把 grid-layout-plus 的 resize 把手（`.analyzer .vgl-item__resizer`）在寬螢幕+粗指標（如平板跑桌面版面）下也長到 30px——這個 30px 數值原本只掛在 `AnalyzerView.vue` 的 `@media (max-width: 768px)`（該檔案本輪未動,由另一支 agent 處理中）,兩條規則疊加、互不牴觸。真正屬於「版面」的寬度斷點（`BottomNav` 顯示切換、dashboard 單欄堆疊——`useDashboardLayout.ts` 的 `MOBILE_BREAKPOINT_PX`）維持寬度判斷不變,那些跟輸入能力無關。圖表手勢部分：`UPlotChart.vue` 觸控拖曳平移/雙指縮放本來就是逐事件 `pointerType`,並非寬度 gate；本輪修正的是 `pen` 誤入觸控分支的 bug（抽成可測的 `isTouchGesturePointer()`),改為與 `mouse` 同路（框選縮放 + Shift 平移),理由是 S Pen 已有懸浮能力,自然比照滑鼠體驗。
   - **實作註記（B31 固定中線游標模式，2026-07-14）**：`settingsStore.centreCursorMode`（布林，預設 false，與 `inputModePref` 同一顆 store／同一份 B19 匯出匯入)，只由 `TimeSeriesChart.vue` 讀取並往下傳給 `UPlotChart.vue` 的新 prop `centreCursorMode`（`GearPanel.vue`/`SessionMergePanel.vue` 的獨立圖表沒傳這個 prop，完全不受影響——刻意的低風險 scoping)。開啟後：(1) 圖表水平中央畫一條常駐垂直線（純 CSS overlay，定位在 `wrap`——不是 `host`，因為 uPlot 自己的 `.u-wrap`/`.u-over` 是直接掛在 `host` 下、不受 Vue 模板追蹤，硬塞子節點進去太脆弱)，同時關閉 uPlot 原生 hover 十字準星（`cursor.x/y: false`，避免兩個游標指示器打架)；(2) **任何 pointerType 的拖曳都是同一個手勢**（`onPointerDown/Move/Up` 裡新增的 `centreCursorMode` 分支，早於既有 touch-only 分岐，off 時完全不影響既有觸控/滑鼠/pen 行為)，重用既有 `dataXBounds`/`currentXRange`/`panRange`/`emitXRange` pipeline 平移可視範圍（不含雙指縮放——刻意只挑一種手勢，見 prop 文件)；(3) 每次可視範圍變動（拖曳、或別的圖表同步過來的 `xRange`）都從 `setScale` hook 重新算「中線目前對到哪個 sample」（純函式 `centreCursorIndex`，見 `UPlotChart.vue` 開頭 + `test/units/uplotChartCentreCursor.test.ts`）並 emit 成這顆圖表的 `cursor`——跨圖表同步靠既有共用 `xRange` 機制順便達成（拖一顆圖表會連動全部同一個 xRange 的圖表)，`externalCursor` prop 在此模式下直接忽略（沒有「hover 位置」這回事)。設定頁核取方塊 + `zh-Hant`/`en` locale 皆已補上（`centreCursor.label`/`.hint`)。
   - **修正記錄（B31b，2026-07-14 稍後）**：使用者實測回報「一點用都沒有、還是歪的」。查證後，指針自身像素位置（`needleOffsetX(plotLeft, plotWidth)`）與指針下取樣值（`valueAtPlotX`/`centreCursorIndex`，本 app 恆為線性 X scale，等價於 `posToVal(中心像素)`）皆早已正確，兩者都補上純函式 + 單元測試釘住（`test/units/uplotChartCentreCursor.test.ts`）。真正的根因是**拖曳完全沒作用**：`cursor.x: false`／`cursor.y: false` 只關掉 uPlot 原生十字準星的「畫」，並不會關掉 uPlot 自己獨立的 `cursor.drag`（預設 `{ x: true, setScale: true }`）——所以中線模式下，一般滑鼠拖曳仍會同時觸發 uPlot 自己原生的框選縮放（真滑鼠的 `mousedown`/`mousemove`/`mouseup` 是原生事件、不是從 pointer event 合成出來的「相容事件」，所以本元件自己 `pointerdown` 上呼叫的 `preventDefault()` 並不會抑制它們——只對 touch/pen 才有效)，兩邊同時搶著改同一個 x scale，使用者一放開滑鼠，畫面就被 uPlot 自己的框選縮放蓋掉，看起來「歪」且「沒用」。修法：`centreCursorMode` 開啟時 `cursor.drag` 也一併關閉（`{ setScale: false, x: false, y: false }`），讓本元件自己的 `onCentrePointerDown/Move/Up` 是唯一能改 x range 的路徑。用真的 `uplot` 套件（非 mock）+ 最小 fake DOM 直接發真實 mousedown/mousemove/mouseup 到 uPlot 自己的 `.u-over` 監聽器上釘住這個機制層級的迴歸測試：`test/units/uplotChartCentreDrag.test.ts`。
+  - **實作註記（B36 手機單欄模式卡片滿版，2026-07-14）**：手機單欄（`useDashboardLayout.ts` 的
+    `MOBILE_BREAKPOINT_PX`——這是版面寬度斷點，依本節政策仍以寬度判斷，跟輸入能力無關）下，
+    頁邊距＋卡片邊框＋卡片內距層層疊加，在 360px 螢幕上吃掉整體寬度的兩成以上；本輪把這疊插起來
+    的邊距逐層拆開：(1) `App.vue` 的 `.content` 在手機斷點下左右 padding 歸零——但只在**分析器**
+    分頁生效，`ConverterView.vue`/`SettingsView.vue` 各自在自己的根元素補回同樣的水平間距，
+    外觀完全不變（決議：這兩頁是表單/表格內容，不是使用者要拿回空間的圖表/地圖，維持原樣風險
+    最低）。(2) `DashboardCard.vue` 在手機斷點下移除左右 border／圓角（上下 border 保留當作卡片
+    間的分隔線），卡片本體從「浮起的卡」變成「滿版區段」；`--card-body-pad-x`（卡片內距的水平
+    分量，factor 成 CSS 變數）同時縮到 4px 的最小值——非零，讓文字類卡片（控制面板、圈表、
+    band 篩選輸入）仍保有可讀的呼吸空間。**釘選 (pinned) 卡片排除在外**：pinned 是刻意浮動的
+    元素（Teleport 到獨立 sticky anchor），手機下仍保留完整卡片外觀（border/圓角/較寬內距）；
+    `AnalyzerView.vue` 的 `.pinned-anchor` 相應補回一點水平內距，避免 pinned 卡片邊框貼齊真實
+    螢幕邊緣。(3) grid-layout-plus 的 `margin[0]`（`GRID_MARGIN`）本身就內建成整個網格的左右邊緣
+    inset，不只是卡片間的溝——`useDashboardLayout.ts` 新增 `gridMargin` computed，手機單欄下把
+    水平分量歸零（垂直分量、也就是堆疊卡片間的縱向間距，維持不變），桌面 2-D 網格完全不受影響。
+    (4) 圖表/地圖本體貼邊：`UPlotChart.vue` 的 `.uplot-wrap.fill` 與 `TrackMap.vue` 的
+    `.track-wrap.fill` 讀取 DashboardCard 定義的 `--card-bleed-x` CSS 變數（手機非 pinned 卡片下
+    為 4px，其餘情況為 0——包含 `GearPanel.vue`/`SessionMergePanel.vue` 等在儀表板外使用這兩顆
+    元件的呼叫端，完全不受影響），套用負邊距 + 對應寬度補償，貼到卡片（也就是螢幕）真實邊緣；
+    uPlot 的 Y 軸標籤本身有留白，貼邊後仍可讀。(5) **邊緣手勢緩衝**：圖表/地圖互動層貼邊後，
+    觸控裝置從螢幕邊緣起始的拖曳會與 Android/iOS 系統的「邊緣滑動返回」手勢衝突——新增純函式
+    `isEdgeGestureZone(clientX, viewportWidth, insetPx=8)`（`domain/layout/edgeGesture.ts`，同
+    `xRangeGesture.ts` 風格，可離線單元測試），`UPlotChart.vue`/`TrackMap.vue` 的
+    `onPointerDown` 在 `pointerType === 'touch'` 且 `anyPointerCoarse`（B35 訊號）且落在螢幕左右
+    8px 內時直接不呼叫 `preventDefault()`/`setPointerCapture()`，讓事件原封不動地交還給
+    OS/瀏覽器自己的手勢辨識——視覺仍貼邊，只有這 8px 是「我方手勢的死區」。此為行為層級的緩解
+    （逐事件判斷、可單元測試該判斷本身），實際與真實系統手勢辨識器的互動仍需真機驗證，見下方
+    真機驗收清單。
 
 ---
 
@@ -354,6 +455,12 @@ RC3 槽位固定有限（16 個），loga 欄位數百個，故以「**幫每個
   - **歸屬**：與分析器的「圈/區段」同一類東西，未併入 `LapMetric`，改以獨立的 `AccelSegment[]`
     結果型別（含 `isFastest` 旗標）+ 面板呈現（掃描演算法與圈統計解耦，互不影響既有 `LapMetric`
     union）。
+  - **B53（驗收確認為真實資料、非 bug）**：曾有驗收回報「同樣 100m，#1 比 #2 快卻終點車速較低」
+    看似異常；用真實 log 重跑後確認兩筆都是真正靜止起步（GPS_Speed 連續多筆精確 0），#1 只是在
+    100m 窗口內先衝到波峰車速、隨後煞車進彎才過線——區段搜尋、邊界索引、終點車速取樣皆正確。
+    為了讓這種「先衝高再煞車」的情形不再誤判為 bug，`AccelSegment` 新增 `peakSpeedKmh`
+    （窗口內原始峰值車速），`AccelTestPanel.vue` 僅在峰值明顯高於終點車速時才額外顯示
+    「峰值 xx km/h」。
 - **`.vbo` 輸出格式（Phase 1 轉檔器延伸；✅ 已實作 2026-06-23）**：轉檔除了 `.nmea`，再加
   **Racelogic VBOX `.vbo`**，讓 log 直接在 **Circuit Tools 3**（Racelogic 官方、免費、賽道分析等級）
   與 **RaceChrono** 開啟。**相對 RC3 `.nmea` 的關鍵價值**：NMEA 只有 15 個固定類比槽（要槽位對應、

@@ -234,6 +234,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
         yChannel,
         equalAspect: looksLikeForcePair(xChannel, yChannel),
         colorChannel: null,
+        includeOutliers: false,
       })
     } else {
       charts.value.push({ kind: 'timeseries', id: nextId++, channels: [] })
@@ -277,6 +278,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     chart.colorChannel = channel
   }
 
+  /** B51 — toggle a scatter chart's 3D "include outliers" escape hatch
+   *  (false = outlier-robust percentile-clamped axis ranges, true = full
+   *  data extent) — same "one field, one setter, no-op on the wrong chart
+   *  kind" contract as `setChartXY`/`setChartEqualAspect`. */
+  function setChartIncludeOutliers(id: number, includeOutliers: boolean): void {
+    const chart = charts.value.find((c) => c.id === id)
+    if (!chart || chart.kind !== 'scatter') return
+    chart.includeOutliers = includeOutliers
+  }
+
   return {
     activeFileId,
     xAxis,
@@ -314,5 +325,6 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     setChartXY,
     setChartEqualAspect,
     setChartColorChannel,
+    setChartIncludeOutliers,
   }
 })

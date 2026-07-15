@@ -234,6 +234,21 @@ const buildDate = __BUILD_DATE__
   .tabs {
     display: none;
   }
+  /* B36 — 手機單欄模式卡片滿版: the page container's own left/right padding
+     is the OUTERMOST of several stacked insets eating into a phone's already
+     narrow width (see AnalyzerView.vue/DashboardCard.vue's own B36 notes for
+     the others: DashboardCard's border + body padding, the dashboard grid's
+     own margin-driven inset). Zeroed here so the ANALYZER tab's dashboard
+     cards can go genuinely edge-to-edge on mobile. Converter/Settings are
+     NOT part of this task's ask (they're form-heavy content, not the
+     chart/map real estate the user is trying to reclaim) and are left
+     visually unchanged — each adds its own matching horizontal padding back
+     on its own root element (`.converter`/`.settings`) specifically so
+     zeroing it HERE doesn't also flush their content to the edge. */
+  .content {
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 
 /* View-switch transition: a subtle non-linear slide+fade, direction-aware

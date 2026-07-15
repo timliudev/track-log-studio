@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { LapLine } from '@/domain/analysis/laps'
 import type { Aggregation } from '@/domain/analysis/lapAggregate'
 import type { LapMetric } from '@/domain/analysis/lapMetrics'
@@ -10,6 +10,7 @@ import {
   type LapDistanceBand,
 } from '@/domain/analysis/lapValidity'
 import { invalidSectorLapIndices } from '@/domain/analysis/sectorValidity'
+import { swapPrimaryLapState } from '@/domain/analysis/primaryLapSwap'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { XAxis } from '@/stores/analyzerStore'
@@ -267,6 +268,62 @@ export const useLapStore = defineStore('lap', () => {
     selectedAcrossSessions.value = []
   }
 
+  // B55 — set for exactly one reactive flush right after `swapPrimarySession`
+  // runs, so the file-change watchers that would otherwise WIPE per-lap state
+  // on any active-file change (useLaps.ts, useSectors.ts — see their own
+  // module docs) know to skip that wipe THIS time, since the swap already
+  // migrated everything that needs migrating. Peeked (never consumed/reset)
+  // by those watchers — TWO independent composables observe the same swap in
+  // the same flush, so only one place may safely reset it, and it must run
+  // AFTER both have peeked. The `watch` below (registered once, at store
+  // setup) does the resetting itself, using Vue's 'post' flush timing: 'pre'
+  // watchers (the default — what useLaps.ts/useSectors.ts use) always run
+  // BEFORE 'post' ones within the same reactive flush, regardless of
+  // registration order, so this is guaranteed to fire after every peeker has
+  // already seen `true` for this swap. (A plain `nextTick()` call inside
+  // `swapPrimarySession` was tried first and is UNSAFE here: `nextTick`
+  // schedules relative to whatever flush is already pending at the moment
+  // it's called, not the LATER flush the caller's own `activeFileId` mutation
+  // triggers right after — those can land in different microtask turns.)
+  const primarySwapPending = ref(false)
+  watch(
+    primarySwapPending,
+    (pending) => {
+      if (pending) primarySwapPending.value = false
+    },
+    { flush: 'post' },
+  )
+
+  /**
+   * Migrate per-lap state when the PRIMARY recording changes (FileBar.vue's
+   * `makePrimary`, or `toggleIncludedSession` auto-promoting a comparison
+   * when the primary is unchecked/removed) — see primaryLapSwap.ts's module
+   * doc for why this is needed at all. `oldPrimaryId` is `null` when the
+   * outgoing primary is leaving the loaded set entirely (its state is then
+   * discarded, not folded into a per-session facet); a no-op when the ids
+   * are equal (nothing actually changed).
+   */
+  function swapPrimarySession(oldPrimaryId: number | null, newPrimaryId: number): void {
+    if (oldPrimaryId === newPrimaryId) return
+    const result = swapPrimaryLapState({
+      oldPrimaryId,
+      newPrimaryId,
+      selected: selected.value,
+      manualExcluded: manualExcluded.value,
+      offsets: offsets.value,
+      selectedAcrossSessions: selectedAcrossSessions.value,
+      manualExcludedBySession: manualExcludedBySession.value,
+      sessionLapOffsets: sessionLapOffsets.value,
+    })
+    selected.value = result.selected
+    manualExcluded.value = result.manualExcluded
+    offsets.value = result.offsets
+    selectedAcrossSessions.value = result.selectedAcrossSessions
+    manualExcludedBySession.value = result.manualExcludedBySession
+    sessionLapOffsets.value = result.sessionLapOffsets
+    primarySwapPending.value = true
+  }
+
   /** Manually mark lap `i` as garbage, or un-mark it when already manually excluded. */
   function toggleExcluded(i: number): void {
     manualExcluded.value = manualExcluded.value.includes(i)
@@ -453,6 +510,8 @@ export const useLapStore = defineStore('lap', () => {
     isSessionLapSelected,
     clearSessionSelection,
     clearAllLapSelections,
+    primarySwapPending,
+    swapPrimarySession,
     sessionLapOffsetOf,
     nudgeSessionLapOffset,
     resetSessionLapOffset,

@@ -1,5 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, it, expect } from 'vitest'
+import { nextTick } from 'vue'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import type { Lap } from '@/domain/model/Lap'
@@ -724,6 +725,78 @@ describe('lapStore', () => {
 
       expect(s.isSessionManuallyExcluded(10, 1)).toBe(true)
       expect(s.isSessionLapSelected(10, 2)).toBe(false)
+    })
+  })
+
+  // B55: promoting a different loaded recording to primary must not silently
+  // leave the primary-only facets (selected/manualExcluded/offsets) pointing
+  // at the OUTGOING primary's lap indices — swapPrimarySession migrates both
+  // facets in lockstep. See domain/analysis/primaryLapSwap.ts for the pure
+  // logic this action wraps; these tests cover it wired up on the real refs.
+  describe('swapPrimarySession (B55)', () => {
+    it('promotes the new primary\'s per-session state into the primary facet, and vice versa', () => {
+      const s = useLapStore()
+      // Recording 1 is primary with its own selection/exclusion/offset.
+      s.toggleLap(0)
+      s.toggleExcluded(0)
+      s.nudgeOffset(0, 'time', 0.3)
+      // Recording 2 is a comparison with its own per-session state.
+      s.toggleSessionLap(2, 5)
+      s.toggleSessionExcluded(2, 7)
+      s.nudgeSessionLapOffset(2, 5, 'time', 0.4)
+
+      s.swapPrimarySession(1, 2)
+
+      // Recording 2's former per-session state is now the primary facet.
+      expect(s.selected).toEqual([5])
+      expect(s.manualExcluded).toEqual([7])
+      expect(s.offsetOf(5, 'time')).toBeCloseTo(0.4)
+      // Recording 1's former primary state now lives under its own id.
+      expect(s.isSessionLapSelected(1, 0)).toBe(true)
+      expect(s.isSessionManuallyExcluded(1, 0)).toBe(true)
+      expect(s.sessionLapOffsetOf(1, 0, 'time')).toBeCloseTo(0.3)
+      // Recording 2 no longer appears in the per-session facets.
+      expect(s.selectedAcrossSessions).not.toContainEqual({ fileId: 2, index: 5 })
+      expect(s.manualExcludedBySession[2]).toBeUndefined()
+    })
+
+    it('is a no-op when the old and new primary are the same id', () => {
+      const s = useLapStore()
+      s.toggleLap(1)
+      s.swapPrimarySession(3, 3)
+      expect(s.selected).toEqual([1])
+    })
+
+    it('discards the outgoing primary\'s state (does not fold it in) when oldPrimaryId is null', () => {
+      const s = useLapStore()
+      s.toggleLap(0) // outgoing primary's own selection
+      s.toggleSessionLap(2, 1) // incoming primary's per-session selection
+
+      s.swapPrimarySession(null, 2)
+
+      expect(s.selected).toEqual([1]) // the promoted recording's own laps
+      // The outgoing primary's [0] selection is gone, not folded under any id.
+      expect(s.selectedAcrossSessions).toEqual([])
+    })
+
+    it('sets primarySwapPending for exactly one flush', async () => {
+      const s = useLapStore()
+      expect(s.primarySwapPending).toBe(false)
+      s.swapPrimarySession(1, 2)
+      expect(s.primarySwapPending).toBe(true)
+      await nextTick()
+      expect(s.primarySwapPending).toBe(false)
+    })
+
+    it('leaves an unrelated third recording\'s per-session state untouched', () => {
+      const s = useLapStore()
+      s.toggleSessionLap(9, 2)
+      s.toggleSessionExcluded(9, 3)
+
+      s.swapPrimarySession(1, 2)
+
+      expect(s.isSessionLapSelected(9, 2)).toBe(true)
+      expect(s.isSessionManuallyExcluded(9, 3)).toBe(true)
     })
   })
 })

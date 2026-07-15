@@ -340,6 +340,12 @@ watch(
     const activeExists = analyzer.activeFileId != null && readyIds.has(analyzer.activeFileId)
     if (!activeExists) {
       const nextPrimary = comparisons[0] ?? files[0]?.id ?? null
+      // B55 — the outgoing primary's file is GONE (removed/failed), so
+      // there's nothing to fold it back into; but if a comparison recording
+      // is being promoted in its place, that recording's own per-lap state
+      // should become the new primary-facet state, same as an explicit
+      // FileBar makePrimary swap (see lapStore.swapPrimarySession).
+      if (nextPrimary != null) lapStore.swapPrimarySession(null, nextPrimary)
       analyzer.activeFileId = nextPrimary
       analyzer.selectedSessions = comparisons.filter((id) => id !== nextPrimary)
     } else if (comparisons.length !== analyzer.selectedSessions.length) {
@@ -451,7 +457,7 @@ const { isLocked, toggleLocked } = useLayoutLock()
 
 // --- #8: draggable/resizable dashboard grid (grid-layout-plus) ---
 const chartIds = computed(() => charts.value.map((c) => c.id))
-const { layout, colNum, isMobile, isDraggable, isResizable, resetLayout } =
+const { layout, colNum, isMobile, isDraggable, isResizable, gridMargin, resetLayout } =
   useDashboardLayout(chartIds, isLocked)
 
 // --- #9: per-card collapse (all breakpoints) + single cross-breakpoint pin
@@ -488,6 +494,18 @@ function isVisibleId(id: string): boolean {
 // position from the emitted array.
 const desktopVisibleLayout = computed<typeof layout.value>(() =>
   layout.value.filter((it) => isVisibleId(it.i)),
+)
+
+// B52 fix — the collapse-reflow DISPLAY layout (see applyCollapsedHeights),
+// shared by `activeLayout`'s getter below AND `gutterItems`: the gutter
+// overlay must be detected/positioned from the exact same rects the grid
+// actually renders, not the canonical (pre-collapse) `desktopVisibleLayout`.
+// Before this fix, `gutterItems` was built straight from
+// `desktopVisibleLayout`, so once any card collapsed, every gutter below/
+// beside it stayed at its stale pre-collapse position/size — the reported
+// "pink gutter indicator doesn't follow a collapsed card" bug.
+const desktopDisplayLayout = computed<typeof layout.value>(() =>
+  applyCollapsedHeights(desktopVisibleLayout.value, collapsedIds.value),
 )
 
 // --- Mobile layout (1-D order, persisted to panelState.v1's mobileOrder) ---
@@ -563,11 +581,13 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
     // Collapse-reflow overlay: collapsed cards shrink to COLLAPSED_ROWS and the
     // layout re-packs top-left so neighbours fill the reclaimed rows (補位). The
     // canonical (expanded) heights stay in `layout` — this is display-only.
+    // Desktop reuses `desktopDisplayLayout` (also fed to `gutterItems` below)
+    // so the grid and the gutter overlay never disagree on where a card
+    // actually is.
     decorateForGrid(
-      applyCollapsedHeights(
-        isMobile.value ? mobileVisibleLayout.value : desktopVisibleLayout.value,
-        collapsedIds.value,
-      ),
+      isMobile.value
+        ? applyCollapsedHeights(mobileVisibleLayout.value, collapsedIds.value)
+        : desktopDisplayLayout.value,
     ),
   set: (next) => {
     if (isMobile.value) {
@@ -669,13 +689,23 @@ function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): vo
 // `gutterItems` — its grid slot is an inert Teleport placeholder (see the
 // template's pin-placeholder note), so a gutter touching it would visibly do
 // nothing.
+//
+// B52 fix — built from `desktopDisplayLayout` (the collapse-reflow DISPLAY
+// layout, same one fed to `<GridLayout>` by `activeLayout`'s getter), not the
+// canonical `desktopVisibleLayout`: pinned filtering now happens AFTER the
+// collapse overlay so it matches exactly what's on screen, whether or not
+// the pinned card is also collapsed.
 const gutterItems = computed<DashboardLayoutItem[]>(() =>
-  desktopVisibleLayout.value.filter((it) => !isPinned(it.i)),
+  desktopDisplayLayout.value.filter((it) => !isPinned(it.i)),
 )
 const gutterEnabled = computed(() => !isMobile.value && !isLocked.value)
 const gridGutters = useGridGutters({
   items: gutterItems,
   enabled: gutterEnabled,
+  // B52 — lets useGridGutters drop a gutter along a collapsed card's DISPLAY-
+  // only bottom edge (see gridGutter.ts's filterCollapsedGutters) so dragging
+  // never targets a height that's about to be reverted below.
+  collapsedIds,
   cols: GRID_COLS,
   rowHeight: GRID_ROW_HEIGHT,
   marginX: GRID_MARGIN[0],
@@ -691,8 +721,21 @@ const gridGutters = useGridGutters({
   // `onLayoutUpdated` merges back in — see gridGutter.ts's module doc for
   // why this round trip is safe (doesn't loop) rather than a hand-rolled
   // reflow living here.
+  //
+  // B52 fix — `next` is the FULL `gutterItems` array (display heights), so
+  // EVERY currently-collapsed card in it still carries its COLLAPSED_ROWS
+  // display height, not just the one card the drag actually resized. Without
+  // restoring those back to `layout.value`'s canonical height first,
+  // `mergeLayoutPositions` would see every collapsed card's `h` "changed"
+  // (COLLAPSED_ROWS vs. its real height) and freeze COLLAPSED_ROWS into the
+  // persisted layout for ALL of them — same canonical-height restore
+  // `activeLayout`'s setter already does for the native drag/resize path.
   onChange: (next) => {
-    layout.value = mergeLayoutPositions(layout.value, next)
+    const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
+    const restored = collapsedIds.value.size
+      ? next.map((it) => (collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it))
+      : next
+    layout.value = mergeLayoutPositions(layout.value, restored)
   },
 })
 const gutters = gridGutters.gutters
@@ -841,7 +884,7 @@ function titleForItemId(id: string): string {
         :is-resizable="isResizable"
         :responsive="false"
         :row-height="GRID_ROW_HEIGHT"
-        :margin="GRID_MARGIN"
+        :margin="gridMargin"
         :vertical-compact="true"
         :use-css-transforms="true"
         @layout-updated="onLayoutUpdated"
@@ -1269,6 +1312,19 @@ function titleForItemId(id: string): string {
   flex-direction: column;
   gap: calc(var(--space) * 2);
 }
+/* B36 — App.vue's `.content` zeroes its own horizontal padding on mobile so
+   the dashboard grid below (`.grid-wrap`/`.pinned-anchor`, i.e. the actual
+   DashboardCard content) can go edge-to-edge — see that file's own comment.
+   Loose (non-card) rows that sit directly in `.analyzer` — the toolbar and
+   the "no files" message — aren't cards at all, just text/buttons, so they
+   get a small inset of their own back rather than sitting flush against the
+   true screen edge. */
+@media (max-width: 768px) {
+  .empty,
+  .toolbar {
+    padding: 0 calc(var(--space) * 1.5);
+  }
+}
 .empty {
   color: var(--color-text-muted);
 }
@@ -1614,7 +1670,7 @@ function titleForItemId(id: string): string {
    mobile (#9 fix) the 560px cap left dead space on either side of the card
    on any viewport wider than 560px — including exactly 768px, the phone
    breakpoint itself — so the mobile media query below overrides back to a
-   full-width card, matching every other card's edge-to-edge mobile layout. */
+   full-width card. */
 .pinned-anchor :deep(.dashboard-card) {
   width: min(560px, 100%);
   margin: 0 auto calc(var(--space) * 1.5);
@@ -1622,6 +1678,20 @@ function titleForItemId(id: string): string {
 @media (max-width: 768px) {
   .pinned-anchor :deep(.dashboard-card) {
     width: 100%;
+  }
+  /* B36 — grid-resident cards go genuinely edge-to-edge on mobile (App.vue's
+     `.content` drops its own horizontal padding for exactly this — see its
+     comment), but a PINNED card deliberately keeps its full floating chrome
+     (border/radius/shadow — see DashboardCard.vue's `:not(.pinned)` bleed
+     exclusion): it's a floating element, not a flush list section. Without
+     its own inset here it would otherwise inherit `.analyzer`'s now-zero
+     ambient padding and sit border-to-screen-edge, which reads as a
+     misaligned card rather than a deliberately floating one. Restoring a
+     small gutter on the ANCHOR (rather than the card itself) means the
+     card's own `width: 100%` above still correctly fills 100% of this now-
+     inset content box. */
+  .pinned-anchor {
+    padding: 0 calc(var(--space) * 1.5);
   }
 }
 .pin-placeholder {

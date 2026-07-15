@@ -45,6 +45,11 @@ import {
   type PanelState,
 } from '@/domain/layout/panelState'
 import { parseLayoutLocked } from '@/domain/layout/layoutLock'
+import {
+  parseCurrentValuesFieldPrefs,
+  defaultCurrentValuesFieldPrefs,
+  type CurrentValuesFieldPrefs,
+} from '@/domain/analysis/currentValuesFieldPrefs'
 
 /** Bumped whenever the bundle's shape changes in a way old builds can't just
  *  tolerate-and-default their way through (rare — every field below is
@@ -57,6 +62,12 @@ export interface LayoutSettings {
   dashboardLayout: DashboardLayoutItem[]
   panelState: PanelState
   layoutLocked: boolean
+  /** B49 — current-values card field arrangement (sort mode / hidden fields /
+   *  custom order). Bundled alongside the rest of `LayoutSettings` (not a
+   *  separate top-level/opt-in bundle field) since it's the same kind of
+   *  device-specific dashboard preference the "include layout" toggle already
+   *  covers — see `domain/analysis/currentValuesFieldPrefs.ts`'s module doc. */
+  currentValuesFieldPrefs: CurrentValuesFieldPrefs
 }
 
 export interface SettingsExportBundle {
@@ -144,6 +155,9 @@ export function parseImportBundle(json: string): ImportResult {
       dashboardLayout: parseLayout(JSON.stringify(l.dashboardLayout ?? null)) ?? defaultLayout(),
       panelState: parsePanelState(JSON.stringify(l.panelState ?? null)) ?? defaultPanelState(),
       layoutLocked: parseLayoutLocked(JSON.stringify(l.layoutLocked ?? null)) ?? false,
+      currentValuesFieldPrefs:
+        parseCurrentValuesFieldPrefs(JSON.stringify(l.currentValuesFieldPrefs ?? null)) ??
+        defaultCurrentValuesFieldPrefs(),
     }
   }
 

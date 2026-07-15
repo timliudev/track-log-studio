@@ -195,6 +195,16 @@ interface SessionSelection {
   裡——它永遠是「基準/全解析度」的那一個，`selectedSessions` 只裝**其他**
   檔案，這點完全比照現有 `overlayFileIds` 已經在做的「排除 activeFileId」
   規則（`useTrackOverlay.ts` 的 `candidates` computed）。
+- **主檔切換（B55，已實作）**：primary 不鎖定在第一個載入的檔案。FileBar
+  每個非主檔的 ready pill 提供常駐星形「設為主要記錄」按鈕（coarse pointer
+  下 44px，DESIGN.md §8；點檔名亦可觸發），純邏輯在
+  `domain/analysis/sessionSelection.ts` 的 `promotePrimarySession`。切換時
+  `lapStore.swapPrimarySession`（純函式 `domain/analysis/primaryLapSwap.ts`）
+  把 index-keyed 的 primary 圈狀態（選圈/手動排除/對位偏移）與 fileId-keyed
+  的 per-session 狀態雙向遷移；起跑線、sector gates、有效圈 band 視為全域
+  共用狀態，切換不重置（`primarySwapPending` 一次性訊號讓
+  useLaps/useSectors 的換檔清空 watcher 跳過該次）。取消勾選主檔的自動升級
+  與移除主檔檔案的自動升級也走同一條遷移。
 
 ### 2.2 各卡片在目標模型下的行為
 

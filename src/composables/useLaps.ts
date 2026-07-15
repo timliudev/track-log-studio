@@ -131,10 +131,21 @@ export function useLaps(): {
 
   // Seed a default line when a track appears, and reseed when the active file
   // changes (track identity changes -> clear so the next tick reseeds).
+  //
+  // B55 — `lapStore.primarySwapPending` is true for exactly this one flush
+  // when the active-file change came from an explicit primary swap (FileBar's
+  // makePrimary / toggleIncludedSession auto-promotion) rather than a
+  // genuinely different recording being loaded. `swapPrimarySession` already
+  // migrated the index-keyed selection/exclusion/offset state for that case,
+  // so wiping it here would just throw that migration away. The start/finish
+  // line and valid-lap bands are left untouched either way: they're GLOBAL,
+  // not tied to one file — comparison recordings already re-detect their own
+  // laps off this SAME shared line/source (see setSource's doc above), so a
+  // primary swap within the same loaded set has no reason to reset them.
   watch(
     track,
     (next, prev) => {
-      if (prev && next !== prev) {
+      if (prev && next !== prev && !lapStore.primarySwapPending) {
         lapStore.clearLine()
         // Lap selection, garbage exclusions and alignment offsets are keyed by
         // lap index, which is meaningless across a different recording — clear

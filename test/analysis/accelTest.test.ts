@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { fastestDistanceFromLaunch, fastestSpeedSegment } from '@/domain/analysis/accelTest'
+import type { AccelSegment } from '@/domain/analysis/accelTest'
+import { fastestDistanceFromLaunch, fastestSpeedSegment, sortSegmentsByTime } from '@/domain/analysis/accelTest'
 
 /**
  * Build synthetic time/distance/speed arrays for a constant-acceleration ramp
@@ -205,6 +206,71 @@ describe('fastestDistanceFromLaunch', () => {
     })
     expect(results.length).toBeGreaterThan(0)
   })
+
+  // B53: a real log showed a "faster" 100m segment ending at a LOWER speed
+  // than a "slower" one covering the same distance — this looked like a bug
+  // (wrong end-speed sample / phantom rolling start) but is actually a real,
+  // physically valid shape: launch hard, peak mid-window, brake for a corner
+  // before the distance mark resolves. `peakSpeedKmh` exists so the UI can
+  // show that shape instead of just the (correct but misleading-on-its-own)
+  // entry/exit pair.
+  it('reports peakSpeedKmh above exitSpeedKmh when the run peaks then brakes before the mark (B53)', () => {
+    // Standing start, hard accel 0 -> 120 km/h, then heavy braking down to
+    // 40 km/h — the 100m mark falls during the braking phase, exactly like
+    // the real-log "faster time, lower end speed" case.
+    const { timeMs, speedKmh, cumDistM } = rampSession([
+      { v0: 0, v1: 120, n: 41 }, // hard launch
+      { v0: 120, v1: 40, n: 41 }, // braking for a corner
+      { v0: 40, v1: 40, n: 20 }, // hold, so the search has room to resolve
+    ])
+    const results = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 100,
+      entrySpeedKmh: 0,
+    })
+    expect(results).toHaveLength(1)
+    const result = results[0]
+    // The distance/time/exit-speed themselves are correct — the run really
+    // did resolve mid-braking, well below its peak.
+    expect(result.exitSpeedKmh).toBeLessThan(result.peakSpeedKmh)
+    // The peak is the genuine ~120 km/h high point reached before braking
+    // started, not merely the entry or exit speed.
+    expect(result.peakSpeedKmh).toBeCloseTo(120, 0)
+  })
+
+  it('a hard-peak-then-brake run can legitimately be FASTER over the same distance than a lower, steadier run, despite ending slower (B53)', () => {
+    // Run A: hard launch to 150, then heavy braking down to 30 — the 100m
+    // mark falls after the braking has already resolved (into the
+    // steady-30 hold), so it reaches the mark quickly (strong early
+    // acceleration) but ends at a low speed.
+    const runA = rampSession([
+      { v0: 0, v1: 150, n: 21 },
+      { v0: 150, v1: 30, n: 21 },
+      { v0: 30, v1: 30, n: 20 },
+    ])
+    const gap = rampSession([{ v0: 30, v1: 0, n: 10 }], 100)
+    // Run B: gentle, steady launch that never exceeds 70 km/h — slower to
+    // cover the same 100m, but ends at a higher speed than Run A.
+    const runB = rampSession([
+      { v0: 0, v1: 70, n: 101 },
+      { v0: 70, v1: 70, n: 20 },
+    ])
+    const { timeMs, speedKmh, cumDistM } = concatSessions([runA, gap, runB])
+
+    const results = fastestDistanceFromLaunch(cumDistM, timeMs, speedKmh, {
+      distanceM: 100,
+      entrySpeedKmh: 0,
+    })
+    expect(results).toHaveLength(2)
+    const [a, b] = results
+    // Run A is faster (lower timeMs) yet ends at a lower speed than Run B —
+    // the exact "faster but slower-looking" shape B53 flagged as suspicious.
+    expect(a.timeMs).toBeLessThan(b.timeMs)
+    expect(a.exitSpeedKmh).toBeLessThan(b.exitSpeedKmh)
+    // peakSpeedKmh is what actually explains it: Run A got much faster than
+    // Run B at some point, it just braked off before the mark.
+    expect(a.peakSpeedKmh).toBeGreaterThan(b.peakSpeedKmh)
+    expect(a.isFastest).toBe(true)
+  })
 })
 
 describe('fastestSpeedSegment', () => {
@@ -220,6 +286,9 @@ describe('fastestSpeedSegment', () => {
     expect(result.entrySpeedKmh).toBeCloseTo(0, 0)
     expect(result.exitSpeedKmh).toBeCloseTo(100, 0)
     expect(result.isFastest).toBe(true)
+    // A clean monotonic ramp's peak is (very close to) its exit speed —
+    // no mid-window overshoot to report.
+    expect(result.peakSpeedKmh).toBeCloseTo(result.exitSpeedKmh, 0)
   })
 
   it('reports multiple 0->100 runs in chronological order, with the fastest flagged (B14)', () => {
@@ -297,5 +366,47 @@ describe('fastestSpeedSegment', () => {
     const cumDistM = new Float64Array([0, 1, 2, 3])
     const results = fastestSpeedSegment(timeMs, speedKmh, cumDistM, { fromKmh: 0, toKmh: 100 })
     expect(results).toEqual([])
+  })
+})
+
+// B48: the panel displays results fastest-to-slowest; the search functions
+// above stay chronological (asserted above), so the UI applies this separate
+// sort on top.
+describe('sortSegmentsByTime (B48)', () => {
+  function seg(startIdx: number, timeMs: number, isFastest = false): AccelSegment {
+    return {
+      startIdx,
+      endIdx: startIdx + 1,
+      timeMs,
+      distanceM: 100,
+      entrySpeedKmh: 0,
+      exitSpeedKmh: 100,
+      peakSpeedKmh: 100,
+      isFastest,
+    }
+  }
+
+  it('sorts ascending by timeMs, fastest first', () => {
+    const chronological = [seg(0, 8000), seg(10, 4000, true), seg(20, 6000)]
+    const sorted = sortSegmentsByTime(chronological)
+    expect(sorted.map((s) => s.startIdx)).toEqual([10, 20, 0])
+    expect(sorted[0].isFastest).toBe(true)
+  })
+
+  it('does not mutate the input array', () => {
+    const chronological = [seg(0, 8000), seg(10, 4000, true)]
+    const copy = [...chronological]
+    sortSegmentsByTime(chronological)
+    expect(chronological).toEqual(copy)
+  })
+
+  it('is stable for equal timeMs values (keeps chronological order among ties)', () => {
+    const chronological = [seg(0, 5000), seg(10, 5000), seg(20, 5000)]
+    const sorted = sortSegmentsByTime(chronological)
+    expect(sorted.map((s) => s.startIdx)).toEqual([0, 10, 20])
+  })
+
+  it('returns an empty array unchanged', () => {
+    expect(sortSegmentsByTime([])).toEqual([])
   })
 })

@@ -51,14 +51,25 @@ function isAnalysisSelected(id: number): boolean {
 }
 
 function toggleAnalysisFile(id: number): void {
+  const prevPrimary = analyzer.activeFileId
   const wasComparison = analyzer.selectedSessions.includes(id)
   const next = toggleIncludedSession(selectionState(), id)
   applySelection(next)
   if (wasComparison && !next.comparisonIds.includes(id)) lapStore.clearSessionSelection(id)
+  // Unchecking the PRIMARY itself promotes the first comparison in its place
+  // (see toggleIncludedSession) — the promoted recording's own per-lap state
+  // needs to become the new primary-facet state, same migration `makePrimary`
+  // does below, but with no "fold the old primary back in" half since it's
+  // leaving the analysis set entirely, not staying as a comparison (B55).
+  if (id === prevPrimary && next.primaryId !== prevPrimary && next.primaryId != null) {
+    lapStore.swapPrimarySession(null, next.primaryId)
+  }
 }
 
 function makePrimary(id: number): void {
+  const prevPrimary = analyzer.activeFileId
   applySelection(promotePrimarySession(selectionState(), id))
+  if (prevPrimary != null) lapStore.swapPrimarySession(prevPrimary, id)
 }
 
 /** File input accept list, derived from the importer registry plus .zip. */
@@ -343,6 +354,26 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
         <span v-if="props.analyzerMode && analyzer.activeFileId === f.id" class="primary-tag">
           {{ t('fileBar.primary') }}
         </span>
+        <!-- B55 — explicit, always-visible "make primary" affordance: the
+             pill-name click above is a real trigger too (kept for muscle
+             memory), but its ONLY discovery cue was a hover tooltip, which a
+             touch device can never show and a mouse user has to stumble into
+             (DESIGN.md §8 — discovery must not depend on hover). A star icon
+             button next to the name is visible and tappable without hovering
+             anything; only shown for non-primary ready files, since a primary
+             file already shows the badge above instead. -->
+        <button
+          v-if="props.analyzerMode && f.status === 'ready' && analyzer.activeFileId !== f.id"
+          type="button"
+          class="icon-btn make-primary-btn"
+          v-tooltip="t('fileBar.makePrimary', { name: f.name })"
+          :aria-label="t('fileBar.makePrimary', { name: f.name })"
+          @click="makePrimary(f.id)"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        </button>
         <span v-if="f.status === 'parsing'" class="pill-meta">{{ Math.round(f.progress * 100) }}%</span>
         <span v-else-if="f.status === 'ready'" class="pill-meta">
           {{ f.formatId }} · {{ t('fileBar.rows', { n: f.rowCount }) }}
@@ -565,6 +596,42 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
   color: var(--color-accent);
   font-size: 0.68rem;
   white-space: nowrap;
+}
+.make-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.make-primary-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.make-primary-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border);
+}
+/* B35 — §8 layer 3: any coarse pointer present (useInputCapabilities.ts's
+   capability signal, mirrored onto <html data-any-pointer-coarse> — NOT a
+   viewport-width guess) grows this to a comfortable >=44px touch target, same
+   convention as DashboardCard.vue's .icon-btn / SessionLapComparison.vue's
+   .chart-align button. */
+:root[data-any-pointer-coarse] .make-primary-btn {
+  width: 44px;
+  height: 44px;
+}
+:root[data-any-pointer-coarse] .make-primary-btn svg {
+  width: 20px;
+  height: 20px;
 }
 .pill-meta {
   color: var(--color-text-muted);

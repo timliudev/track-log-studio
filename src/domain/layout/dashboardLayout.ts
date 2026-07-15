@@ -83,13 +83,27 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.sessionMerge]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.suspension]: { minW: 2, minH: 3 },
-  // B15/B43 — same floor as most control panels (minW:2): the value grid
-  // itself (`.values-grid`'s `auto-fill minmax(min(96px,100%),1fr)` — see
-  // CurrentValuesPanel.vue) already collapses to a single column and scrolls
-  // (via CardFillScroll) once the card gets this narrow, so there's no
-  // correctness reason to hold this card to a wider floor than any other
-  // control panel.
-  [STATIC_CARD_IDS.currentValues]: { minW: 2, minH: 3 },
+  // B15/B43/B43b — floor lowered to minW:1 (below every other control panel's
+  // minW:2). B43 dropped the floor to 2 and switched the value grid itself to
+  // `auto-fill minmax(min(96px,100%),1fr)` (see CurrentValuesPanel.vue) so it
+  // COULD collapse to a single column — but at GRID_COLS=12 a 2-grid-unit-wide
+  // card is, on any realistic desktop window, still comfortably wide enough
+  // for two 96px cells side by side (e.g. at a 1280px window: colWidth ≈
+  // (1280 - 12*13)/12 ≈ 93.7px/col, so a w:2 card is ≈ 93.7*2+12 ≈ 199px
+  // outer / ≈ 175px content after the card's 12px+12px body padding — comfortably
+  // over the 96*2+8(gap) = 200px... actually just under it, but far from the
+  // ~70-95px content width a TRUE single-column squeeze implies), so B43
+  // never actually reached the single-column case it was meant to enable —
+  // hence B43b. At minW:1, a w:1 card's content is ≈ 93.7-24 ≈ 70px at
+  // 1280px, ≈ 123px at 1920px, ≈ 176px at 2560px — all comfortably under the
+  // 200px (96*2+8 gap) needed for a second 96px column, so the existing
+  // `minmax(min(96px,100%),1fr)` track sizing (unchanged — no need to shrink
+  // the 96px floor further) naturally renders exactly one column with no
+  // horizontal scrollbar/clipping. (Only an extremely wide, ~3600px+ browser
+  // window would still fit two columns at minW:1 — at that point there's
+  // genuine extra room, so a second column there is a reasonable use of the
+  // space rather than a bug.)
+  [STATIC_CARD_IDS.currentValues]: { minW: 1, minH: 3 },
 }
 
 /** Chart cards (uPlot/echarts) need more room than a small control panel to

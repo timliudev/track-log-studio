@@ -23,6 +23,21 @@ import {
 import { fitProjection, type MapProjection } from './projection'
 import { nearestSample, resolveTrackHitRadius } from './trackNearestSample'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
+import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
+import { useMapBackground } from '@/composables/useMapBackground'
+import MapBackgroundControls from './MapBackgroundControls.vue'
+import {
+  OSM_MAX_ZOOM,
+  OSM_MIN_ZOOM,
+  TileLruCache,
+  computeTileRange,
+  findAncestorPlaceholder,
+  selectTileZoom,
+  tileKey,
+  tileXToLon,
+  tileYToLat,
+  wrapTileX,
+} from '@/domain/analysis/mapTiles'
 
 const props = defineProps<{
   track: GpsTrack | null
@@ -152,6 +167,154 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const background = useMapBackground()
+const alignBackground = ref(false)
+
+// B54 — tile cache/loading state. `tileCache` is capacity-bounded (LRU) so a
+// long session panning/zooming across many OSM zoom levels doesn't grow
+// without bound; capped entries also stay around as ANCESTOR placeholders
+// (see findAncestorPlaceholder below) for tiles at nearby zoom levels, which
+// is exactly what keeps the background from flashing blank while zooming.
+const TILE_CACHE_CAPACITY = 400
+const tileCache = new TileLruCache<HTMLImageElement>(TILE_CACHE_CAPACITY)
+// Keys currently queued or in-flight — checked before enqueueing again.
+const pendingTiles = new Set<string>()
+// Keys that failed to load at least once: never retried (no retry storm) —
+// the ancestor-placeholder fallback below covers the visual gap permanently,
+// same as a slow/never-arriving tile would.
+const failedTiles = new Set<string>()
+// Simple FIFO queue + concurrency gate so a viewport with many missing tiles
+// doesn't fire them all at once (modest parallelism, in keeping with OSM's
+// tile usage policy — browsers cap real concurrency per-origin anyway, but
+// this keeps OUR intent explicit and easy to reason about/test).
+const MAX_CONCURRENT_TILE_REQUESTS = 6
+let activeTileRequests = 0
+let tileRequestQueue: { key: string; url: string }[] = []
+
+function pumpTileQueue(): void {
+  while (activeTileRequests < MAX_CONCURRENT_TILE_REQUESTS && tileRequestQueue.length > 0) {
+    const next = tileRequestQueue.shift()!
+    activeTileRequests++
+    pendingTiles.add(next.key)
+    const image = new Image()
+    image.onload = () => {
+      tileCache.set(next.key, image)
+      pendingTiles.delete(next.key)
+      activeTileRequests--
+      pumpTileQueue()
+      draw()
+    }
+    image.onerror = () => {
+      failedTiles.add(next.key)
+      pendingTiles.delete(next.key)
+      activeTileRequests--
+      pumpTileQueue()
+    }
+    image.src = next.url
+  }
+}
+
+// B54 — settle debounce: a fast zoom (many wheel ticks) or drag recomputes
+// the needed tile set on every draw(), but only actually ENQUEUES fetches
+// once the viewport signature stops changing for TILE_SETTLE_MS (or the
+// gesture ends and stops calling draw() at all) — never on every tick.
+// Purely-hover-driven redraws (cursor scrub) don't touch this at all: the
+// signature comparison below is a no-op whenever the viewport itself hasn't
+// moved, so hovering the map never delays or re-triggers a fetch pass.
+const TILE_SETTLE_MS = 250
+let pendingTileSignature: string | null = null
+let tileSettleTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleTileFetch(
+  kind: string,
+  zoomLevel: number,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  urlFor: (z: number, x: number, y: number) => string,
+): void {
+  const signature = `${kind}/${zoomLevel}/${x0}/${x1}/${y0}/${y1}`
+  if (signature === pendingTileSignature) return
+  pendingTileSignature = signature
+  if (tileSettleTimer !== null) clearTimeout(tileSettleTimer)
+  tileSettleTimer = setTimeout(() => {
+    tileSettleTimer = null
+    // Drop any not-yet-started requests from a previous (now stale) settle —
+    // in-flight ones can't be cancelled but are left to finish (their result
+    // still lands in the cache and helps if the viewport has drifted back).
+    tileRequestQueue = []
+    const max = 2 ** zoomLevel
+    for (let y = Math.max(0, y0); y <= Math.min(max - 1, y1); y++) {
+      for (let x = x0; x <= x1; x++) {
+        const wrappedX = wrapTileX(x, zoomLevel)
+        const key = tileKey(kind, zoomLevel, wrappedX, y)
+        if (tileCache.has(key) || pendingTiles.has(key) || failedTiles.has(key)) continue
+        tileRequestQueue.push({ key, url: urlFor(zoomLevel, wrappedX, y) })
+      }
+    }
+    pumpTileQueue()
+  }, TILE_SETTLE_MS)
+}
+
+/** Draw geo-referenced OSM/Mapbox tiles before every canvas overlay. Missing
+ * tiles fall back to the nearest cached lower-zoom ANCESTOR tile, cropped and
+ * stretched to fill the cell — the standard "coarser tile scaled up while the
+ * exact one loads" placeholder, so zooming never flashes to blank — and new
+ * fetches are only enqueued once the viewport settles (see scheduleTileFetch)
+ * rather than on every wheel tick. Tile loads redraw on completion; keys are
+ * never persisted or sent anywhere except the selected provider's own tile
+ * request. */
+function drawTileBackground(ctx: CanvasRenderingContext2D, base: MapProjection, zView: number, tx: number, ty: number, w: number, h: number): void {
+  const kind = background.settings.value.kind
+  const apiKey = background.settings.value.satelliteApiKey
+  if (kind !== 'osm' && (kind !== 'satellite' || !apiKey)) return
+  const corners = [base.toGeo((0 - tx) / zView, (0 - ty) / zView), base.toGeo((w - tx) / zView, (h - ty) / zView)]
+  const lonSpan = Math.abs(corners[1].lon - corners[0].lon) || 0.001
+  const zoomLevel = selectTileZoom(w, lonSpan, OSM_MIN_ZOOM, OSM_MAX_ZOOM)
+  const { x0, x1, y0, y1 } = computeTileRange(zoomLevel, corners[0].lon, corners[0].lat, corners[1].lon, corners[1].lat)
+  const max = 2 ** zoomLevel
+
+  const urlFor = (z: number, x: number, y: number): string =>
+    kind === 'osm'
+      ? `https://tile.openstreetmap.org/${z}/${x}/${y}.png`
+      : `https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/256/${z}/${x}/${y}?access_token=${encodeURIComponent(apiKey)}`
+  scheduleTileFetch(kind, zoomLevel, x0, x1, y0, y1, urlFor)
+
+  for (let y = Math.max(0, y0); y <= Math.min(max - 1, y1); y++) for (let x = x0; x <= x1; x++) {
+    const wrappedX = wrapTileX(x, zoomLevel)
+    const cacheKey = tileKey(kind, zoomLevel, wrappedX, y)
+    const nw = base.toPixel(tileYToLat(y, zoomLevel), tileXToLon(x, zoomLevel))
+    const se = base.toPixel(tileYToLat(y + 1, zoomLevel), tileXToLon(x + 1, zoomLevel))
+    const dx = nw.x * zView + tx
+    const dy = nw.y * zView + ty
+    const dw = (se.x - nw.x) * zView
+    const dh = (se.y - nw.y) * zView
+
+    const image = tileCache.get(cacheKey)
+    if (image) {
+      ctx.drawImage(image, dx, dy, dw, dh)
+      continue
+    }
+    // Not loaded yet (or failed) — draw the nearest cached ancestor tile's
+    // covering sub-region, scaled up, so this cell never goes blank.
+    const placeholder = findAncestorPlaceholder(zoomLevel, wrappedX, y, (az, ax, ay) => tileCache.has(tileKey(kind, az, ax, ay)))
+    if (!placeholder) continue
+    const ancestorImage = tileCache.get(tileKey(kind, placeholder.z, placeholder.x, placeholder.y))
+    if (!ancestorImage) continue
+    ctx.drawImage(ancestorImage, placeholder.srcX, placeholder.srcY, placeholder.srcSize, placeholder.srcSize, dx, dy, dw, dh)
+  }
+}
+
+function drawImageBackground(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  if (background.settings.value.kind !== 'image' || !background.image.value) return
+  const image = background.image.value
+  const a = background.settings.value.alignment
+  const factor = Math.min(w / image.naturalWidth, h / image.naturalHeight) * a.scale
+  const iw = image.naturalWidth * factor
+  const ih = image.naturalHeight * factor
+  ctx.drawImage(image, (w - iw) / 2 + a.x, (h - ih) / 2 + a.y, iw, ih)
+}
 
 // B30b(b) — capability-driven hit-radius (see trackNearestSample.ts's doc);
 // `anyPointerCoarse` is already read live elsewhere via App.vue's single
@@ -692,6 +855,9 @@ function draw(): void {
   projection = view
   const proj = view
 
+  drawTileBackground(ctx, base, z, tx, ty, w, h)
+  drawImageBackground(ctx, w, h)
+
   // Project the active track (+ the focusRange sub-bbox for #7's auto-fit)
   // and every overlay track through the SAME base projection in one pass
   // each, then fold every bbox together so panning stays clamped to
@@ -842,7 +1008,7 @@ function onWheel(e: WheelEvent): void {
 // Active pointers (by id) and the current interaction mode. 'idle' means hover
 // (mouse, no button) → scrub the nearest sample; a press picks line / pan / pinch.
 const pointers = new Map<number, { x: number; y: number }>()
-type Mode = 'idle' | 'line' | 'pan' | 'pinch'
+type Mode = 'idle' | 'line' | 'pan' | 'pinch' | 'background'
 let mode: Mode = 'idle'
 // Which handle is being dragged in 'line' mode, and on what target: the
 // start/finish line, or a gate (by index into props.gates). Reuses the exact
@@ -908,6 +1074,18 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 }
 
 function onPointerDown(e: PointerEvent): void {
+  // B36 — the map now bleeds to the true viewport edge on mobile (see
+  // `.track-wrap.fill`'s `--card-bleed-x` styling below), so a touch drag
+  // STARTING right at that edge would fight the OS/browser's own edge-swipe
+  // "go back" gesture (this canvas sets `touch-action: none`, i.e. it
+  // otherwise claims every touch gesture for itself). Only touch is gated
+  // (mouse/pen have no such OS gesture to protect, and only matters when a
+  // coarse pointer is actually present — see edgeGesture.ts's own doc) —
+  // bail out WITHOUT capturing/preventing so the platform's own gesture
+  // recognizer still gets first look at the touch.
+  if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
+    return
+  }
   const pos = clientPos(e)
   if (!pos) return
   pointers.set(e.pointerId, pos)
@@ -925,6 +1103,12 @@ function onPointerDown(e: PointerEvent): void {
 
   // Single pointer: grab a start/finish or confirmed-gate handle if one is
   // under it, else pan.
+  if (alignBackground.value && background.settings.value.kind === 'image') {
+    mode = 'background'
+    panLast = pos
+    e.preventDefault()
+    return
+  }
   const h = handleAt(pos.x, pos.y)
   if (h) {
     mode = 'line'
@@ -986,6 +1170,15 @@ function onPointerMove(e: PointerEvent): void {
     panY.value += pos.y - panLast.y
     panLast = pos
     clampPan()
+    draw()
+    return
+  }
+
+  if (mode === 'background') {
+    const pos = clientPos(e)
+    if (!pos || !panLast) return
+    background.nudgeImage(pos.x - panLast.x, pos.y - panLast.y)
+    panLast = pos
     draw()
     return
   }
@@ -1088,6 +1281,12 @@ onBeforeUnmount(() => {
   ro?.disconnect()
   window.removeEventListener('resize', draw)
   window.removeEventListener('keydown', onMaximizedKeydown)
+  // B54 — a pending settle-debounced tile fetch must not fire (and call
+  // draw() on a torn-down canvas) after this component is gone.
+  if (tileSettleTimer !== null) {
+    clearTimeout(tileSettleTimer)
+    tileSettleTimer = null
+  }
 })
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
@@ -1120,6 +1319,8 @@ watch(() => props.extremaMarkers, () => draw())
 // re-fit only matters at zoom 1, and clampPan keeps any current pan legal
 // against the new bbox on the next gesture).
 watch(() => props.overlayTracks, () => draw())
+watch(background.settings, () => draw(), { deep: true })
+watch(background.image, () => draw())
 </script>
 
 <template>
@@ -1142,6 +1343,21 @@ watch(() => props.overlayTracks, () => draw())
       @wheel.prevent="onWheel"
       @dblclick="resetView"
     />
+    <MapBackgroundControls
+      class="background-control"
+      :settings="background.settings.value"
+      :has-image="Boolean(background.image)"
+      @upload="async (file) => await background.upload(file)"
+      @kind="background.setKind"
+      @satellite-key="background.setSatelliteKey"
+      @nudge="background.nudgeImage"
+      @scale="background.scaleImage"
+      @reset="background.resetImageAlignment"
+    />
+    <label v-if="background.settings.value.kind === 'image'" class="align-background">
+      <input v-model="alignBackground" type="checkbox" /> {{ t('analyzer.mapBackground.dragAlign') }}
+    </label>
+    <a v-if="background.settings.value.kind === 'osm'" class="osm-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a>
     <button v-if="showReset" type="button" class="reset-view" @click="resetView">
       {{ t('analyzer.resetView') }}
     </button>
@@ -1185,6 +1401,16 @@ watch(() => props.overlayTracks, () => draw())
      would be circular. Basis 0 + grow 1 = "whatever the text rows leave". */
   flex: 1 1 0;
   min-height: 120px;
+  /* B36 — 手機單欄模式地圖出血貼邊: same `--card-bleed-x` mechanism as
+     UPlotChart.vue's `.uplot-wrap.fill` (see its own, more detailed doc) —
+     0 everywhere except inside a non-pinned DashboardCard on mobile, so this
+     is a total no-op wherever the map is used outside the dashboard grid.
+     `.track`'s own 1px border still shows right at the true edge once
+     bled — a deliberate "framed edge-to-edge" look, not something this
+     removes. */
+  margin-left: calc(-1 * var(--card-bleed-x, 0px));
+  margin-right: calc(-1 * var(--card-bleed-x, 0px));
+  width: calc(100% + 2 * var(--card-bleed-x, 0px));
 }
 .track {
   display: block;
@@ -1201,6 +1427,10 @@ watch(() => props.overlayTracks, () => draw())
   flex: 1 1 auto;
   min-height: 0;
 }
+.background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; }
+.align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
+.osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: 10px; }
+:root[data-any-pointer-coarse] .align-background { min-height: 44px; display: flex; align-items: center; }
 .reset-view {
   position: absolute;
   top: 8px;

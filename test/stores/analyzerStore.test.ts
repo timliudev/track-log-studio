@@ -35,6 +35,7 @@ describe('analyzerStore', () => {
       expect(chart.yChannel).toBeNull()
       expect(chart.equalAspect).toBe(false)
       expect(chart.colorChannel).toBeNull()
+      expect(chart.includeOutliers).toBe(false)
     }
   })
 
@@ -94,6 +95,25 @@ describe('analyzerStore', () => {
     if (ts?.kind === 'timeseries') expect(ts).not.toHaveProperty('colorChannel')
     s.setChartColorChannel(id1, null)
     if (c1?.kind === 'scatter') expect(c1.colorChannel).toBeNull()
+  })
+
+  it('setChartIncludeOutliers toggles only the targeted scatter chart; no-op on timeseries', () => {
+    const s = useAnalyzerStore()
+    const timeseriesId = s.charts[0].id
+    s.addChart('scatter')
+    s.addChart('scatter')
+    const [id1, id2] = [s.charts[1].id, s.charts[2].id]
+    s.setChartIncludeOutliers(id1, true)
+    s.setChartIncludeOutliers(timeseriesId, true) // wrong kind — must not throw/mutate
+    const c1 = s.charts.find((c) => c.id === id1)
+    const c2 = s.charts.find((c) => c.id === id2)
+    if (c1?.kind === 'scatter') expect(c1.includeOutliers).toBe(true)
+    // id2 was never touched — still at its default false.
+    if (c2?.kind === 'scatter') expect(c2.includeOutliers).toBe(false)
+    const ts = s.charts.find((c) => c.id === timeseriesId)
+    if (ts?.kind === 'timeseries') expect(ts).not.toHaveProperty('includeOutliers')
+    s.setChartIncludeOutliers(id1, false)
+    if (c1?.kind === 'scatter') expect(c1.includeOutliers).toBe(false)
   })
 
   it('addChart("scatter", initial) seeds the initial X/Y channels', () => {
@@ -258,7 +278,15 @@ describe('analyzerStore — chart persistence (T5)', () => {
     expect(s2.charts).toEqual([
       { kind: 'timeseries', id: 1, channels: [] },
       { kind: 'timeseries', id: 2, channels: ['RPM', 'T_Eng'] },
-      { kind: 'scatter', id: 3, xChannel: 'TC_Xforce', yChannel: 'TC_Yforce', equalAspect: true, colorChannel: null },
+      {
+        kind: 'scatter',
+        id: 3,
+        xChannel: 'TC_Xforce',
+        yChannel: 'TC_Yforce',
+        equalAspect: true,
+        colorChannel: null,
+        includeOutliers: false,
+      },
     ])
   })
 
@@ -286,6 +314,19 @@ describe('analyzerStore — chart persistence (T5)', () => {
     const restored = s2.charts.find((c) => c.kind === 'scatter')
     expect(restored?.kind).toBe('scatter')
     if (restored?.kind === 'scatter') expect(restored.equalAspect).toBe(false)
+  })
+
+  it('a toggled-on includeOutliers survives reload (persisted with the chart card)', async () => {
+    const s = useAnalyzerStore()
+    s.addChart('scatter', { xChannel: 'RPM', yChannel: 'Vehicle_Speed' })
+    s.setChartIncludeOutliers(s.charts[1].id, true)
+    await nextTick()
+
+    setActivePinia(createPinia())
+    const s2 = useAnalyzerStore()
+    const restored = s2.charts.find((c) => c.kind === 'scatter')
+    expect(restored?.kind).toBe('scatter')
+    if (restored?.kind === 'scatter') expect(restored.includeOutliers).toBe(true)
   })
 
   it('new ids continue past the restored maximum (no card-id collisions)', async () => {
