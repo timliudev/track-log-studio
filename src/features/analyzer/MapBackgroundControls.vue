@@ -15,6 +15,14 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 const error = ref<string | null>(null)
+
+// B60 — 原本用 <details>/<summary>，收折箭頭吃瀏覽器 UA 預設的 disclosure
+// marker；桌面 Chrome 會畫出來，但 Android Chrome 對這顆 marker 的呈現不一致
+// （常見狀況是完全不畫），使用者因此看不到收折控制、以為區塊卡住展開/收合
+// 不了。改成一顆常駐可見的按鈕，箭頭是內嵌 SVG（不吃任何 UA 預設樣式），
+// 展開/收合完全由這裡的 `collapsed` state 驅動，不再依賴 <details> 原生行為。
+const collapsed = ref(true)
+
 function choose(e: Event): void {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
@@ -30,9 +38,20 @@ function choose(e: Event): void {
 </script>
 
 <template>
-  <details class="map-background">
-    <summary>{{ t('analyzer.mapBackground.title') }}</summary>
-    <div class="background-controls">
+  <div class="map-background" :class="{ collapsed }">
+    <button
+      type="button"
+      class="toggle"
+      :aria-expanded="!collapsed"
+      :aria-label="`${t('analyzer.mapBackground.title')} — ${t(collapsed ? 'analyzer.layout.expand' : 'analyzer.layout.collapse')}`"
+      @click="collapsed = !collapsed"
+    >
+      <span class="toggle-label">{{ t('analyzer.mapBackground.title') }}</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="chevron">
+        <path d="M6 9l6 6 6-6" />
+      </svg>
+    </button>
+    <div v-if="!collapsed" class="background-controls">
       <label>{{ t('analyzer.mapBackground.layer') }}
         <select :value="props.settings.kind" @change="emit('kind', ($event.target as HTMLSelectElement).value as MapBackgroundKind)">
           <option value="none">{{ t('analyzer.mapBackground.none') }}</option>
@@ -58,16 +77,42 @@ function choose(e: Event): void {
       <p v-if="error" class="error">{{ error }}</p>
       <small>{{ t('analyzer.mapBackground.localOnly') }}</small>
     </div>
-  </details>
+  </div>
 </template>
 
 <style scoped>
 .map-background { font-size: .85rem; }
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  /* B60 — 常駐可點擊區域，不靠 hover 呈現（DESIGN.md §8 觸控政策）。 */
+  min-height: 32px;
+}
+:root[data-any-pointer-coarse] .toggle { min-height: 44px; }
+.toggle-label { flex: 1; text-align: left; }
+.chevron {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  transition: transform 0.15s ease;
+}
+:root[data-any-pointer-coarse] .chevron { width: 20px; height: 20px; }
+/* 收合時箭頭轉向右（▶ 提示可展開），展開時維持向下（▼ 提示可收合）。 */
+.map-background.collapsed .chevron { transform: rotate(-90deg); }
 .background-controls { display: grid; gap: 8px; margin-top: 6px; }
 .background-controls label { display: grid; gap: 3px; }
 .align-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
 .align-buttons button { min-width: 32px; min-height: 32px; }
 :root[data-any-pointer-coarse] .align-buttons button { min-width: 44px; min-height: 44px; }
-:root[data-any-pointer-coarse] summary { min-height: 44px; display: flex; align-items: center; }
 .error { color: var(--color-accent); margin: 0; }
 </style>
