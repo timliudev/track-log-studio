@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, nextTick, ref, watch } from 'vue'
 import { mount } from '@vue/test-utils'
 import { useDashboardLayout } from '@/composables/useDashboardLayout'
-import { GRID_MARGIN, mergeLayoutPositions } from '@/domain/layout/dashboardLayout'
+import { GRID_MARGIN, STATIC_CARD_IDS, defaultLayout, mergeLayoutPositions } from '@/domain/layout/dashboardLayout'
 
 /** Node's default test environment has no real localStorage; this file opts
  *  into happy-dom (for `window`) but still needs the same in-memory stub
@@ -94,6 +94,22 @@ describe('useDashboardLayout — gridMargin (B36 mobile full-bleed)', () => {
     window.innerWidth = 1280
     const { layout } = mountHarness()
     expect(layout.gridMargin.value).toEqual(GRID_MARGIN)
+  })
+})
+
+describe('useDashboardLayout — reset to content-sized defaults (B66 follow-up)', () => {
+  it('replaces a cramped persisted desktop layout with the current larger defaults', () => {
+    window.innerWidth = 1280
+    localStorage.setItem('aracer-loga.dashboardLayout.v1', JSON.stringify([
+      { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 5 },
+      { i: STATIC_CARD_IDS.currentValues, x: 4, y: 0, w: 4, h: 3 },
+    ]))
+    const { layout } = mountHarness()
+    layout.resetLayout()
+    const current = layout.layout.value.find((item) => item.i === STATIC_CARD_IDS.currentValues)
+    const expected = defaultLayout().find((item) => item.i === STATIC_CARD_IDS.currentValues)
+    expect(current?.h).toBe(expected?.h)
+    expect(current?.h).toBeGreaterThan(3)
   })
 })
 

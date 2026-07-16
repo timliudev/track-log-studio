@@ -548,22 +548,22 @@ export function defaultLayout(): DashboardLayoutItem[] {
   return [
     // Column A — the at-a-glance map/lap/sector stack.
     { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 12 },
-    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 12, w: 4, h: 12 },
-    { i: STATIC_CARD_IDS.sectors, x: 0, y: 24, w: 4, h: 9 },
+    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 12, w: 4, h: 16 },
+    { i: STATIC_CARD_IDS.sectors, x: 0, y: 28, w: 4, h: 20 },
     // Column B
     { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 7 },
-    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 7, w: 4, h: 8 },
-    { i: STATIC_CARD_IDS.gear, x: 4, y: 15, w: 4, h: 9 },
-    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 24, w: 4, h: 7 },
-    { i: STATIC_CARD_IDS.suspension, x: 4, y: 31, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 7, w: 4, h: 12 },
+    { i: STATIC_CARD_IDS.gear, x: 4, y: 19, w: 4, h: 14 },
+    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 33, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.suspension, x: 4, y: 41, w: 4, h: 12 },
     // Column C — first chart (the store's initial default chart) sits right
     // under session-merge; further charts are appended below by
     // reconcileLayout's "new item" path (see defaultChartItem).
     { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 10 },
-    { i: chartItemId(1), x: 8, y: 10, w: 4, h: 13 },
-    { i: STATIC_CARD_IDS.currentValues, x: 8, y: 23, w: 4, h: 8 },
-    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 31, w: 4, h: 7 },
-    { i: STATIC_CARD_IDS.lapAlign, x: 8, y: 38, w: 4, h: 7 },
+    { i: chartItemId(1), x: 8, y: 10, w: 4, h: 14 },
+    { i: STATIC_CARD_IDS.currentValues, x: 8, y: 24, w: 4, h: 22 },
+    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 46, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.lapAlign, x: 0, y: 48, w: 4, h: 8 },
   ]
 }
 
@@ -573,7 +573,7 @@ export function defaultLayout(): DashboardLayoutItem[] {
  *  settles it upward if there's room. */
 function defaultChartItem(id: string, layout: DashboardLayoutItem[]): DashboardLayoutItem {
   const maxY = layout.reduce((m, it) => Math.max(m, it.y + it.h), 0)
-  return { i: id, x: 8, y: maxY, w: 4, h: 13 }
+  return { i: id, x: 8, y: maxY, w: 4, h: 14 }
 }
 
 /** Parse persisted JSON into a layout array, or null if missing/invalid
