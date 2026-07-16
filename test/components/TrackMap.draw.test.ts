@@ -247,6 +247,25 @@ describe('TrackMap draw() refactor protection (M3 baseline)', () => {
     expect(calls.filter((c) => c.method === 'set:lineWidth').some((c) => c.args[0] === 2.5)).toBe(true)
   })
 
+  it('keeps the start/finish checker and outline black/white in the dark UI theme', async () => {
+    const track = makeTrack(5)
+    const line: LapLine = { a: { lat: 35, lon: 135 }, b: { lat: 35.0005, lon: 135 } }
+    document.documentElement.style.setProperty('--color-text', '#e8eaed')
+    document.documentElement.style.setProperty('--color-surface', '#181b21')
+    try {
+      const calls = await drawWith({ track, line })
+      const fillStyles = calls.filter((c) => c.method === 'set:fillStyle').map((c) => c.args[0])
+      const strokeStyles = calls.filter((c) => c.method === 'set:strokeStyle').map((c) => c.args[0])
+      expect(fillStyles).toContain('#111111')
+      expect(fillStyles).toContain('#ffffff')
+      expect(strokeStyles).toContain('#111111')
+      expect(strokeStyles).not.toContain('#e8eaed')
+    } finally {
+      document.documentElement.style.removeProperty('--color-text')
+      document.documentElement.style.removeProperty('--color-surface')
+    }
+  })
+
   it('line + gates + extrema + cursor + overlay all drawn together: exact per-feature call counts', async () => {
     const track = makeTrack(5)
     const overlayTrack = makeTrack(4)

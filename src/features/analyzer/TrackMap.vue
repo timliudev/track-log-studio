@@ -150,6 +150,10 @@ const props = defineProps<{
 // Fixed, theme-independent colour for sector gates — distinct from the accent
 // red (cursor / start-finish handles) and from the lap-identity palette.
 const GATE_COLOR = '#00c2ff'
+// Theme-independent flag colours: a map tile may be light even while the app
+// uses its dark theme, so UI theme tokens cannot guarantee map contrast.
+const START_FINISH_DARK = '#111111'
+const START_FINISH_LIGHT = '#ffffff'
 
 // Number of discrete colour buckets: caps strokes per frame regardless of
 // sample count, so the heatmap stays as cheap as the plain single-stroke track.
@@ -640,17 +644,16 @@ function drawComparisonHighlights(
 }
 
 /** Start/finish line + draggable endpoints. Drawn as a checkered-flag band
- *  (the universal start/finish marker) in the text/surface two-tone so it
- *  has contrast in both themes and reads completely differently from the
- *  round red (--color-accent) cursor dot and the colourful track/heatmap —
- *  the #3 fix. The band's polygon geometry itself comes from
+ *  (the universal start/finish marker) in fixed black/white so it remains
+ *  legible against either light or dark map imagery, independently of the
+ *  app theme. The band's polygon geometry itself comes from
  *  computeCheckeredBand (trackMapGeometry.ts); this only fills/strokes it. */
 function drawStartFinishLine(ctx: CanvasRenderingContext2D, proj: MapProjection, line: LapLine | null | undefined): void {
   if (!line) return
   const a = proj.toPixel(line.a.lat, line.a.lon)
   const b = proj.toPixel(line.b.lat, line.b.lon)
-  const dark = cssVar('--color-text')
-  const light = cssVar('--color-surface')
+  const dark = START_FINISH_DARK
+  const light = START_FINISH_LIGHT
 
   const SQ = 6 // target checker square size (px)
   const band = computeCheckeredBand(a, b, SQ)
@@ -667,7 +670,7 @@ function drawStartFinishLine(ctx: CanvasRenderingContext2D, proj: MapProjection,
     }
     // Outline so the band stays delineated against either theme background.
     ctx.strokeStyle = dark
-    ctx.lineWidth = 1
+    ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.moveTo(...band.outline[0])
     ctx.lineTo(...band.outline[1])
@@ -1460,7 +1463,9 @@ watch(background.image, () => draw())
       v-tooltip="t('analyzer.maximizeMap')"
       @click="toggleMaximize"
     >
-      <span aria-hidden="true">⛶</span>
+      <svg class="maximize-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+      </svg>
     </button>
     <button
       v-else
@@ -1470,7 +1475,9 @@ watch(background.image, () => draw())
       v-tooltip="t('analyzer.minimizeMap')"
       @click="toggleMaximize"
     >
-      <span aria-hidden="true">✕</span>
+      <svg class="maximize-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
     </button>
   </div>
 </template>
@@ -1573,5 +1580,11 @@ watch(background.image, () => draw())
 }
 .maximize-toggle:hover {
   border-color: var(--color-text-muted);
+}
+.maximize-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 </style>
