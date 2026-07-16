@@ -1,6 +1,6 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, it, expect } from 'vitest'
-import { computed } from 'vue'
+import { computed, nextTick } from 'vue'
 import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useLapStore } from '@/stores/lapStore'
@@ -24,6 +24,20 @@ function gpsSession(latBase: number): LogSession {
       channel('Time', [0, 1000]),
       channel('GPS_Lat', [latBase, latBase + 0.001]),
       channel('GPS_Lon', [120, 120.001]),
+    ],
+    { formatId: 'nmea', createdDate: null, headerInfo: {} },
+  )
+}
+
+/** ECU-lap session with three equal-distance laps, sufficient for band suggestions. */
+function ecuLapSession(latBase: number): LogSession {
+  const n = 41
+  return new LogSession(
+    [
+      channel('Time', Array.from({ length: n }, (_, i) => i * 5_000)),
+      channel('GPS_Lat', Array.from({ length: n }, () => latBase)),
+      channel('GPS_Lon', Array.from({ length: n }, (_, i) => 120 + i * 0.001)),
+      channel('IR_LapNumber', Array.from({ length: n }, (_, i) => Math.floor(i / 10))),
     ],
     { formatId: 'nmea', createdDate: null, headerInfo: {} },
   )
@@ -88,6 +102,34 @@ describe('useLaps file-change watcher', () => {
     expect(lapStore.sessionLapOffsetOf(id1, 0, 'time')).toBeCloseTo(0.2)
     // The line is global/shared — untouched by a primary swap.
     expect(lapStore.line).toBe(lineBefore)
+  })
+
+  it('replaces valid-lap band suggestions on a genuine track change', async () => {
+    const analyzer = useAnalyzerStore()
+    const lapStore = useLapStore()
+    lapStore.setSource('ecu')
+    const { laps } = useLaps()
+    const fileStore = useFileStore()
+    const first = fileStore.addMergedSession('first.nmea', ecuLapSession(23))
+    const second = fileStore.addMergedSession('second.nmea', ecuLapSession(24))
+    analyzer.activeFileId = first
+    await nextTick()
+    await nextTick()
+
+    expect(laps.value).toHaveLength(3)
+    expect(lapStore.lapTimeBand).not.toBeNull()
+    expect(lapStore.lapDistanceBand).not.toBeNull()
+    lapStore.setLapTimeBand({ minSec: 1, maxSec: 2 })
+    lapStore.setLapDistanceBand({ minM: 1, maxM: 2 })
+
+    analyzer.activeFileId = second
+    await nextTick()
+    await nextTick()
+
+    expect(lapStore.lapTimeBand).not.toEqual({ minSec: 1, maxSec: 2 })
+    expect(lapStore.lapDistanceBand).not.toEqual({ minM: 1, maxM: 2 })
+    expect(lapStore.lapTimeBand?.minSec).toBeCloseTo(40)
+    expect(lapStore.lapDistanceBand?.minM).toBeGreaterThan(800)
   })
 
   // B55 — useLaps.ts's and useSectors.ts's file-change watchers BOTH peek

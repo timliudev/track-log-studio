@@ -164,19 +164,22 @@ export function useLaps(): {
     { immediate: true },
   )
 
-  // Auto-suggest the valid lap-time AND lap-distance bands (A8, extended to
-  // distance): once per NEW session/track — never on every `laps` recompute —
-  // and only while EACH band is UNSET, so a user clearing it (or editing it)
-  // is never silently overwritten. `pending` tracks whether the current track
-  // still owes its one suggestion attempt; it's set on every track-identity
-  // change (including to null->something) and cleared as soon as laps are
-  // available to suggest from (or the track goes away), so it fires exactly
-  // once laps first become non-empty. Both bands are independent settings but
-  // share the same "suggest once" trigger and pool (see `plausibleLaps` in the
-  // domain module) for consistency.
+  // Auto-suggest the valid lap-time AND lap-distance bands once per genuinely
+  // new track — never on every `laps` recompute. A new track discards both
+  // bands first, even if they contain values from the old track; otherwise a
+  // user-edited range can silently exclude every lap on the next circuit.
+  // Within one track, values are never overwritten. Primary swaps deliberately
+  // retain the shared bands and do not schedule another suggestion.
   let pendingBandSuggestion = false
   watch(track, (next, prev) => {
-    if (next !== prev) pendingBandSuggestion = next != null
+    if (next === prev) return
+    if (next && !lapStore.primarySwapPending) {
+      lapStore.clearLapTimeBand()
+      lapStore.clearLapDistanceBand()
+      pendingBandSuggestion = true
+    } else {
+      pendingBandSuggestion = false
+    }
   })
   watch(
     laps,
@@ -195,7 +198,7 @@ export function useLaps(): {
         if (suggestion) lapStore.setLapDistanceBand(suggestion)
       }
     },
-    { immediate: true },
+    { immediate: true, flush: 'post' },
   )
 
   // Seed ONE default statistics column (reproducing the old "top speed" column)
