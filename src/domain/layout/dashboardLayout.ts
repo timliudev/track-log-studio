@@ -148,6 +148,41 @@ export function isItemResizable(globalResizable: boolean, pinned: boolean): bool
   return globalResizable && !pinned
 }
 
+/**
+ * B59 — 手機單欄模式下,調整卡片尺寸會自己往右延伸(放開才彈回原寬)。根因
+ * (讀 node_modules/grid-layout-plus/src/components/grid-item.vue 的
+ * `tryMakeResizable`/`handleResize` 查證): 該套件的角落把手預設同時掛
+ * `edges.right` 和 `edges.bottom` 在同一個選取器上(單一小方塊同時代表「可橫向
+ * +可縱向」),拖曳期間 `state.resizing.width` 直接跟著指尖 X 位移即時變動,不會
+ * 等到手放開才 clamp——單欄下任何 w>1 的暫態寬度都會把卡片視覺上推出右邊界,
+ * 直到 `resizeend` 呼叫 `calcWH()` 才夾回 `w<=cols`(=1),於是「放掉寬度才彈回」。
+ * grid-layout-plus 沒有內建「單軸 resize」開關,但 GridItem 的 `resizeOption`
+ * prop 會整包蓋掉 grid-item.vue 自己組出的 `edges`(見該檔案
+ * `{ edges, ignoreFrom, restrictSize, ...props.resizeOption }`),所以可以在
+ * 我們這層用同一個把手選取器,只保留 `bottom` 這個邊——`handleResize` 裡
+ * `if (!event.edges.right && !event.edges.left) lastW = x` 這行本來就是給
+ * 「純垂直 resize」用的:每次 move 都把 lastW 釘回目前的 x,下一輪算出的
+ * deltaX 恆為 0,寬度全程不變,不需要等 resizeend 才夾回——沒有暫態、沒有彈跳。
+ * 選取器沿用 AnalyzerView.vue 已經在用的 `.vgl-item__resizer`(themed 在該檔案
+ * 的 `<style>`),對應 grid-item.vue 內 `useNameHelper('item').be('resizer')`
+ * 的固定輸出,非 RTL 情境下就是這個字串。
+ */
+const VERTICAL_RESIZE_HANDLE_SELECTOR = '.vgl-item__resizer'
+
+/** 手機單欄下要餵給 GridItem 的 `resizeOption`——只保留 bottom 邊,水平方向
+ *  (left/right)一律 false,讓拖曳角落把手時橫向位移完全不影響寬度。桌面 2-D
+ *  網格不套用這個(維持原本四個邊都可用的自由 resize),見 {@link resizeOptionFor}。 */
+export const VERTICAL_ONLY_RESIZE_OPTION: Record<string, unknown> = {
+  edges: { left: false, right: false, top: false, bottom: VERTICAL_RESIZE_HANDLE_SELECTOR },
+}
+
+/** 依目前斷點決定要不要把 resize 鎖成只能改高度——手機(單欄)鎖,桌面(2-D 網格)
+ *  不鎖。回傳 `undefined`(而不是空物件)給桌面,讓 GridItem 使用它自己預設的
+ *  `resizeOption: () => ({})`,不留下一個「什麼都沒覆蓋」的空物件痕跡。 */
+export function resizeOptionFor(isMobile: boolean): Record<string, unknown> | undefined {
+  return isMobile ? VERTICAL_ONLY_RESIZE_OPTION : undefined
+}
+
 /** i18n message key (under `analyzer.layout`) for each STATIC card's title —
  *  a plain data table so AnalyzerView's pinned-placeholder label (rendered
  *  OUTSIDE the big per-card template branch — see its module doc) can look up
