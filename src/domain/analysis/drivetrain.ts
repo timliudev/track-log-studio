@@ -59,6 +59,110 @@ export function resolveRpmChannel(session: LogSession): string | null {
   return session.has('RPM') ? 'RPM' : null
 }
 
+export type InferredDrivetrainKind = 'mt' | 'cvt'
+
+export interface DrivetrainKindInference {
+  kind: InferredDrivetrainKind
+  basis: 'gearChannel' | 'ratioPlateaus' | 'continuousRatio'
+  sampleCount: number
+}
+
+/**
+ * Conservatively infer whether a recording came from a stepped (MT) or
+ * continuously-variable (CVT) drivetrain. This is intentionally a one-shot
+ * session classifier, not part of the cursor/chart update path.
+ *
+ * A discrete gear-position channel is definitive MT evidence when at least
+ * two driven gears occur. Otherwise RPM and road speed are converted to the
+ * same ratio trace used by the calculator: a few dominant, well-separated
+ * plateaus imply MT; a broad curve which cannot be covered by eight plateaus
+ * and falls consistently as speed rises implies CVT. Ambiguous, short, or
+ * single-gear recordings return null so callers can keep the current choice.
+ * The nominal circumference only scales every ratio equally and therefore
+ * cannot affect the classification.
+ */
+export function inferDrivetrainKind(session: LogSession): DrivetrainKindInference | null {
+  const gearChannel = session.channels.find((channel) => {
+    const label = `${channel.name} ${channel.rawName} ${channel.description ?? ''}`.toLowerCase()
+    return /(?:^|[\s_/.-])(gear|gearpos|gearposition)(?:$|[\s_/.-])/.test(label) && !label.includes('ratio')
+  })
+  if (gearChannel) {
+    const gears = new Set<number>()
+    let valid = 0
+    for (const value of gearChannel.data) {
+      if (!Number.isFinite(value) || value < 1 || value > 8 || Math.abs(value - Math.round(value)) > 0.05) continue
+      gears.add(Math.round(value))
+      valid++
+    }
+    if (valid >= 12 && gears.size >= 2) return { kind: 'mt', basis: 'gearChannel', sampleCount: valid }
+  }
+
+  const rpm = session.get('RPM')?.data
+  const speed = session.get('GPS_Speed')?.data ?? session.get('Vehicle_Speed')?.data
+  if (!rpm || !speed) return null
+
+  const ratio = computeRatioSeries(rpm, speed, { wheelCircumferenceMm: 1870, minSpeedKmh: 10 })
+  const ratios: number[] = []
+  const speeds: number[] = []
+  const n = Math.min(ratio.length, speed.length, rpm.length)
+  for (let i = 0; i < n; i++) {
+    if (!Number.isFinite(ratio[i]) || rpm[i] < 1500) continue
+    ratios.push(ratio[i])
+    speeds.push(speed[i])
+  }
+  if (ratios.length < 120) return null
+
+  const sorted = [...ratios].sort((a, b) => a - b)
+  const p05 = sorted[Math.floor((sorted.length - 1) * 0.05)]
+  const p95 = sorted[Math.floor((sorted.length - 1) * 0.95)]
+  const robustSpanFrac = p05 > 0 ? (p95 - p05) / p05 : 0
+  if (robustSpanFrac < 0.08) return null
+
+  const plateaus = detectGearPlateaus(ratios, { toleranceFrac: 0.025, minSampleFrac: 0.03 })
+  const dominant = [...plateaus].sort((a, b) => b.sampleCount - a.sampleCount).slice(0, 8)
+  const plateauCoverage = dominant.reduce((sum, plateau) => sum + plateau.sampleCount, 0) / ratios.length
+  if (dominant.length >= 2 && plateauCoverage >= 0.72) {
+    const centres = dominant.map((plateau) => plateau.ratio)
+    if (Math.max(...centres) / Math.min(...centres) >= 1.08) {
+      return { kind: 'mt', basis: 'ratioPlateaus', sampleCount: ratios.length }
+    }
+  }
+
+  if (
+    robustSpanFrac >= 0.2 &&
+    plateaus.length > 8 &&
+    plateauCoverage < 0.68 &&
+    pearsonCorrelation(speeds, ratios) <= -0.65
+  ) {
+    return { kind: 'cvt', basis: 'continuousRatio', sampleCount: ratios.length }
+  }
+  return null
+}
+
+function pearsonCorrelation(xs: readonly number[], ys: readonly number[]): number {
+  const n = Math.min(xs.length, ys.length)
+  if (n < 2) return NaN
+  let sumX = 0
+  let sumY = 0
+  for (let i = 0; i < n; i++) {
+    sumX += xs[i]
+    sumY += ys[i]
+  }
+  const meanX = sumX / n
+  const meanY = sumY / n
+  let covariance = 0
+  let varianceX = 0
+  let varianceY = 0
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - meanX
+    const dy = ys[i] - meanY
+    covariance += dx * dy
+    varianceX += dx * dx
+    varianceY += dy * dy
+  }
+  return varianceX > 0 && varianceY > 0 ? covariance / Math.sqrt(varianceX * varianceY) : NaN
+}
+
 // ── Layer 1: pure calculator ────────────────────────────────────────────────
 
 /**

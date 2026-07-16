@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import { tireSpecToCircumferenceMm, type GearRatioInput, type FinalDriveInput, type MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
 
 export type DrivetrainKind = 'mt' | 'cvt'
+export type DrivetrainKindSelection = 'auto' | 'manual'
 
 /** How a single gear ratio (or the final drive) is being entered — either
  *  form is always kept around in state (so switching the toggle doesn't
@@ -119,13 +120,8 @@ function defaultCvtNotes(): CvtNoteField[] {
 }
 
 const DEFAULT_CVT: CvtFormState = {
-  wheelCircumferenceMm: 1400,
-  // Blank, not a guessed spec string: unlike MT (whose default spec/mm pair
-  // are chosen to agree with each other — see DEFAULT_MT's doc), CVT scooter
-  // tire sizes vary too widely to pick one sane default that matches 1400mm,
-  // and an unset spec is already handled cleanly (no "invalid spec" hint,
-  // no auto-apply) by the same live-conversion logic MT uses.
-  tireSpec: '',
+  wheelCircumferenceMm: Math.round(tireSpecToCircumferenceMm('120/80-12')),
+  tireSpec: '120/80-12',
   notes: defaultCvtNotes(),
 }
 
@@ -191,6 +187,9 @@ const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
 
 export interface PersistedDrivetrain {
   kind: DrivetrainKind
+  /** Whether future sessions may auto-select a page. Optional only for
+   *  compatibility with v2 payloads written before this marker existed. */
+  kindSelection?: DrivetrainKindSelection
   mt: MtFormState
   cvt: CvtFormState
   inversionWheelCircumferenceMm: number
@@ -244,9 +243,14 @@ export function mergeMtFormState(partial: Partial<MtFormState> | null | undefine
 /** CVT counterpart of {@link mergeMtFormState}. */
 export function mergeCvtFormState(partial: Partial<CvtFormState> | null | undefined): CvtFormState {
   const p = looksLikeV2Cvt(partial) ? partial : undefined
+  // Payloads written before CVT gained a tire default had no `tireSpec`.
+  // Preserve their stored circumference and retain the old blank spec rather
+  // than presenting the new default as if that user had configured it.
+  const legacyWithoutTireSpec = p != null && !Object.prototype.hasOwnProperty.call(p, 'tireSpec')
   return {
     ...DEFAULT_CVT,
     ...p,
+    ...(legacyWithoutTireSpec ? { tireSpec: '' } : {}),
     notes: p?.notes ? p.notes.map((n) => ({ ...n })) : defaultCvtNotes(),
   }
 }
@@ -258,6 +262,8 @@ function loadPersisted(): Partial<PersistedDrivetrain> {
     const data = JSON.parse(raw) as Partial<PersistedDrivetrain>
     return {
       kind: data.kind === 'mt' || data.kind === 'cvt' ? data.kind : undefined,
+      kindSelection:
+        data.kindSelection === 'auto' || data.kindSelection === 'manual' ? data.kindSelection : undefined,
       mt: looksLikeV2Mt(data.mt) ? data.mt : undefined,
       cvt: looksLikeV2Cvt(data.cvt) ? data.cvt : undefined,
       inversionWheelCircumferenceMm:
@@ -278,6 +284,12 @@ function loadPersisted(): Partial<PersistedDrivetrain> {
 export const useDrivetrainStore = defineStore('drivetrain', () => {
   const persisted = loadPersisted()
   const kind = ref<DrivetrainKind>(persisted.kind ?? 'mt')
+  // An existing unmarked v2 payload already contains a remembered page and
+  // is migrated as an explicit choice. Only a genuinely fresh profile, or a
+  // payload already marked `auto`, may follow per-session inference.
+  const kindSelection = ref<DrivetrainKindSelection>(
+    persisted.kindSelection ?? (persisted.kind != null ? 'manual' : 'auto'),
+  )
   const mt = ref<MtFormState>(mergeMtFormState(persisted.mt))
   const cvt = ref<CvtFormState>(mergeCvtFormState(persisted.cvt))
   // Tire-spec live conversion (user decision, 2026-07-08): the spec field now
@@ -303,10 +315,11 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
   const inversionWheelCircumferenceMm = ref<number>(persisted.inversionWheelCircumferenceMm ?? 1870)
 
   watch(
-    [kind, mt, cvt, inversionWheelCircumferenceMm],
+    [kind, kindSelection, mt, cvt, inversionWheelCircumferenceMm],
     () => {
       const data: PersistedDrivetrain = {
         kind: kind.value,
+        kindSelection: kindSelection.value,
         mt: mt.value,
         cvt: cvt.value,
         inversionWheelCircumferenceMm: inversionWheelCircumferenceMm.value,
@@ -322,6 +335,13 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
 
   function setKind(k: DrivetrainKind): void {
     kind.value = k
+    kindSelection.value = 'manual'
+  }
+
+  function applyDetectedKind(k: DrivetrainKind | null): boolean {
+    if (kindSelection.value !== 'auto' || k == null) return false
+    kind.value = k
+    return true
   }
 
   function setMt(patch: Partial<Omit<MtFormState, 'gearRatios' | 'finalDrive'>>): void {
@@ -438,6 +458,7 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
    */
   function applyImported(next: PersistedDrivetrain): void {
     kind.value = next.kind
+    kindSelection.value = next.kindSelection ?? 'manual'
     mt.value = next.mt
     cvt.value = next.cvt
     inversionWheelCircumferenceMm.value = next.inversionWheelCircumferenceMm
@@ -445,10 +466,12 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
 
   return {
     kind,
+    kindSelection,
     mt,
     cvt,
     inversionWheelCircumferenceMm,
     setKind,
+    applyDetectedKind,
     setMt,
     setFinalDrive,
     setCvtWheelCircumferenceMm,

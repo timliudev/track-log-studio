@@ -9,6 +9,8 @@ import type { Channel } from '@/domain/model/types'
 import { vTooltip } from '@/directives/tooltip'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { speedKmhToWheelRpm } from '@/domain/analysis/drivetrain'
 
 /**
  * Regression test for 4d2f90d — GearPanel is a single long-lived instance in
@@ -35,6 +37,15 @@ function channel(name: string, data: number[]): Channel {
 function sessionWithSteadyGear1(n = 30): LogSession {
   const rpm = new Array(n).fill(6000)
   const speed = new Array(n).fill(30.29)
+  return new LogSession(
+    [channel('RPM', rpm), channel('GPS_Speed', speed)],
+    { formatId: 'nmea', createdDate: null, headerInfo: {} },
+  )
+}
+
+function continuousCvtSession(n = 400): LogSession {
+  const speed = Array.from({ length: n }, (_, i) => 12 + (88 * i) / (n - 1))
+  const rpm = speed.map((kmh, i) => speedKmhToWheelRpm(kmh, 1870) * (16 - (8 * i) / (n - 1)))
   return new LogSession(
     [channel('RPM', rpm), channel('GPS_Speed', speed)],
     { formatId: 'nmea', createdDate: null, headerInfo: {} },
@@ -151,5 +162,18 @@ describe('GearPanel — session-switch clears stale estimate (regression 4d2f90d
     await wrapper.setProps({ session: sessionWithSteadyGear1() })
 
     expect(wrapper.find('.estimate-err').exists()).toBe(false)
+  })
+
+  it('auto-selects the inferred page for a new session but respects a manual tab choice', async () => {
+    const wrapper = mountPanel(null)
+    const store = useDrivetrainStore()
+    expect(store.kindSelection).toBe('auto')
+
+    await wrapper.setProps({ session: continuousCvtSession() })
+    expect(store.kind).toBe('cvt')
+
+    store.setKind('mt')
+    await wrapper.setProps({ session: continuousCvtSession(450) })
+    expect(store.kind).toBe('mt')
   })
 })

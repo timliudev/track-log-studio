@@ -59,6 +59,7 @@ import {
   cvtRatioSummary,
   estimateClutchEngagementRpm,
   estimateCircumferenceFromLog,
+  inferDrivetrainKind,
   type CircumferenceFromLogEstimate,
 } from '@/domain/analysis/drivetrain'
 
@@ -217,10 +218,12 @@ const estimateFailed = ref(false)
 // that's no longer loaded.
 watch(
   () => props.session,
-  () => {
+  (session) => {
     estimateResult.value = null
     estimateFailed.value = false
+    store.applyDetectedKind(session ? inferDrivetrainKind(session)?.kind ?? null : null)
   },
+  { immediate: true },
 )
 
 function runCircumferenceEstimate(): void {
