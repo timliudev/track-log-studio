@@ -1,4 +1,5 @@
 import { aggregateChannel, type Aggregation } from './lapAggregate'
+import { lapDistanceM } from './lapDistance'
 import type { LapSectorTimes } from './sectorTiming'
 import type { Lap } from '@/domain/model/Lap'
 import type { LogSession } from '@/domain/model/LogSession'
@@ -46,9 +47,7 @@ export function computeMetric(metric: LapMetric, lap: Lap, ctx: LapContext): num
       return lap.lapTimeMs
 
     case 'distance': {
-      const cum = ctx.cumDistM
-      if (!cum || lap.endIdx <= lap.startIdx || lap.endIdx >= cum.length) return NaN
-      return cum[lap.endIdx] - cum[lap.startIdx]
+      return lapDistanceM(lap, ctx.cumDistM)
     }
 
     case 'channel': {
