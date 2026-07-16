@@ -158,6 +158,7 @@ const ggSeries = computed<GgSeries[]>(() => {
       props.selectedLaps,
       lapStore.selectedAcrossSessions,
       comparisons,
+      (index) => t('analyzer.gg.lapSeries', { n: index + 1 }) as string,
     )
 
     if (lapPicks.length > 0) {

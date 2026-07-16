@@ -106,16 +106,16 @@ describe('buildMultiSessionScatterLaps', () => {
         { id: 2, name: 'B', color: '#0a0', session: session({ X: [5, 6, 7, 8], Y: [50, 60, 70, 80] }) },
       ],
       [
-        { sourceId: 1, index: 0, startIdx: 1, endIdx: 3 },
-        { sourceId: 2, index: 2, startIdx: 0, endIdx: 2 },
+        { sourceId: 1, index: 0, startIdx: 1, endIdx: 3, label: 'Lap 1' },
+        { sourceId: 2, index: 2, startIdx: 0, endIdx: 2, label: 'Lap 3' },
       ],
       'X',
       'Y',
     )
 
     expect(result).toEqual([
-      { points: [[2, 20], [3, 30]], color: '#a00', name: 'A · #1', symbol: 'circle' },
-      { points: [[5, 50], [6, 60]], color: '#0a0', name: 'B · #3', symbol: 'triangle' },
+      { points: [[2, 20], [3, 30]], color: '#a00', name: 'A · Lap 1', symbol: 'circle' },
+      { points: [[5, 50], [6, 60]], color: '#0a0', name: 'B · Lap 3', symbol: 'triangle' },
     ])
   })
 
@@ -123,14 +123,14 @@ describe('buildMultiSessionScatterLaps', () => {
     const result = buildMultiSessionScatterLaps(
       [{ id: 1, name: 'A', color: '#a00', session: session({ X: [1, 2, 3, 4, 5, 6], Y: [1, 2, 3, 4, 5, 6] }) }],
       [
-        { sourceId: 1, index: 0, startIdx: 0, endIdx: 2 },
-        { sourceId: 1, index: 1, startIdx: 3, endIdx: 6 },
+        { sourceId: 1, index: 0, startIdx: 0, endIdx: 2, label: 'Lap 1' },
+        { sourceId: 1, index: 1, startIdx: 3, endIdx: 6, label: 'Lap 2' },
       ],
       'X',
       'Y',
     )
 
-    expect(result.map((s) => s.name)).toEqual(['A · #1', 'A · #2'])
+    expect(result.map((s) => s.name)).toEqual(['A · Lap 1', 'A · Lap 2'])
     expect(result[0].points).toEqual([[1, 1], [2, 2]])
     expect(result[1].points).toEqual([[4, 4], [5, 5], [6, 6]])
     // Same session → same colour for both laps (hue stays file identity, not lap order).
@@ -144,18 +144,18 @@ describe('buildMultiSessionScatterLaps', () => {
         { id: 1, name: 'A', color: '#a00', session: session({ X: [1, 2], Y: [1, 2] }) },
         { id: 2, name: 'B', color: '#0a0', session: session({ X: [3, 4], Y: [3, 4] }) },
       ],
-      [{ sourceId: 1, index: 0, startIdx: 0, endIdx: 2 }],
+      [{ sourceId: 1, index: 0, startIdx: 0, endIdx: 2, label: 'Lap 1' }],
       'X',
       'Y',
     )
 
-    expect(result.map((s) => s.name)).toEqual(['A · #1'])
+    expect(result.map((s) => s.name)).toEqual(['A · Lap 1'])
   })
 
   it('routes the third channel to the colour axis within the clipped range', () => {
     const result = buildMultiSessionScatterLaps(
       [{ id: 1, name: 'A', color: '#a00', session: session({ X: [1, 2, 3], Y: [1, 2, 3], RPM: [100, 200, 300] }) }],
-      [{ sourceId: 1, index: 0, startIdx: 1, endIdx: 3 }],
+      [{ sourceId: 1, index: 0, startIdx: 1, endIdx: 3, label: 'Lap 1' }],
       'X',
       'Y',
       5000,
@@ -163,22 +163,28 @@ describe('buildMultiSessionScatterLaps', () => {
     )
 
     expect(result).toEqual([
-      { points: [[2, 2], [3, 3]], colorValues: [200, 300], color: '#a00', name: 'A · #1', symbol: 'circle' },
+      { points: [[2, 2], [3, 3]], colorValues: [200, 300], color: '#a00', name: 'A · Lap 1', symbol: 'circle' },
     ])
   })
 })
 
 describe('resolveComparisonLapPicks', () => {
+  // `lapLabel` mirrors the i18n-formatted label ScatterChart.vue actually
+  // passes (t('analyzer.gg.lapSeries', { n: index + 1 })) without pulling in
+  // vue-i18n here — this module has no i18n dependency, see its doc.
+  const label = (index: number): string => `Lap ${index + 1}`
+
   it('carries the primary laps through unchanged', () => {
     const picks = resolveComparisonLapPicks(
       1,
       [{ index: 0, startIdx: 10, endIdx: 20 }, { index: 2, startIdx: 40, endIdx: 60 }],
       [],
       [],
+      label,
     )
     expect(picks).toEqual([
-      { sourceId: 1, index: 0, startIdx: 10, endIdx: 20 },
-      { sourceId: 1, index: 2, startIdx: 40, endIdx: 60 },
+      { sourceId: 1, index: 0, startIdx: 10, endIdx: 20, label: 'Lap 1' },
+      { sourceId: 1, index: 2, startIdx: 40, endIdx: 60, label: 'Lap 3' },
     ])
   })
 
@@ -188,26 +194,27 @@ describe('resolveComparisonLapPicks', () => {
       [],
       [{ fileId: 2, index: 1 }],
       [{ id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 5 }, { index: 1, startIdx: 5, endIdx: 12 }] }],
+      label,
     )
-    expect(picks).toEqual([{ sourceId: 2, index: 1, startIdx: 5, endIdx: 12 }])
+    expect(picks).toEqual([{ sourceId: 2, index: 1, startIdx: 5, endIdx: 12, label: 'Lap 2' }])
   })
 
   it('drops a stale cross-session ref whose file is no longer a comparison', () => {
     const picks = resolveComparisonLapPicks(1, [], [{ fileId: 9, index: 0 }], [
       { id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 5 }] },
-    ])
+    ], label)
     expect(picks).toEqual([])
   })
 
   it('drops a stale cross-session ref whose lap index no longer exists on that file', () => {
     const picks = resolveComparisonLapPicks(1, [], [{ fileId: 2, index: 5 }], [
       { id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 5 }] },
-    ])
+    ], label)
     expect(picks).toEqual([])
   })
 
   it('returns an empty list when nothing is selected anywhere — the caller\'s cue to fall back to whole-session plotting', () => {
-    const picks = resolveComparisonLapPicks(1, [], [], [{ id: 2, laps: [] }])
+    const picks = resolveComparisonLapPicks(1, [], [], [{ id: 2, laps: [] }], label)
     expect(picks).toEqual([])
   })
 
@@ -217,10 +224,11 @@ describe('resolveComparisonLapPicks', () => {
       [{ index: 0, startIdx: 0, endIdx: 10 }],
       [{ fileId: 2, index: 0 }],
       [{ id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 8 }] }],
+      label,
     )
     expect(picks).toEqual([
-      { sourceId: 1, index: 0, startIdx: 0, endIdx: 10 },
-      { sourceId: 2, index: 0, startIdx: 0, endIdx: 8 },
+      { sourceId: 1, index: 0, startIdx: 0, endIdx: 10, label: 'Lap 1' },
+      { sourceId: 2, index: 0, startIdx: 0, endIdx: 8, label: 'Lap 1' },
     ])
   })
 })

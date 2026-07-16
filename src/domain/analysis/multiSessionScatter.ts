@@ -91,25 +91,37 @@ export interface LapRange {
  * unit-testable without mounting the component or a Pinia store. A ref whose
  * file isn't currently in `comparisons`, or whose lap index doesn't exist on
  * that file's own detected laps (stale selection after a source/line change),
- * is silently dropped rather than plotted with a wrong range.
+ * is silently dropped rather than plotted with a wrong range. `lapLabel` is a
+ * caller-supplied formatter (ScatterChart.vue passes the already-localized
+ * `t('analyzer.gg.lapSeries', { n })` string) so this module stays free of
+ * any i18n dependency while the resulting series name still respects the
+ * user's language.
  */
 export function resolveComparisonLapPicks(
   primaryId: number,
   primaryLaps: readonly LapRange[],
   crossRefs: readonly { fileId: number; index: number }[],
   comparisons: readonly { id: number; laps: readonly LapRange[] }[],
+  lapLabel: (index: number) => string,
 ): SessionScatterLapPick[] {
   const picks: SessionScatterLapPick[] = primaryLaps.map((lap) => ({
     sourceId: primaryId,
     index: lap.index,
     startIdx: lap.startIdx,
     endIdx: lap.endIdx,
+    label: lapLabel(lap.index),
   }))
   for (const ref of crossRefs) {
     const comparison = comparisons.find((entry) => entry.id === ref.fileId)
     const lap = comparison?.laps.find((entry) => entry.index === ref.index)
     if (!comparison || !lap) continue
-    picks.push({ sourceId: ref.fileId, index: lap.index, startIdx: lap.startIdx, endIdx: lap.endIdx })
+    picks.push({
+      sourceId: ref.fileId,
+      index: lap.index,
+      startIdx: lap.startIdx,
+      endIdx: lap.endIdx,
+      label: lapLabel(lap.index),
+    })
   }
   return picks
 }
@@ -121,6 +133,10 @@ export interface SessionScatterLapPick {
   index: number
   startIdx: number
   endIdx: number
+  /** Already-localized "Lap N"-style label (see `resolveComparisonLapPicks`'s
+   *  `lapLabel` doc) — combined with the owning source's name for the
+   *  series legend/tooltip text. */
+  label: string
 }
 
 /**
@@ -135,8 +151,9 @@ export interface SessionScatterLapPick {
  * TimeSeriesChart's cross-session overlay: once ANY lap selection is active,
  * only sessions that actually have a lap picked are drawn — there's no
  * "whole session" fallback per source). Each lap gets its own series (so a
- * file with two selected laps draws two clouds), named `"<source> · #<lap>"`
- * so the legend/tooltip disambiguate which lap a point belongs to.
+ * file with two selected laps draws two clouds), named `"<source> · <lap
+ * label>"` (the label already localized by the caller) so the legend/tooltip
+ * disambiguate which lap a point belongs to.
  */
 export function buildMultiSessionScatterLaps(
   sources: readonly SessionScatterSource[],
@@ -156,7 +173,7 @@ export function buildMultiSessionScatterLaps(
     const third = colorChannel ? source.session.get(colorChannel) : undefined
     const picks = laps.filter((lap) => lap.sourceId === source.id)
     for (const lap of picks) {
-      const name = `${source.name} · #${lap.index + 1}`
+      const name = `${source.name} · ${lap.label}`
       if (third) {
         const { points, colorValues } = buildGgPointsWithColor(x.data, y.data, third.data, {
           scale,
