@@ -112,7 +112,7 @@ Please keep this list free of working-hours logs (issue text + status + commit o
 
 ## Acceptance round 5 — second batch (user tested 2026-07-16 evening, mobile)
 - [ ] **B59** Mobile: while resizing a card it keeps growing to the RIGHT on its own; releasing the width restores it. Reproduce with touch resize on the mobile single-column layout.
-- [ ] **B60** 底圖 collapse button ▼ not visible on Android Chrome (desktop fine). Check the TrackMap base-layer disclosure control's rendering/stacking on mobile.
+- [~] **B60** Root cause: `MapBackgroundControls.vue` used a bare `<details>/<summary>` whose collapse triangle is the browser's UA-default disclosure marker — desktop Chrome paints it, Android Chrome doesn't reliably. Replaced with an always-visible button + inline SVG chevron (same convention as DashboardCard's collapse button: rotate transition, 44px coarse target, `aria-expanded`; reuses existing expand/collapse i18n). UA-independent by construction; needs the user's Android device to confirm before `[x]`. — `d76443f`/`8b17e3b`
 - [ ] **B61** Mobile: card drag-to-reorder should require a short press-and-hold before the drag starts (title-bar touch currently competes with scrolling — DESIGN §8 layer 1/2: touch needs a long-press affordance, mouse drag unchanged).
 
 ## Maintenance / deferred
