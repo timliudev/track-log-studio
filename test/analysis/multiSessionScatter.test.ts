@@ -206,6 +206,11 @@ describe('resolveComparisonLapPicks', () => {
     expect(picks).toEqual([])
   })
 
+  it('returns an empty list when nothing is selected anywhere — the caller\'s cue to fall back to whole-session plotting', () => {
+    const picks = resolveComparisonLapPicks(1, [], [], [{ id: 2, laps: [] }])
+    expect(picks).toEqual([])
+  })
+
   it('merges primary and cross-session picks in order', () => {
     const picks = resolveComparisonLapPicks(
       1,
