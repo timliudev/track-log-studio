@@ -2,7 +2,7 @@ import { computed, watch, type ComputedRef } from 'vue'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLapStore } from '@/stores/lapStore'
 import { timeSeconds } from '@/domain/analysis/timeAxis'
-import { detectLapsByChannel, detectLapsByLine, type LapLine } from '@/domain/analysis/laps'
+import { detectLapsByChannel, detectLapsByLine, inferLapLineFromChannel, type LapLine } from '@/domain/analysis/laps'
 import { suggestLapTimeBand, suggestLapDistanceBand } from '@/domain/analysis/lapValidity'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { toRadians } from '@/domain/export/rc3Nmea/geo'
@@ -102,9 +102,14 @@ export function useLaps(): {
         ? detectLapsByChannel(session.value, timeMs.value)
         : []
     }
-    return track.value && timeMs.value && lapStore.line
-      ? detectLapsByLine(track.value, timeMs.value, lapStore.line)
-      : []
+    if (track.value && timeMs.value && lapStore.line) {
+      return detectLapsByLine(track.value, timeMs.value, lapStore.line)
+    }
+    // With no line, keep the table useful as a whole-recording summary. This
+    // synthetic single span uses the same metric/selection pipeline as a lap.
+    const count = session.value?.rowCount ?? 0
+    if (!timeMs.value || count === 0) return []
+    return [{ index: 0, startIdx: 0, endIdx: count - 1, lapTimeMs: timeMs.value[count - 1] - timeMs.value[0] }]
   })
 
   // Keep the store's copy of the detected laps in sync so it can derive the
@@ -124,7 +129,9 @@ export function useLaps(): {
    * itself re-seed, otherwise the line vanishes with no way to get it back.)
    */
   function resetLine(): void {
-    const seeded = track.value ? defaultLine(track.value) : null
+    const seeded = track.value && session.value
+      ? inferLapLineFromChannel(session.value, track.value) ?? defaultLine(track.value)
+      : null
     if (seeded) lapStore.setLine(seeded)
     else lapStore.clearLine()
   }
@@ -172,7 +179,9 @@ export function useLaps(): {
         }
       }
       if (next && lapStore.line == null) {
-        const seeded = defaultLine(next)
+        const seeded = session.value
+          ? inferLapLineFromChannel(session.value, next) ?? defaultLine(next)
+          : defaultLine(next)
         if (seeded) lapStore.setLine(seeded)
       }
     },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectLapsByLine, detectLapsByChannel, type LapLine } from '@/domain/analysis/laps'
+import { detectLapsByLine, detectLapsByChannel, inferLapLineFromChannel, segmentsIntersect, planarGate, type LapLine } from '@/domain/analysis/laps'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel, LogMeta } from '@/domain/model/types'
@@ -142,5 +142,26 @@ describe('detectLapsByChannel', () => {
     const session = new LogSession([ch('IR_LapNumber', [1, 1, 1, 2, 2])], meta)
     const timeMs = new Float64Array([0, 1000, 2000, 3000, 4000])
     expect(detectLapsByChannel(session, timeMs)).toEqual([])
+  })
+})
+
+describe('inferLapLineFromChannel', () => {
+  it('builds a perpendicular line through repeated ECU lap-transition positions', () => {
+    const session = new LogSession([
+      ch('IR_LapNumber', [1, 1, 2, 2, 3, 3]),
+    ], meta)
+    const track = makeTrack(
+      [23, 23, 23, 23, 23, 23],
+      [120, 120.0001, 120.0002, 120.0003, 120.0004, 120.0005],
+    )
+    const line = inferLapLineFromChannel(session, track)
+    expect(line).not.toBeNull()
+    const gate = planarGate(line!)
+    expect(segmentsIntersect(
+      { x: -0.0002, y: 0 },
+      { x: 0.0002, y: 0 },
+      gate.a,
+      gate.b,
+    )).toBe(true)
   })
 })

@@ -282,22 +282,7 @@ export function detectLapsByLine(
  * `timeMs` is the per-sample time axis; its units determine lapTimeMs units.
  */
 export function detectLapsByChannel(session: LogSession, timeMs: Float64Array): Lap[] {
-  const lapCh = session.get('IR_LapNumber')
-  if (!lapCh) return []
-
-  const data = lapCh.data
-  const n = data.length
-
-  // Boundaries: each sample index where the lap counter increases.
-  const boundaries: number[] = []
-  let prevLap = NaN
-  for (let i = 0; i < n; i++) {
-    const v = data[i]
-    if (!Number.isFinite(v)) continue
-    if (!Number.isNaN(prevLap) && v > prevLap) boundaries.push(i)
-    if (Number.isNaN(prevLap) || v !== prevLap) prevLap = v
-  }
-
+  const boundaries = lapChannelBoundaries(session)
   if (boundaries.length < 2) return []
 
   const laps: Lap[] = []
@@ -312,4 +297,63 @@ export function detectLapsByChannel(session: LogSession, timeMs: Float64Array): 
     })
   }
   return laps
+}
+
+/** Sample indices where the ECU lap counter increases. */
+export function lapChannelBoundaries(session: LogSession): number[] {
+  const lapCh = session.get('IR_LapNumber')
+  if (!lapCh) return []
+  const boundaries: number[] = []
+  let prevLap = NaN
+  for (let i = 0; i < lapCh.data.length; i++) {
+    const v = lapCh.data[i]
+    if (!Number.isFinite(v)) continue
+    if (!Number.isNaN(prevLap) && v > prevLap) boundaries.push(i)
+    if (Number.isNaN(prevLap) || v !== prevLap) prevLap = v
+  }
+
+  return boundaries
+}
+
+/**
+ * Infer a start/finish line from the ECU lap-counter transition positions.
+ * Multiple transitions are averaged to reduce GPS jitter; their local travel
+ * vectors are averaged and the returned line is perpendicular to that motion.
+ */
+export function inferLapLineFromChannel(
+  session: LogSession,
+  track: GpsTrack,
+  halfWidthM = 15,
+): LapLine | null {
+  const boundaries = lapChannelBoundaries(session)
+  if (boundaries.length === 0) return null
+  const points: Array<{ idx: number; lat: number; lon: number; hx: number; hy: number }> = []
+  for (const boundary of boundaries) {
+    let idx = boundary
+    while (idx < track.valid.length && !track.valid[idx]) idx++
+    if (idx >= track.valid.length) continue
+    let before = idx - 1
+    while (before >= 0 && (!track.valid[before] || (track.lat[before] === track.lat[idx] && track.lon[before] === track.lon[idx]))) before--
+    let after = idx + 1
+    while (after < track.valid.length && (!track.valid[after] || (track.lat[after] === track.lat[idx] && track.lon[after] === track.lon[idx]))) after++
+    if (before < 0 || after >= track.valid.length) continue
+    const cosLat = Math.cos(toRadians(track.lat[idx])) || 1
+    const hx = (track.lon[after] - track.lon[before]) * cosLat
+    const hy = track.lat[after] - track.lat[before]
+    const len = Math.hypot(hx, hy)
+    if (len > 0) points.push({ idx, lat: track.lat[idx], lon: track.lon[idx], hx: hx / len, hy: hy / len })
+  }
+  if (points.length === 0) return null
+  const lat = points.reduce((sum, point) => sum + point.lat, 0) / points.length
+  const lon = points.reduce((sum, point) => sum + point.lon, 0) / points.length
+  const hx = points.reduce((sum, point) => sum + point.hx, 0)
+  const hy = points.reduce((sum, point) => sum + point.hy, 0)
+  const headingLength = Math.hypot(hx, hy)
+  if (headingLength === 0) return null
+  const east = -hy / headingLength
+  const north = hx / headingLength
+  const earthR = 6371000
+  const dLat = (north * halfWidthM / earthR) * (180 / Math.PI)
+  const dLon = (east * halfWidthM / (earthR * (Math.cos(toRadians(lat)) || 1))) * (180 / Math.PI)
+  return { a: { lat: lat + dLat, lon: lon + dLon }, b: { lat: lat - dLat, lon: lon - dLon } }
 }
