@@ -396,6 +396,125 @@ describe('lapStore', () => {
     })
   })
 
+  // B58 part 2 — the band value alone can't tell useLaps.ts whether it's
+  // still safe to overwrite with a fresh suggestion once the laps change
+  // (e.g. the start/finish line moves): setLapTimeBand/setLapDistanceBand
+  // (the panel's own inputs) mark 'user', applyAutoLapTimeBand/
+  // applyAutoLapDistanceBand (useLaps.ts's suggestion path) mark 'auto', and
+  // clearing either band re-arms it back to null so the next suggestion isn't
+  // permanently blocked.
+  describe('band origin — auto vs. user (B58 part 2)', () => {
+    it('starts with no origin for either band', () => {
+      const s = useLapStore()
+      expect(s.lapTimeBandOrigin).toBeNull()
+      expect(s.lapDistanceBandOrigin).toBeNull()
+    })
+
+    it('setLapTimeBand marks the origin user', () => {
+      const s = useLapStore()
+      s.setLapTimeBand({ minSec: 40, maxSec: 50 })
+      expect(s.lapTimeBandOrigin).toBe('user')
+    })
+
+    it('an all-null setLapTimeBand edit clears the band and re-arms the origin to null', () => {
+      const s = useLapStore()
+      s.setLapTimeBand({ minSec: 40, maxSec: 50 })
+      s.setLapTimeBand({ minSec: null, maxSec: null })
+      expect(s.lapTimeBand).toBeNull()
+      expect(s.lapTimeBandOrigin).toBeNull()
+    })
+
+    it('clearLapTimeBand clears the band and re-arms the origin to null', () => {
+      const s = useLapStore()
+      s.setLapTimeBand({ minSec: 40, maxSec: 50 })
+      s.clearLapTimeBand()
+      expect(s.lapTimeBand).toBeNull()
+      expect(s.lapTimeBandOrigin).toBeNull()
+    })
+
+    it('applyAutoLapTimeBand marks the origin auto and can be overwritten by a later auto suggestion', () => {
+      const s = useLapStore()
+      s.applyAutoLapTimeBand({ minSec: 40, maxSec: 50 })
+      expect(s.lapTimeBand).toEqual({ minSec: 40, maxSec: 50 })
+      expect(s.lapTimeBandOrigin).toBe('auto')
+      s.applyAutoLapTimeBand({ minSec: 20, maxSec: 30 })
+      expect(s.lapTimeBand).toEqual({ minSec: 20, maxSec: 30 })
+      expect(s.lapTimeBandOrigin).toBe('auto')
+    })
+
+    it('applyAutoLapTimeBand(null) clears the band and leaves the origin re-armed', () => {
+      const s = useLapStore()
+      s.applyAutoLapTimeBand({ minSec: 40, maxSec: 50 })
+      s.applyAutoLapTimeBand(null)
+      expect(s.lapTimeBand).toBeNull()
+      expect(s.lapTimeBandOrigin).toBeNull()
+    })
+
+    it('a user edit blocks a later auto suggestion from being applied by useLaps.ts\'s own guard', () => {
+      // The store itself doesn't enforce this (useLaps.ts checks the origin
+      // before calling applyAutoLapTimeBand at all) — this just pins that
+      // applyAutoLapTimeBand ALWAYS overwrites when called, so the guard has
+      // to live in the caller, not silently no-op here.
+      const s = useLapStore()
+      s.setLapTimeBand({ minSec: 1, maxSec: 2 })
+      s.applyAutoLapTimeBand({ minSec: 40, maxSec: 50 })
+      expect(s.lapTimeBand).toEqual({ minSec: 40, maxSec: 50 })
+      expect(s.lapTimeBandOrigin).toBe('auto')
+    })
+
+    it('setLapDistanceBand marks the origin user', () => {
+      const s = useLapStore()
+      s.setLapDistanceBand({ minM: 400, maxM: 500 })
+      expect(s.lapDistanceBandOrigin).toBe('user')
+    })
+
+    it('an all-null setLapDistanceBand edit clears the band and re-arms the origin to null', () => {
+      const s = useLapStore()
+      s.setLapDistanceBand({ minM: 400, maxM: 500 })
+      s.setLapDistanceBand({ minM: null, maxM: null })
+      expect(s.lapDistanceBand).toBeNull()
+      expect(s.lapDistanceBandOrigin).toBeNull()
+    })
+
+    it('clearLapDistanceBand clears the band and re-arms the origin to null', () => {
+      const s = useLapStore()
+      s.setLapDistanceBand({ minM: 400, maxM: 500 })
+      s.clearLapDistanceBand()
+      expect(s.lapDistanceBand).toBeNull()
+      expect(s.lapDistanceBandOrigin).toBeNull()
+    })
+
+    it('applyAutoLapDistanceBand marks the origin auto and can be overwritten by a later auto suggestion', () => {
+      const s = useLapStore()
+      s.applyAutoLapDistanceBand({ minM: 400, maxM: 500 })
+      expect(s.lapDistanceBand).toEqual({ minM: 400, maxM: 500 })
+      expect(s.lapDistanceBandOrigin).toBe('auto')
+      s.applyAutoLapDistanceBand({ minM: 100, maxM: 200 })
+      expect(s.lapDistanceBand).toEqual({ minM: 100, maxM: 200 })
+      expect(s.lapDistanceBandOrigin).toBe('auto')
+    })
+
+    it('applyAutoLapDistanceBand(null) clears the band and leaves the origin re-armed', () => {
+      const s = useLapStore()
+      s.applyAutoLapDistanceBand({ minM: 400, maxM: 500 })
+      s.applyAutoLapDistanceBand(null)
+      expect(s.lapDistanceBand).toBeNull()
+      expect(s.lapDistanceBandOrigin).toBeNull()
+    })
+
+    it('time-band and distance-band origins are independent facets', () => {
+      const s = useLapStore()
+      s.setLapTimeBand({ minSec: 40, maxSec: 50 })
+      s.applyAutoLapDistanceBand({ minM: 400, maxM: 500 })
+      expect(s.lapTimeBandOrigin).toBe('user')
+      expect(s.lapDistanceBandOrigin).toBe('auto')
+      s.clearLapTimeBand()
+      expect(s.lapTimeBandOrigin).toBeNull()
+      // Clearing the time band doesn't touch the distance band's origin.
+      expect(s.lapDistanceBandOrigin).toBe('auto')
+    })
+  })
+
   it('starts with an empty sector-invalid set (no track, no gates)', () => {
     const s = useLapStore()
     expect(s.sectorInvalid).toEqual([])
