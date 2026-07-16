@@ -497,7 +497,7 @@ export default {
   },
   centreCursor: {
     label: 'Fixed centre-needle mode',
-    hint: 'Charts show a fixed vertical line at their centre — drag the chart itself to scroll the data under it; whatever lands on the needle becomes the current cursor (synced to the map / current-values card / other charts).',
+    hint: 'Charts show a fixed vertical line at their centre. Zoom with the wheel or a two-finger pinch, then drag the data underneath it; the value on the needle becomes the current cursor (synced to the map / current-values card / other charts).',
   },
   converter: {
     suspensionToggle: 'Suspension calibration (click to expand)',
