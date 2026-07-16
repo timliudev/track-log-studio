@@ -66,6 +66,9 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // Owned here (not locally in AnalyzerView) so future cursor-following readouts
   // can subscribe to it; presentational charts still receive it as a prop.
   const cursorIdx = ref<number | null>(null)
+  // Transient but store-owned so switching away from the analyzer (which
+  // unmounts AnalyzerView) does not reset the user's in-card map view.
+  const mapMaximized = ref(false)
   // Separate shared cursor for OVERLAY charts: an index into the shared
   // lap-relative grid (not a session sample index). Overlay charts all build the
   // same grid (same xValues + selected laps + gridPoints), so this index aligns
@@ -294,6 +297,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     charts,
     xRange,
     cursorIdx,
+    mapMaximized,
     overlayCursorIdx,
     trackChannel,
     trackColormap,

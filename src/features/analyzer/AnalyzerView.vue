@@ -68,7 +68,7 @@ const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
 const sectorStore = useSectorStore()
-const { charts, xAxis, xRange, cursorIdx, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
+const { charts, xAxis, xRange, cursorIdx, mapMaximized, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
   storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
@@ -775,8 +775,6 @@ function onResetLayout(): void {
 // canvas + buttons, not these sibling elements declared in this template.
 // With those hidden, TrackMap's existing `.fill` flex-grow expands to fill
 // the whole card body; no special sizing logic is needed here.
-const mapMaximized = ref(false)
-
 /** Per-chart card title: numbered by POSITION among same-kind charts (1-based,
  *  in `charts` array order) so titles stay short and stable-looking even
  *  though the underlying grid-item id is keyed by the chart's store id (see
@@ -940,6 +938,7 @@ function titleForItemId(id: string): string {
             >
               <TrackMap
                 fill-height
+                :maximized="mapMaximized"
                 :track="track"
                 :cursor-idx="cursorIdx"
                 :line="lapStore.line"

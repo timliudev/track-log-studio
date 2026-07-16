@@ -145,6 +145,8 @@ const props = defineProps<{
    * actual layout size).
    */
   fillHeight?: boolean
+  /** Store-owned host state, allowing maximize to survive view unmount/remount. */
+  maximized?: boolean
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
@@ -385,7 +387,7 @@ const showReset = computed(() => zoom.value !== 1 || panX.value !== 0 || panY.va
 // redrawing as that flex-driven size change happens. Still purely local UI
 // state (no analyzerStore/grid-layout involvement) beyond the one emitted
 // event a host may listen to.
-const maximized = ref(false)
+const maximized = ref(props.maximized ?? false)
 function toggleMaximize(): void {
   maximized.value = !maximized.value
 }
@@ -393,6 +395,9 @@ function onMaximizedKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && maximized.value) maximized.value = false
 }
 watch(maximized, (isMax) => emit('update:maximized', isMax))
+watch(() => props.maximized, (isMax) => {
+  if (isMax != null && isMax !== maximized.value) maximized.value = isMax
+})
 
 const PAD = 16
 // Visible endpoint radius and a larger touch-friendly hit radius (~44px target).
