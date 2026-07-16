@@ -1,6 +1,7 @@
 import type { Lap } from '@/domain/model/Lap'
 import type { GpsTrack } from './gpsTrack'
 import { cumulativeDistanceM } from './distance'
+import { lapDistanceM } from './lapDistance'
 
 /**
  * A valid lap-time band in SECONDS. Either bound may be null to leave that side
@@ -92,20 +93,6 @@ export function outOfBandDistanceLapIndices(
     if (isOutOfBand(lapDistanceM(lap, cum), band.minM, band.maxM)) out.push(lap.index)
   }
   return out
-}
-
-/**
- * One lap's travelled distance (metres) from a track's precomputed cumulative-
- * distance array. Clamps `startIdx`/`endIdx` into range (mirrors how a lap can
- * reference the very last sample) so a lap at the track's tail doesn't read
- * past the array; returns 0 for a degenerate (empty) track.
- */
-function lapDistanceM(lap: Lap, cumDistM: Float64Array): number {
-  const n = cumDistM.length
-  if (n === 0) return 0
-  const end = Math.min(lap.endIdx, n - 1)
-  const start = Math.min(lap.startIdx, n - 1)
-  return cumDistM[end] - cumDistM[start]
 }
 
 /** Fraction (±) applied to the median PLAUSIBLE-lap distance to pick the

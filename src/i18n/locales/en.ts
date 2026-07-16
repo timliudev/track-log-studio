@@ -152,6 +152,7 @@ export default {
     lapDistanceBandMax: 'Max',
     lapDistanceBandClear: 'Clear band',
     lapDistanceBandExcluded: '{x} laps outside band',
+    allLapsBandExcluded: 'All {n} detected laps are outside the validity bands. Review the time and distance bands below the track map.',
     resetLine: 'Reset line',
     lineHint: 'Drag the two endpoints on the track to set the start/finish line.',
     clearLapSelection: 'Clear selection',
@@ -214,6 +215,7 @@ export default {
     maximizeMap: 'Maximize track map',
     minimizeMap: 'Restore track map',
     sectorAutoDetect: 'Auto-detect corners',
+    sectorAutoDetectNoValidLap: 'No included lap is available. Review the valid-lap time and distance bands, then try again.',
     sectorRedetectConfirm:
       'Re-detecting will overwrite your manually-adjusted sector gates. Continue?',
     sectorAddGate: '+ Add gate',

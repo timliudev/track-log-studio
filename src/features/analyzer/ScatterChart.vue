@@ -10,7 +10,12 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 import type { GgSeries } from './GgChart.vue'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
-import { buildMultiSessionScatter } from '@/domain/analysis/multiSessionScatter'
+import {
+  buildMultiSessionScatter,
+  buildMultiSessionScatterLaps,
+  resolveComparisonLapPicks,
+} from '@/domain/analysis/multiSessionScatter'
+import { useLapStore } from '@/stores/lapStore'
 
 // A10+A12 — XY scatter chart TYPE: any two channels, managed exactly like
 // timeseries charts (multiple instances, per-chart config, remove button).
@@ -65,6 +70,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const analyzer = useAnalyzerStore()
+const lapStore = useLapStore()
 
 const allChannels = computed(() => {
   const s = props.session
@@ -128,15 +134,37 @@ const ggSeries = computed<GgSeries[]>(() => {
   const scale = useMilliG.value ? MILLI_G_SCALE : 1
   const comparisons = props.comparisonSessions ?? []
   if (comparisons.length > 0) {
-    return buildMultiSessionScatter([
+    const primaryId = props.primaryFileId ?? 0
+    const sources = [
       {
-        id: props.primaryFileId ?? 0,
+        id: primaryId,
         name: props.primaryFileName ?? t('analyzer.gg.session'),
-        color: categoricalColor(props.primaryFileId ?? 0),
+        color: categoricalColor(primaryId),
         session: s,
       },
       ...comparisons,
-    ], xName, yName, MAX_POINTS, colorChannel.value)
+    ]
+
+    // B57 — the primary's own selected laps (from the lap table, same source
+    // TimeSeriesChart's overlay uses) PLUS any laps picked from a comparison
+    // file's own per-lap table (`lapStore.selectedAcrossSessions` — see
+    // TimeSeriesChart.vue's `crossLapSources` for the identical merge). When
+    // this combined list is non-empty the scatter must follow the selection
+    // instead of silently falling back to whole-session clouds for every
+    // file — that fallback is the reported bug (圈次表選了圈之後散佈圖仍顯示
+    // 整個 session 的所有點).
+    const lapPicks = resolveComparisonLapPicks(
+      primaryId,
+      props.selectedLaps,
+      lapStore.selectedAcrossSessions,
+      comparisons,
+      (index) => t('analyzer.gg.lapSeries', { n: index + 1 }) as string,
+    )
+
+    if (lapPicks.length > 0) {
+      return buildMultiSessionScatterLaps(sources, lapPicks, xName, yName, MAX_POINTS, colorChannel.value)
+    }
+    return buildMultiSessionScatter(sources, xName, yName, MAX_POINTS, colorChannel.value)
   }
 
   // The selected Z channel is resolved once here (not per lap). A stale
