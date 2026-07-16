@@ -422,6 +422,8 @@ export default {
       unpin: '取消釘選',
       pinnedPlaceholder: '📌 已釘選於頂部',
       pinnedResizeHandle: '拖曳調整大小（點兩下重設）',
+      minimizePinned: '迷你模式（只顯示標題）',
+      expandPinned: '展開釘選卡片',
     },
   },
   suspension: {

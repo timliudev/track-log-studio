@@ -1701,20 +1701,7 @@ function titleForItemId(id: string): string {
 @media (max-width: 768px) {
   .pinned-anchor :deep(.dashboard-card) {
     width: 100%;
-  }
-  /* B36 — grid-resident cards go genuinely edge-to-edge on mobile (App.vue's
-     `.content` drops its own horizontal padding for exactly this — see its
-     comment), but a PINNED card deliberately keeps its full floating chrome
-     (border/radius/shadow — see DashboardCard.vue's `:not(.pinned)` bleed
-     exclusion): it's a floating element, not a flush list section. Without
-     its own inset here it would otherwise inherit `.analyzer`'s now-zero
-     ambient padding and sit border-to-screen-edge, which reads as a
-     misaligned card rather than a deliberately floating one. Restoring a
-     small gutter on the ANCHOR (rather than the card itself) means the
-     card's own `width: 100%` above still correctly fills 100% of this now-
-     inset content box. */
-  .pinned-anchor {
-    padding: 0 calc(var(--space) * 1.5);
+    margin-bottom: calc(var(--space) * 1.5);
   }
 }
 .pin-placeholder {

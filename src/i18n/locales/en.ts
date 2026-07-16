@@ -428,6 +428,8 @@ export default {
       unpin: 'Unpin',
       pinnedPlaceholder: '📌 Pinned at top',
       pinnedResizeHandle: 'Drag to resize (double-click to reset)',
+      minimizePinned: 'Minimize (show title only)',
+      expandPinned: 'Expand pinned card',
     },
   },
   suspension: {
