@@ -13,6 +13,7 @@ function seg(
   isFastest = false,
   timeMs = 1000,
   peakSpeedKmh = 100,
+  autoExcludedReason: AccelSegment['autoExcludedReason'] = null,
 ): AccelSegment {
   return {
     startIdx,
@@ -22,6 +23,9 @@ function seg(
     entrySpeedKmh: 0,
     exitSpeedKmh: 100,
     peakSpeedKmh,
+    speedIntegratedDistanceM: 100,
+    movingTimeRatio: 1,
+    autoExcludedReason,
     isFastest,
   }
 }
@@ -157,5 +161,46 @@ describe('AccelTestPanel peak speed affordance (B53)', () => {
   it('stays quiet for a monotonic run whose peak equals its exit speed', () => {
     const wrapper = mountPanel([seg(0, 10, true, 1000, 100)])
     expect(wrapper.find('.result-peak').exists()).toBe(false)
+  })
+})
+
+describe('AccelTestPanel result exclusion', () => {
+  it('shows automatic quality exclusions without allowing them to own the fastest badge', () => {
+    const wrapper = mountPanel([
+      seg(0, 1, false, 1000, 2, 'gpsJump'),
+      seg(10, 20, true, 4000),
+    ])
+    const rows = wrapper.findAll('.result')
+    expect(rows[0].classes()).toContain('excluded')
+    expect(rows[0].find('.exclusion-reason').text()).toContain('GPS 重新定位')
+    expect(rows[0].find('.fastest-badge').exists()).toBe(false)
+    expect(rows[1].classes()).toContain('fastest')
+    expect(wrapper.find('.result-count').text()).toContain('可用 1，已排除 1')
+  })
+
+  it('can restore an automatically excluded result and recomputes the fastest row', async () => {
+    const wrapper = mountPanel([
+      seg(0, 1, false, 1000, 2, 'gpsJump'),
+      seg(10, 20, true, 4000),
+    ])
+    await wrapper.findAll('.exclude-btn')[0].trigger('click')
+    const rows = wrapper.findAll('.result')
+    expect(rows[0].classes()).not.toContain('excluded')
+    expect(rows[0].classes()).toContain('fastest')
+    expect(rows[0].find('.exclude-btn').text()).toBe('排除此區段')
+    expect(rows[1].classes()).not.toContain('fastest')
+  })
+
+  it('can manually exclude and restore an otherwise valid result', async () => {
+    const wrapper = mountPanel([seg(0, 10, true, 1000), seg(20, 30, false, 2000)])
+    const firstButton = wrapper.findAll('.exclude-btn')[0]
+    await firstButton.trigger('click')
+    expect(wrapper.findAll('.result')[0].classes()).toContain('excluded')
+    expect(firstButton.text()).toBe('恢復此區段')
+    expect(wrapper.findAll('.result')[1].classes()).toContain('fastest')
+
+    await firstButton.trigger('click')
+    expect(wrapper.findAll('.result')[0].classes()).not.toContain('excluded')
+    expect(wrapper.findAll('.result')[0].classes()).toContain('fastest')
   })
 })

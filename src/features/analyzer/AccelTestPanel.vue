@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AccelSegment } from '@/domain/analysis/accelTest'
+import type { AccelAutoExclusionReason, AccelSegment } from '@/domain/analysis/accelTest'
 import { sortSegmentsByTime } from '@/domain/analysis/accelTest'
 import type { AccelCondition } from '@/stores/analyzerStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
@@ -35,6 +35,7 @@ const analyzer = useAnalyzerStore()
 // the row can render a highlight + toggle its own button, and so a global
 // "clear focus" affordance can appear.
 const focusedKey = ref<string | null>(null)
+const manualDecisions = ref<Record<string, 'include' | 'exclude'>>({})
 
 function segKey(seg: AccelSegment): string {
   return `${seg.startIdx}-${seg.endIdx}`
@@ -61,13 +62,39 @@ function clearFocus(): void {
   emit('clear')
 }
 
+function isExcluded(seg: AccelSegment): boolean {
+  const decision = manualDecisions.value[segKey(seg)]
+  return decision === 'exclude' || (decision !== 'include' && seg.autoExcludedReason != null)
+}
+
+function exclusionReason(seg: AccelSegment): AccelAutoExclusionReason | null {
+  return manualDecisions.value[segKey(seg)] == null ? seg.autoExcludedReason : null
+}
+
+function toggleExcluded(seg: AccelSegment): void {
+  const key = segKey(seg)
+  const exclude = !isExcluded(seg)
+  manualDecisions.value = { ...manualDecisions.value, [key]: exclude ? 'exclude' : 'include' }
+  if (exclude && isFocused(seg)) clearFocus()
+}
+
+function exclusionText(reason: AccelAutoExclusionReason | null): string {
+  if (reason === 'gpsJump') return t('analyzer.accelAutoExcludedGpsJump')
+  if (reason === 'speedDistanceMismatch') return t('analyzer.accelAutoExcludedSpeedMismatch')
+  if (reason === 'insufficientMovement') return t('analyzer.accelAutoExcludedInsufficientMovement')
+  return ''
+}
+
 // The result list changes (condition edited, new session, …) whenever a
 // fresh search runs — any previously-focused segment may no longer exist in
 // the new array, so drop the stale focus rather than leave the chart zoomed
 // to a span that no longer corresponds to a listed result.
 watch(
   () => props.results,
-  () => clearFocus(),
+  () => {
+    clearFocus()
+    manualDecisions.value = {}
+  },
 )
 
 // B48: displayed fastest-to-slowest (the search functions themselves stay
@@ -75,7 +102,19 @@ watch(
 // at the top, with the ⚡ fastest badge landing on row #1 as a result. Focus
 // state keys off `startIdx-endIdx` (segKey/isFocused below), not array index,
 // so re-sorting never disturbs which row is highlighted as focused.
-const sortedResults = computed(() => sortSegmentsByTime(props.results))
+const sortedResults = computed(() => {
+  const results = props.results.map((segment) => ({ ...segment, isFastest: false }))
+  let fastest: AccelSegment | null = null
+  for (const segment of results) {
+    if (isExcluded(segment)) continue
+    if (!fastest || segment.timeMs < fastest.timeMs) fastest = segment
+  }
+  if (fastest) fastest.isFastest = true
+  return sortSegmentsByTime(results)
+})
+
+const excludedCount = computed(() => props.results.filter(isExcluded).length)
+const includedCount = computed(() => props.results.length - excludedCount.value)
 
 const condition = computed(() => analyzer.accelCondition)
 const isDistance = computed(() => condition.value.kind === 'distance')
@@ -207,7 +246,13 @@ function showsPeak(seg: AccelSegment): boolean {
       <p v-if="!props.speedAvailable" class="hint">{{ t('analyzer.accelNoChannel') }}</p>
       <p v-else-if="props.results.length === 0" class="hint">{{ t('analyzer.accelNoMatch') }}</p>
       <div v-else class="row result-count-row">
-        <p class="hint result-count">{{ t('analyzer.accelResultCount', { n: props.results.length }) }}</p>
+        <p class="hint result-count">
+          {{ t('analyzer.accelResultCountWithExcluded', {
+            n: props.results.length,
+            included: includedCount,
+            excluded: excludedCount,
+          }) }}
+        </p>
         <button
           v-if="focusedKey != null"
           type="button"
@@ -224,7 +269,7 @@ function showsPeak(seg: AccelSegment): boolean {
         v-for="(seg, i) in sortedResults"
         :key="`${seg.startIdx}-${seg.endIdx}`"
         class="result"
-        :class="{ fastest: seg.isFastest, focused: isFocused(seg) }"
+        :class="{ fastest: seg.isFastest, focused: isFocused(seg), excluded: isExcluded(seg) }"
       >
         <span class="result-index">#{{ i + 1 }}</span>
         <span v-if="seg.isFastest" class="fastest-badge" :title="t('analyzer.accelFastest')">⚡</span>
@@ -239,8 +284,24 @@ function showsPeak(seg: AccelSegment): boolean {
         <span v-if="showsPeak(seg)" class="result-detail result-peak">
           {{ t('analyzer.accelPeakSpeed', { peak: fmtSpeed(seg.peakSpeedKmh) }) }}
         </span>
+        <span
+          v-if="exclusionReason(seg)"
+          class="result-detail exclusion-reason"
+          :title="exclusionText(exclusionReason(seg))"
+        >
+          {{ exclusionText(exclusionReason(seg)) }}
+        </span>
         <button type="button" class="focus-btn" :class="{ active: isFocused(seg) }" @click="onFocusClick(seg)">
           {{ isFocused(seg) ? t('analyzer.accelUnfocus') : t('analyzer.accelFocus') }}
+        </button>
+        <button
+          type="button"
+          class="exclude-btn"
+          :class="{ active: isExcluded(seg) }"
+          :aria-pressed="isExcluded(seg)"
+          @click="toggleExcluded(seg)"
+        >
+          {{ isExcluded(seg) ? t('analyzer.accelRestore') : t('analyzer.accelExclude') }}
         </button>
       </li>
     </ul>
@@ -351,6 +412,10 @@ function showsPeak(seg: AccelSegment): boolean {
 .result.focused {
   box-shadow: inset 3px 0 0 var(--color-accent);
 }
+.result.excluded > :not(button):not(.exclusion-reason) {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
 .result-index {
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
@@ -375,6 +440,11 @@ function showsPeak(seg: AccelSegment): boolean {
   font-style: italic;
   opacity: 0.85;
 }
+.exclusion-reason {
+  flex-basis: 100%;
+  color: var(--color-danger, var(--color-accent));
+  font-size: 0.8rem;
+}
 .focus-btn {
   margin-left: auto;
   background: var(--color-surface);
@@ -394,5 +464,24 @@ function showsPeak(seg: AccelSegment): boolean {
   background: var(--color-accent);
   color: var(--color-accent-text);
   border-color: var(--color-accent);
+}
+.exclude-btn {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.exclude-btn:hover,
+.exclude-btn.active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+:root[data-any-pointer-coarse] .focus-btn,
+:root[data-any-pointer-coarse] .exclude-btn {
+  min-height: 44px;
 }
 </style>
