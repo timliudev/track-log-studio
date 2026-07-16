@@ -129,6 +129,14 @@ const sectorCount = computed(() => sectorStore.gates.length + 1)
 const rows = computed(() =>
   buildLapTableRows(props.laps, ctx.value, lapStore.columns.map((c) => c.metric), lapStore.excluded),
 )
+
+// A manual exclusion or failed sector check needs a different remedy. This
+// notice only covers the two editable validity ranges shown beneath the map.
+const allLapsBandExcluded = computed(() => {
+  if (props.laps.length === 0) return false
+  const autoExcluded = new Set([...lapStore.bandExcluded, ...lapStore.distanceBandExcluded])
+  return props.laps.every((lap) => autoExcluded.has(lap.index))
+})
 </script>
 
 <template>
@@ -266,6 +274,9 @@ const rows = computed(() =>
         </div>
       </template>
     </LapTableView>
+    <p v-if="allLapsBandExcluded" class="band-excluded-hint" role="status">
+      {{ t('analyzer.allLapsBandExcluded', { n: laps.length }) }}
+    </p>
     <SessionLapComparison
       :primary-laps="laps"
       :primary-excluded="lapStore.excluded"
@@ -430,6 +441,11 @@ const rows = computed(() =>
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.band-excluded-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
 }
 .swatch {
   display: inline-block;

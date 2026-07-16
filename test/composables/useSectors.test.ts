@@ -75,7 +75,7 @@ describe('useSectors', () => {
     const laps = computed<Lap[]>(() => [wholeTrackLap(rowCount)])
 
     const { runAutoDetect } = useSectors(laps)
-    runAutoDetect()
+    expect(runAutoDetect()).toBe(true)
 
     expect(sectorStore.gates.length).toBeGreaterThan(0)
     expect(sectorStore.edited).toBe(false)
@@ -86,7 +86,7 @@ describe('useSectors', () => {
     const laps = computed<Lap[]>(() => [])
 
     const { runAutoDetect } = useSectors(laps)
-    runAutoDetect()
+    expect(runAutoDetect()).toBe(false)
 
     expect(sectorStore.gates).toEqual([])
   })
@@ -98,7 +98,7 @@ describe('useSectors', () => {
     const laps = computed<Lap[]>(() => []) // nothing to pick a reference from
 
     const { runAutoDetect } = useSectors(laps)
-    runAutoDetect()
+    expect(runAutoDetect()).toBe(false)
 
     expect(sectorStore.gates).toEqual([])
   })

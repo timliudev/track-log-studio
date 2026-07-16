@@ -19,7 +19,7 @@ import { sortGatesByPosition } from '@/domain/analysis/gateOrder'
  * the current recording, same as the start/finish line and lap selection.
  */
 export function useSectors(laps: ComputedRef<Lap[]>): {
-  runAutoDetect: () => void
+  runAutoDetect: () => boolean
   addGateAtCursor: (cursorIdx: number | null) => void
   reorderGates: () => void
 } {
@@ -31,14 +31,15 @@ export function useSectors(laps: ComputedRef<Lap[]>): {
     return pickReferenceLap(track.value!, laps.value, lapStore.excluded)
   }
 
-  function runAutoDetect(): void {
+  function runAutoDetect(): boolean {
     const s = session.value
     const tk = track.value
-    if (!s || !tk) return
+    if (!s || !tk) return false
     const lap = pickReferenceLap(tk, laps.value, lapStore.excluded)
-    if (!lap) return
+    if (!lap) return false
     const { corners } = detectCorners(s, tk, lap.startIdx, lap.endIdx)
     sectorStore.loadDetected(corners.map((corner) => cornerGateLine(tk, corner)))
+    return true
   }
 
   /**
