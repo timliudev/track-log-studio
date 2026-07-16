@@ -37,6 +37,7 @@ import {
   minSizeFor,
   isItemDraggable,
   isItemResizable,
+  resizeOptionFor,
   mergeLayoutPositions,
   compactLayoutTopLeft,
   compactVertical,
@@ -535,6 +536,10 @@ interface GridItemDecoration {
   isResizable: boolean
   minW: number
   minH: number
+  /** B59 — 手機單欄下鎖成只能改高度的 resize 邊界設定;桌面 `undefined`(用
+   *  GridItem 自己的預設,四邊都可拖)。見 dashboardLayout.ts 的
+   *  `resizeOptionFor`/`VERTICAL_ONLY_RESIZE_OPTION` doc。 */
+  resizeOption?: Record<string, unknown>
 }
 // B6 — per-card minimum size (see dashboardLayout.ts's minSizeFor) is carried
 // on the layout item the same way drag config is, so grid-layout-plus's OWN
@@ -550,7 +555,11 @@ interface GridItemDecoration {
 // slot is just an empty placeholder that shouldn't be draggable or resizable.
 function decorateForGrid(
   items: DashboardLayoutItem[],
+  mobile: boolean,
 ): (DashboardLayoutItem & GridItemDecoration)[] {
+  // B59 — computed ONCE per call (not per item): the same vertical-only
+  // resize-edge override applies to every card on mobile, none on desktop.
+  const resizeOption = resizeOptionFor(mobile)
   return items.map((it) => {
     const collapsed = isCollapsed(it.i)
     const min = minSizeFor(it.i)
@@ -566,6 +575,7 @@ function decorateForGrid(
       isResizable: isItemResizable(isResizable.value, isPinned(it.i)) && !collapsed,
       minW: min.minW,
       minH: collapsed ? COLLAPSED_ROWS : min.minH,
+      resizeOption,
     }
   })
 }
@@ -588,6 +598,7 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
       isMobile.value
         ? applyCollapsedHeights(mobileVisibleLayout.value, collapsedIds.value)
         : desktopDisplayLayout.value,
+      isMobile.value,
     ),
   set: (next) => {
     if (isMobile.value) {
