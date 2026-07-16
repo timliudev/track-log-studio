@@ -468,14 +468,15 @@ export default {
     statusDisabled: 'Disabled',
     statusChannelMissing: '(not present in the current log)',
     save: {
-      heading: 'Save calibrated .loga',
-      intro: 'Write the calibrated suspension travel into a new .loga (original untouched; columns are replaced if present, otherwise appended).',
-      none: 'No saveable files (enable calibration above and load a log with the matching SuspensionAD).',
+      heading: 'Save updated .loga',
+      intro: 'Write suspension calibration and CVT tuning notes to a new file without replacing the original.',
+      none: 'Nothing to save (enable suspension calibration or enter CVT tuning notes).',
       one: 'Save',
       all: 'Save all (ZIP)',
       busy: 'Processing…',
       replaced: 'replaced',
       appended: 'added',
+      cvtNotesSaved: '{count} CVT notes',
     },
   },
   theme: {
@@ -505,7 +506,7 @@ export default {
       importGuide: 'Import guide',
       vbo: 'The .vbo files are for Racelogic Circuit Tools 3 (and RaceChrono). Every ECU channel is exported; see the _channels.csv map for what each one is.',
       csv: 'The .csv is a generic, one-row-per-sample export (Time, GPS_Lat, GPS_Lon, GPS_Speed, then every other channel) for Race Studio 3, Excel, or any spreadsheet/analysis tool. Every ECU channel is exported automatically under its own name.',
-      loga: 'Writes the calibrated suspension travel (and other derived channels) into a new .loga (original untouched; columns are replaced if present, otherwise appended). Expand "Suspension calibration" below to adjust the parameters.',
+      loga: 'Writes suspension calibration and CVT tuning notes to a new .loga without replacing the original.',
       gpsNote:
         'Any recording that includes GPS data can be aligned to the map; without GPS (e.g. an ECU log with no GPS module attached) you can still convert sensor data (RC3), with the timestamp synthesized from the conversion time. (For aRacer .loga sources: the Race Module is required for GPS channels.)',
     },
@@ -552,12 +553,12 @@ export default {
     format: {
       label: 'Output format',
       loga: 'Save modified (.loga)',
-      logaDisabledHint: 'Only available when the original source is a .loga (writes calibrated suspension travel and other derived channels back into it).',
+      logaDisabledHint: 'Only available when the original source is a .loga.',
       hint: {
         nmea: 'RaceChrono DIY .nmea — GPS + RC3 sensor slots (mapped below).',
         vbo: 'Racelogic VBOX .vbo for Circuit Tools 3 — every channel exported automatically. Produces _ct.vbo, _rc.vbo and a _channels.csv map per log.',
         csv: 'Generic .csv (Race Studio 3 / Excel / Python) — every channel exported automatically, one row per sample.',
-        loga: 'Writes calibrated suspension travel and other derived channels into a new .loga (original left untouched). Only available when the source is itself a .loga.',
+        loga: 'Writes suspension calibration and CVT tuning notes to a new .loga without replacing the original.',
       },
       vboPanelNote:
         'VBO exports every channel automatically, so there is no field mapping to set. Each .loga produces _ct.vbo (Circuit Tools, original ECU names), _rc.vbo (RaceChrono identifiers) and a _channels.csv cross-reference.',

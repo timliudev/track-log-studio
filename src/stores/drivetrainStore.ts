@@ -371,6 +371,18 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     cvt.value = { ...cvt.value, notes: cvt.value.notes.filter((_, i) => i !== index) }
   }
 
+  /** Load the notes attached to the active recording while retaining empty
+   *  built-in fields for values that recording does not define. */
+  function replaceCvtNotes(notes?: readonly CvtNoteField[]): void {
+    const next = defaultCvtNotes()
+    for (const note of notes ?? []) {
+      const match = next.findIndex((candidate) => candidate.label === note.label)
+      if (match >= 0) next[match] = { label: note.label, value: note.value }
+      else next.push({ label: note.label, value: note.value })
+    }
+    cvt.value = { ...cvt.value, notes: next }
+  }
+
   /** Patch a single gear's ratio-input fields by 1-based gear number. */
   function setGearRatio(gear: number, patch: Partial<MtGearFormInput>): void {
     if (gear < 1 || gear > MAX_GEARS) return
@@ -479,6 +491,7 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     setCvtNote,
     addCvtNote,
     removeCvtNote,
+    replaceCvtNotes,
     setGearRatio,
     setGearCount,
     setInversionWheelCircumferenceMm,

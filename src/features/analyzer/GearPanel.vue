@@ -36,6 +36,7 @@ import type uPlot from 'uplot'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
+import { useFileStore } from '@/stores/fileStore'
 import {
   useDrivetrainStore,
   toMtDrivetrainSpec,
@@ -85,6 +86,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const store = useDrivetrainStore()
+const fileStore = useFileStore()
 
 const isMt = computed(() => store.kind === 'mt')
 
@@ -225,6 +227,35 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  [() => props.session, () => props.primaryFileId],
+  ([session, fileId]) => {
+    if (!session || fileId == null) return
+    store.replaceCvtNotes(fileStore.getExportMetadata(fileId).cvtNotes)
+  },
+  { immediate: true },
+)
+
+function syncCvtNotesToSession(): void {
+  if (props.primaryFileId == null || !props.session) return
+  fileStore.setExportMetadata(props.primaryFileId, { cvtNotes: store.cvt.notes })
+}
+
+function setSessionCvtNote(index: number, patch: { label?: string; value?: string }): void {
+  store.setCvtNote(index, patch)
+  syncCvtNotesToSession()
+}
+
+function addSessionCvtNote(): void {
+  store.addCvtNote()
+  syncCvtNotesToSession()
+}
+
+function removeSessionCvtNote(index: number): void {
+  store.removeCvtNote(index)
+  syncCvtNotesToSession()
+}
 
 function runCircumferenceEstimate(): void {
   const rpm = rpmData.value
@@ -924,21 +955,21 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
             type="text"
             :placeholder="t('analyzer.gear.noteLabelPlaceholder') as string"
             :value="n.label"
-            @input="store.setCvtNote(i, { label: ($event.target as HTMLInputElement).value })"
+            @input="setSessionCvtNote(i, { label: ($event.target as HTMLInputElement).value })"
           />
           <input
             class="note-value"
             type="text"
             :placeholder="t('analyzer.gear.noteValuePlaceholder') as string"
             :value="n.value"
-            @input="store.setCvtNote(i, { value: ($event.target as HTMLInputElement).value })"
+            @input="setSessionCvtNote(i, { value: ($event.target as HTMLInputElement).value })"
           />
-          <button type="button" class="note-remove" :aria-label="t('analyzer.gear.removeNote')" @click="store.removeCvtNote(i)">
+          <button type="button" class="note-remove" :aria-label="t('analyzer.gear.removeNote')" @click="removeSessionCvtNote(i)">
             ×
           </button>
         </div>
       </div>
-      <button type="button" class="note-add" @click="store.addCvtNote()">{{ t('analyzer.gear.addNote') }}</button>
+      <button type="button" class="note-add" @click="addSessionCvtNote()">{{ t('analyzer.gear.addNote') }}</button>
     </template>
   </div>
 </template>

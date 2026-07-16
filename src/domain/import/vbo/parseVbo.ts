@@ -17,6 +17,7 @@
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel, LogMeta } from '@/domain/model/types'
 import { canonicalName, descriptionOf } from '@/domain/parsing/canonical'
+import { decodeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
 
 /** The 7 fixed VBO GPS column tokens, in order. */
 const BASE_TOKENS = ['sats', 'time', 'lat', 'long', 'velocity', 'heading', 'height'] as const
@@ -248,15 +249,22 @@ export function parseVbo(text: string): LogSession {
   }
 
   const headerInfo: Record<string, string> = {}
+  let exportMetadata: ExportMetadata = {}
   for (const line of comments) {
     const m = line.match(/^([^:]+):\s*(.+)$/)
-    if (m) headerInfo[m[1].trim()] = m[2].trim()
+    if (m) {
+      const key = m[1].trim()
+      const value = m[2].trim()
+      headerInfo[key] = value
+      if (key === 'TLS-Metadata') exportMetadata = decodeExportMetadata(value)
+    }
   }
 
   const meta: LogMeta = {
     formatId: 'vbo',
     createdDate: parseCreatedDate(createdLine),
     headerInfo,
+    exportMetadata,
   }
   // Reference `units` to keep it available for future unit-aware mapping; it is
   // parallel to `header` but not currently surfaced on Channel.

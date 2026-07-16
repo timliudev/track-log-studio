@@ -1,6 +1,7 @@
 import type { LogSession } from '@/domain/model/LogSession'
 import { makeFixResolver } from '@/domain/gps/gpsFix'
 import { GPS_CONSUMED } from '@/domain/export/vbo/semantic'
+import { exportMetadataHeader, type ExportMetadata } from '@/domain/export/metadata'
 
 /**
  * ECU/GPS columns that are either folded into the leading GPS_Lat/GPS_Lon/
@@ -107,13 +108,12 @@ function csvField(value: string): string {
  *    canonical names (unlike `_channels.csv`, which embeds Chinese
  *    descriptions and therefore needs the BOM for Excel); RS3 and pandas both
  *    assume BOM-less UTF-8/ASCII for plain data CSVs.
- *  - No metadata comment block: RS3's CSV import was not available to verify
- *    tolerance for leading `#`-comment lines, so metadata is left OFF by
- *    default to keep every row a plain, importable data row. (A commented
- *    metadata preamble could be added later behind an option once RS3's
- *    import behaviour is confirmed.)
+ *  - Portable annotations use one trailing `TLS_Metadata/...` header with an
+ *    empty value in every data row. This remains a regular RFC 4180 column,
+ *    keeps all existing channel positions intact, and avoids non-standard
+ *    leading comment lines which some telemetry importers treat as data.
  */
-export function convertToCsv(session: LogSession): CsvArtifact[] {
+export function convertToCsv(session: LogSession, metadata?: ExportMetadata): CsvArtifact[] {
   const n = session.rowCount
   const timeCh = session.timeChannel?.data
   const fixResolver = makeFixResolver(session)
@@ -123,7 +123,15 @@ export function convertToCsv(session: LogSession): CsvArtifact[] {
     (c) => c.name !== '' && c.name !== session.timeChannel?.name && !CSV_GPS_DUPES.has(c.name),
   )
 
-  const header = ['Time', 'GPS_Lat', 'GPS_Lon', 'GPS_Speed', ...otherChannels.map((c) => c.name)]
+  const metadataHeader = exportMetadataHeader(metadata)
+  const header = [
+    'Time',
+    'GPS_Lat',
+    'GPS_Lon',
+    'GPS_Speed',
+    ...otherChannels.map((c) => c.name),
+    ...(metadataHeader ? [metadataHeader] : []),
+  ]
   const lines: string[] = [header.map(csvField).join(',')]
 
   for (let i = 0; i < n; i++) {
@@ -134,6 +142,7 @@ export function convertToCsv(session: LogSession): CsvArtifact[] {
       fix ? fmtCoord(fix.lonDd) : '',
       fmt(cell(speedCh, i)),
       ...otherChannels.map((c) => fmt(cell(c.data, i))),
+      ...(metadataHeader ? [''] : []),
     ]
     lines.push(row.join(','))
   }

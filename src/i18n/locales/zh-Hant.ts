@@ -462,14 +462,15 @@ export default {
     statusDisabled: '未啟用',
     statusChannelMissing: '（目前記錄無此通道）',
     save: {
-      heading: '另存校正後的 .loga',
-      intro: '把校正後的避震行程寫進一份新的 .loga（不複寫原檔；欄位有就替換、沒有就新增）。',
-      none: '沒有可另存的檔案（需在上方啟用校正，且記錄含對應的 SuspensionAD）。',
+      heading: '另存更新後的 .loga',
+      intro: '把避震校正與 CVT 調教備註寫入新檔，不覆蓋原檔。',
+      none: '沒有可另存的內容（需啟用避震校正或填寫 CVT 調教備註）。',
       one: '另存',
       all: '全部另存 (ZIP)',
       busy: '處理中…',
       replaced: '替換',
       appended: '新增',
+      cvtNotesSaved: 'CVT 備註 {count} 筆',
     },
   },
   theme: {
@@ -499,7 +500,7 @@ export default {
       importGuide: '匯入說明',
       vbo: '.vbo 檔供 Racelogic Circuit Tools 3（與 RaceChrono）使用。會輸出所有 ECU 通道；各通道對應請見 _channels.csv 對照表。',
       csv: '.csv 為通用格式（每筆取樣一列：Time、GPS_Lat、GPS_Lon、GPS_Speed，之後接每個其他通道），可供 Race Studio 3、Excel 或任何試算表/分析工具匯入。會自動輸出所有 ECU 通道，各自使用自己的通道名稱。',
-      loga: '把校正後的避震行程等衍生通道寫進一份新的 .loga（不覆寫原始檔案；欄位有就替換、沒有就新增）。可於下方展開「避震校正」調整參數。',
+      loga: '把避震校正與 CVT 調教備註寫入新的 .loga，不覆蓋原檔。',
       gpsNote:
         '只要記錄含有 GPS 資料，就能對位到底圖；若無 GPS（例如未接 GPS 模組的 ECU 記錄檔），仍可轉出感測器數據（RC3），此時時間戳以轉檔當下時間合成。（若來源為 aRacer .loga：需安裝 Race Module 才會有 GPS 頻道。）',
     },
@@ -546,12 +547,12 @@ export default {
     format: {
       label: '輸出格式',
       loga: '另存修改 (.loga)',
-      logaDisabledHint: '僅原始來源為 .loga 時可用（把校正後的避震行程等衍生通道寫回原始 .loga）。',
+      logaDisabledHint: '僅原始來源為 .loga 時可用。',
       hint: {
         nmea: 'RaceChrono DIY .nmea — GPS + RC3 感測器槽位（於下方對應）。',
         vbo: 'Racelogic VBOX .vbo，給 Circuit Tools 3 用 — 自動輸出所有通道。每個 log 會產生 _ct.vbo、_rc.vbo 與 _channels.csv 對照表。',
         csv: '通用 .csv（給 Race Studio 3 / Excel / Python 用）— 自動輸出所有通道，每筆取樣一列。',
-        loga: '把校正後的避震行程等衍生通道寫回一份新的 .loga（不覆寫原始檔案）。僅原始來源為 .loga 時可用。',
+        loga: '把避震校正與 CVT 調教備註寫入新的 .loga，不覆蓋原檔。',
       },
       vboPanelNote:
         'VBO 會自動輸出所有通道，無需設定欄位對應。每個 .loga 會產生 _ct.vbo（Circuit Tools，原始 ECU 名稱）、_rc.vbo（RaceChrono 識別符）與 _channels.csv 對照表。',
