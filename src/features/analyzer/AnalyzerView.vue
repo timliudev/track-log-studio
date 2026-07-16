@@ -450,6 +450,7 @@ const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.lengt
 // How many laps fail the sector-gate-crossing check (0 when no gates are
 // confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
 const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
+const sectorAllFailed = computed(() => lapStore.sectorAllFailed)
 
 // --- 鎖定布局: a single global toggle disabling drag+resize for every card,
 // independent of per-card pin (see usePanelState below) — folded into
@@ -1114,6 +1115,7 @@ function titleForItemId(id: string): string {
               <SectorPanel
                 :laps="laps"
                 :invalid-count="sectorInvalidCount"
+                :all-failed="sectorAllFailed"
                 :track="track"
                 :time-ms="timeMs"
                 :cursor-idx="cursorIdx"

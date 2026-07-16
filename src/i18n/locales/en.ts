@@ -174,6 +174,8 @@ export default {
     excludedByBand: 'Auto-excluded by the valid lap-time band',
     excludedByDistanceBand: 'Auto-excluded by the valid lap-distance band',
     excludedBySector: 'Auto-excluded — failed sector check',
+    excludedBySectorNumber: 'Auto-excluded — failed sector S{n}',
+    sectorAllFailedWarning: 'Every lap failed the sector check. Adjust the gates; automatic exclusion is not applied.',
     bestLap: 'Fastest lap',
     slowestLap: 'Slowest lap',
     alignTitle: 'Overlay alignment',

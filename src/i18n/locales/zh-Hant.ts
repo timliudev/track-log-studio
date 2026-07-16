@@ -171,6 +171,8 @@ export default {
     excludedByBand: '已由有效圈速區間自動排除',
     excludedByDistanceBand: '已由有效圈距離區間自動排除',
     excludedBySector: '未通過 sector 檢查自動排除',
+    excludedBySectorNumber: '未通過 S{n} sector 檢查自動排除',
+    sectorAllFailedWarning: '所有圈次皆未通過 sector 檢查；請調整閘門，目前不套用自動排除。',
     bestLap: '最快圈',
     slowestLap: '最慢圈',
     alignTitle: '疊圈對位微調',

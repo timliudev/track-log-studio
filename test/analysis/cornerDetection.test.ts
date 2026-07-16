@@ -9,6 +9,7 @@ import {
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import { haversineM } from '@/domain/export/rc3Nmea/geo'
+import { planarGate, walkLapGates } from '@/domain/analysis/laps'
 
 // These tests exercise the peak-separation ALGORITHM on synthetic (low-noise)
 // signals, so they pass lenient, explicit thresholds rather than relying on
@@ -195,7 +196,7 @@ describe('pickReferenceLap', () => {
 })
 
 describe('cornerGateLine', () => {
-  it('builds a line centred on the corner, perpendicular to local heading, halfWidthM to each side', () => {
+  it('builds a line just after the corner, perpendicular to local heading, halfWidthM to each side', () => {
     const turnRates = singleHump(20, 20, 9)
     const track = walkTrack(turnRates)
     const [corner] = detectCornersByCurvature(track, 0, track.valid.length, LENIENT)
@@ -207,5 +208,18 @@ describe('cornerGateLine', () => {
     expect(haversineM(corner.lat, corner.lon, line.b.lat, line.b.lon)).toBeCloseTo(halfWidthM, 0)
     // The two endpoints should be ~2*halfWidthM apart (a straight line through the apex).
     expect(haversineM(line.a.lat, line.a.lon, line.b.lat, line.b.lon)).toBeCloseTo(halfWidthM * 2, 0)
+  })
+
+  it('places a detected gate between distinct GPS fixes so its own reference lap crosses it', () => {
+    const track: GpsTrack = {
+      lat: Float64Array.from([23, 23, 23, 23]),
+      // The first two rows repeat one GPS fix, as ECU-rate logs commonly do.
+      lon: Float64Array.from([120, 120, 120.0001, 120.0002]),
+      valid: Uint8Array.from([1, 1, 1, 1]),
+    }
+    const corner = { index: 0, distanceM: 0, lat: 23, lon: 120, value: 1, prominence: 1 }
+    const gate = cornerGateLine(track, corner)
+    const crossed = walkLapGates(track, { startIdx: 0, endIdx: 3 }, [planarGate(gate)], () => {})
+    expect(crossed).toBe(1)
   })
 })

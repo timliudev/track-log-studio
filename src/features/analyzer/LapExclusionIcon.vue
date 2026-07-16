@@ -1,7 +1,7 @@
 <script setup lang="ts">
 export type LapExclusionReason = 'manual' | 'timeBand' | 'distBand' | 'sector'
 
-defineProps<{ reason: LapExclusionReason }>()
+defineProps<{ reason: LapExclusionReason; sectorNumber?: number | null }>()
 </script>
 
 <template>
@@ -19,7 +19,7 @@ defineProps<{ reason: LapExclusionReason }>()
       <path d="m9 13 2 2m1-5 2 2m1-5 2 2" />
     </template>
     <template v-else>
-      <path d="M5 21V4m0 1h10l-2 4 2 4H5" />
+      <text x="12" y="15" text-anchor="middle" fill="currentColor" stroke="none" :font-size="(sectorNumber ?? 0) >= 10 ? 7 : 8.5" font-weight="700">S{{ sectorNumber ?? '?' }}</text>
     </template>
   </svg>
 </template>

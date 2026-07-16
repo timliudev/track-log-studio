@@ -11,15 +11,16 @@ import { computeSectorTimes, computeOptimalLap } from '@/domain/analysis/sectorT
 import { formatLapTime } from '@/domain/analysis/format'
 import CardFillScroll from '@/components/CardFillScroll.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   laps: Lap[]
   invalidCount: number
+  allFailed?: boolean
   track: GpsTrack | null
   timeMs: Float64Array | null
   /** Current map hover sample, so "add gate" can drop a gate at the cursor
    *  position rather than always at the reference lap's midpoint. */
   cursorIdx: number | null
-}>()
+}>(), { allFailed: false })
 
 const { t } = useI18n()
 const sectorStore = useSectorStore()
@@ -81,6 +82,9 @@ const hasOptimalData = computed(
         </button>
         <span v-if="invalidCount > 0" class="invalid-count">
           {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
+        </span>
+        <span v-else-if="allFailed" class="invalid-count" role="status">
+          {{ t('analyzer.sectorAllFailedWarning') }}
         </span>
         <span v-if="autoDetectHint" class="detect-hint" role="status">
           {{ t('analyzer.sectorAutoDetectNoValidLap') }}

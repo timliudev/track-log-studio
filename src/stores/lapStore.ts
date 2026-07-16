@@ -9,7 +9,7 @@ import {
   type LapTimeBand,
   type LapDistanceBand,
 } from '@/domain/analysis/lapValidity'
-import { invalidSectorLapIndices } from '@/domain/analysis/sectorValidity'
+import { evaluateSectorValidity } from '@/domain/analysis/sectorValidity'
 import { swapPrimaryLapState } from '@/domain/analysis/primaryLapSwap'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
@@ -136,8 +136,17 @@ export const useLapStore = defineStore('lap', () => {
   // sequence). Empty whenever there is no track yet or no gates are confirmed —
   // so with zero gates this term contributes nothing, keeping `excluded`
   // byte-identical to before sector gates existed.
+  const sectorValidity = computed(() =>
+    track.value
+      ? evaluateSectorValidity(laps.value, track.value, sectorStore.gates)
+      : { failures: [], allFailed: false },
+  )
+  // B67 policy: a gate set that rejects every lap is treated as a bad gate
+  // configuration and surfaced as a warning, not allowed to erase the entire
+  // usable lap set. Once at least one lap passes, failing laps are excluded.
+  const sectorAllFailed = computed(() => sectorValidity.value.allFailed)
   const sectorInvalid = computed<number[]>(() =>
-    track.value ? invalidSectorLapIndices(laps.value, track.value, sectorStore.gates) : [],
+    sectorAllFailed.value ? [] : sectorValidity.value.failures.map((failure) => failure.lapIndex),
   )
 
   // The effective exclusion set feeding best-lap / delta / overlays: a lap is
@@ -382,6 +391,10 @@ export const useLapStore = defineStore('lap', () => {
     return null
   }
 
+  function sectorFailureNumber(i: number): number | null {
+    return sectorValidity.value.failures.find((failure) => failure.lapIndex === i)?.missedSector ?? null
+  }
+
   /** Replace the detected-laps the store derives band exclusions from. */
   function setLaps(next: Lap[]): void {
     laps.value = next
@@ -548,6 +561,8 @@ export const useLapStore = defineStore('lap', () => {
     bandExcluded,
     distanceBandExcluded,
     sectorInvalid,
+    sectorAllFailed,
+    sectorFailureNumber,
     lapTimeBand,
     lapDistanceBand,
     lapTimeBandOrigin,

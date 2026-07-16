@@ -23,6 +23,7 @@ defineProps<{
   /** Which exclusion rule applies. A non-excluded row uses the manual icon as
    *  the familiar action affordance until the user excludes it. */
   reason?: LapExclusionReason | null
+  sectorNumber?: number | null
 }>()
 
 const emit = defineEmits<{ toggle: [] }>()
@@ -39,7 +40,7 @@ const emit = defineEmits<{ toggle: [] }>()
     :aria-disabled="disabled"
     @click.stop="!disabled && emit('toggle')"
   >
-    <LapExclusionIcon :reason="reason ?? 'manual'" />
+    <LapExclusionIcon :reason="reason ?? 'manual'" :sector-number="sectorNumber" />
   </button>
 </template>
 

@@ -110,7 +110,7 @@ function excludeLabel(index: number): string {
   if (reason === 'manual') return t('analyzer.excludedManually')
   if (reason === 'timeBand') return t('analyzer.excludedByBand')
   if (reason === 'distBand') return t('analyzer.excludedByDistanceBand')
-  if (reason === 'sector') return t('analyzer.excludedBySector')
+  if (reason === 'sector') return t('analyzer.excludedBySectorNumber', { n: lapStore.sectorFailureNumber(index) ?? '?' })
   return reason === 'manual' ? t('analyzer.includeLap') : t('analyzer.excludeLap')
 }
 
@@ -273,6 +273,7 @@ const allLapsBandExcluded = computed(() => {
             :disabled="excludeDisabled(row.index)"
             :label="excludeLabel(row.index)"
             :reason="lapStore.exclusionReason(row.index)"
+            :sector-number="lapStore.sectorFailureNumber(row.index)"
             @toggle="lapStore.toggleExcluded(row.index)"
           />
           <span
