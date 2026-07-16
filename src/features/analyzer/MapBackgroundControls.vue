@@ -96,7 +96,7 @@ function choose(e: Event): void {
   color: inherit;
   cursor: pointer;
   /* B60 — 常駐可點擊區域，不靠 hover 呈現（DESIGN.md §8 觸控政策）。 */
-  min-height: 32px;
+  min-height: 24px;
 }
 :root[data-any-pointer-coarse] .toggle { min-height: 44px; }
 .toggle-label { flex: 1; text-align: left; }
