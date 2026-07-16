@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildMultiSessionScatter } from '@/domain/analysis/multiSessionScatter'
+import {
+  buildMultiSessionScatter,
+  buildMultiSessionScatterLaps,
+  resolveComparisonLapPicks,
+} from '@/domain/analysis/multiSessionScatter'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 
@@ -85,5 +89,146 @@ describe('buildMultiSessionScatter', () => {
     )
 
     expect(result).toEqual([{ points: [[1, 2]], color: '#a00', name: 'A', symbol: 'circle' }])
+  })
+})
+
+// B57 — regression coverage for the "圈次表選了圈之後，散佈圖沒有跟著切圈"
+// bug: multi-session comparison mode used to always plot the WHOLE session
+// for every source, silently ignoring any lap selection (ScatterChart.vue's
+// ggSeries called buildMultiSessionScatter unconditionally whenever
+// comparisonSessions was non-empty). buildMultiSessionScatterLaps is the
+// lap-aware replacement path.
+describe('buildMultiSessionScatterLaps', () => {
+  it('clips each source to its own selected lap range instead of the whole session', () => {
+    const result = buildMultiSessionScatterLaps(
+      [
+        { id: 1, name: 'A', color: '#a00', session: session({ X: [1, 2, 3, 4], Y: [10, 20, 30, 40] }) },
+        { id: 2, name: 'B', color: '#0a0', session: session({ X: [5, 6, 7, 8], Y: [50, 60, 70, 80] }) },
+      ],
+      [
+        { sourceId: 1, index: 0, startIdx: 1, endIdx: 3, label: 'Lap 1' },
+        { sourceId: 2, index: 2, startIdx: 0, endIdx: 2, label: 'Lap 3' },
+      ],
+      'X',
+      'Y',
+    )
+
+    expect(result).toEqual([
+      { points: [[2, 20], [3, 30]], color: '#a00', name: 'A · Lap 1', symbol: 'circle' },
+      { points: [[5, 50], [6, 60]], color: '#0a0', name: 'B · Lap 3', symbol: 'triangle' },
+    ])
+  })
+
+  it('draws one clipped series per lap when a source has multiple selected laps', () => {
+    const result = buildMultiSessionScatterLaps(
+      [{ id: 1, name: 'A', color: '#a00', session: session({ X: [1, 2, 3, 4, 5, 6], Y: [1, 2, 3, 4, 5, 6] }) }],
+      [
+        { sourceId: 1, index: 0, startIdx: 0, endIdx: 2, label: 'Lap 1' },
+        { sourceId: 1, index: 1, startIdx: 3, endIdx: 6, label: 'Lap 2' },
+      ],
+      'X',
+      'Y',
+    )
+
+    expect(result.map((s) => s.name)).toEqual(['A · Lap 1', 'A · Lap 2'])
+    expect(result[0].points).toEqual([[1, 1], [2, 2]])
+    expect(result[1].points).toEqual([[4, 4], [5, 5], [6, 6]])
+    // Same session → same colour for both laps (hue stays file identity, not lap order).
+    expect(result[0].color).toBe('#a00')
+    expect(result[1].color).toBe('#a00')
+  })
+
+  it('omits a source entirely when it has no lap in the pick list (no whole-session fallback per source)', () => {
+    const result = buildMultiSessionScatterLaps(
+      [
+        { id: 1, name: 'A', color: '#a00', session: session({ X: [1, 2], Y: [1, 2] }) },
+        { id: 2, name: 'B', color: '#0a0', session: session({ X: [3, 4], Y: [3, 4] }) },
+      ],
+      [{ sourceId: 1, index: 0, startIdx: 0, endIdx: 2, label: 'Lap 1' }],
+      'X',
+      'Y',
+    )
+
+    expect(result.map((s) => s.name)).toEqual(['A · Lap 1'])
+  })
+
+  it('routes the third channel to the colour axis within the clipped range', () => {
+    const result = buildMultiSessionScatterLaps(
+      [{ id: 1, name: 'A', color: '#a00', session: session({ X: [1, 2, 3], Y: [1, 2, 3], RPM: [100, 200, 300] }) }],
+      [{ sourceId: 1, index: 0, startIdx: 1, endIdx: 3, label: 'Lap 1' }],
+      'X',
+      'Y',
+      5000,
+      'RPM',
+    )
+
+    expect(result).toEqual([
+      { points: [[2, 2], [3, 3]], colorValues: [200, 300], color: '#a00', name: 'A · Lap 1', symbol: 'circle' },
+    ])
+  })
+})
+
+describe('resolveComparisonLapPicks', () => {
+  // `lapLabel` mirrors the i18n-formatted label ScatterChart.vue actually
+  // passes (t('analyzer.gg.lapSeries', { n: index + 1 })) without pulling in
+  // vue-i18n here — this module has no i18n dependency, see its doc.
+  const label = (index: number): string => `Lap ${index + 1}`
+
+  it('carries the primary laps through unchanged', () => {
+    const picks = resolveComparisonLapPicks(
+      1,
+      [{ index: 0, startIdx: 10, endIdx: 20 }, { index: 2, startIdx: 40, endIdx: 60 }],
+      [],
+      [],
+      label,
+    )
+    expect(picks).toEqual([
+      { sourceId: 1, index: 0, startIdx: 10, endIdx: 20, label: 'Lap 1' },
+      { sourceId: 1, index: 2, startIdx: 40, endIdx: 60, label: 'Lap 3' },
+    ])
+  })
+
+  it('resolves a cross-session ref to that file’s own lap range', () => {
+    const picks = resolveComparisonLapPicks(
+      1,
+      [],
+      [{ fileId: 2, index: 1 }],
+      [{ id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 5 }, { index: 1, startIdx: 5, endIdx: 12 }] }],
+      label,
+    )
+    expect(picks).toEqual([{ sourceId: 2, index: 1, startIdx: 5, endIdx: 12, label: 'Lap 2' }])
+  })
+
+  it('drops a stale cross-session ref whose file is no longer a comparison', () => {
+    const picks = resolveComparisonLapPicks(1, [], [{ fileId: 9, index: 0 }], [
+      { id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 5 }] },
+    ], label)
+    expect(picks).toEqual([])
+  })
+
+  it('drops a stale cross-session ref whose lap index no longer exists on that file', () => {
+    const picks = resolveComparisonLapPicks(1, [], [{ fileId: 2, index: 5 }], [
+      { id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 5 }] },
+    ], label)
+    expect(picks).toEqual([])
+  })
+
+  it('returns an empty list when nothing is selected anywhere — the caller\'s cue to fall back to whole-session plotting', () => {
+    const picks = resolveComparisonLapPicks(1, [], [], [{ id: 2, laps: [] }], label)
+    expect(picks).toEqual([])
+  })
+
+  it('merges primary and cross-session picks in order', () => {
+    const picks = resolveComparisonLapPicks(
+      1,
+      [{ index: 0, startIdx: 0, endIdx: 10 }],
+      [{ fileId: 2, index: 0 }],
+      [{ id: 2, laps: [{ index: 0, startIdx: 0, endIdx: 8 }] }],
+      label,
+    )
+    expect(picks).toEqual([
+      { sourceId: 1, index: 0, startIdx: 0, endIdx: 10, label: 'Lap 1' },
+      { sourceId: 2, index: 0, startIdx: 0, endIdx: 8, label: 'Lap 1' },
+    ])
   })
 })
