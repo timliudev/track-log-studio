@@ -167,6 +167,7 @@ export default {
     removeColumn: '移除欄位',
     excludeLap: '排除此圈（爛圈，不列入最快圈）',
     includeLap: '取消排除',
+    excludedManually: '手動排除',
     excludedByBand: '已由有效圈速區間自動排除',
     excludedByDistanceBand: '已由有效圈距離區間自動排除',
     excludedBySector: '未通過 sector 檢查自動排除',

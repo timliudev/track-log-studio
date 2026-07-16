@@ -19,6 +19,8 @@ import type { LogSession } from '@/domain/model/LogSession'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import SessionLapComparison from './SessionLapComparison.vue'
 import LapExcludeToggle from './LapExcludeToggle.vue'
+import LapExclusionLegend from './LapExclusionLegend.vue'
+import type { LapExclusionReason } from './LapExclusionIcon.vue'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 
 const props = defineProps<{
@@ -105,11 +107,18 @@ function swatchColor(index: number): string {
  */
 function excludeLabel(index: number): string {
   const reason = lapStore.exclusionReason(index)
+  if (reason === 'manual') return t('analyzer.excludedManually')
   if (reason === 'timeBand') return t('analyzer.excludedByBand')
   if (reason === 'distBand') return t('analyzer.excludedByDistanceBand')
   if (reason === 'sector') return t('analyzer.excludedBySector')
   return reason === 'manual' ? t('analyzer.includeLap') : t('analyzer.excludeLap')
 }
+
+const exclusionLegendReasons = computed<LapExclusionReason[]>(() => {
+  const order: LapExclusionReason[] = ['manual', 'timeBand', 'distBand', 'sector']
+  const reasons = new Set(props.laps.map((lap) => lapStore.exclusionReason(lap.index)).filter((reason): reason is LapExclusionReason => reason != null))
+  return order.filter((reason) => reasons.has(reason))
+})
 
 /** Whether lap `index`'s ⦸ toggle should be disabled: auto-excluded (time band,
  *  distance band, or sector) laps can't be un-excluded by hand while the rule
@@ -263,6 +272,7 @@ const allLapsBandExcluded = computed(() => {
             :excluded="lapStore.isExcluded(row.index)"
             :disabled="excludeDisabled(row.index)"
             :label="excludeLabel(row.index)"
+            :reason="lapStore.exclusionReason(row.index)"
             @toggle="lapStore.toggleExcluded(row.index)"
           />
           <span
@@ -274,6 +284,7 @@ const allLapsBandExcluded = computed(() => {
         </div>
       </template>
     </LapTableView>
+    <LapExclusionLegend :reasons="exclusionLegendReasons" />
     <p v-if="allLapsBandExcluded" class="band-excluded-hint" role="status">
       {{ t('analyzer.allLapsBandExcluded', { n: laps.length }) }}
     </p>

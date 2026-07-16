@@ -170,6 +170,7 @@ export default {
     removeColumn: 'Remove column',
     excludeLap: 'Exclude this lap (garbage, omit from best lap)',
     includeLap: 'Re-include lap',
+    excludedManually: 'Manually excluded',
     excludedByBand: 'Auto-excluded by the valid lap-time band',
     excludedByDistanceBand: 'Auto-excluded by the valid lap-distance band',
     excludedBySector: 'Auto-excluded — failed sector check',
