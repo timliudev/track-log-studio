@@ -1046,7 +1046,10 @@ let mode: Mode = 'idle'
 // same hit radius, pointer-capture and toGeo conversion as the start/finish
 // line; only the emitted event and its target line differ.
 type DragTarget = { kind: 'line' } | { kind: 'gate'; index: number }
-let dragging: { target: DragTarget; handle: 'a' | 'b' } | null = null
+type DragHandle = 'a' | 'b' | 'mid'
+let dragging: { target: DragTarget; handle: DragHandle } | null = null
+let dragStartGeo: { lat: number; lon: number } | null = null
+let dragOriginLine: LapLine | null = null
 // Drag geometry is deliberately local until pointer-up. Updating the Pinia
 // owner on every pixel used to invalidate lap detection, validity bands and
 // sector checks for the full recording during the gesture. The overlay canvas
@@ -1114,14 +1117,26 @@ function nearestHandle(
   return da <= db ? { handle: 'a', distSq: da } : { handle: 'b', distSq: db }
 }
 
+function gateHandle(line: LapLine, mx: number, my: number): { handle: DragHandle; distSq: number } | null {
+  const endpoint = nearestHandle(line, mx, my)
+  if (!projection) return endpoint
+  const a = projection.toPixel(line.a.lat, line.a.lon)
+  const b = projection.toPixel(line.b.lat, line.b.lon)
+  const midX = (a.x + b.x) / 2
+  const midY = (a.y + b.y) / 2
+  const distSq = (midX - mx) ** 2 + (midY - my) ** 2
+  if (distSq > HANDLE_HIT * HANDLE_HIT) return endpoint
+  return !endpoint || distSq < endpoint.distSq ? { handle: 'mid', distSq } : endpoint
+}
+
 /**
  * Which handle (if any) is under the pointer, within the hit radius — checked
  * across the start/finish line AND every gate. When several targets' handles
  * overlap, the closest one wins.
  */
-function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | 'b' } | null {
+function handleAt(mx: number, my: number): { target: DragTarget; handle: DragHandle } | null {
   if (!projection) return null
-  let best: { target: DragTarget; handle: 'a' | 'b'; distSq: number } | null = null
+  let best: { target: DragTarget; handle: DragHandle; distSq: number } | null = null
 
   if (props.line) {
     const hit = nearestHandle(props.line, mx, my)
@@ -1130,7 +1145,7 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 
   const gates = props.gates ?? []
   gates.forEach((g, index) => {
-    const hit = nearestHandle(g.line, mx, my)
+    const hit = gateHandle(g.line, mx, my)
     if (hit && (!best || hit.distSq < best.distSq)) {
       best = { target: { kind: 'gate', index }, handle: hit.handle, distSq: hit.distSq }
     }
@@ -1183,13 +1198,16 @@ function onPointerDown(e: PointerEvent): void {
   if (h) {
     mode = 'line'
     dragging = h
+    dragStartGeo = projection?.toGeo(pos.x, pos.y) ?? null
     if (h.target.kind === 'line' && props.line) {
       draftLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+      dragOriginLine = { a: { ...props.line.a }, b: { ...props.line.b } }
     } else if (h.target.kind === 'gate') {
       const gate = (props.gates ?? [])[h.target.index]
       draftGate = gate
         ? { index: h.target.index, line: { a: { ...gate.line.a }, b: { ...gate.line.b } } }
         : null
+      dragOriginLine = gate ? { a: { ...gate.line.a }, b: { ...gate.line.b } } : null
     }
     // Remove the dragged target from the static layer once; subsequent moves
     // repaint only the tiny interaction overlay.
@@ -1232,12 +1250,19 @@ function onPointerMove(e: PointerEvent): void {
     if (target.kind === 'line') {
       if (!draftLine) return
       const next: LapLine = { a: { ...draftLine.a }, b: { ...draftLine.b } }
-      next[handle] = { lat: geo.lat, lon: geo.lon }
+      if (handle !== 'mid') next[handle] = { lat: geo.lat, lon: geo.lon }
       draftLine = next
     } else {
       if (!draftGate || draftGate.index !== target.index) return
       const next: LapLine = { a: { ...draftGate.line.a }, b: { ...draftGate.line.b } }
-      next[handle] = { lat: geo.lat, lon: geo.lon }
+      if (handle === 'mid' && dragStartGeo && dragOriginLine) {
+        const dLat = geo.lat - dragStartGeo.lat
+        const dLon = geo.lon - dragStartGeo.lon
+        next.a = { lat: dragOriginLine.a.lat + dLat, lon: dragOriginLine.a.lon + dLon }
+        next.b = { lat: dragOriginLine.b.lat + dLat, lon: dragOriginLine.b.lon + dLon }
+      } else if (handle !== 'mid') {
+        next[handle] = { lat: geo.lat, lon: geo.lon }
+      }
       draftGate = { index: target.index, line: next }
     }
     drawInteractionOverlay()
@@ -1335,6 +1360,8 @@ function onPointerUp(e: PointerEvent): void {
     if (dragging?.target.kind === 'gate' && draftGate) emit('update:gate', draftGate.index, draftGate.line)
     mode = 'idle'
     dragging = null
+    dragStartGeo = null
+    dragOriginLine = null
     panLast = null
     drawInteractionOverlay()
   }

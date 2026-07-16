@@ -225,4 +225,44 @@ describe('TrackMap line drag commit boundary', () => {
     expect(updates?.[0][0].a).not.toEqual(line.a)
     expect(updates?.[0][0].b).toEqual(line.b)
   })
+
+  it('moves a whole sector gate from its numbered midpoint and commits on pointer-up', async () => {
+    const track = straightTrack(50)
+    const gate: LapLine = {
+      a: { lat: track.lat[20] - 0.0005, lon: track.lon[20] },
+      b: { lat: track.lat[20] + 0.0005, lon: track.lon[20] },
+    }
+    const w = mountMap(track)
+    await w.setProps({ gates: [{ line: gate, confirmed: true }] })
+    const canvas = w.find('canvas.track').element as HTMLCanvasElement
+    const overlay = w.find('canvas.track-interaction').element as HTMLCanvasElement
+    // @ts-expect-error test stub
+    canvas.getContext = () => stubContext(vi.fn())
+    // @ts-expect-error test stub
+    overlay.getContext = () => stubContext(vi.fn())
+    for (const element of [canvas, overlay]) {
+      Object.defineProperty(element, 'clientWidth', { value: 400, configurable: true })
+      Object.defineProperty(element, 'clientHeight', { value: 300, configurable: true })
+    }
+    Object.defineProperty(canvas, 'getBoundingClientRect', {
+      value: () => ({ left: 0, top: 0, width: 400, height: 300, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }),
+      configurable: true,
+    })
+    canvas.setPointerCapture = vi.fn()
+    canvas.releasePointerCapture = vi.fn()
+    await w.setProps({ track: { ...track } })
+    const projection = fitProjection(track, 400, 300, 16)!
+    const a = projection.toPixel(gate.a.lat, gate.a.lon)
+    const b = projection.toPixel(gate.b.lat, gate.b.lon)
+    const midpoint = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+    await w.find('canvas.track').trigger('pointerdown', { pointerId: 2, pointerType: 'mouse', clientX: midpoint.x, clientY: midpoint.y })
+    await w.find('canvas.track').trigger('pointermove', { pointerId: 2, pointerType: 'mouse', clientX: midpoint.x + 20, clientY: midpoint.y + 10 })
+    expect(w.emitted('update:gate')).toBeUndefined()
+    await w.find('canvas.track').trigger('pointerup', { pointerId: 2, pointerType: 'mouse', clientX: midpoint.x + 20, clientY: midpoint.y + 10 })
+    const updates = w.emitted<[number, LapLine]>('update:gate')
+    expect(updates).toHaveLength(1)
+    expect(updates?.[0][0]).toBe(0)
+    expect(updates?.[0][1].a).not.toEqual(gate.a)
+    expect(updates?.[0][1].b).not.toEqual(gate.b)
+  })
 })
