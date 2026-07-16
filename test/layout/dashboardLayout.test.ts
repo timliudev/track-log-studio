@@ -16,6 +16,8 @@ import {
   resolveOverlaps,
   isItemDraggable,
   isItemResizable,
+  resizeOptionFor,
+  VERTICAL_ONLY_RESIZE_OPTION,
   mergeLayoutPositions,
   compactLayoutTopLeft,
   compactVertical,
@@ -799,6 +801,32 @@ describe('isItemDraggable / isItemResizable (lock + pin interplay)', () => {
   it('is never draggable/resizable when the card itself is pinned, even if the grid allows it', () => {
     expect(isItemDraggable(true, true)).toBe(false)
     expect(isItemResizable(true, true)).toBe(false)
+  })
+})
+
+describe('resizeOptionFor (B59 — mobile single-column resize locked to height-only)', () => {
+  it('returns undefined on desktop — GridItem keeps its own default free 4-edge resize', () => {
+    expect(resizeOptionFor(false)).toBeUndefined()
+  })
+
+  it('returns an edges override on mobile that disables every edge except bottom', () => {
+    const opt = resizeOptionFor(true)
+    expect(opt).toEqual(VERTICAL_ONLY_RESIZE_OPTION)
+    const edges = (opt as { edges: Record<string, unknown> }).edges
+    expect(edges.left).toBe(false)
+    expect(edges.right).toBe(false)
+    expect(edges.top).toBe(false)
+    // The remaining active edge must still be scoped to grid-layout-plus's
+    // own resizer-handle selector (not `true`, which would turn the whole
+    // bottom EDGE of the card into a drag-to-resize strip) — same selector
+    // AnalyzerView.vue's <style> already themes (`.vgl-item__resizer`).
+    expect(edges.bottom).toBe('.vgl-item__resizer')
+  })
+
+  it('the mobile override never re-enables a horizontal edge (regression guard for the B59 right-edge creep)', () => {
+    const edges = (resizeOptionFor(true) as { edges: Record<string, unknown> }).edges
+    expect(edges.left).not.toBe(true)
+    expect(edges.right).not.toBe(true)
   })
 })
 

@@ -142,19 +142,34 @@ export function useLaps(): {
   // not tied to one file — comparison recordings already re-detect their own
   // laps off this SAME shared line/source (see setSource's doc above), so a
   // primary swap within the same loaded set has no reason to reset them.
+  //
+  // B58 part 2 — a swap also has to SUPPRESS the auto-band-suggestion watcher
+  // below for this one flush: that watcher reacts to `laps` changing for ANY
+  // reason (including the track switching underneath a swap), and would
+  // otherwise stomp a swap-preserved 'auto' band with a fresh suggestion from
+  // the newly-promoted session's laps. `suppressAutoBandSuggest` is peeked
+  // (and consumed) by that watcher, which runs in the 'post' phase — always
+  // after this 'pre' (default) watcher — so it always sees an up-to-date value.
+  let suppressAutoBandSuggest = false
   watch(
     track,
     (next, prev) => {
-      if (prev && next !== prev && !lapStore.primarySwapPending) {
-        lapStore.clearLine()
-        // Lap selection, garbage exclusions and alignment offsets are keyed by
-        // lap index, which is meaningless across a different recording — clear
-        // them all on file change.
-        lapStore.clearAllLapSelections()
-        lapStore.clearExcluded()
-        lapStore.clearLapTimeBand()
-        lapStore.clearLapDistanceBand()
-        lapStore.clearOffsets()
+      if (prev && next !== prev) {
+        if (lapStore.primarySwapPending) {
+          suppressAutoBandSuggest = true
+        } else {
+          lapStore.clearLine()
+          // Lap selection, garbage exclusions and alignment offsets are keyed
+          // by lap index, which is meaningless across a different recording —
+          // clear them all on file change. Clearing the bands also re-arms
+          // their auto-suggestion origin (see lapStore.clearLapTimeBand's doc),
+          // so the fresh track's laps get a fresh suggestion below.
+          lapStore.clearAllLapSelections()
+          lapStore.clearExcluded()
+          lapStore.clearLapTimeBand()
+          lapStore.clearLapDistanceBand()
+          lapStore.clearOffsets()
+        }
       }
       if (next && lapStore.line == null) {
         const seeded = defaultLine(next)
@@ -164,38 +179,39 @@ export function useLaps(): {
     { immediate: true },
   )
 
-  // Auto-suggest the valid lap-time AND lap-distance bands once per genuinely
-  // new track — never on every `laps` recompute. A new track discards both
-  // bands first, even if they contain values from the old track; otherwise a
-  // user-edited range can silently exclude every lap on the next circuit.
-  // Within one track, values are never overwritten. Primary swaps deliberately
-  // retain the shared bands and do not schedule another suggestion.
-  let pendingBandSuggestion = false
-  watch(track, (next, prev) => {
-    if (next === prev) return
-    if (next && !lapStore.primarySwapPending) {
-      lapStore.clearLapTimeBand()
-      lapStore.clearLapDistanceBand()
-      pendingBandSuggestion = true
-    } else {
-      pendingBandSuggestion = false
-    }
-  })
+  // Auto-suggest the valid lap-time AND lap-distance bands whenever the
+  // detected laps change (a new track, a dragged start/finish line, or a
+  // lap-source switch) — as long as the corresponding band hasn't been
+  // explicitly edited by the user (origin 'user', set by AnalyzerView's panel
+  // inputs via setLapTimeBand/setLapDistanceBand). This intentionally keeps
+  // re-suggesting on every genuine laps recompute rather than once per track:
+  // the seeded default line is a tiny placeholder near the first GPS fix, so
+  // the FIRST laps a brand-new track ever produces are themselves garbage
+  // micro-laps (B58) — there is no reliable one-shot moment to suggest from,
+  // only "keep refreshing until the user takes over".
+  //
+  // Clearing a band (the panel's 清除 button, or blanking both its inputs)
+  // resets its origin to null via clearLapTimeBand/clearLapDistanceBand,
+  // which RE-ARMS this watcher for that band: the next laps change (typically
+  // the next line drag) suggests it again. This is a deliberate trade-off —
+  // "clear" behaves as "reset and try again", matching what B58's report
+  // expected, not as a permanent per-track opt-out. A user who wants no band
+  // at all can still get there by typing a band that intentionally includes
+  // every lap, which (being a user edit) is never touched by this watcher.
   watch(
     laps,
     (next) => {
-      if (!pendingBandSuggestion) return
+      const suppressed = suppressAutoBandSuggest
+      suppressAutoBandSuggest = false
+      if (suppressed) return
       if (next.length === 0) return
       const t = track.value
       if (!t) return
-      pendingBandSuggestion = false
-      if (lapStore.lapTimeBand == null) {
-        const suggestion = suggestLapTimeBand(t, next)
-        if (suggestion) lapStore.setLapTimeBand(suggestion)
+      if (lapStore.lapTimeBandOrigin !== 'user') {
+        lapStore.applyAutoLapTimeBand(suggestLapTimeBand(t, next))
       }
-      if (lapStore.lapDistanceBand == null) {
-        const suggestion = suggestLapDistanceBand(t, next)
-        if (suggestion) lapStore.setLapDistanceBand(suggestion)
+      if (lapStore.lapDistanceBandOrigin !== 'user') {
+        lapStore.applyAutoLapDistanceBand(suggestLapDistanceBand(t, next))
       }
     },
     { immediate: true, flush: 'post' },

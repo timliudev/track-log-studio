@@ -3,6 +3,12 @@ import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PIN_FLIP_EASING } from '@/domain/layout/flip'
 import { playFlipTransition, prefersReducedMotion, useAutoFlip } from '@/composables/useFlipAnimation'
+import {
+  DEFAULT_TOUCH_DRAG_DELAY,
+  advanceOnMove,
+  advanceOnTimeout,
+  type TouchDragDelayState,
+} from '@/domain/layout/touchDragDelay'
 
 /**
  * #8/#9 — one grid item's visual chrome on the analyzer dashboard: a header
@@ -65,6 +71,62 @@ import { playFlipTransition, prefersReducedMotion, useAutoFlip } from '@/composa
  *    same way #19's pin-toggle does. It's turned OFF while `pinned` (the
  *    Teleport move above already animates that case explicitly; running
  *    both here would double-animate the same transform).
+ *
+ * B61 — touch on `.drag-handle` used to hand off straight to grid-layout-
+ * plus's own interactjs-driven drag exactly like a mouse press, which fights
+ * a finger trying to SCROLL the page starting from a card's title (a natural
+ * place to start a scroll swipe once cards stack full-width on mobile — see
+ * B36). Mouse/pen still start dragging immediately (`onDragHandlePointerDown`
+ * returns early for anything but `pointerType === 'touch'` — §8 layer 2:
+ * branch per-event on pointerType, never on breakpoint/device). For touch,
+ * this component now runs its own long-press gate BEFORE grid-layout-plus's
+ * interactjs ever sees the gesture:
+ *
+ *  1. `touch-action` on `.drag-handle` was `none` (blocks ALL native touch
+ *     handling unconditionally, including scroll) — changed to `pan-y` below
+ *     so a finger that starts moving vertically before the hold completes
+ *     scrolls the page completely natively (we never call `preventDefault`
+ *     during the pending window, so the browser is free to do so).
+ *  2. `onDragHandlePointerDown` calls `event.stopPropagation()` on a
+ *     qualifying touch pointerdown — verified by reading interactjs's own
+ *     source (node_modules/interactjs/dist/interact.js): it listens for
+ *     `pointerdown` on `document`, in the BUBBLE phase (`onDocSignal`'s
+ *     `eventMethod(doc, type, listener, eventOptions)`, no `capture: true`
+ *     anywhere in that path) — a `stopPropagation()` called on this
+ *     DESCENDANT element during the event's target phase therefore keeps the
+ *     event from ever reaching interactjs's listener at all, regardless of
+ *     Vue's own (deferred-by-a-tick) reactivity timing. Interactjs simply
+ *     never learns this touch happened until step 4.
+ *  3. A `setTimeout(DEFAULT_TOUCH_DRAG_DELAY.delayMs)` starts, tracked
+ *     against real `pointermove`/`pointerup`/`pointercancel` on `window` and
+ *     fed through touchDragDelay.ts's pure state machine
+ *     (`advanceOnMove`/`advanceOnTimeout`) — movement past the threshold
+ *     cancels (this was scroll intent all along, and since step 1 never
+ *     blocked native scrolling, the page is already scrolling normally by
+ *     this point); an early `pointerup` cancels too (a tap, not a hold).
+ *  4. If the timer wins (finger held still long enough): a synthetic
+ *     `pointerdown` `PointerEvent`, carrying the SAME `pointerId` and the
+ *     latest tracked coordinates, is dispatched on the drag handle itself —
+ *     this time WITHOUT `stopPropagation()`, so it bubbles normally and
+ *     interactjs (confirmed via the same source read to have no `isTrusted`
+ *     check anywhere) picks it up as a brand-new drag candidate for that
+ *     pointerId. The REAL subsequent `pointermove`/`pointerup` for the same
+ *     finger (still physically down) then reach interactjs's own document
+ *     listeners normally and it drives the drag exactly like the mouse path
+ *     — including flipping grid-layout-plus's own `.vgl-item--dragging`
+ *     class (opacity/z-index) once it recognises the drag, which doubles as
+ *     this feature's "you're now dragging" visual cue. A short-lived local
+ *     `touchArmed` class on the header additionally highlights the INSTANT
+ *     the hold completes (before any further finger movement), so a
+ *     still-finger long-press gets feedback even before that library class
+ *     would appear.
+ *
+ * This has NOT been exercised on a real touchscreen (this project's dev/test
+ * environment cannot paint/dispatch genuine touch input — see #20/B32's own
+ * notes on the same limitation) — the state machine itself is unit-tested
+ * offline (touchDragDelay.test.ts), but the synthetic-pointerdown handoff to
+ * interactjs is a structural fix that needs a real Android/iOS device to
+ * confirm end-to-end (see the acceptance checklist wherever this ships).
  */
 const props = defineProps<{
   title: string
@@ -97,6 +159,144 @@ const { t } = useI18n()
 // just above `onTogglePinned` below) because B18's resize handle also reads
 // it, above that.
 const rootEl = ref<HTMLElement | null>(null)
+
+// B61 — long-press-to-drag gate for touch pointers on the header — see this
+// component's module doc above for the full design/why. `dragHandleEl` is
+// where the pointerdown listener lives AND where the synthetic hand-off
+// pointerdown gets (re-)dispatched from once armed.
+const dragHandleEl = ref<HTMLElement | null>(null)
+// Transient visual cue: true for a short window right when the long-press
+// completes (see `onTouchDragTimeout`), separate from — and earlier than —
+// grid-layout-plus's own `.vgl-item--dragging` class, which only appears
+// once interactjs actually recognises the handed-off drag on the NEXT
+// finger movement.
+const touchArmed = ref(false)
+const TOUCH_ARMED_VISUAL_MS = 400
+
+let touchDragState: TouchDragDelayState | null = null
+let touchDragTimer: ReturnType<typeof setTimeout> | null = null
+let touchDragStart: { x: number; y: number; pointerId: number } | null = null
+let touchDragLatest: { x: number; y: number } | null = null
+
+/** Tears down whatever's left of an in-flight (or just-finished) long-press
+ *  tracking session — timer, window listeners, local state. Safe to call
+ *  from any point (idempotent: a second call with nothing pending is a
+ *  no-op), which is why every exit path below (cancel, arm, unmount) just
+ *  calls this rather than duplicating the cleanup. */
+function clearTouchDragTracking(): void {
+  if (touchDragTimer != null) {
+    clearTimeout(touchDragTimer)
+    touchDragTimer = null
+  }
+  window.removeEventListener('pointermove', onTouchDragMove)
+  window.removeEventListener('pointerup', onTouchDragEnd)
+  window.removeEventListener('pointercancel', onTouchDragEnd)
+  touchDragState = null
+  touchDragStart = null
+  touchDragLatest = null
+}
+
+function onTouchDragMove(e: PointerEvent): void {
+  if (!touchDragState || !touchDragStart || e.pointerId !== touchDragStart.pointerId) return
+  touchDragLatest = { x: e.clientX, y: e.clientY }
+  touchDragState = advanceOnMove(touchDragState, touchDragStart.x, touchDragStart.y, e.clientX, e.clientY)
+  if (touchDragState === 'cancelled') clearTouchDragTracking()
+}
+
+function onTouchDragEnd(e: PointerEvent): void {
+  if (!touchDragStart || e.pointerId !== touchDragStart.pointerId) return
+  clearTouchDragTracking()
+}
+
+// B61 — marks the synthetic hand-off pointerdown (see `onTouchDragTimeout`)
+// so `onDragHandlePointerDown` — bound to the SAME `.drag-handle` element
+// this gets dispatched on — recognises and ignores its own hand-off rather
+// than treating it as a brand-new touch and re-arming a second long-press
+// cycle around it (which would stopPropagation() it right back out, and
+// grid-layout-plus's document-level listener would never see it at all).
+const TOUCH_HANDOFF_MARKER = '__b61TouchHandoff'
+
+function onTouchDragTimeout(): void {
+  touchDragTimer = null
+  if (!touchDragState || !touchDragStart) return
+  touchDragState = advanceOnTimeout(touchDragState)
+  if (touchDragState !== 'armed') return
+
+  const { pointerId } = touchDragStart
+  const { x, y } = touchDragLatest ?? touchDragStart
+  const handle = dragHandleEl.value
+  // Our own job (deciding pending/cancelled) is done — stop tracking so a
+  // REAL pointermove/up from here on reaches interactjs's own listeners
+  // unobstructed (see step 4 of the module doc above) instead of also being
+  // consumed here.
+  window.removeEventListener('pointermove', onTouchDragMove)
+  window.removeEventListener('pointerup', onTouchDragEnd)
+  window.removeEventListener('pointercancel', onTouchDragEnd)
+  touchDragState = null
+  touchDragStart = null
+  touchDragLatest = null
+
+  touchArmed.value = true
+  window.setTimeout(() => {
+    touchArmed.value = false
+  }, TOUCH_ARMED_VISUAL_MS)
+
+  if (!handle) return
+  // Hand off to grid-layout-plus: this touch's ORIGINAL pointerdown was
+  // never seen by interactjs (stopPropagation'd in
+  // onDragHandlePointerDown) — a fresh synthetic one, same pointerId so the
+  // REAL subsequent move/up events (still the same physical finger) are
+  // correctly attributed to the interaction this starts.
+  const synthetic = new PointerEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    pointerId,
+    pointerType: 'touch',
+    clientX: x,
+    clientY: y,
+    isPrimary: true,
+    button: 0,
+    buttons: 1,
+  })
+  ;(synthetic as PointerEvent & Record<string, boolean>)[TOUCH_HANDOFF_MARKER] = true
+  handle.dispatchEvent(synthetic)
+}
+
+function onDragHandlePointerDown(e: PointerEvent): void {
+  // Our own synthetic hand-off, arriving back at the very listener that
+  // dispatched it (same element) — let it through untouched so it can
+  // bubble on to grid-layout-plus, see TOUCH_HANDOFF_MARKER's doc above.
+  if ((e as PointerEvent & Record<string, boolean>)[TOUCH_HANDOFF_MARKER]) return
+  // Mouse/pen keep today's behaviour — start dragging immediately via
+  // grid-layout-plus's own interactjs handling, untouched by anything below
+  // (§8 layer 2: branch on the EVENT's pointerType, never on device/width).
+  if (e.pointerType !== 'touch') return
+  // Header buttons (pin/collapse, `.actions`) must keep their plain tap
+  // behaviour — same region grid-layout-plus's own `dragIgnoreFrom` already
+  // excludes from ITS drag recognition; excluded here too so this gate
+  // never eats their click.
+  if ((e.target as HTMLElement).closest('.actions')) return
+  // Belt-and-braces: a second finger touching the handle while one gesture
+  // is already pending/tracked should not stomp on it.
+  if (touchDragState) return
+
+  // The key move: block this pointerdown from ever reaching interactjs
+  // (which listens on `document`, bubble phase — see module doc) so it
+  // cannot start a drag from this touch at all. No `preventDefault()` here,
+  // so the browser's native vertical pan (`touch-action: pan-y`, see the
+  // style below) is completely free to take over if this turns out to be a
+  // scroll gesture.
+  e.stopPropagation()
+
+  touchDragState = 'pending'
+  touchDragStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
+  touchDragLatest = null
+
+  window.addEventListener('pointermove', onTouchDragMove)
+  window.addEventListener('pointerup', onTouchDragEnd)
+  window.addEventListener('pointercancel', onTouchDragEnd)
+  touchDragTimer = setTimeout(onTouchDragTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
+}
 
 // B18 — pinned cards can be resized by dragging a corner handle (see
 // `.pin-resize-handle` below). This is DELIBERATELY separate from
@@ -319,12 +519,20 @@ onBeforeUnmount(() => {
   // would never remove them on its own.
   window.removeEventListener('pointermove', onPinResizePointerMove)
   window.removeEventListener('pointerup', onPinResizePointerUp)
+  // B61 — same belt-and-braces reasoning: the long-press tracking listeners
+  // are also on `window`, not this component's own DOM.
+  clearTouchDragTracking()
 })
 </script>
 
 <template>
   <div ref="rootEl" class="dashboard-card" :class="{ pinned, collapsed }" :style="cardStyle">
-    <header class="drag-handle">
+    <header
+      ref="dragHandleEl"
+      class="drag-handle"
+      :class="{ 'touch-armed': touchArmed }"
+      @pointerdown="onDragHandlePointerDown"
+    >
       <span class="title">{{ title }}</span>
       <span class="actions">
         <slot name="actions" />
@@ -477,14 +685,30 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg);
   cursor: move;
-  /* Prevent the browser's own touch scroll/select from fighting the grid's
-     own pointer-based drag handling on touch devices (desktop-only feature,
-     but harmless to set unconditionally). */
-  touch-action: none;
+  /* B61 fix — was `none` (blocks ALL native touch handling unconditionally,
+     including scroll), which is exactly why a touch starting on the title
+     used to fight a page-scroll swipe: the browser had zero chance to ever
+     treat it as a scroll. `pan-y` keeps native vertical scrolling available
+     by default; `onDragHandlePointerDown`'s long-press gate (see this
+     component's module doc) is what takes over — and calls
+     `preventDefault()`/lets interactjs do so — ONLY once a hold is
+     confirmed, never during the pending window. Mouse/pen are unaffected
+     either way (`touch-action` only governs touch/pen-as-touch gesture
+     handling, not mouse dragging). */
+  touch-action: pan-y;
   user-select: none;
+  transition: background-color 0.15s ease;
 }
 .dashboard-card.collapsed .drag-handle {
   border-bottom: none;
+}
+/* B61 — brief highlight the instant a touch long-press is confirmed (before
+   grid-layout-plus's own `.vgl-item--dragging` opacity/z-index kicks in on
+   the NEXT finger movement — see the handoff in `onTouchDragTimeout`), so a
+   finger held perfectly still still gets immediate "you can drag now"
+   feedback rather than nothing happening until it moves. */
+.drag-handle.touch-armed {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-bg));
 }
 .title {
   font-size: 0.9rem;

@@ -402,7 +402,7 @@ export default {
       resetLayout: 'Reset layout',
       resetLayoutConfirm: 'Reset the dashboard layout to its default arrangement?',
       dragHint: 'Drag a card\'s title bar to move it, drag the bottom-right corner to resize',
-      dragHintMobile: 'Drag a card\'s title bar to reorder it, drag the bottom-right corner to resize its height',
+      dragHintMobile: 'Press and hold a card\'s title bar to reorder it, drag the bottom-right corner to resize its height',
       lockLayout: 'Lock layout',
       unlockLayout: 'Unlock layout',
       lockLayoutHint: 'Locking disables dragging and resizing for every card — tap again to unlock',

@@ -19,6 +19,10 @@ import { useSectorStore } from '@/stores/sectorStore'
 /** How laps are detected: a user-placed start/finish line, or the ECU channel. */
 export type LapSource = 'line' | 'ecu'
 
+/** Where a lap-time/lap-distance band's current value came from — see
+ *  `lapTimeBandOrigin`/`lapDistanceBandOrigin` below for the full contract. */
+export type BandOrigin = 'auto' | 'user'
+
 /** Stable lap identity once more than one recording is in play. */
 export interface SessionLapRef {
   fileId: number
@@ -96,6 +100,18 @@ export const useLapStore = defineStore('lap', () => {
   // can wait inside the track long enough to match the time band, but its
   // distance is clearly short, and a wrong-line/extra-loop lap is clearly long.
   const lapDistanceBand = ref<LapDistanceBand | null>(null)
+
+  // B58 part 2 — where the CURRENT band value came from, so useLaps.ts knows
+  // whether it's safe to overwrite it with a fresh suggestion when the laps
+  // change (e.g. the start/finish line gets dragged): 'auto' means the value
+  // is a suggestion nothing has touched yet, 'user' means the panel's inputs
+  // set it explicitly and it must be left alone. `null` alongside a `null`
+  // band means "unset and free to (re-)suggest" — the state a track starts
+  // in, and the state `clear*Band` below re-arms to, so the NEXT laps change
+  // suggests again rather than leaving the filter off forever. Kept in lockstep
+  // with the band value itself by every setter below; never assigned on its own.
+  const lapTimeBandOrigin = ref<BandOrigin | null>(null)
+  const lapDistanceBandOrigin = ref<BandOrigin | null>(null)
 
   // Cross-store read: confirmed sector gates live in sectorStore (drawn/accepted
   // via SectorPanel). Read here, at store setup, same pattern as
@@ -377,32 +393,69 @@ export const useLapStore = defineStore('lap', () => {
   }
 
   /**
-   * Set the valid lap-time band (seconds, inclusive). Either bound may be null to
-   * leave that side open; an all-null band clears the constraint. Out-of-band
-   * laps are then folded into the excluded set automatically.
+   * Set the valid lap-time band (seconds, inclusive) from the ANALYZER PANEL'S
+   * inputs — i.e. a user edit. Either bound may be null to leave that side
+   * open; an all-null band clears the constraint. Marks the origin 'user' (or
+   * `null`, re-arming auto-suggestion, when the result is an all-null clear)
+   * so useLaps.ts's suggestion watcher leaves a real value alone from now on.
+   * Out-of-band laps are then folded into the excluded set automatically.
    */
   function setLapTimeBand(band: LapTimeBand | null): void {
-    lapTimeBand.value =
-      band && (band.minSec != null || band.maxSec != null) ? band : null
-  }
-
-  /** Clear the valid lap-time band (manual exclusions are untouched). */
-  function clearLapTimeBand(): void {
-    lapTimeBand.value = null
+    const next = band && (band.minSec != null || band.maxSec != null) ? band : null
+    lapTimeBand.value = next
+    lapTimeBandOrigin.value = next ? 'user' : null
   }
 
   /**
-   * Set the valid lap-distance band (metres, inclusive). Either bound may be
-   * null to leave that side open; an all-null band clears the constraint.
-   * Out-of-band laps are then folded into the excluded set automatically.
+   * Auto-suggest the valid lap-time band from the current laps (useLaps.ts
+   * only — never called for a user edit). Unlike {@link setLapTimeBand} this
+   * marks the origin 'auto', so a LATER auto-suggestion is still free to
+   * overwrite it; only a user edit stops that. `null` (nothing to suggest
+   * from) still re-arms the origin so the next laps change tries again.
    */
-  function setLapDistanceBand(band: LapDistanceBand | null): void {
-    lapDistanceBand.value = band && (band.minM != null || band.maxM != null) ? band : null
+  function applyAutoLapTimeBand(band: LapTimeBand | null): void {
+    const next = band && (band.minSec != null || band.maxSec != null) ? band : null
+    lapTimeBand.value = next
+    lapTimeBandOrigin.value = next ? 'auto' : null
   }
 
-  /** Clear the valid lap-distance band (manual exclusions/time band are untouched). */
+  /**
+   * Clear the valid lap-time band (manual exclusions are untouched). Also
+   * re-arms auto-suggestion (origin -> null) so the NEXT laps change (e.g.
+   * dragging the start/finish line again) suggests a fresh band instead of
+   * leaving the filter off until the user reopens the panel — matching what
+   * "清除區間" is expected to do: reset, not permanently disable.
+   */
+  function clearLapTimeBand(): void {
+    lapTimeBand.value = null
+    lapTimeBandOrigin.value = null
+  }
+
+  /**
+   * Set the valid lap-distance band (metres, inclusive) from the ANALYZER
+   * PANEL'S inputs — the distance-band analogue of {@link setLapTimeBand}
+   * (same null/open-side/origin rules). Out-of-band laps are then folded into
+   * the excluded set automatically.
+   */
+  function setLapDistanceBand(band: LapDistanceBand | null): void {
+    const next = band && (band.minM != null || band.maxM != null) ? band : null
+    lapDistanceBand.value = next
+    lapDistanceBandOrigin.value = next ? 'user' : null
+  }
+
+  /** Auto-suggest the valid lap-distance band — the distance-band analogue of
+   *  {@link applyAutoLapTimeBand} (same origin/overwrite rules). */
+  function applyAutoLapDistanceBand(band: LapDistanceBand | null): void {
+    const next = band && (band.minM != null || band.maxM != null) ? band : null
+    lapDistanceBand.value = next
+    lapDistanceBandOrigin.value = next ? 'auto' : null
+  }
+
+  /** Clear the valid lap-distance band (manual exclusions/time band are
+   *  untouched). Also re-arms auto-suggestion — see {@link clearLapTimeBand}. */
   function clearLapDistanceBand(): void {
     lapDistanceBand.value = null
+    lapDistanceBandOrigin.value = null
   }
 
   /** This lap's CHART shift for `axis` (0 when none set). */
@@ -497,6 +550,8 @@ export const useLapStore = defineStore('lap', () => {
     sectorInvalid,
     lapTimeBand,
     lapDistanceBand,
+    lapTimeBandOrigin,
+    lapDistanceBandOrigin,
     columns,
     offsets,
     sessionLapOffsets,
@@ -525,8 +580,10 @@ export const useLapStore = defineStore('lap', () => {
     setLaps,
     setTrack,
     setLapTimeBand,
+    applyAutoLapTimeBand,
     clearLapTimeBand,
     setLapDistanceBand,
+    applyAutoLapDistanceBand,
     clearLapDistanceBand,
     offsetOf,
     mapOffsetOf,
