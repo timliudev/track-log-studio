@@ -384,4 +384,133 @@ describe('DashboardCard (scaffold smoke test)', () => {
       expect(wrapper.attributes('style')).toBeUndefined()
     })
   })
+
+  describe('B61 — touch long-press gate before drag-reorder starts', () => {
+    // grid-layout-plus's own interactjs listens for pointerdown on
+    // `document`, in the bubble phase (verified by reading its source — see
+    // DashboardCard.vue's B61 module doc) — a parent-level bubble listener
+    // stands in for that here: it must NOT see the real touch pointerdown
+    // (stopPropagation'd while the long-press is pending) but MUST see the
+    // synthetic hand-off pointerdown dispatched once the hold is confirmed.
+    function mountWithParentSpy() {
+      const wrapper = mountCard()
+      // `mountCard` doesn't attach to `document.body`, so the rendered tree
+      // starts out DETACHED — a bubbling `dispatchEvent` never leaves its own
+      // disconnected subtree. Move it into a connected container so
+      // propagation up to an ancestor (standing in for grid-layout-plus's
+      // real document-level listener — see the module doc) actually happens,
+      // same as it would in a real mounted app.
+      const parent = document.createElement('div')
+      document.body.append(parent)
+      parent.append(wrapper.element)
+      const parentSpy = vi.fn()
+      parent.addEventListener('pointerdown', parentSpy)
+      return { wrapper, parentSpy, parent }
+    }
+
+    it('mouse pointerdown is untouched — reaches the ancestor immediately, no timer scheduled', async () => {
+      const { wrapper, parentSpy } = mountWithParentSpy()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 10, clientY: 10, pointerId: 1 })
+      expect(parentSpy).toHaveBeenCalledTimes(1)
+
+      vi.useFakeTimers()
+      vi.advanceTimersByTime(1000)
+      vi.useRealTimers()
+      // No second (synthetic) dispatch — mouse never goes through the gate.
+      expect(parentSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('touch pointerdown is blocked from the ancestor while pending, then a synthetic pointerdown reaches it once the hold completes', async () => {
+      vi.useFakeTimers()
+      const { wrapper, parentSpy } = mountWithParentSpy()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      expect(parentSpy).not.toHaveBeenCalled()
+
+      vi.advanceTimersByTime(300)
+      expect(parentSpy).toHaveBeenCalledTimes(1)
+      const handoff = parentSpy.mock.calls[0][0] as PointerEvent
+      expect(handoff.pointerId).toBe(7)
+      expect(handoff.pointerType).toBe('touch')
+      vi.useRealTimers()
+    })
+
+    it('cancels (no hand-off) when the finger moves past the threshold before the delay elapses — scroll intent', async () => {
+      vi.useFakeTimers()
+      const { wrapper, parentSpy } = mountWithParentSpy()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 3 })
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 60, pointerId: 3 }))
+      vi.advanceTimersByTime(300)
+
+      expect(parentSpy).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    it('tolerates small jitter under the threshold while pending — still arms', async () => {
+      vi.useFakeTimers()
+      const { wrapper, parentSpy } = mountWithParentSpy()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 4 })
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 13, clientY: 11, pointerId: 4 }))
+      vi.advanceTimersByTime(300)
+
+      expect(parentSpy).toHaveBeenCalledTimes(1)
+      vi.useRealTimers()
+    })
+
+    it('cancels (no hand-off) when the finger lifts before the delay elapses — a tap, not a hold', async () => {
+      vi.useFakeTimers()
+      const { wrapper, parentSpy } = mountWithParentSpy()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 9 })
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 9 }))
+      vi.advanceTimersByTime(300)
+
+      expect(parentSpy).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    it('does not intercept a touch pointerdown on the header action buttons (pin/collapse keep their plain tap)', async () => {
+      vi.useFakeTimers()
+      const { wrapper, parentSpy } = mountWithParentSpy()
+      await wrapper
+        .find('.pin-btn')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 2 })
+      // Not stopped — the button's own tap handling still gets the real event.
+      expect(parentSpy).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(300)
+      // ...and no long-press machinery was armed for it either (still just
+      // the one, real, bubbled call — no second synthetic dispatch).
+      expect(parentSpy).toHaveBeenCalledTimes(1)
+      vi.useRealTimers()
+    })
+
+    it('adds a brief `touch-armed` visual cue on hold-confirm and clears it again shortly after', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard()
+      const handle = wrapper.find('.drag-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 5 })
+      expect(handle.classes()).not.toContain('touch-armed')
+
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).toContain('touch-armed')
+
+      vi.advanceTimersByTime(400)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-armed')
+      vi.useRealTimers()
+    })
+  })
 })
