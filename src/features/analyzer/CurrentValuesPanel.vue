@@ -189,15 +189,16 @@ function setCellEl(key: string, el: Element | null): void {
   else cellEls.delete(key)
 }
 
-function pulse(key: string): void {
-  const el = cellEls.get(key)
-  if (!el) return
-  el.classList.remove('value-cell--pulse')
-  // Force a reflow between remove/add so the browser treats the re-added
-  // class as a NEW animation start rather than a no-op (same class, same
-  // computed style) — see module doc above.
-  void el.offsetWidth
-  el.classList.add('value-cell--pulse')
+function pulseMany(keys: readonly string[]): void {
+  const elements = keys.map((key) => cellEls.get(key)).filter((el): el is HTMLElement => el != null)
+  if (elements.length === 0) return
+  for (const el of elements) el.classList.remove('value-cell--pulse')
+  // Removing every class first and forcing ONE layout flush restarts all
+  // affected animations together. The previous per-cell offsetWidth read
+  // interleaved style writes and layout reads, producing one synchronous
+  // reflow per changed channel on every cursor step.
+  void elements[0].offsetWidth
+  for (const el of elements) el.classList.add('value-cell--pulse')
 }
 
 // `flush: 'post'` — run after the DOM has the new cell elements/text so
@@ -209,11 +210,13 @@ function pulse(key: string): void {
 watch(
   displayFields,
   (list) => {
+    const changed: string[] = []
     for (const f of list) {
       const prev = lastText.get(f.key)
-      if (f.kind !== 'time' && prev !== undefined && prev !== f.text) pulse(f.key)
+      if (f.kind !== 'time' && prev !== undefined && prev !== f.text) changed.push(f.key)
       lastText.set(f.key, f.text)
     }
+    pulseMany(changed)
   },
   { flush: 'post', immediate: true },
 )

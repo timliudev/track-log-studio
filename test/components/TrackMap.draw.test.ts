@@ -133,12 +133,17 @@ function mountMap(props: Record<string, unknown>) {
 async function drawWith(props: Record<string, unknown>, w = 400, h = 300): Promise<Call[]> {
   const calls: Call[] = []
   const w0 = mountMap(props)
-  const canvas = w0.find('canvas').element as HTMLCanvasElement
+  const canvas = w0.find('canvas.track').element as HTMLCanvasElement
+  const overlay = w0.find('canvas.track-interaction').element as HTMLCanvasElement
   const ctx = recordingContext(calls)
   // @ts-expect-error test stub — happy-dom's canvas has no real 2D context
   canvas.getContext = () => ctx
+  // @ts-expect-error test stub — interaction canvas records into the same call log
+  overlay.getContext = () => ctx
   Object.defineProperty(canvas, 'clientWidth', { value: w, configurable: true })
   Object.defineProperty(canvas, 'clientHeight', { value: h, configurable: true })
+  Object.defineProperty(overlay, 'clientWidth', { value: w, configurable: true })
+  Object.defineProperty(overlay, 'clientHeight', { value: h, configurable: true })
   // Any prop change re-triggers draw() with the mocked context/size now wired up.
   await w0.setProps({ track: props.track ? { ...(props.track as GpsTrack) } : null })
   return calls

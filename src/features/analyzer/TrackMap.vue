@@ -21,7 +21,12 @@ import {
   type HighlightSegment,
 } from '@/domain/analysis/trackMapGeometry'
 import { fitProjection, type MapProjection } from './projection'
-import { nearestSample, resolveTrackHitRadius } from './trackNearestSample'
+import {
+  buildTrackSampleSpatialIndex,
+  nearestIndexedSample,
+  resolveTrackHitRadius,
+  type TrackSampleSpatialIndex,
+} from './trackNearestSample'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 import { useMapBackground } from '@/composables/useMapBackground'
@@ -325,11 +330,13 @@ function drawImageBackground(ctx: CanvasRenderingContext2D, w: number, h: number
 const { anyPointerCoarse } = useInputCapabilities()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
+const cursorCanvas = ref<HTMLCanvasElement | null>(null)
 let ro: ResizeObserver | null = null
 
 // Projected pixel coords per sample (NaN where no fix); recomputed on draw.
 let px: Float64Array | null = null
 let py: Float64Array | null = null
+let sampleIndex: TrackSampleSpatialIndex | null = null
 // The projection used by the last draw(); shared with line hit-testing/dragging.
 // This is the *view* projection (base fit composed with the zoom/pan below), so
 // hit-testing and dragging happen in the same on-screen coordinate frame.
@@ -693,18 +700,29 @@ function drawSectorGates(
   ctx: CanvasRenderingContext2D,
   proj: MapProjection,
   gates: { line: LapLine; confirmed: boolean }[],
+  hiddenIndex = -1,
 ): void {
   gates.forEach((g, i) => {
-    const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
-    const b = proj.toPixel(g.line.b.lat, g.line.b.lon)
-    ctx.strokeStyle = GATE_COLOR
-    ctx.lineWidth = g.confirmed ? 3 : 2
-    ctx.setLineDash(g.confirmed ? [] : [5, 4])
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-    ctx.setLineDash([])
+    if (i !== hiddenIndex) drawSectorGate(ctx, proj, g, i + 1)
+  })
+}
+
+function drawSectorGate(
+  ctx: CanvasRenderingContext2D,
+  proj: MapProjection,
+  g: { line: LapLine; confirmed: boolean },
+  number: number,
+): void {
+  const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
+  const b = proj.toPixel(g.line.b.lat, g.line.b.lon)
+  ctx.strokeStyle = GATE_COLOR
+  ctx.lineWidth = g.confirmed ? 3 : 2
+  ctx.setLineDash(g.confirmed ? [] : [5, 4])
+  ctx.beginPath()
+  ctx.moveTo(a.x, a.y)
+  ctx.lineTo(b.x, b.y)
+  ctx.stroke()
+  ctx.setLineDash([])
 
     const mx = (a.x + b.x) / 2
     const my = (a.y + b.y) / 2
@@ -719,8 +737,7 @@ function drawSectorGates(
     ctx.font = '10px sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(String(i + 1), mx, my)
-  })
+  ctx.fillText(String(number), mx, my)
 }
 
 /** A9 — unified extrema markers: numbered markers colour-graded green->red
@@ -823,6 +840,10 @@ function draw(): void {
   const track = props.track
   if (!track) {
     projection = null
+    px = null
+    py = null
+    sampleIndex = null
+    drawInteractionOverlay()
     return
   }
 
@@ -869,6 +890,7 @@ function draw(): void {
   const activeProjected = projectSamples(track.lat, track.lon, track.valid, base.toPixel, z, tx, ty, props.focusRange)
   px = activeProjected.px
   py = activeProjected.py
+  sampleIndex = buildTrackSampleSpatialIndex(px, py)
   let bbox: BBox | null = activeProjected.bbox
 
   const overlayPixels = overlayTracks.map((entry) => {
@@ -916,10 +938,11 @@ function draw(): void {
   drawTrackPath(ctx, px, py, n, heat, anySelection, colorVals, swatches)
   drawLapHighlights(ctx, highlightLaps, px, py, n, heat, colorVals, swatches, pixelShift)
   drawComparisonHighlights(ctx, comparisonHighlights, base, z, tx, ty, pixelShift)
-  drawStartFinishLine(ctx, proj, props.line)
-  drawSectorGates(ctx, proj, props.gates ?? [])
+  if (dragging?.target.kind !== 'line') drawStartFinishLine(ctx, proj, props.line)
+  const hiddenGateIndex = dragging?.target.kind === 'gate' ? dragging.target.index : -1
+  drawSectorGates(ctx, proj, props.gates ?? [], hiddenGateIndex)
   drawExtremaMarkers(ctx, proj, props.extremaMarkers ?? [])
-  drawCursorMarker(ctx, px, py, props.cursorIdx, n)
+  drawInteractionOverlay()
 }
 
 // ── zoom / pan ──────────────────────────────────────────────────────────────
@@ -1016,8 +1039,43 @@ let mode: Mode = 'idle'
 // line; only the emitted event and its target line differ.
 type DragTarget = { kind: 'line' } | { kind: 'gate'; index: number }
 let dragging: { target: DragTarget; handle: 'a' | 'b' } | null = null
+// Drag geometry is deliberately local until pointer-up. Updating the Pinia
+// owner on every pixel used to invalidate lap detection, validity bands and
+// sector checks for the full recording during the gesture. The overlay canvas
+// keeps the handle visually live while only the final geometry is committed.
+let draftLine: LapLine | null = null
+let draftGate: { index: number; line: LapLine } | null = null
 let panLast: { x: number; y: number } | null = null
 let pinchLast: { dist: number; cx: number; cy: number } | null = null
+
+function setupInteractionFrame(): CanvasRenderingContext2D | null {
+  const cv = cursorCanvas.value
+  if (!cv) return null
+  const ctx = cv.getContext('2d')
+  if (!ctx) return null
+  const dpr = window.devicePixelRatio || 1
+  const w = cv.clientWidth
+  const h = cv.clientHeight
+  const backingW = Math.round(w * dpr)
+  const backingH = Math.round(h * dpr)
+  if (cv.width !== backingW || cv.height !== backingH) {
+    cv.width = backingW
+    cv.height = backingH
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+  return ctx
+}
+
+/** O(1) interaction layer: the shared cursor and an in-progress gate/line
+ * preview never require the static track, tiles, heatmap or labels to redraw. */
+function drawInteractionOverlay(): void {
+  const ctx = setupInteractionFrame()
+  if (!ctx || !projection) return
+  if (draftLine) drawStartFinishLine(ctx, projection, draftLine)
+  if (draftGate) drawSectorGate(ctx, projection, { line: draftGate.line, confirmed: true }, draftGate.index + 1)
+  if (px && py) drawCursorMarker(ctx, px, py, props.cursorIdx, Math.min(px.length, py.length))
+}
 
 /** Position relative to the canvas, in CSS px, from any event with clientX/Y. */
 function clientPos(e: { clientX: number; clientY: number }): { x: number; y: number } | null {
@@ -1074,6 +1132,7 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 }
 
 function onPointerDown(e: PointerEvent): void {
+  cancelPendingHover()
   // B36 — the map now bleeds to the true viewport edge on mobile (see
   // `.track-wrap.fill`'s `--card-bleed-x` styling below), so a touch drag
   // STARTING right at that edge would fight the OS/browser's own edge-swipe
@@ -1095,8 +1154,11 @@ function onPointerDown(e: PointerEvent): void {
     // Second finger down → pinch zoom/pan; abandon any line/pan in progress.
     mode = 'pinch'
     dragging = null
+    draftLine = null
+    draftGate = null
     const [p1, p2] = twoPointers()!
     pinchLast = { dist: Math.hypot(p2.x - p1.x, p2.y - p1.y), cx: (p1.x + p2.x) / 2, cy: (p1.y + p2.y) / 2 }
+    draw()
     e.preventDefault()
     return
   }
@@ -1113,6 +1175,17 @@ function onPointerDown(e: PointerEvent): void {
   if (h) {
     mode = 'line'
     dragging = h
+    if (h.target.kind === 'line' && props.line) {
+      draftLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+    } else if (h.target.kind === 'gate') {
+      const gate = (props.gates ?? [])[h.target.index]
+      draftGate = gate
+        ? { index: h.target.index, line: { a: { ...gate.line.a }, b: { ...gate.line.b } } }
+        : null
+    }
+    // Remove the dragged target from the static layer once; subsequent moves
+    // repaint only the tiny interaction overlay.
+    draw()
   } else {
     mode = 'pan'
     panLast = pos
@@ -1149,17 +1222,17 @@ function onPointerMove(e: PointerEvent): void {
     const geo = projection.toGeo(pos.x, pos.y)
     const { target, handle } = dragging
     if (target.kind === 'line') {
-      if (!props.line) return
-      const next: LapLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+      if (!draftLine) return
+      const next: LapLine = { a: { ...draftLine.a }, b: { ...draftLine.b } }
       next[handle] = { lat: geo.lat, lon: geo.lon }
-      emit('update:line', next)
+      draftLine = next
     } else {
-      const g = (props.gates ?? [])[target.index]
-      if (!g) return
-      const next: LapLine = { a: { ...g.line.a }, b: { ...g.line.b } }
+      if (!draftGate || draftGate.index !== target.index) return
+      const next: LapLine = { a: { ...draftGate.line.a }, b: { ...draftGate.line.b } }
       next[handle] = { lat: geo.lat, lon: geo.lon }
-      emit('update:gate', target.index, next)
+      draftGate = { index: target.index, line: next }
     }
+    drawInteractionOverlay()
     return
   }
 
@@ -1186,7 +1259,7 @@ function onPointerMove(e: PointerEvent): void {
   // Idle hover (mouse, no button): scrub the nearest sample for chart sync.
   // Only selects when the pointer is actually near the track line (HIT radius),
   // so the whitespace around it doesn't snap to the outermost point.
-  if (!px || !py) return
+  if (!sampleIndex) return
   const pos = clientPos(e)
   if (!pos) return
   // B30b(a) — prefer snapping onto a currently highlighted/selected SAME-FILE
@@ -1196,9 +1269,40 @@ function onPointerMove(e: PointerEvent): void {
   // that's actually inside a selected lap). `highlightLaps` indexes into
   // THIS track's own samples (unlike `comparisonLapHighlights`, which indexes
   // into other sessions' tracks — never valid ranges here).
-  const preferredRanges = (props.highlightLaps ?? []).map((l) => ({ startIdx: l.startIdx, endIdx: l.endIdx }))
-  const HIT = resolveTrackHitRadius(anyPointerCoarse.value)
-  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT, preferredRanges))
+  scheduleHover(pos)
+}
+
+let pendingHover: { x: number; y: number } | null = null
+let hoverFrame: number | null = null
+function cancelPendingHover(): void {
+  pendingHover = null
+  if (hoverFrame != null) cancelAnimationFrame(hoverFrame)
+  hoverFrame = null
+}
+function scheduleHover(pos: { x: number; y: number }): void {
+  pendingHover = pos
+  if (hoverFrame != null) return
+  hoverFrame = requestAnimationFrame(() => {
+    hoverFrame = null
+    const current = pendingHover
+    pendingHover = null
+    const index = sampleIndex
+    if (!current || !index) return
+    const preferredRanges = (props.highlightLaps ?? []).map((lap) => ({
+      startIdx: lap.startIdx,
+      endIdx: lap.endIdx,
+    }))
+    emit(
+      'cursor',
+      nearestIndexedSample(
+        index,
+        current.x,
+        current.y,
+        resolveTrackHitRadius(anyPointerCoarse.value),
+        preferredRanges,
+      ),
+    )
+  })
 }
 
 function onPointerUp(e: PointerEvent): void {
@@ -1219,53 +1323,32 @@ function onPointerUp(e: PointerEvent): void {
   }
 
   if (pointers.size === 0) {
+    if (dragging?.target.kind === 'line' && draftLine) emit('update:line', draftLine)
+    if (dragging?.target.kind === 'gate' && draftGate) emit('update:gate', draftGate.index, draftGate.line)
     mode = 'idle'
     dragging = null
     panLast = null
+    drawInteractionOverlay()
   }
 }
 
 function onPointerLeave(): void {
   // Clear the scrub cursor only when not mid-gesture (capture keeps gestures alive).
-  if (mode === 'idle') emit('cursor', null)
+  if (mode === 'idle') {
+    cancelPendingHover()
+    emit('cursor', null)
+  }
 }
 
-// B30 — coalesce cursorIdx-driven redraws to at most one per animation frame.
-// `draw()` re-renders the WHOLE canvas every time (full track polyline,
-// heatmap buckets, highlight/comparison segments, gates, extrema
-// labels/strokeText, start/finish band — see the function above), not just
-// the cursor dot. `watch(() => props.cursorIdx, () => draw())` used to call
-// that full pipeline SYNCHRONOUSLY on every single hover-driven cursor
-// change — i.e. on every mousemove pixel, since map→chart cursor forwarding
-// (TrackMap's own idle-hover branch in onPointerMove below) emits a new
-// cursorIdx on every pointermove. On a real multi-lap/heatmap track (tens of
-// thousands of samples, HEAT_BUCKETS strokes, per-marker strokeText/fillText)
-// a single draw() can take long enough that a fast mouse move floods the main
-// thread with a backlog of queued draw() calls it can't keep up with — from
-// the user's POV the map cursor "freezes" near wherever it first landed while
-// the backlog slowly (or never, in practice) catches up, exactly matching the
-// "only the first touched point registers, not continuous" symptom. This
-// doesn't reproduce on a small synthetic track (draw() is cheap enough there
-// to always keep up), which is why it wasn't caught by a plain small-fixture
-// component test.
-//
-// scheduleDraw() fixes this the standard way: coalesce however many
-// cursorIdx changes land within one frame into a SINGLE draw() call that
-// reads props.cursorIdx fresh (not a captured stale value) — so the render
-// loop can never fall behind the input rate, capping redraw work to the
-// display's own refresh rate regardless of how fast the pointer moves. Only
-// used for the two purely-hover-driven triggers below (the cursorIdx prop
-// watch, and onPointerLeave's clear-to-null) — every OTHER draw() call site
-// (zoom/pan, line/gate drag, resize, focusRange fit) stays synchronous and
-// unchanged, since those either need draw()'s side effects (focusMinX/Y etc.)
-// available immediately afterward, or aren't high-frequency enough to matter.
+// Cursor changes are coalesced to one cheap overlay paint per display frame.
+// Static map work is intentionally absent from this path.
 let cursorDrawScheduled = false
 function scheduleDraw(): void {
   if (cursorDrawScheduled) return
   cursorDrawScheduled = true
   requestAnimationFrame(() => {
     cursorDrawScheduled = false
-    draw()
+    drawInteractionOverlay()
   })
 }
 
@@ -1287,12 +1370,16 @@ onBeforeUnmount(() => {
     clearTimeout(tileSettleTimer)
     tileSettleTimer = null
   }
+  cancelPendingHover()
 })
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
 watch(() => props.track, () => resetView())
 watch(() => props.cursorIdx, () => scheduleDraw())
-watch(() => props.line, () => draw())
+watch(() => props.line, () => {
+  if (dragging?.target.kind !== 'line') draftLine = null
+  draw()
+})
 watch(() => props.highlightLaps, () => draw())
 watch(() => props.comparisonLapHighlights, () => draw())
 // #7: on a focusRange CHANGE (not every draw — see fitToFocus's docs), draw
@@ -1310,7 +1397,10 @@ watch(
 )
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
-watch(() => props.gates, () => draw())
+watch(() => props.gates, () => {
+  if (dragging?.target.kind !== 'gate') draftGate = null
+  draw()
+})
 watch(() => props.extremaMarkers, () => draw())
 // Multi-file overlay: toggling a session on/off changes what's drawn AND the
 // combined fit (fitProjection bounds), so just redraw — the user's zoom/pan
@@ -1343,6 +1433,7 @@ watch(background.image, () => draw())
       @wheel.prevent="onWheel"
       @dblclick="resetView"
     />
+    <canvas ref="cursorCanvas" class="track-interaction" aria-hidden="true" />
     <MapBackgroundControls
       class="background-control"
       :settings="background.settings.value"
@@ -1426,6 +1517,14 @@ watch(background.image, () => draw())
   height: 100%;
   flex: 1 1 auto;
   min-height: 0;
+}
+.track-interaction {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  border-radius: var(--radius);
 }
 .background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; }
 .align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
