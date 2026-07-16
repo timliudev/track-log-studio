@@ -1605,6 +1605,18 @@ function titleForItemId(id: string): string {
 .grid-wrap {
   position: relative;
 }
+/* B63 — grid-layout-plus does not write `touch-action` inline: its GridItem
+   adds `.vgl-item--no-touch` on Android whenever an item is draggable or
+   resizable, and the library's injected stylesheet gives that ancestor
+   `touch-action: none`. The browser intersects a target's touch-action with
+   every ancestor, so DashboardCard's `pan-y` header rule could never restore
+   native scrolling during B61's pending long-press window. Scope the override
+   to dashboard grid items. Explicit gesture surfaces (map/chart) and the
+   resize handle retain their own `touch-action: none`, while a fast swipe
+   beginning on a title can once again be claimed by native vertical scroll. */
+.grid-wrap :deep(.vgl-item--no-touch) {
+  touch-action: pan-y;
+}
 /* One draggable hit-box per shared card edge, sized/positioned to exactly
    fill the margin gap between two touching cards (gridGutter.ts's
    `gutterRect`) — invisible by default (a visible line there all the time
