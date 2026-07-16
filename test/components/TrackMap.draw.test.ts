@@ -181,7 +181,7 @@ afterEach(() => {
 })
 
 describe('TrackMap draw() refactor protection (M3 baseline)', () => {
-  it('plain track (no heatmap, no selection): one full-range stroke at the muted color/width, at the exact fitProjection coordinates', async () => {
+  it('plain track uses an opposite-colour casing plus contrast centre at the exact coordinates', async () => {
     const track = makeTrack(5)
     const calls = await drawWith({ track })
 
@@ -195,24 +195,25 @@ describe('TrackMap draw() refactor protection (M3 baseline)', () => {
     expect(calls.filter((c) => c.method === 'fillText')).toHaveLength(0)
     expect(calls.filter((c) => c.method === 'strokeText')).toHaveLength(0)
 
-    // Exactly one stroked path: beginPath, moveTo(first), lineTo(rest), stroke.
-    expect(calls.filter((c) => c.method === 'beginPath')).toHaveLength(1)
-    expect(calls.filter((c) => c.method === 'stroke')).toHaveLength(1)
+    // Same geometry is painted twice: wide casing first, narrow centre last.
+    expect(calls.filter((c) => c.method === 'beginPath')).toHaveLength(2)
+    expect(calls.filter((c) => c.method === 'stroke')).toHaveLength(2)
     const moveTo = calls.filter((c) => c.method === 'moveTo')
     const lineTo = calls.filter((c) => c.method === 'lineTo')
-    expect(moveTo).toHaveLength(1)
-    expect(lineTo).toHaveLength(4)
+    expect(moveTo).toHaveLength(2)
+    expect(lineTo).toHaveLength(8)
     expect(moveTo[0].args).toEqual([round(expectedPts[0].x), round(expectedPts[0].y)])
-    for (let i = 1; i < 5; i++) {
-      expect(lineTo[i - 1].args).toEqual([round(expectedPts[i].x), round(expectedPts[i].y)])
+    expect(moveTo[1].args).toEqual(moveTo[0].args)
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 1; i < 5; i++) {
+        expect(lineTo[pass * 4 + i - 1].args).toEqual([round(expectedPts[i].x), round(expectedPts[i].y)])
+      }
     }
 
-    // Muted color (falls back to '#888' in this environment — no theme CSS loaded)
-    // and lineWidth 2, both set before the stroke.
-    const lastLineWidth = [...calls].reverse().find((c) => c.method === 'set:lineWidth')
-    const lastStrokeStyle = [...calls].reverse().find((c) => c.method === 'set:strokeStyle')
-    expect(lastLineWidth?.args).toEqual([2])
-    expect(lastStrokeStyle?.args).toEqual(['#888'])
+    const widths = calls.filter((c) => c.method === 'set:lineWidth').map((c) => c.args[0])
+    const colors = calls.filter((c) => c.method === 'set:strokeStyle').map((c) => c.args[0])
+    expect(widths).toEqual([5, 2.5])
+    expect(colors).toEqual(['#111111', '#ffffff'])
   })
 
   it('heatmap (colorValues set, no selection): buckets segments and strokes only non-empty buckets with the matching colormap swatch, in bucket order', async () => {
@@ -245,6 +246,19 @@ describe('TrackMap draw() refactor protection (M3 baseline)', () => {
     expect(heatmapColors).toEqual(nonEmpty.map((x) => swatches[x.b]))
 
     expect(calls.filter((c) => c.method === 'set:lineWidth').some((c) => c.args[0] === 2.5)).toBe(true)
+  })
+
+  it('does not apply contrast casing to selected-lap identity colours', async () => {
+    const track = makeTrack(5)
+    const calls = await drawWith({
+      track,
+      highlightLaps: [{ startIdx: 1, endIdx: 3, color: '#123456' }],
+    })
+    const widths = calls.filter((c) => c.method === 'set:lineWidth').map((c) => c.args[0])
+    const colors = calls.filter((c) => c.method === 'set:strokeStyle').map((c) => c.args[0])
+    expect(widths).toEqual([2, 3])
+    expect(colors).toContain('#123456')
+    expect(widths).not.toContain(5)
   })
 
   it('keeps the start/finish checker and outline black/white in the dark UI theme', async () => {

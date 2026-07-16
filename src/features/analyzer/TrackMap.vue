@@ -22,6 +22,14 @@ import {
 } from '@/domain/analysis/trackMapGeometry'
 import { fitProjection, type MapProjection } from './projection'
 import {
+  meanCompositedLuminance,
+  parseCssRgb,
+  relativeLuminance,
+  resolveTrackContrast,
+  type Rgb,
+  type TrackContrastPalette,
+} from '@/domain/analysis/trackContrast'
+import {
   buildTrackSampleSpatialIndex,
   nearestIndexedSample,
   resolveTrackHitRadius,
@@ -338,6 +346,58 @@ const { anyPointerCoarse } = useInputCapabilities()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const cursorCanvas = ref<HTMLCanvasElement | null>(null)
 let ro: ResizeObserver | null = null
+let themeObserver: MutationObserver | null = null
+
+const CONTRAST_SAMPLE_SIZE = 24
+let contrastSampleCanvas: HTMLCanvasElement | null = null
+let contrastCache: { key: string; palette: TrackContrastPalette } | null = null
+
+/** Sample only the local uploaded image on a tiny dedicated canvas. OSM and
+ * satellite tiles are intentionally never read: their cross-origin pixels
+ * would taint the renderer canvas and make getImageData throw. */
+function sampleLocalBackgroundLuminance(image: HTMLImageElement, w: number, h: number, fallback: Rgb): number | null {
+  try {
+    const cv = contrastSampleCanvas ??= document.createElement('canvas')
+    cv.width = CONTRAST_SAMPLE_SIZE
+    cv.height = CONTRAST_SAMPLE_SIZE
+    const ctx = cv.getContext('2d', { willReadFrequently: true })
+    if (!ctx || image.naturalWidth <= 0 || image.naturalHeight <= 0 || w <= 0 || h <= 0) return null
+    ctx.clearRect(0, 0, CONTRAST_SAMPLE_SIZE, CONTRAST_SAMPLE_SIZE)
+    ctx.fillStyle = `rgb(${fallback[0]}, ${fallback[1]}, ${fallback[2]})`
+    ctx.fillRect(0, 0, CONTRAST_SAMPLE_SIZE, CONTRAST_SAMPLE_SIZE)
+    const alignment = background.settings.value.alignment
+    const factor = Math.min(w / image.naturalWidth, h / image.naturalHeight) * alignment.scale
+    const scaleX = CONTRAST_SAMPLE_SIZE / w
+    const scaleY = CONTRAST_SAMPLE_SIZE / h
+    const iw = image.naturalWidth * factor
+    const ih = image.naturalHeight * factor
+    ctx.drawImage(
+      image,
+      ((w - iw) / 2 + alignment.x) * scaleX,
+      ((h - ih) / 2 + alignment.y) * scaleY,
+      iw * scaleX,
+      ih * scaleY,
+    )
+    return meanCompositedLuminance(ctx.getImageData(0, 0, CONTRAST_SAMPLE_SIZE, CONTRAST_SAMPLE_SIZE).data, fallback)
+  } catch {
+    // Defensive fallback for unexpected image origins/decoder failures. The
+    // opposite-colour casing still guarantees visibility without pixel reads.
+    return null
+  }
+}
+
+function backgroundTrackContrast(w: number, h: number): TrackContrastPalette {
+  const kind = background.settings.value.kind
+  const fallback = parseCssRgb(cssVar('--color-bg')) ?? [128, 128, 128]
+  const alignment = background.settings.value.alignment
+  const image = background.image.value
+  const key = [kind, w, h, fallback.join(','), image?.src ?? '', alignment.x, alignment.y, alignment.scale].join('|')
+  if (contrastCache?.key === key) return contrastCache.palette
+  const sampled = kind === 'image' && image ? sampleLocalBackgroundLuminance(image, w, h, fallback) : null
+  const palette = resolveTrackContrast(kind, sampled, relativeLuminance(fallback))
+  contrastCache = { key, palette }
+  return palette
+}
 
 // Projected pixel coords per sample (NaN where no fix); recomputed on draw.
 let px: Float64Array | null = null
@@ -561,9 +621,20 @@ function drawTrackPath(
   anySelection: boolean,
   colorVals: Float64Array | null | undefined,
   swatches: string[],
+  contrast: TrackContrastPalette,
 ): void {
   if (heat && !anySelection && colorVals) {
     drawHeatmapSegment(ctx, px, py, colorVals, swatches, 0, n - 1, 2.5)
+  } else if (!heat && !anySelection) {
+    // Opposite-colour casing makes the line survive mixed imagery: the inner
+    // stroke is visible on the dominant background, while the wider outer
+    // stroke remains visible wherever brightness flips underneath it.
+    ctx.strokeStyle = contrast.casing
+    ctx.lineWidth = 5
+    drawPlainSegment(ctx, px, py, 0, n - 1)
+    ctx.strokeStyle = contrast.inner
+    ctx.lineWidth = 2.5
+    drawPlainSegment(ctx, px, py, 0, n - 1)
   } else {
     ctx.strokeStyle = cssVar(anySelection ? '--color-border' : '--color-text-muted')
     ctx.lineWidth = 2
@@ -943,7 +1014,7 @@ function draw(): void {
   const comparisonHighlights = props.comparisonLapHighlights ?? []
   const anySelection = highlightLaps.length > 0 || comparisonHighlights.length > 0
 
-  drawTrackPath(ctx, px, py, n, heat, anySelection, colorVals, swatches)
+  drawTrackPath(ctx, px, py, n, heat, anySelection, colorVals, swatches, backgroundTrackContrast(w, h))
   drawLapHighlights(ctx, highlightLaps, px, py, n, heat, colorVals, swatches, pixelShift)
   drawComparisonHighlights(ctx, comparisonHighlights, base, z, tx, ty, pixelShift)
   if (dragging?.target.kind !== 'line') drawStartFinishLine(ctx, proj, props.line)
@@ -1394,9 +1465,15 @@ onMounted(() => {
   // dpr / viewport changes (devtools device-mode toggle) may not trigger RO.
   window.addEventListener('resize', draw)
   window.addEventListener('keydown', onMaximizedKeydown)
+  themeObserver = new MutationObserver(() => {
+    contrastCache = null
+    draw()
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 onBeforeUnmount(() => {
   ro?.disconnect()
+  themeObserver?.disconnect()
   window.removeEventListener('resize', draw)
   window.removeEventListener('keydown', onMaximizedKeydown)
   // B54 — a pending settle-debounced tile fetch must not fire (and call
