@@ -185,6 +185,14 @@ describe('defaultLayout', () => {
     }
   })
 
+  it('gives a fresh layout content-sized defaults instead of minimum-height cards (B66)', () => {
+    const byId = new Map(defaultLayout().map((item) => [item.i, item]))
+    expect(byId.get(STATIC_CARD_IDS.lapTable)?.h).toBeGreaterThan(minSizeFor(STATIC_CARD_IDS.lapTable).minH)
+    expect(byId.get(STATIC_CARD_IDS.currentValues)?.h).toBeGreaterThan(minSizeFor(STATIC_CARD_IDS.currentValues).minH)
+    expect(byId.get(STATIC_CARD_IDS.sectors)?.h).toBeGreaterThan(minSizeFor(STATIC_CARD_IDS.sectors).minH)
+    expect(byId.get(chartItemId(1))?.h).toBeGreaterThan(minSizeFor(chartItemId(1)).minH)
+  })
+
   it('balances column heights so no column leaves a large blank gap versus the others (T3 — fills the page)', () => {
     // Regression for the old 5/7-split layout, whose right column (with the
     // align panels in their default-hidden state) bottomed out ~35 rows
@@ -645,6 +653,7 @@ describe('reconcileLayout', () => {
     const added = next.find((it) => it.i === chartItemId(2))!
     expect(added.w).toBeGreaterThan(0)
     expect(added.h).toBeGreaterThan(0)
+    expect(added.h).toBe(defaultLayout().find((it) => it.i === chartItemId(1))?.h)
   })
 
   it('removes the layout entry for a chart that no longer exists', () => {
@@ -981,6 +990,13 @@ describe('mobileLayout (single-column builder from an explicit order)', () => {
       { i: chartItemId(1), x: 0, y: 6, w: 1, h: 8 },
       { i: STATIC_CARD_IDS.map, x: 0, y: 14, w: 1, h: 10 },
     ])
+  })
+
+  it('keeps B66 fresh-layout heights when cards become a mobile single column', () => {
+    const fresh = defaultLayout()
+    const order = [STATIC_CARD_IDS.currentValues, STATIC_CARD_IDS.sectors, chartItemId(1)]
+    const out = mobileLayout(order, fresh)
+    expect(out.map((item) => item.h)).toEqual(order.map((id) => fresh.find((item) => item.i === id)?.h))
   })
 
   it('falls back to a default height for an id missing from the desktop layout', () => {
