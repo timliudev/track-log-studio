@@ -13,7 +13,7 @@ import { categoricalColor } from '@/domain/analysis/colorPalette'
 import {
   buildMultiSessionScatter,
   buildMultiSessionScatterLaps,
-  type SessionScatterLapPick,
+  resolveComparisonLapPicks,
 } from '@/domain/analysis/multiSessionScatter'
 import { useLapStore } from '@/stores/lapStore'
 
@@ -153,18 +153,12 @@ const ggSeries = computed<GgSeries[]>(() => {
     // instead of silently falling back to whole-session clouds for every
     // file — that fallback is the reported bug (圈次表選了圈之後散佈圖仍顯示
     // 整個 session 的所有點).
-    const lapPicks: SessionScatterLapPick[] = props.selectedLaps.map((lap) => ({
-      sourceId: primaryId,
-      index: lap.index,
-      startIdx: lap.startIdx,
-      endIdx: lap.endIdx,
-    }))
-    for (const ref of lapStore.selectedAcrossSessions) {
-      const comparison = comparisons.find((entry) => entry.id === ref.fileId)
-      const lap = comparison?.laps.find((entry) => entry.index === ref.index)
-      if (!comparison || !lap) continue
-      lapPicks.push({ sourceId: ref.fileId, index: lap.index, startIdx: lap.startIdx, endIdx: lap.endIdx })
-    }
+    const lapPicks = resolveComparisonLapPicks(
+      primaryId,
+      props.selectedLaps,
+      lapStore.selectedAcrossSessions,
+      comparisons,
+    )
 
     if (lapPicks.length > 0) {
       return buildMultiSessionScatterLaps(sources, lapPicks, xName, yName, MAX_POINTS, colorChannel.value)

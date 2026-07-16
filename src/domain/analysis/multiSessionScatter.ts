@@ -72,6 +72,48 @@ export function buildMultiSessionScatter(
   return out
 }
 
+/** One lap belonging to some file, identified only by its own index and
+ * range — the shape `useLaps`/`ComparisonSession.laps` entries and
+ * `lapStore.selected` both already resolve to (see {@link resolveComparisonLapPicks}). */
+export interface LapRange {
+  index: number
+  startIdx: number
+  endIdx: number
+}
+
+/**
+ * B57 — merges the primary's own selected laps with any cross-session lap
+ * picks (`lapStore.selectedAcrossSessions`, each a bare `{fileId, index}`
+ * ref) into the flat `SessionScatterLapPick` list {@link buildMultiSessionScatterLaps}
+ * expects. Pure (no store/session objects, just plain arrays) so this "does a
+ * cross-session ref still resolve to a real lap on that comparison" step —
+ * the same shape as TimeSeriesChart.vue's `crossLapSources` loop — is
+ * unit-testable without mounting the component or a Pinia store. A ref whose
+ * file isn't currently in `comparisons`, or whose lap index doesn't exist on
+ * that file's own detected laps (stale selection after a source/line change),
+ * is silently dropped rather than plotted with a wrong range.
+ */
+export function resolveComparisonLapPicks(
+  primaryId: number,
+  primaryLaps: readonly LapRange[],
+  crossRefs: readonly { fileId: number; index: number }[],
+  comparisons: readonly { id: number; laps: readonly LapRange[] }[],
+): SessionScatterLapPick[] {
+  const picks: SessionScatterLapPick[] = primaryLaps.map((lap) => ({
+    sourceId: primaryId,
+    index: lap.index,
+    startIdx: lap.startIdx,
+    endIdx: lap.endIdx,
+  }))
+  for (const ref of crossRefs) {
+    const comparison = comparisons.find((entry) => entry.id === ref.fileId)
+    const lap = comparison?.laps.find((entry) => entry.index === ref.index)
+    if (!comparison || !lap) continue
+    picks.push({ sourceId: ref.fileId, index: lap.index, startIdx: lap.startIdx, endIdx: lap.endIdx })
+  }
+  return picks
+}
+
 /** One selected lap belonging to a particular `SessionScatterSource` (matched
  * by `sourceId`, i.e. the file id) — see {@link buildMultiSessionScatterLaps}. */
 export interface SessionScatterLapPick {
