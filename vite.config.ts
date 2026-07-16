@@ -3,6 +3,7 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import { loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import * as vueCompiler from 'vue/compiler-sfc'
 import { VitePWA } from 'vite-plugin-pwa'
 
 import { cloudflare } from "@cloudflare/vite-plugin";
@@ -38,7 +39,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
-      vue(),
+      // Give the plugin a compiler before its build-start hook. During a cold
+      // dependency optimisation, the file watcher can otherwise receive an
+      // HMR event while the plugin's compiler slot is still null.
+      vue({ compiler: vueCompiler }),
       VitePWA({
         // 'prompt': an update-available toast is now wired (see
         // src/composables/usePwaUpdate.ts + src/components/PwaUpdateToast.vue),
