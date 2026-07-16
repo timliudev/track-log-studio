@@ -194,7 +194,7 @@ export default {
     mapBackground: {
       title: '底圖', layer: '圖層', none: '無底圖', image: '上傳圖片', osm: 'OpenStreetMap 街道圖', satellite: '衛星圖（Mapbox）',
       upload: '上傳底圖（PNG／JPEG／WebP，最多 10 MB）', uploadTypeError: '只接受 PNG、JPEG 或 WebP 圖片。', uploadSizeError: '圖片必須大於 0 且不超過 10 MB。',
-      localOnly: '圖片存於本機 IndexedDB；衛星金鑰只存於本機 localStorage。', mapboxKey: 'Mapbox API key', dragAlign: '拖曳對齊圖片',
+      mapboxKey: 'Mapbox API key', dragAlign: '拖曳對齊圖片',
       up: '上移', down: '下移', left: '左移', right: '右移', zoomIn: '放大圖片', zoomOut: '縮小圖片', reset: '重設圖片對齊',
     },
     colormap: '色階',

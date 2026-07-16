@@ -1526,7 +1526,7 @@ watch(background.image, () => draw())
   pointer-events: none;
   border-radius: var(--radius);
 }
-.background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; }
+.background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 3px 6px; }
 .align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
 .osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: 10px; }
 :root[data-any-pointer-coarse] .align-background { min-height: 44px; display: flex; align-items: center; }

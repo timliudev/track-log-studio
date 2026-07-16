@@ -75,7 +75,6 @@ function choose(e: Event): void {
         <input type="password" autocomplete="off" :value="props.settings.satelliteApiKey" @input="emit('satelliteKey', ($event.target as HTMLInputElement).value)" />
       </label>
       <p v-if="error" class="error">{{ error }}</p>
-      <small>{{ t('analyzer.mapBackground.localOnly') }}</small>
     </div>
   </div>
 </template>
@@ -111,8 +110,12 @@ function choose(e: Event): void {
 .map-background.collapsed .chevron { transform: rotate(-90deg); }
 .background-controls { display: grid; gap: 8px; margin-top: 6px; }
 .background-controls label { display: grid; gap: 3px; }
+.background-controls select,
+.background-controls input { min-height: 28px; font: inherit; }
 .align-buttons { display: flex; flex-wrap: wrap; gap: 4px; }
 .align-buttons button { min-width: 32px; min-height: 32px; }
+:root[data-any-pointer-coarse] .background-controls select,
+:root[data-any-pointer-coarse] .background-controls input { min-height: 44px; }
 :root[data-any-pointer-coarse] .align-buttons button { min-width: 44px; min-height: 44px; }
 .error { color: var(--color-accent); margin: 0; }
 </style>
