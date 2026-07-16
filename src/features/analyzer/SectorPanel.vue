@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import type { Lap } from '@/domain/model/Lap'
@@ -27,6 +27,7 @@ const lapStore = useLapStore()
 const { gates, edited } = storeToRefs(sectorStore)
 const lapsRef = computed(() => props.laps)
 const { runAutoDetect, addGateAtCursor, reorderGates } = useSectors(lapsRef)
+const autoDetectHint = ref(false)
 
 // Re-detect clobbers any manual edits (add/remove/drag) — confirm first so a
 // user who's been hand-tuning gates doesn't lose that work to an accidental
@@ -36,7 +37,7 @@ function onAutoDetect(): void {
   if (edited.value && gates.value.length > 0 && !window.confirm(t('analyzer.sectorRedetectConfirm'))) {
     return
   }
-  runAutoDetect()
+  autoDetectHint.value = !runAutoDetect()
 }
 
 function onAddGate(): void {
@@ -80,6 +81,9 @@ const hasOptimalData = computed(
         </button>
         <span v-if="invalidCount > 0" class="invalid-count">
           {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
+        </span>
+        <span v-if="autoDetectHint" class="detect-hint" role="status">
+          {{ t('analyzer.sectorAutoDetectNoValidLap') }}
         </span>
       </div>
 
@@ -188,6 +192,11 @@ const hasOptimalData = computed(
   color: var(--color-text-muted);
 }
 .invalid-count {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+.detect-hint {
+  flex-basis: 100%;
   font-size: 0.85rem;
   color: var(--color-text-muted);
 }
