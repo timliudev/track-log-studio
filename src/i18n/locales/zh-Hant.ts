@@ -247,6 +247,9 @@ export default {
     accelClearFocus: '清除聚焦',
     currentValues: {
       time: '目前時間',
+      gpsUpdateRate: 'GPS 更新率',
+      ecuUpdateRate: 'ECU 更新率',
+      channelUpdateRate: '更新率：{rate}',
       noSession: '請先載入記錄以顯示目前數值。',
       editFields: '編輯欄位',
       doneEditing: '完成',

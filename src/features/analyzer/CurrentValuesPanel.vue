@@ -15,7 +15,11 @@ import {
   type CurrentValuesSortMode,
 } from '@/domain/analysis/currentValuesFieldPrefs'
 import { useCurrentValuesFieldPrefs } from '@/composables/useCurrentValuesFieldPrefs'
+import { cachedSessionChannelUpdateRates } from '@/composables/channelUpdateRateCache'
 import CardFillScroll from '@/components/CardFillScroll.vue'
+
+const GPS_UPDATE_RATE_KEY = '__updateRateGps'
+const ECU_UPDATE_RATE_KEY = '__updateRateEcu'
 
 /**
  * B15/B16 — "目前數值" (current values) dashboard card: every channel in the
@@ -51,6 +55,10 @@ const { t } = useI18n()
 
 const elapsedTimeSec = computed(() => (props.session ? timeSeconds(props.session) : null))
 
+// Keyed only by the session/file identity. The cache scans each raw channel
+// once; cursor movement below only indexes values and reads these map entries.
+const updateRates = computed(() => (props.session ? cachedSessionChannelUpdateRates(props.session) : null))
+
 const index = computed(() =>
   props.session ? resolveCurrentValueIndex(props.cursorIdx, props.session.rowCount) : null,
 )
@@ -59,7 +67,25 @@ const fields = computed<CurrentValueField[]>(() => {
   const s = props.session
   const elapsed = elapsedTimeSec.value
   if (!s || !elapsed) return []
-  return buildCurrentValueFields(s, elapsed, index.value, t('analyzer.currentValues.time'))
+  const built = buildCurrentValueFields(s, elapsed, index.value, t('analyzer.currentValues.time'))
+  const rates = updateRates.value
+  built.splice(
+    1,
+    0,
+    {
+      key: GPS_UPDATE_RATE_KEY,
+      label: t('analyzer.currentValues.gpsUpdateRate'),
+      kind: 'updateRate',
+      value: rates?.gpsHz ?? NaN,
+    },
+    {
+      key: ECU_UPDATE_RATE_KEY,
+      label: t('analyzer.currentValues.ecuUpdateRate'),
+      kind: 'updateRate',
+      value: rates?.ecuHz ?? NaN,
+    },
+  )
+  return built
 })
 
 const timeField = computed(() => fields.value.find((f) => f.kind === 'time') ?? null)
@@ -125,7 +151,17 @@ const visibleFields = computed<CurrentValueField[]>(() => {
  *  is exactly what's on screen — comparing formatted text (not raw numbers)
  *  is deliberate: it's what "changed" means to the user (e.g. a value that
  *  rounds to the same displayed digits shouldn't pulse). */
-const displayFields = computed(() => visibleFields.value.map((f) => ({ ...f, text: formatCurrentValueField(f) })))
+function formatRateBadge(rate: number | null | undefined): string {
+  return rate != null && Number.isFinite(rate) ? `${rate.toFixed(1)} Hz` : '— Hz'
+}
+
+const displayFields = computed(() => visibleFields.value.map((f) => ({
+  ...f,
+  text: formatCurrentValueField(f),
+  rateBadge: f.kind === 'channel'
+    ? formatRateBadge(updateRates.value?.byChannel.get(f.key))
+    : null,
+})))
 
 /**
  * B44 — low-contrast "value changed" pulse: a brief background flash on any
@@ -234,9 +270,15 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
           :class="{
             'value-cell--time': f.kind === 'time',
             'value-cell--hidden': editing && f.kind !== 'time' && isHidden(f.key),
+            'value-cell--with-rate': f.rateBadge,
           }"
         >
           <span class="value-label" :title="f.label">{{ f.label }}</span>
+          <span
+            v-if="f.rateBadge"
+            class="rate-badge"
+            :title="t('analyzer.currentValues.channelUpdateRate', { rate: f.rateBadge })"
+          >{{ f.rateBadge }}</span>
           <span class="value-number">{{ f.text }}</span>
           <div v-if="editing && f.kind !== 'time'" class="edit-controls">
             <label class="hide-toggle">
@@ -342,6 +384,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   align-content: start;
 }
 .value-cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -349,6 +392,21 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   border-radius: var(--radius);
   background: var(--color-bg);
   min-width: 0;
+}
+.value-cell--with-rate .value-label {
+  padding-right: 42px;
+}
+.rate-badge {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  max-width: 42px;
+  color: var(--color-text-muted);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .value-cell--time {
   outline: 1px solid var(--color-accent);

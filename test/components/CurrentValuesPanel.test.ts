@@ -56,11 +56,11 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
   })
 
   it('renders the synthetic time cell first, then one cell per session channel', () => {
-    // Session channels: Time, RPM -> fields: [synthetic time, Time channel, RPM channel].
+    // Session channels: Time, RPM plus the two synthetic group-rate fields.
     const s = session([channel('Time', [0, 1000, 2000]), channel('RPM', [1000, 2000, 3000])])
     const wrapper = mountPanel({ session: s, cursorIdx: 0 })
     const cells = wrapper.findAll('.value-cell')
-    expect(cells).toHaveLength(3)
+    expect(cells).toHaveLength(5)
     expect(cells[0].classes()).toContain('value-cell--time')
     expect(cells[0].find('.value-label').text()).toBe('目前時間')
   })
@@ -150,7 +150,7 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
     it('defaults to the original channel order with no edit controls shown', () => {
       const s = session([channel('RPM', [1]), channel('GPS_Speed', [2]), channel('Throttle', [3])])
       const wrapper = mountPanel({ session: s, cursorIdx: 0 })
-      expect(cellLabels(wrapper)).toEqual(['目前時間', 'RPM', 'GPS_Speed', 'Throttle'])
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS 更新率', 'ECU 更新率', 'RPM', 'GPS_Speed', 'Throttle'])
       expect(wrapper.find('.edit-controls').exists()).toBe(false)
       expect(wrapper.find('.sort-mode-group').exists()).toBe(false)
     })
@@ -161,7 +161,7 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
       await wrapper.find('.edit-toggle-btn').trigger('click')
       const buttons = wrapper.findAll('.sort-mode-group button')
       await buttons[1].trigger('click') // alphabetical
-      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS_Speed', 'RPM', 'Throttle'])
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'ECU 更新率', 'GPS 更新率', 'GPS_Speed', 'RPM', 'Throttle'])
     })
 
     it('hides a field via its edit-mode checkbox, and it disappears outside edit mode', async () => {
@@ -175,7 +175,7 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
 
       // Leave edit mode: the hidden field is gone from the grid entirely.
       await wrapper.find('.edit-toggle-btn').trigger('click')
-      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS_Speed'])
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS 更新率', 'ECU 更新率', 'GPS_Speed'])
     })
 
     it('re-shows a hidden field by checking its box again', async () => {
@@ -198,7 +198,7 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
         .find('input[type="checkbox"]')
         .setValue(false)
       // Still in edit mode: RPM stays listed (dimmed), not removed.
-      expect(cellLabels(wrapper)).toEqual(['目前時間', 'RPM', 'GPS_Speed'])
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS 更新率', 'ECU 更新率', 'RPM', 'GPS_Speed'])
     })
 
     it('only shows up/down move buttons once sortMode is custom', async () => {
@@ -217,10 +217,10 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
       await wrapper.find('.edit-toggle-btn').trigger('click')
       await wrapper.findAll('.sort-mode-group button')[2].trigger('click') // custom
 
-      // Move GPS_Speed (currently 2nd non-time field) up one place.
+      // Move GPS_Speed up one place within the editable field order.
       const gpsCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('GPS_Speed'))!
       await gpsCell.find('.move-btn:first-child').trigger('click')
-      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS_Speed', 'RPM', 'Throttle'])
+      expect(cellLabels(wrapper)).toEqual(['目前時間', 'GPS 更新率', 'ECU 更新率', 'GPS_Speed', 'RPM', 'Throttle'])
     })
 
     it('disables the up button for the first field and the down button for the last', async () => {
@@ -229,9 +229,9 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
       await wrapper.find('.edit-toggle-btn').trigger('click')
       await wrapper.findAll('.sort-mode-group button')[2].trigger('click') // custom
 
-      const rpmCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('RPM'))!
+      const firstCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('GPS 更新率'))!
       const gpsCell = wrapper.findAll('.value-cell').find((c) => c.text().includes('GPS_Speed'))!
-      expect(rpmCell.find('.move-btn:first-child').attributes('disabled')).toBeDefined()
+      expect(firstCell.find('.move-btn:first-child').attributes('disabled')).toBeDefined()
       expect(gpsCell.findAll('.move-btn')[1].attributes('disabled')).toBeDefined()
     })
 
@@ -239,7 +239,7 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
       const s = session([channel('RPM', [1])])
       const wrapper = mountPanel({ session: s, cursorIdx: 0 })
       await wrapper.find('.edit-toggle-btn').trigger('click')
-      await wrapper.find('input[type="checkbox"]').setValue(false)
+      for (const checkbox of wrapper.findAll('input[type="checkbox"]')) await checkbox.setValue(false)
       await wrapper.find('.edit-toggle-btn').trigger('click') // leave edit mode
       expect(wrapper.text()).toContain('所有欄位皆已隱藏')
       // Time cell is still shown even though every channel is hidden.
@@ -261,7 +261,31 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
       await wrapper1.findAll('.sort-mode-group button')[1].trigger('click') // alphabetical
 
       const wrapper2 = mountPanel({ session: s, cursorIdx: 0 })
-      expect(cellLabels(wrapper2)).toEqual(['目前時間', 'GPS_Speed', 'RPM'])
+      expect(cellLabels(wrapper2)).toEqual(['目前時間', 'ECU 更新率', 'GPS 更新率', 'GPS_Speed', 'RPM'])
     })
+
+    it('lets the GPS and ECU update-rate fields be hidden like channel fields', async () => {
+      const s = session([channel('Time', [0, 100, 200]), channel('RPM', [1, 2, 3])])
+      const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      const gpsRate = wrapper.findAll('.value-cell').find((c) => c.text().includes('GPS 更新率'))!
+      await gpsRate.find('input[type="checkbox"]').setValue(false)
+      await wrapper.find('.edit-toggle-btn').trigger('click')
+      expect(cellLabels(wrapper)).not.toContain('GPS 更新率')
+      expect(cellLabels(wrapper)[0]).toBe('目前時間')
+    })
+  })
+
+  it('shows a cached update-rate badge on each raw channel cell', () => {
+    const s = session([
+      channel('Time', [0, 100, 200, 300]),
+      channel('RPM', [1000, 2000, 3000, 4000]),
+      channel('Steady', [7, 7, 7, 7]),
+    ])
+    const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+    const rpm = wrapper.findAll('.value-cell').find((c) => c.text().includes('RPM'))!
+    const steady = wrapper.findAll('.value-cell').find((c) => c.text().includes('Steady'))!
+    expect(rpm.find('.rate-badge').text()).toBe('10.0 Hz')
+    expect(steady.find('.rate-badge').text()).toBe('— Hz')
   })
 })

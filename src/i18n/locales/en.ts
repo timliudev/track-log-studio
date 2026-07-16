@@ -253,6 +253,9 @@ export default {
     accelClearFocus: 'Clear focus',
     currentValues: {
       time: 'Current time',
+      gpsUpdateRate: 'GPS update rate',
+      ecuUpdateRate: 'ECU update rate',
+      channelUpdateRate: 'Update rate: {rate}',
       noSession: 'Load a recording to see the current values.',
       editFields: 'Edit fields',
       doneEditing: 'Done',

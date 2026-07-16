@@ -78,7 +78,7 @@ describe('formatCurrentValueField', () => {
     return { key: 'k', label: 'k', kind, value }
   }
 
-  it('formats a NaN value as an em dash regardless of kind', () => {
+  it('formats a NaN time or channel value as an em dash', () => {
     expect(formatCurrentValueField(f('channel', NaN))).toBe('—')
     expect(formatCurrentValueField(f('time', NaN))).toBe('—')
   })
@@ -90,5 +90,10 @@ describe('formatCurrentValueField', () => {
   it('formats a channel field with the generic metric formatter', () => {
     expect(formatCurrentValueField(f('channel', 12345.6))).toBe('12345.6')
     expect(formatCurrentValueField(f('channel', 3.14159))).toBe('3.14')
+  })
+
+  it('formats an update-rate field with its unit and keeps null-like values explicit', () => {
+    expect(formatCurrentValueField(f('updateRate', 10))).toBe('10.0 Hz')
+    expect(formatCurrentValueField(f('updateRate', NaN))).toBe('— Hz')
   })
 })
