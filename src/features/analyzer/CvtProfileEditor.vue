@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDrivetrainStore, type CvtAngleInput, type CvtProfilePatch } from '@/stores/drivetrainStore'
+import { inferFixedReductionFromSegment } from '@/domain/analysis/cvtCalibration'
 import CvtReductionEditor from './CvtReductionEditor.vue'
 
-defineProps<{ open: boolean }>()
+const props = defineProps<{
+  open: boolean
+  totalReduction?: ArrayLike<number> | null
+  calibrationSelection?: { startIdx: number; endIdx: number; startX: number; endX: number } | null
+}>()
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
 const drivetrain = useDrivetrainStore()
 const profile = computed(() => drivetrain.activeCvtProfile)
+const calibrationMessage = ref('')
 
 function optionalNumber(event: Event): number | null {
   const raw = (event.target as HTMLInputElement).value.trim()
@@ -70,6 +76,44 @@ function setIdealEfficiency(enabled: boolean): void {
 
 function setEqualSplit(enabled: boolean): void {
   patch({ force: { torqueCam: { equalSplitAssumption: enabled, torqueShare: enabled ? 0.5 : null } } })
+}
+
+function inferFixedReduction(): void {
+  const selection = props.calibrationSelection
+  const reference = profile.value.calibration.referencePureRatio
+  if (!selection || !props.totalReduction || reference == null) {
+    calibrationMessage.value = t('analyzer.cvt.calibrationMissingSelection') as string
+    return
+  }
+  const result = inferFixedReductionFromSegment(
+    props.totalReduction,
+    selection.startIdx,
+    selection.endIdx,
+    reference,
+  )
+  if (result.status !== 'ok') {
+    calibrationMessage.value = result.status === 'unstable'
+      ? t('analyzer.cvt.calibrationUnstable', { percent: (result.relativeMad * 100).toFixed(2) }) as string
+      : t('analyzer.cvt.calibrationInvalid') as string
+    return
+  }
+  patch({
+    calibration: {
+      combinedFixedReduction: result.combinedFixedReduction,
+      revision: profile.value.calibration.revision + 1,
+      fixedReductionSegment: {
+        startX: selection.startX,
+        endX: selection.endX,
+        sampleCount: result.sampleCount,
+        referencePureRatio: reference,
+        relativeMad: result.relativeMad,
+      },
+    },
+  })
+  calibrationMessage.value = t('analyzer.cvt.calibrationSaved', {
+    ratio: result.combinedFixedReduction.toFixed(4),
+    count: result.sampleCount,
+  }) as string
 }
 
 function addProfile(): void {
@@ -231,6 +275,32 @@ function onBackdropPointer(event: PointerEvent): void {
           <p class="field-note">{{ t('analyzer.cvt.couplingWarning') }}</p>
         </details>
 
+        <details class="form-section force-section">
+          <summary><strong>{{ t('analyzer.cvt.calibrationHeading') }}</strong><span>{{ t('analyzer.cvt.calibrationSummary') }}</span></summary>
+          <div class="form-grid calibration-grid">
+            <label><span>{{ t('analyzer.cvt.setupIdentity') }}</span><input type="text" :value="profile.calibration.setupIdentity" @change="patch({ calibration: { setupIdentity: textValue($event) } })" /></label>
+            <label><span>{{ t('analyzer.cvt.activeDirection') }}</span><select :value="profile.calibration.activeDirection" @change="patch({ calibration: { activeDirection: textValue($event) === 'downshift' ? 'downshift' : 'upshift' } })"><option value="upshift">{{ t('analyzer.cvt.upshift') }}</option><option value="downshift">{{ t('analyzer.cvt.downshift') }}</option></select></label>
+            <label><span>{{ t('analyzer.cvt.referencePureRatio') }}</span><input type="number" inputmode="decimal" min="0" step="0.001" :value="profile.calibration.referencePureRatio ?? ''" @change="patch({ calibration: { referencePureRatio: optionalNumber($event) } })" /></label>
+            <label><span>{{ t('analyzer.cvt.combinedFixedFallback') }}</span><input type="number" inputmode="decimal" min="0" step="0.001" :value="profile.calibration.combinedFixedReduction ?? ''" disabled /></label>
+            <label><span>{{ t('analyzer.cvt.accuracyTarget') }}</span><input type="number" inputmode="decimal" min="0" step="10" :value="profile.calibration.accuracyTargetRpm ?? ''" @change="patch({ calibration: { accuracyTargetRpm: optionalNumber($event) } })" /></label>
+            <label><span>{{ t('analyzer.cvt.holdoutResidual') }}</span><input type="number" inputmode="decimal" min="0" step="1" :value="profile.calibration.holdoutResidualRpm ?? ''" @change="patch({ calibration: { holdoutResidualRpm: optionalNonNegativeNumber($event) } })" /></label>
+            <label><span>{{ t('analyzer.cvt.massSensitivityStep') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.calibration.sensitivityDeltaTotalMassG" @change="patch({ calibration: { sensitivityDeltaTotalMassG: optionalNumber($event) ?? 1 } })" /></label>
+          </div>
+          <div class="calibration-action">
+            <button type="button" :disabled="!calibrationSelection" @click="inferFixedReduction">{{ t('analyzer.cvt.useSelectedSegment') }}</button>
+            <span v-if="calibrationSelection">{{ t('analyzer.cvt.selectedSegment', { start: calibrationSelection.startX.toFixed(2), end: calibrationSelection.endX.toFixed(2) }) }}</span>
+            <span v-else>{{ t('analyzer.cvt.noSelectedSegment') }}</span>
+          </div>
+          <p v-if="calibrationMessage" class="field-note">{{ calibrationMessage }}</p>
+          <p v-if="profile.calibration.fixedReductionSegment" class="field-note">{{ t('analyzer.cvt.savedSegment', { start: profile.calibration.fixedReductionSegment.startX.toFixed(2), end: profile.calibration.fixedReductionSegment.endX.toFixed(2), count: profile.calibration.fixedReductionSegment.sampleCount, mad: (profile.calibration.fixedReductionSegment.relativeMad * 100).toFixed(2) }) }}</p>
+
+          <div class="map-grid">
+            <label class="wide-field"><span>{{ t('analyzer.cvt.upshiftMap') }}</span><textarea rows="4" :value="formatPoints(profile.calibration.upshiftMap, ['ratio', 'scale'])" placeholder="1.0, 0.98&#10;1.5, 1.02" @change="patch({ calibration: { upshiftMap: parsePoints($event, ['ratio', 'scale']) as never, holdoutResidualRpm: null } })"></textarea></label>
+            <label class="wide-field"><span>{{ t('analyzer.cvt.downshiftMap') }}</span><textarea rows="4" :value="formatPoints(profile.calibration.downshiftMap, ['ratio', 'scale'])" placeholder="1.0, 1.04&#10;1.5, 1.08" @change="patch({ calibration: { downshiftMap: parsePoints($event, ['ratio', 'scale']) as never, holdoutResidualRpm: null } })"></textarea></label>
+          </div>
+          <p class="field-note">{{ t('analyzer.cvt.calibrationBoundary') }}</p>
+        </details>
+
         <aside class="honesty-boundary">
           <strong>{{ t('analyzer.cvt.boundaryHeading') }}</strong>
           <p>{{ t('analyzer.cvt.honestyBoundary') }}</p>
@@ -262,6 +332,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 .wide-field textarea { min-height: 96px; resize: vertical; padding: 8px 9px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); font-family: var(--font-mono, monospace); }
 .check-field { min-height: 36px; display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; }
 .check-field input { min-height: auto; }
+.calibration-action { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; color: var(--color-text-muted); font-size: 0.78rem; }
+.map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
 .reduction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .honesty-boundary { padding: 14px; border: 1px solid var(--color-warning, #c99100); border-radius: var(--radius); background: color-mix(in srgb, var(--color-warning, #c99100) 10%, transparent); }

@@ -35,6 +35,7 @@ export interface CvtTorqueCamModel {
 export interface CvtCouplingModel {
   mode: 'disabled' | 'ideal' | 'calibrated'
   calibratedScale: number | null
+  calibrationMap?: readonly { ratio: number; scale: number }[]
 }
 
 export interface CvtForceBalanceInput {
@@ -208,7 +209,11 @@ export function cvtForceDisabledReasons(input: CvtForceBalanceInput): CvtForceDi
     reasons.push('torque-share')
   }
   if (input.coupling.mode === 'disabled') reasons.push('coupling')
-  if (input.coupling.mode === 'calibrated' && !positive(input.coupling.calibratedScale ?? Number.NaN)) reasons.push('coupling')
+  if (
+    input.coupling.mode === 'calibrated' &&
+    !positive(input.coupling.calibratedScale ?? Number.NaN) &&
+    !(input.coupling.calibrationMap?.some((point) => positive(point.ratio) && positive(point.scale)) ?? false)
+  ) reasons.push('coupling')
   const geometry = input.geometry
   if (
     !positive(geometry.pitchLengthMm) || !positive(geometry.centerDistanceMm) ||
@@ -228,9 +233,22 @@ export function evaluateCvtForceAtRatio(input: CvtForceBalanceInput, ratio: numb
     ? 0
     : rearCamForceN(input.torqueCam!, geometry.rearDisplacementMm, input.rearTorqueNm)
   const idealRatio = geometry.frontWrapAngleRad / geometry.rearWrapAngleRad
-  const couplingRatio = input.coupling.mode === 'calibrated'
-    ? idealRatio * input.coupling.calibratedScale!
-    : idealRatio
+  const map = input.coupling.calibrationMap
+  let scale = input.coupling.calibratedScale ?? Number.NaN
+  if (input.coupling.mode === 'calibrated' && map?.length) {
+    const points = [...map].filter((point) => positive(point.ratio) && positive(point.scale)).sort((a, b) => a.ratio - b.ratio)
+    if (points.length === 1 && ratio === points[0].ratio) scale = points[0].scale
+    else {
+      for (let index = 0; index < points.length - 1; index += 1) {
+        const left = points[index]
+        const right = points[index + 1]
+        if (ratio < left.ratio || ratio > right.ratio) continue
+        scale = left.scale + (ratio - left.ratio) / (right.ratio - left.ratio) * (right.scale - left.scale)
+        break
+      }
+    }
+  }
+  const couplingRatio = input.coupling.mode === 'calibrated' ? idealRatio * scale : idealRatio
   const rearTotalForceN = rearSpringForceNValue + rearCamForceNValue
   const residualN = frontRollerForceN - couplingRatio * rearTotalForceN
   if (![frontRollerForceN, rearSpringForceNValue, rearCamForceNValue, couplingRatio, residualN].every(Number.isFinite)) {

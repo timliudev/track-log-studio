@@ -152,6 +152,28 @@ export interface CvtForceProfile {
   frictionCoefficientMax: number | null
 }
 
+export interface CvtCalibrationSegment {
+  startX: number
+  endX: number
+  sampleCount: number
+  referencePureRatio: number
+  relativeMad: number
+}
+
+export interface CvtCalibrationProfile {
+  setupIdentity: string
+  revision: number
+  activeDirection: 'upshift' | 'downshift'
+  referencePureRatio: number | null
+  combinedFixedReduction: number | null
+  fixedReductionSegment: CvtCalibrationSegment | null
+  upshiftMap: Array<{ ratio: number; scale: number }>
+  downshiftMap: Array<{ ratio: number; scale: number }>
+  accuracyTargetRpm: number | null
+  holdoutResidualRpm: number | null
+  sensitivityDeltaTotalMassG: number
+}
+
 export interface CvtProfile {
   id: string
   name: string
@@ -164,9 +186,10 @@ export interface CvtProfile {
   belt: CvtBeltProfile
   geometry: CvtGeometryProfile
   force: CvtForceProfile
+  calibration: CvtCalibrationProfile
 }
 
-export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'force' | 'gearReduction' | 'finalReduction'>> & {
+export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'force' | 'calibration' | 'gearReduction' | 'finalReduction'>> & {
   belt?: Partial<Omit<CvtBeltProfile, 'wedgeAngle'>> & { wedgeAngle?: Partial<CvtAngleInput> }
   geometry?: Partial<Omit<CvtGeometryProfile, 'frontSheaveAngle' | 'rearSheaveAngle'>> & {
     frontSheaveAngle?: Partial<CvtAngleInput>
@@ -179,6 +202,7 @@ export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'fo
     spring?: Partial<CvtSpringProfile>
     torqueCam?: Partial<CvtTorqueCamProfile>
   }
+  calibration?: Partial<CvtCalibrationProfile>
 }
 
 function halfAngleDeg(angle: CvtAngleInput): number {
@@ -195,11 +219,15 @@ export function toCvtTraceConfig(profile: CvtProfile): CvtTraceConfig {
           profile.belt.outsideLengthMm ?? Number.NaN,
           profile.belt.cordOffsetFromOutsideMm ?? Number.NaN,
         )
+  const gearReduction = resolveFixedReduction(profile.gearReduction)
+  const finalReduction = resolveFixedReduction(profile.finalReduction)
+  const useCalibrationFallback = (!Number.isFinite(gearReduction) || !Number.isFinite(finalReduction)) &&
+    profile.calibration.combinedFixedReduction != null
   return {
     profileId: profile.id,
     wheelCircumferenceMm: profile.wheelCircumferenceMm,
-    gearReduction: resolveFixedReduction(profile.gearReduction),
-    finalReduction: resolveFixedReduction(profile.finalReduction),
+    gearReduction: useCalibrationFallback ? profile.calibration.combinedFixedReduction! : gearReduction,
+    finalReduction: useCalibrationFallback ? 1 : finalReduction,
     pitchLengthMm,
     centerDistanceMm: profile.geometry.centerDistanceMm ?? Number.NaN,
     frontSheaveHalfAngleDeg: halfAngleDeg(profile.geometry.frontSheaveAngle),
@@ -259,8 +287,17 @@ export function toCvtForceBalanceInput(profile: CvtProfile): CvtForceBalanceInpu
     coupling: {
       mode: profile.force.couplingMode,
       calibratedScale: profile.force.couplingScale,
+      calibrationMap: profile.calibration.activeDirection === 'upshift'
+        ? profile.calibration.upshiftMap
+        : profile.calibration.downshiftMap,
     },
   }
+}
+
+export function usesCvtCalibrationFixedReduction(profile: CvtProfile): boolean {
+  const directComplete = Number.isFinite(resolveFixedReduction(profile.gearReduction)) &&
+    Number.isFinite(resolveFixedReduction(profile.finalReduction))
+  return !directComplete && profile.calibration.combinedFixedReduction != null
 }
 
 export interface CvtFormState {
@@ -389,6 +426,19 @@ function defaultCvtProfile(
       operatingRearTorqueNm: null,
       frictionCoefficientMin: null,
       frictionCoefficientMax: null,
+    },
+    calibration: {
+      setupIdentity: '',
+      revision: 0,
+      activeDirection: 'upshift',
+      referencePureRatio: null,
+      combinedFixedReduction: null,
+      fixedReductionSegment: null,
+      upshiftMap: [],
+      downshiftMap: [],
+      accuracyTargetRpm: null,
+      holdoutResidualRpm: null,
+      sensitivityDeltaTotalMassG: 1,
     },
   }
 }
@@ -586,6 +636,30 @@ function sanitizeCamPoints(value: unknown): TorqueCamPoint[] {
   }).sort((a, b) => a.travelMm - b.travelMm)
 }
 
+function sanitizeCalibrationMap(value: unknown): Array<{ ratio: number; scale: number }> {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const raw = entry as { ratio?: unknown; scale?: unknown }
+    const ratio = positiveNumberOrNull(raw.ratio)
+    const scale = positiveNumberOrNull(raw.scale)
+    return ratio != null && scale != null ? [{ ratio, scale }] : []
+  }).sort((a, b) => a.ratio - b.ratio)
+}
+
+function sanitizeCalibrationSegment(value: unknown): CvtCalibrationSegment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Partial<CvtCalibrationSegment>
+  const startX = nonNegativeNumberOrNull(raw.startX)
+  const endX = nonNegativeNumberOrNull(raw.endX)
+  const sampleCount = positiveNumberOrNull(raw.sampleCount)
+  const referencePureRatio = positiveNumberOrNull(raw.referencePureRatio)
+  const relativeMad = nonNegativeNumberOrNull(raw.relativeMad)
+  return startX != null && endX != null && endX >= startX && sampleCount != null && referencePureRatio != null && relativeMad != null
+    ? { startX, endX, sampleCount: Math.round(sampleCount), referencePureRatio, relativeMad }
+    : null
+}
+
 /** Sanitize one persisted/imported profile without inventing missing physical values. */
 export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, fallback?: CvtProfile): CvtProfile {
   const base = fallback ?? defaultCvtProfile()
@@ -602,6 +676,8 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
     (rawForce.spring && typeof rawForce.spring === 'object' && !Array.isArray(rawForce.spring) ? rawForce.spring : {}) as Partial<CvtSpringProfile>
   const rawCam =
     (rawForce.torqueCam && typeof rawForce.torqueCam === 'object' && !Array.isArray(rawForce.torqueCam) ? rawForce.torqueCam : {}) as Partial<CvtTorqueCamProfile>
+  const rawCalibration =
+    (raw.calibration && typeof raw.calibration === 'object' && !Array.isArray(raw.calibration) ? raw.calibration : {}) as Partial<CvtCalibrationProfile>
   return {
     id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : base.id,
     name: typeof raw.name === 'string' ? raw.name : base.name,
@@ -672,6 +748,19 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
       operatingRearTorqueNm: nonNegativeNumberOrNull(rawForce.operatingRearTorqueNm),
       frictionCoefficientMin: positiveNumberOrNull(rawForce.frictionCoefficientMin),
       frictionCoefficientMax: positiveNumberOrNull(rawForce.frictionCoefficientMax),
+    },
+    calibration: {
+      setupIdentity: typeof rawCalibration.setupIdentity === 'string' ? rawCalibration.setupIdentity : base.calibration.setupIdentity,
+      revision: nonNegativeNumberOrNull(rawCalibration.revision) == null ? 0 : Math.round(rawCalibration.revision!),
+      activeDirection: rawCalibration.activeDirection === 'downshift' ? 'downshift' : 'upshift',
+      referencePureRatio: positiveNumberOrNull(rawCalibration.referencePureRatio),
+      combinedFixedReduction: positiveNumberOrNull(rawCalibration.combinedFixedReduction),
+      fixedReductionSegment: sanitizeCalibrationSegment(rawCalibration.fixedReductionSegment),
+      upshiftMap: sanitizeCalibrationMap(rawCalibration.upshiftMap),
+      downshiftMap: sanitizeCalibrationMap(rawCalibration.downshiftMap),
+      accuracyTargetRpm: positiveNumberOrNull(rawCalibration.accuracyTargetRpm),
+      holdoutResidualRpm: nonNegativeNumberOrNull(rawCalibration.holdoutResidualRpm),
+      sensitivityDeltaTotalMassG: positiveNumberOrNull(rawCalibration.sensitivityDeltaTotalMassG) ?? 1,
     },
   }
 }
@@ -846,6 +935,8 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
   function updateCvtProfile(profileId: string, patch: CvtProfilePatch): void {
     const nextProfiles = cvt.value.profiles.map((profile) => {
       if (profile.id !== profileId) return profile
+      const physicalIdentityChanged = patch.vehicleId !== undefined || patch.actuationKind !== undefined ||
+        patch.belt !== undefined || patch.geometry !== undefined || patch.force !== undefined
       const mergedPatch: Partial<CvtProfile> = {
         ...profile,
         ...patch,
@@ -866,6 +957,11 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
           roller: { ...profile.force.roller, ...patch.force?.roller },
           spring: { ...profile.force.spring, ...patch.force?.spring },
           torqueCam: { ...profile.force.torqueCam, ...patch.force?.torqueCam },
+        },
+        calibration: {
+          ...profile.calibration,
+          ...patch.calibration,
+          ...(physicalIdentityChanged ? { holdoutResidualRpm: null } : {}),
         },
         gearReduction: { ...profile.gearReduction, ...patch.gearReduction },
         finalReduction: { ...profile.finalReduction, ...patch.finalReduction },

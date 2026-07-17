@@ -17,13 +17,13 @@ function channel(name: string, values: number[]): Channel {
 }
 
 const session = new LogSession([
-  channel('RPM', [6000, 7000, 8000]),
-  channel('GPS_Speed', [60, 70, 80]),
+  channel('RPM', [6000, 7000, 8000, 9000, 10000]),
+  channel('GPS_Speed', [60, 70, 80, 90, 100]),
 ], { formatId: 'test', createdDate: null, headerInfo: {} })
 
-function mountCard(cursorIdx = 0) {
+function mountCard(cursorIdx = 0, extraProps: Record<string, unknown> = {}) {
   return mount(CvtDynamicsCard, {
-    props: { session, fileId: 7, cursorIdx },
+    props: { session, fileId: 7, cursorIdx, ...extraProps },
     global: {
       plugins: [createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })],
     },
@@ -151,5 +151,27 @@ describe('CvtDynamicsCard', () => {
     expect(wrapper.text()).toContain('力平衡根')
     expect(wrapper.text()).toContain('尚未評估 slip margin')
     expect(wrapper.find('.force-chart').exists()).toBe(true)
+  })
+
+  it('saves the visible chart selection when the user confirms a fixed-reduction fallback', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    const drivetrain = useDrivetrainStore()
+    drivetrain.updateCvtProfile(drivetrain.activeCvtProfile.id, {
+      wheelCircumferenceMm: 1000,
+      calibration: { referencePureRatio: 1 },
+    })
+    const wrapper = mountCard(0, {
+      xValues: new Float64Array([0, 1, 2, 3, 4]),
+      xRange: { min: 0, max: 2.1 },
+    })
+    await wrapper.find('.settings-button').trigger('click')
+    await wrapper.find('.calibration-action button').trigger('click')
+    await nextTick()
+    expect(drivetrain.activeCvtProfile.calibration.combinedFixedReduction).toBeGreaterThan(0)
+    expect(drivetrain.activeCvtProfile.calibration.fixedReductionSegment?.sampleCount).toBe(3)
+    expect(wrapper.text()).toContain('固定比採校正 fallback')
   })
 })

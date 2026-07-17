@@ -6,13 +6,17 @@ import { cachedGearRatioTrace } from '@/domain/analysis/gearRatioTrace'
 import { cachedCvtDerivedTraces } from '@/domain/analysis/cvtTrace'
 import { sheaveAngleMismatch } from '@/domain/analysis/cvtDynamics'
 import { solveCvtForceBalance, type CvtForceDisabledReason } from '@/domain/analysis/cvtForceBalance'
-import { toCvtForceBalanceInput, toCvtTraceConfig, useDrivetrainStore } from '@/stores/drivetrainStore'
+import { sweepTotalRollerMass } from '@/domain/analysis/cvtCalibration'
+import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
+import { toCvtForceBalanceInput, toCvtTraceConfig, usesCvtCalibrationFixedReduction, useDrivetrainStore } from '@/stores/drivetrainStore'
 import CvtProfileEditor from './CvtProfileEditor.vue'
 
 const props = defineProps<{
   session: LogSession | null
   fileId?: number | null
   cursorIdx?: number | null
+  xValues?: Float64Array | null
+  xRange?: { min: number; max: number } | null
 }>()
 const { t } = useI18n()
 const drivetrain = useDrivetrainStore()
@@ -66,6 +70,31 @@ const angleMismatch = computed(() => {
   return sheaveAngleMismatch(belt, sheave, profile.value.belt.heightMm)
 })
 const forceResult = computed(() => solveCvtForceBalance(toCvtForceBalanceInput(profile.value)))
+const calibrationSelection = computed(() => {
+  const range = xRangeToFocusIndices(props.xRange ?? null, props.xValues ?? null)
+  if (!range || !props.xValues) return null
+  return {
+    ...range,
+    startX: props.xValues[range.startIdx],
+    endX: props.xValues[range.endIdx],
+  }
+})
+const sensitivity = computed(() => {
+  const curve = forceResult.value.curve
+  if (curve.length < 2) return { status: 'disabled' as const, totalMassG: Number.NaN, deltaTotalMassG: 1, points: [] }
+  const positions = [0.1, 0.25, 0.5, 0.75, 0.9]
+  const ratios = positions.map((position) => curve[Math.round((curve.length - 1) * position)].ratio)
+  return sweepTotalRollerMass(
+    toCvtForceBalanceInput(profile.value),
+    ratios,
+    profile.value.calibration.sensitivityDeltaTotalMassG,
+  )
+})
+const calibrationValidated = computed(() => {
+  const target = profile.value.calibration.accuracyTargetRpm
+  const residual = profile.value.calibration.holdoutResidualRpm
+  return target != null && residual != null && residual <= target
+})
 const forceStatusText = computed(() => {
   if (forceResult.value.status === 'equilibrium') return t('analyzer.cvt.forceEquilibrium') as string
   if (forceResult.value.status === 'endpoint') return t('analyzer.cvt.forceEndpoint') as string
@@ -214,6 +243,8 @@ const statusLabel = computed(() => {
       <span class="status-chip" :class="`status-${displayed.status}`">{{ statusLabel }}</span>
       <span v-if="profile.actuationKind === 'electronic'" class="status-chip electronic">{{ t('analyzer.cvt.electronicObservationOnly') }}</span>
       <span class="status-chip" :class="forceResult.status === 'disabled' ? 'status-unavailable' : 'status-ok'">{{ forceStatusText }}</span>
+      <span v-if="usesCvtCalibrationFixedReduction(profile)" class="status-chip calibration">{{ t('analyzer.cvt.fixedCalibrationFallback') }}</span>
+      <span v-if="profile.calibration.upshiftMap.length || profile.calibration.downshiftMap.length" class="status-chip" :class="calibrationValidated ? 'status-ok' : 'status-unavailable'">{{ calibrationValidated ? t('analyzer.cvt.calibrationValidated') : t('analyzer.cvt.calibrationUnverified') }}</span>
     </div>
 
     <svg class="cvt-svg" viewBox="0 0 360 180" role="img" :aria-label="t('analyzer.cvt.animationLabel')">
@@ -259,6 +290,15 @@ const statusLabel = computed(() => {
           <div><dt>{{ t('analyzer.cvt.camForce') }}</dt><dd>{{ format(forceResult.selected?.rearCamForceN ?? Number.NaN, 0) }} N</dd></div>
         </dl>
         <p v-if="forceResult.roots.length > 1" class="warning-message">{{ t('analyzer.cvt.multipleRoots', { count: forceResult.roots.length }) }}</p>
+        <div v-if="sensitivity.status === 'ok'" class="sensitivity-table">
+          <strong>{{ t('analyzer.cvt.massSensitivityResult', { delta: sensitivity.deltaTotalMassG }) }}</strong>
+          <div v-for="point in sensitivity.points" :key="point.ratio">
+            <span>q {{ point.ratio.toFixed(3) }}</span>
+            <span>−{{ sensitivity.deltaTotalMassG }} g: {{ point.lighterDeltaRpm >= 0 ? '+' : '' }}{{ point.lighterDeltaRpm.toFixed(0) }} rpm</span>
+            <span>+{{ sensitivity.deltaTotalMassG }} g: {{ point.heavierDeltaRpm >= 0 ? '+' : '' }}{{ point.heavierDeltaRpm.toFixed(0) }} rpm</span>
+          </div>
+        </div>
+        <p v-else class="field-note">{{ t('analyzer.cvt.sensitivityDisabled') }}</p>
       </template>
       <p class="field-note">{{ profile.force.frictionCoefficientMin == null || profile.force.frictionCoefficientMax == null ? t('analyzer.cvt.slipNotAssessed') : t('analyzer.cvt.slipWarningOnly') }}</p>
     </details>
@@ -268,7 +308,12 @@ const statusLabel = computed(() => {
     <p v-if="angleMismatch && Math.abs(angleMismatch.displacementScaleDifferenceRatio) > 0.001" class="warning-message">{{ t('analyzer.cvt.angleMismatchWarning', { percent: Math.abs(angleMismatch.displacementScaleDifferenceRatio * 100).toFixed(2) }) }}</p>
     <p class="confidence-note">{{ t('analyzer.cvt.uncertaintyAlwaysVisible') }}</p>
 
-    <CvtProfileEditor :open="settingsOpen" @close="settingsOpen = false" />
+    <CvtProfileEditor
+      :open="settingsOpen"
+      :total-reduction="totalTrace?.data ?? null"
+      :calibration-selection="calibrationSelection"
+      @close="settingsOpen = false"
+    />
   </div>
 </template>
 
@@ -285,6 +330,7 @@ const statusLabel = computed(() => {
 .status-out-of-bounds, .status-no-root { color: var(--color-warning, #c99100); }
 .status-unavailable { color: var(--color-text-muted); }
 .electronic { color: var(--color-accent); }
+.calibration { color: #9b72cf; }
 .cvt-svg { width: 100%; min-height: 128px; flex: 1 1 150px; overflow: visible; }
 .cvt-svg text { fill: var(--color-text-muted); font-size: 10px; }
 .fixed-sheaves path, .moving-sheave path { fill: none; stroke: var(--color-text-muted); stroke-width: 4; stroke-linecap: round; }
@@ -313,6 +359,8 @@ const statusLabel = computed(() => {
 .force-values dt { color: var(--color-text-muted); font-size: 0.65rem; }
 .force-values dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; }
 .field-note { margin: 7px 0 0; color: var(--color-text-muted); line-height: 1.35; }
+.sensitivity-table { display: grid; gap: 5px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--color-border); }
+.sensitivity-table div { display: grid; grid-template-columns: 0.8fr 1.4fr 1.4fr; gap: 6px; font-variant-numeric: tabular-nums; }
 .layer-message, .warning-message, .confidence-note { margin: 0; line-height: 1.35; }
 .layer-message { padding: 7px 9px; color: var(--color-text-muted); background: var(--color-surface-raised); border-radius: var(--radius); font-size: 0.75rem; }
 .warning-message { color: var(--color-warning, #c99100); font-size: 0.72rem; }

@@ -169,6 +169,13 @@ describe('settingsTransfer — parseImportBundle', () => {
         },
         couplingMode: 'ideal',
       },
+      calibration: {
+        ...cvt.profiles[0].calibration,
+        setupIdentity: 'NMAX-RACE-A',
+        combinedFixedReduction: 12.5,
+        upshiftMap: [{ ratio: 1.2, scale: 0.96 }],
+        downshiftMap: [{ ratio: 1.2, scale: 1.04 }],
+      },
     }
     const result = parseImportBundle(JSON.stringify({ drivetrain: { kind: 'cvt', cvt } }))
     expect(result.ok).toBe(true)
@@ -181,6 +188,10 @@ describe('settingsTransfer — parseImportBundle', () => {
     expect(profile.force.roller.massesG).toEqual([9, 9, 9, 9, 9, 9])
     expect(profile.force.roller.track).toHaveLength(2)
     expect(profile.force.couplingMode).toBe('ideal')
+    expect(profile.calibration.setupIdentity).toBe('NMAX-RACE-A')
+    expect(profile.calibration.combinedFixedReduction).toBe(12.5)
+    expect(profile.calibration.upshiftMap).toEqual([{ ratio: 1.2, scale: 0.96 }])
+    expect(profile.calibration.downshiftMap).toEqual([{ ratio: 1.2, scale: 1.04 }])
   })
 
   it('migrates an older export without a selection marker to manual', () => {

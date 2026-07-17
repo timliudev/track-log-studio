@@ -1191,6 +1191,8 @@ function titleForItemId(id: string): string {
                 :session="session"
                 :file-id="activeFile?.id"
                 :cursor-idx="cursorIdx"
+                :x-values="xValues"
+                :x-range="xRange"
               />
             </DashboardCard>
 

@@ -9,6 +9,8 @@ import {
   mergeCvtFormState,
   mergeCvtProfile,
   toCvtForceBalanceInput,
+  toCvtTraceConfig,
+  usesCvtCalibrationFixedReduction,
 } from '@/stores/drivetrainStore'
 
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
@@ -62,6 +64,8 @@ describe('drivetrainStore persistence', () => {
     expect(s.activeCvtProfile.force.roller.track).toEqual([])
     expect(s.activeCvtProfile.force.spring.mode).toBe('disabled')
     expect(s.activeCvtProfile.force.couplingMode).toBe('disabled')
+    expect(s.activeCvtProfile.calibration.combinedFixedReduction).toBeNull()
+    expect(s.activeCvtProfile.calibration.upshiftMap).toEqual([])
   })
 
   it('persists profile geometry and keeps wheel conversion synced to the active profile', async () => {
@@ -132,6 +136,20 @@ describe('drivetrainStore persistence', () => {
     expect(force.spring.rateNPerMm).toBe(11)
     expect(force.torqueCam.equalSplitAssumption).toBe(true)
     expect(force.couplingMode).toBe('ideal')
+  })
+
+  it('retains directional maps but clears hold-out status when a physical input changes', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      calibration: {
+        accuracyTargetRpm: 100,
+        holdoutResidualRpm: 80,
+        upshiftMap: [{ ratio: 1.2, scale: 1.01 }],
+      },
+    })
+    s.updateCvtProfile(s.activeCvtProfile.id, { belt: { widthMm: 22 } })
+    expect(s.activeCvtProfile.calibration.upshiftMap).toEqual([{ ratio: 1.2, scale: 1.01 }])
+    expect(s.activeCvtProfile.calibration.holdoutResidualRpm).toBeNull()
   })
 
   it('adds, switches, duplicates and removes independent CVT profiles', () => {
@@ -584,6 +602,35 @@ describe('toCvtForceBalanceInput', () => {
     expect(input.spring).toBeNull()
     expect(input.coupling.mode).toBe('disabled')
     expect(input.torqueCam?.points[0].angleDeg).toBe(60)
+  })
+
+  it('uses separate upshift/downshift calibration maps', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      calibration: {
+        activeDirection: 'downshift',
+        upshiftMap: [{ ratio: 1, scale: 0.9 }],
+        downshiftMap: [{ ratio: 1, scale: 1.1 }],
+      },
+    })
+    expect(toCvtForceBalanceInput(s.activeCvtProfile).coupling.calibrationMap).toEqual([{ ratio: 1, scale: 1.1 }])
+  })
+})
+
+describe('CVT fixed-reduction calibration fallback', () => {
+  it('is used only while the explicit gear/final pair is incomplete', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, { calibration: { combinedFixedReduction: 12.5 } })
+    expect(usesCvtCalibrationFixedReduction(s.activeCvtProfile)).toBe(true)
+    expect(toCvtTraceConfig(s.activeCvtProfile).gearReduction).toBe(12.5)
+    expect(toCvtTraceConfig(s.activeCvtProfile).finalReduction).toBe(1)
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      gearReduction: { mode: 'ratio', ratio: 2 },
+      finalReduction: { mode: 'ratio', ratio: 6 },
+    })
+    expect(usesCvtCalibrationFixedReduction(s.activeCvtProfile)).toBe(false)
+    expect(toCvtTraceConfig(s.activeCvtProfile).gearReduction).toBe(2)
+    expect(toCvtTraceConfig(s.activeCvtProfile).finalReduction).toBe(6)
   })
 })
 
