@@ -9,6 +9,7 @@ import BottomNav from '@/components/BottomNav.vue'
 import GithubStarButton from '@/components/GithubStarButton.vue'
 import PwaUpdateToast from '@/components/PwaUpdateToast.vue'
 import { useAppNavigationStore } from '@/stores/appNavigationStore'
+import ConverterView from '@/features/converter/ConverterView.vue'
 
 // Lazy tab views: async imports keep each top-level view in its own chunk so
 // heavy per-tab dependencies (notably grid-layout-plus + interactjs pulled in
@@ -17,7 +18,6 @@ import { useAppNavigationStore } from '@/stores/appNavigationStore'
 // No loadingComponent on purpose: the <Transition mode="out-in"> below waits
 // for an async child to resolve before playing the enter animation, so a
 // loading placeholder would only add a flash mid-transition.
-const ConverterView = defineAsyncComponent(() => import('@/features/converter/ConverterView.vue'))
 const AnalyzerView = defineAsyncComponent(() => import('@/features/analyzer/AnalyzerView.vue'))
 const SettingsView = defineAsyncComponent(() => import('@/features/settings/SettingsView.vue'))
 

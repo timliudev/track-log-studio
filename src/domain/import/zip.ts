@@ -1,5 +1,5 @@
 import { unzipSync, type UnzipFileInfo } from 'fflate'
-import { allImportExtensions } from './registry'
+import { allImportExtensions } from './formatDefinitions'
 
 /** A log file extracted from a zip: base name plus its raw bytes. */
 export interface ExtractedLog {

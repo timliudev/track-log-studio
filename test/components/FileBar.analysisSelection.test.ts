@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createI18n } from 'vue-i18n'
@@ -9,6 +9,15 @@ import { useFileStore } from '@/stores/fileStore'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import zhHant from '@/i18n/locales/zh-Hant'
+
+const { inspectRcnxFile, extractZipFile, parseFile } = vi.hoisted(() => ({
+  inspectRcnxFile: vi.fn(),
+  extractZipFile: vi.fn(),
+  parseFile: vi.fn(),
+}))
+
+vi.mock('@/domain/import/lazyLoaders', () => ({ inspectRcnxFile, extractZipFile }))
+vi.mock('@/composables/useLogImport', () => ({ useLogImport: () => ({ parseFile }) }))
 
 function session(): LogSession {
   const time: Channel = {
@@ -20,7 +29,12 @@ function session(): LogSession {
   return new LogSession([time], { formatId: 'test', createdDate: null, headerInfo: {} })
 }
 
-beforeEach(() => setActivePinia(createPinia()))
+beforeEach(() => {
+  setActivePinia(createPinia())
+  inspectRcnxFile.mockReset()
+  extractZipFile.mockReset()
+  parseFile.mockReset()
+})
 
 describe('FileBar analyzer selection', () => {
   it('uses ready-file checkboxes for the primary and comparison set', async () => {
@@ -102,5 +116,44 @@ describe('FileBar analyzer selection', () => {
     })
     expect(wrapper.find<HTMLInputElement>('input[name="logfile"]').attributes('accept')).toContain('.csv')
     expect(wrapper.text()).toContain('一般 CSV 遙測')
+  })
+
+  it('loads the RCNX inspector only after an RCNX file is chosen', async () => {
+    inspectRcnxFile.mockResolvedValue([
+      { n: 0, waypointCount: 10, trackName: 'Track A', startTimeMs: undefined, durationMs: 1000, hasLapData: false },
+      { n: 1, waypointCount: 20, trackName: 'Track B', startTimeMs: undefined, durationMs: 2000, hasLapData: true },
+    ])
+    const wrapper = mount(FileBar, {
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', messages: { 'zh-Hant': zhHant } })],
+        directives: { tooltip: () => undefined },
+      },
+    })
+    expect(inspectRcnxFile).not.toHaveBeenCalled()
+
+    const file = new File(['PK'], 'sessions.rcnx')
+    const input = wrapper.find<HTMLInputElement>('input[name="logfile"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    await vi.waitFor(() => expect(inspectRcnxFile).toHaveBeenCalledWith(file))
+    expect(wrapper.findAll('.rcnx-session-btn')).toHaveLength(2)
+    expect(parseFile).not.toHaveBeenCalled()
+  })
+
+  it('loads ZIP extraction only after a ZIP file is chosen', async () => {
+    extractZipFile.mockResolvedValue([])
+    const wrapper = mount(FileBar, {
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', messages: { 'zh-Hant': zhHant } })],
+        directives: { tooltip: () => undefined },
+      },
+    })
+    expect(extractZipFile).not.toHaveBeenCalled()
+
+    const file = new File(['PK'], 'shared.zip')
+    const input = wrapper.find<HTMLInputElement>('input[name="logfile"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [file] })
+    await input.trigger('change')
+    await vi.waitFor(() => expect(extractZipFile).toHaveBeenCalledWith(file))
   })
 })
