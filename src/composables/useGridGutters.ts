@@ -161,6 +161,11 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
 
   function onGutterPointerDown(gutter: GridGutter, event: PointerEvent): void {
     if (!enabled.value) return
+    // A finger may only claim the intentionally exposed 44px grip. The thin
+    // desktop gap itself remains available to mouse/pen, while a touch that
+    // starts elsewhere keeps the browser's native page-scroll behaviour.
+    const targetElement = event.target instanceof Element ? event.target : null
+    if (event.pointerType === 'touch' && !targetElement?.closest('.grid-gutter-grip')) return
     event.preventDefault()
     const target = event.currentTarget as HTMLElement
     target.setPointerCapture?.(event.pointerId)
@@ -221,14 +226,11 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
     // doc above already describes for pointerup/pointercancel ALSO applies to
     // pointermove, far more visibly: the first `onChange` call resizes `a`,
     // which moves `a`'s trailing edge away from `b` (grid-layout-plus's own
-    // compaction — the thing that reflows `b` back into place — only runs on
-    // a LATER render once the new `layout` prop round-trips back in, see
-    // AnalyzerView's `onChange` doc), so on the VERY NEXT tick `detectGutters`
-    // stops pairing `a`/`b` as adjacent, `gutters`' v-for key disappears, and
-    // Vue unmounts the exact `<div>` this drag's `target`/pointer-capture
-    // pointed at — ending target-scoped event delivery for the rest of the
-    // gesture (a target-only pointermove listener would go silent right
-    // there). Registering `onMove` on `window` instead (which doesn't depend
+    // a layout update can change a detected gutter's key (for example, a
+    // third-card collision clamp or a concurrent card edit), and Vue can
+    // unmount the exact `<div>` this drag started on. A target-scoped
+    // pointermove listener would then go silent. Registering `onMove` on
+    // `window` instead (which doesn't depend
     // on any particular element still being mounted, same fix shape as
     // endDrag's window-level safety net) keeps every subsequent pointermove
     // arriving for the whole gesture, however many gutter DOM nodes get

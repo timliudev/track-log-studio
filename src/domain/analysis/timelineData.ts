@@ -16,6 +16,8 @@ export interface TimelineSeriesMeta {
   color: string
   primary: boolean
   channelIndex: number
+  /** Stable input order for same-channel traces from different recordings. */
+  sourceOrder: number
 }
 
 export interface TimelineBuildResult {
@@ -79,7 +81,7 @@ export function buildTimelineData(
   const tables: { x: number[]; y: number[] }[] = []
   const series: TimelineSeriesMeta[] = []
 
-  for (const source of sources) {
+  sources.forEach((source, sourceOrder) => {
     channelNames.forEach((channel, channelIndex) => {
       const values = source.channels.get(channel)
       if (!values) return
@@ -95,9 +97,10 @@ export function buildTimelineData(
         color: source.color,
         primary: source.primary,
         channelIndex,
+        sourceOrder,
       })
     })
-  }
+  })
 
   const xs = Array.from(new Set(tables.flatMap((table) => table.x))).sort((a, b) => a - b)
   const indexByX = new Map(xs.map((x, index) => [x, index]))

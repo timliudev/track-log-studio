@@ -3,6 +3,7 @@ import {
   CHANNEL_COLORS_DARK,
   CHANNEL_COLORS_LIGHT,
   channelColor,
+  channelSeriesColor,
   chartColorContrast,
 } from '@/domain/analysis/channelPalette'
 
@@ -19,6 +20,22 @@ describe('chart channel palette', () => {
     }
     for (const color of CHANNEL_COLORS_DARK) {
       expect(chartColorContrast(color, '#181b21')).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  it('cycles stable same-hue trace variants without reducing surface contrast', () => {
+    expect(channelSeriesColor(0, 0, 'light')).toBe(channelColor(0, 'light'))
+    expect(channelSeriesColor(0, 1, 'light')).not.toBe(channelColor(0, 'light'))
+    expect(channelSeriesColor(0, 1, 'light')).toBe(channelSeriesColor(0, 5, 'light'))
+    expect(channelSeriesColor(2, -1, 'dark')).toBe(channelSeriesColor(2, 3, 'dark'))
+
+    for (const theme of ['light', 'dark'] as const) {
+      const surface = theme === 'light' ? '#ffffff' : '#181b21'
+      for (let channel = 0; channel < CHANNEL_COLORS_LIGHT.length; channel++) {
+        for (let trace = 0; trace < 4; trace++) {
+          expect(chartColorContrast(channelSeriesColor(channel, trace, theme), surface)).toBeGreaterThanOrEqual(3)
+        }
+      }
     }
   })
 })

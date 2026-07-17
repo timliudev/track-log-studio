@@ -241,6 +241,9 @@ let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
 let needleFrame: number | null = null
+let needleSettleFrame: number | null = null
+let resizeFrame: number | null = null
+let resizeEpoch = 0
 // Guard so programmatic setScale (from a synced xRange, or uPlot's own
 // auto-ranging on (re)create) doesn't echo back out as a user xZoom.
 //
@@ -263,6 +266,41 @@ function clearApplyingRangeSoon(): void {
   })
 }
 let applyingCursor = false
+
+/**
+ * Synchronize the sample under the fixed needle to both the shared cursor and
+ * uPlot's native legend cursor. The native crosshair remains hidden by the
+ * centre-mode cursor options; setCursor here only refreshes the legend values.
+ * The identity check prevents a deferred sync from a destroyed chart instance
+ * reaching either cursor after a recreate.
+ */
+function syncCentreCursor(instance: uPlot): void {
+  if (!props.centreCursorMode || plot !== instance) return
+  const { min, max } = instance.scales.x
+  if (min == null || max == null) return
+  const xs = instance.data[0] as number[]
+  const index = centreCursorIndex(xs, { min, max })
+  if (index != null) {
+    const left = instance.valToPos(xs[index], 'x')
+    if (Number.isFinite(left)) {
+      applyingCursor = true
+      instance.setCursor({ left, top: 0 })
+      applyingCursor = false
+    }
+  }
+  emit('cursor', index)
+  scheduleNeedlePos()
+}
+
+/**
+ * uPlot coalesces scale commits in a microtask. Schedule after that commit so
+ * an unchanged initial range and a same-range data replacement still publish
+ * the value under the fixed needle.
+ */
+function queueCentreCursor(instance: uPlot): void {
+  if (!props.centreCursorMode) return
+  queueMicrotask(() => syncCentreCursor(instance))
+}
 
 // B9 — whether the chart's CURRENT x scale is narrower than the full data
 // extent, i.e. "there's something to reset". Drives the reset-zoom button's
@@ -370,7 +408,7 @@ function buildOptions(width: number): uPlot.Options {
       setCursor: [
         (u: uPlot) => {
           // B31 — in centre-needle mode the emitted cursor comes from the
-          // FIXED centre (see the `setScale` hook below + `emitCentreCursor`),
+          // FIXED centre (see the `setScale` hook below + `syncCentreCursor`),
           // never from wherever the pointer happens to be hovering — so the
           // native hover-driven emit is suppressed here entirely.
           if (props.centreCursorMode) return
@@ -394,9 +432,7 @@ function buildOptions(width: number): uPlot.Options {
           // instance's data. `u.data[0]` is assumed finite/ascending X — same
           // assumption the `externalCursor` watcher below already makes.
           if (props.centreCursorMode) {
-            const xs = u.data[0] as number[]
-            emit('cursor', centreCursorIndex(xs, { min, max }))
-            scheduleNeedlePos()
+            syncCentreCursor(u)
           }
         },
       ],
@@ -444,16 +480,19 @@ function create(): void {
   // see clearApplyingRangeSoon's comment for why a synchronous reset can't
   // guard an async hook fire.
   applyingRange = true
-  plot = new uPlot(buildOptions(width), props.data, host.value)
+  const instance = new uPlot(buildOptions(width), props.data, host.value)
+  plot = instance
+  observeChartGeometry()
   applyXRange(false) // adopt the shared zoom on (re)create, e.g. a newly added chart
   clearApplyingRangeSoon()
+  queueCentreCursor(instance)
   // T1 — the legend only exists AFTER construction, so the height baked into
   // buildOptions() couldn't subtract it yet; re-measure once now that it's in
   // the DOM so canvas + legend fit the host exactly (fillHeight mode only —
   // fixed-height callers size the canvas to the `height` prop and let the
   // page flow around the legend, unchanged).
   if (props.fillHeight) {
-    resize()
+    scheduleResize()
     // #4 fix — a channel add/remove changes the series shape, which forces
     // THIS create() to run again (see the `[data, series]` watcher below).
     // That recreate happens inside the same reactive flush that may still be
@@ -469,9 +508,8 @@ function create(): void {
     // update (not just this component's own), self-healing without requiring
     // a manual drag. See uplotChartFillHeightResize.test.ts for the
     // regression this closes.
-    void nextTick(resize)
+    scheduleResize()
   }
-  updateNeedlePos()
   scheduleNeedlePos()
 }
 
@@ -487,12 +525,22 @@ function updateNeedlePos(): void {
   needleGeometry.value = centreNeedleGeometry(wrapRect, overRect)
 }
 
-/** uPlot commits setSize/setScale geometry asynchronously; measure after it. */
+/**
+ * uPlot and the responsive grid both commit geometry asynchronously. Measure
+ * in two frames: the first follows uPlot's own commit, the second follows a
+ * breakpoint reflow that lands in that first frame. Coalescing means a rapid
+ * resize can never leave an older frame to overwrite the newest rectangle.
+ */
 function scheduleNeedlePos(): void {
   if (needleFrame != null) cancelAnimationFrame(needleFrame)
+  if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
   needleFrame = requestAnimationFrame(() => {
     needleFrame = null
     updateNeedlePos()
+    needleSettleFrame = requestAnimationFrame(() => {
+      needleSettleFrame = null
+      updateNeedlePos()
+    })
   })
 }
 
@@ -926,13 +974,47 @@ function seriesKey(): string {
   return props.series.map((s) => s.label ?? '').join('|')
 }
 
-function resize(): void {
-  if (plot && host.value) {
-    emit('plotWidth', host.value.clientWidth)
-    plot.setSize({ width: host.value.clientWidth, height: targetHeight() })
-    updateNeedlePos()
-    scheduleNeedlePos()
-  }
+/** Resize only after Vue and the browser have settled the latest grid layout. */
+function scheduleResize(): void {
+  const epoch = ++resizeEpoch
+  void nextTick(() => {
+    if (epoch !== resizeEpoch) return
+    if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null
+      if (epoch !== resizeEpoch) return
+      resizeNow()
+    })
+  })
+}
+
+/** Apply a settled, non-transitional size to uPlot. */
+function resizeNow(): void {
+  if (!plot || !host.value) return
+  const width = host.value.clientWidth
+  const height = targetHeight()
+  // A breakpoint can transiently detach/collapse a grid item. Do not teach
+  // uPlot that zero is a real size and do not erase the last valid needle.
+  if (!(width > 0) || !(height > 0)) return
+  emit('plotWidth', width)
+  plot.setSize({ width, height })
+  scheduleNeedlePos()
+}
+
+/** Keep host/wrapper size changes separate from uPlot's own plot-area change. */
+function onChartGeometryResize(entries: ResizeObserverEntry[]): void {
+  const needsSize = entries.some((entry) => entry.target === host.value || entry.target === wrap.value)
+  if (needsSize) scheduleResize()
+  else scheduleNeedlePos()
+}
+
+/** Re-observe the live uPlot overlay after every create() replacement. */
+function observeChartGeometry(): void {
+  if (!ro) return
+  ro.disconnect()
+  if (host.value) ro.observe(host.value)
+  if (wrap.value) ro.observe(wrap.value)
+  if (plot) ro.observe(plot.over)
 }
 
 // Data-only change → fast setData. Series structure change → recreate. Seeded
@@ -945,11 +1027,11 @@ let lastKey = ''
 onMounted(() => {
   create()
   lastKey = seriesKey()
-  ro = new ResizeObserver(() => resize())
-  if (host.value) ro.observe(host.value)
+  ro = new ResizeObserver(onChartGeometryResize)
+  observeChartGeometry()
   // dpr / viewport changes (e.g. devtools device-mode toggle) don't trigger the
   // element ResizeObserver — also redraw on window resize.
-  window.addEventListener('resize', resize)
+  window.addEventListener('resize', scheduleResize)
   // Recreate with new colours when the theme (data-theme) changes.
   themeObs = new MutationObserver(() => create())
   themeObs.observe(document.documentElement, {
@@ -964,13 +1046,16 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   themeObs?.disconnect()
-  window.removeEventListener('resize', resize)
+  window.removeEventListener('resize', scheduleResize)
   host.value?.removeEventListener('mousedown', onHostMouseDown, true)
   window.removeEventListener('mousemove', onMousePanMove)
   window.removeEventListener('mouseup', onMousePanUp)
   clearLongPress()
   if (contextMenuResetTimer != null) clearTimeout(contextMenuResetTimer)
   if (needleFrame != null) cancelAnimationFrame(needleFrame)
+  if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
+  if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
+  resizeEpoch++
   destroy()
 })
 
@@ -982,8 +1067,10 @@ watch(
       lastKey = key
       create()
     } else {
-      plot.setData(props.data)
+      const instance = plot
+      instance.setData(props.data)
       applyXRange()
+      queueCentreCursor(instance)
     }
   },
   { deep: false },

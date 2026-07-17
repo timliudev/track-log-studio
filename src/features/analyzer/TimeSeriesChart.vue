@@ -16,7 +16,7 @@ import { resolveClockTimezoneOffset, sessionStartAnchor } from '@/domain/analysi
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
 import { planTimeSeriesAxes } from '@/domain/analysis/timeSeriesAxes'
-import { channelColor } from '@/domain/analysis/channelPalette'
+import { channelColor, channelSeriesColor } from '@/domain/analysis/channelPalette'
 import {
   availableDerivedAnalyzerChannels,
   isDerivedAnalyzerChannel,
@@ -80,9 +80,8 @@ const { tzOverride, centreCursorMode } = storeToRefs(settings)
 const documentTheme = useDocumentTheme()
 
 const channelStroke = (channelIndex: number): string => channelColor(channelIndex, documentTheme.value)
-// Line-dash patterns for overlay mode: style encodes the channel ([] = solid).
-const DASHES: number[][] = [[], [6, 4], [2, 3], [8, 3, 2, 3], [12, 4]]
-const dash = (i: number): number[] => DASHES[i % DASHES.length]
+const traceStroke = (channelIndex: number, traceOrder: number): string =>
+  channelSeriesColor(channelIndex, traceOrder, documentTheme.value)
 
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
@@ -249,8 +248,7 @@ const timelineSeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
   ...timeline.value.series.map((entry) => ({
     label: `${entry.sourceLabel} · ${channelDisplayLabel(entry.channel)}`,
-    stroke: channelStroke(entry.channelIndex),
-    dash: dash(entry.channelIndex),
+    stroke: traceStroke(entry.channelIndex, entry.sourceOrder),
     width: entry.primary ? 1.5 : 1,
     scale: valueAxes.value.scaleFor(entry.channel),
     spanGaps: true,
@@ -258,8 +256,8 @@ const timelineSeries = computed<uPlot.Series[]>(() => [
 ])
 
 // --- Overlay: selected laps re-based to a lap-relative X (from 0). ---
-// Colour encodes the lap, line style encodes the channel; same-channel laps
-// share a scale (= channel name) so they're directly comparable.
+// Channel hue identifies the signal; repeated laps vary only its brightness so
+// the traces remain directly comparable without dashed strokes.
 const overlay = computed(() =>
   buildLapOverlay({
     xValues: props.xValues,
@@ -343,8 +341,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
       { label: xUnit.value },
       ...crossOverlay.value.series.map((s) => ({
         label: `${s.sessionName} · #${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
-        stroke: channelStroke(s.channelIndex),
-        dash: dash(s.channelIndex),
+        stroke: traceStroke(s.channelIndex, s.lapOrder),
         width: 1 + (s.lapOrder % 3) * 0.35,
         scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
       })),
@@ -354,8 +351,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
     { label: xUnit.value },
     ...overlay.value.series.map((s) => ({
       label: `#${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
-      stroke: channelStroke(s.channelIndex),
-      dash: dash(s.channelIndex),
+      stroke: traceStroke(s.channelIndex, s.lapOrder),
       width: 1,
       scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
     })),

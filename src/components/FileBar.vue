@@ -5,17 +5,9 @@ import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useLapStore } from '@/stores/lapStore'
 import { useLogImport } from '@/composables/useLogImport'
-import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/registry'
-import { extractLogFiles } from '@/domain/import/zip'
-import { listRcnxSessions, type RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
-// Vite-resolved URL of the sql.js wasm binary (same asset the parse worker
-// uses — see src/workers/parse.worker.ts). listRcnxSessions runs on the main
-// thread (to show the multi-session picker before a File is handed to the
-// worker), so it needs its own copy of this URL: sql.js's default
-// self-location guess (no `locateFile`) resolves to a root path that doesn't
-// exist, and the dev server's SPA fallback then serves index.html instead of
-// a 404 — sql.js then fails to compile HTML bytes as wasm.
-import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
+import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/formatDefinitions'
+import type { RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
+import { extractZipFile, inspectRcnxFile } from '@/domain/import/lazyLoaders'
 import { filesFromDataTransfer, isFileDrag } from './fileDrop'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import {
@@ -150,7 +142,7 @@ async function importOne(file: File): Promise<void> {
       return
     }
     if (imp.id === 'rcnx') {
-      const sessions = await listRcnxSessions(new Uint8Array(await file.arrayBuffer()), sqlWasmUrl)
+      const sessions = await inspectRcnxFile(file)
       if (sessions.length > 1) {
         pendingRcnx.value = { id, file, sessions }
         return
@@ -185,7 +177,7 @@ async function importZip(zip: File): Promise<void> {
   const id = fileStore.beginImport(zip)
   let inner: File[]
   try {
-    const logs = extractLogFiles(new Uint8Array(await zip.arrayBuffer()))
+    const logs = await extractZipFile(zip)
     if (logs.length === 0) {
       throw new Error(`${zip.name}: no .loga or .nmea file inside the zip`)
     }
