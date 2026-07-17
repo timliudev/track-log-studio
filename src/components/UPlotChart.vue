@@ -268,16 +268,27 @@ function clearApplyingRangeSoon(): void {
 let applyingCursor = false
 
 /**
- * Emit the sample at a centre needle from one specific uPlot instance. The
- * identity check prevents a deferred emit from a destroyed chart instance
- * reaching the shared analyzer cursor after a recreate.
+ * Synchronize the sample under the fixed needle to both the shared cursor and
+ * uPlot's native legend cursor. The native crosshair remains hidden by the
+ * centre-mode cursor options; setCursor here only refreshes the legend values.
+ * The identity check prevents a deferred sync from a destroyed chart instance
+ * reaching either cursor after a recreate.
  */
-function emitCentreCursor(instance: uPlot): void {
+function syncCentreCursor(instance: uPlot): void {
   if (!props.centreCursorMode || plot !== instance) return
   const { min, max } = instance.scales.x
   if (min == null || max == null) return
   const xs = instance.data[0] as number[]
-  emit('cursor', centreCursorIndex(xs, { min, max }))
+  const index = centreCursorIndex(xs, { min, max })
+  if (index != null) {
+    const left = instance.valToPos(xs[index], 'x')
+    if (Number.isFinite(left)) {
+      applyingCursor = true
+      instance.setCursor({ left, top: 0 })
+      applyingCursor = false
+    }
+  }
+  emit('cursor', index)
   scheduleNeedlePos()
 }
 
@@ -288,7 +299,7 @@ function emitCentreCursor(instance: uPlot): void {
  */
 function queueCentreCursor(instance: uPlot): void {
   if (!props.centreCursorMode) return
-  queueMicrotask(() => emitCentreCursor(instance))
+  queueMicrotask(() => syncCentreCursor(instance))
 }
 
 // B9 — whether the chart's CURRENT x scale is narrower than the full data
@@ -397,7 +408,7 @@ function buildOptions(width: number): uPlot.Options {
       setCursor: [
         (u: uPlot) => {
           // B31 — in centre-needle mode the emitted cursor comes from the
-          // FIXED centre (see the `setScale` hook below + `emitCentreCursor`),
+          // FIXED centre (see the `setScale` hook below + `syncCentreCursor`),
           // never from wherever the pointer happens to be hovering — so the
           // native hover-driven emit is suppressed here entirely.
           if (props.centreCursorMode) return
@@ -421,7 +432,7 @@ function buildOptions(width: number): uPlot.Options {
           // instance's data. `u.data[0]` is assumed finite/ascending X — same
           // assumption the `externalCursor` watcher below already makes.
           if (props.centreCursorMode) {
-            emitCentreCursor(u)
+            syncCentreCursor(u)
           }
         },
       ],

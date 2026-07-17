@@ -138,11 +138,13 @@ afterEach(() => {
 })
 
 describe('UPlotChart fixed centre geometry', () => {
-  it('emits the centre sample at initial full bounds even when uPlot does not change its scale', async () => {
+  it('synchronizes the native legend cursor and shared cursor at initial full bounds', async () => {
     const w = mountChart(true)
     await Promise.resolve()
 
     expect(w.emitted('cursor')).toEqual([[2]])
+    expect(mockState.instances[0].cursor.idx).toBe(2)
+    expect(mockState.instances[0].setCursorCalls).toEqual([{ left: 280, top: 0 }])
   })
 
   it('re-emits from replacement data when its x bounds stay unchanged', async () => {
@@ -155,8 +157,10 @@ describe('UPlotChart fixed centre geometry', () => {
 
     // The midpoint remains x=50, but its nearest sample is now index 1.
     // MockPlot intentionally suppresses same-range setScale hooks above, so
-    // this proves the data-update lifecycle queues its own centre emission.
+    // this proves the data-update lifecycle queues its own centre/legend sync.
     expect(w.emitted('cursor')).toEqual([[2], [1]])
+    expect(mockState.instances[0].cursor.idx).toBe(1)
+    expect(mockState.instances[0].setCursorCalls.at(-1)).toEqual({ left: 336, top: 0 })
   })
 
   it('does not publish a fixed-centre cursor while centre mode is disabled', async () => {
@@ -164,6 +168,7 @@ describe('UPlotChart fixed centre geometry', () => {
     await Promise.resolve()
 
     expect(w.emitted('cursor')).toBeUndefined()
+    expect(mockState.instances[0].setCursorCalls).toEqual([])
   })
 
   it('tracks the live plot rectangle after resize and never spans axes/legend', async () => {
@@ -264,11 +269,13 @@ describe('UPlotChart fixed centre geometry', () => {
     expect(wheel.defaultPrevented).toBe(true)
     expect(zoom.max - zoom.min).toBeLessThan(100)
     expect(w.emitted('cursor')?.at(-1)).toEqual([2])
+    expect(mockState.instances[0].cursor.idx).toBe(2)
 
     host.dispatchEvent(pointer('pointerdown', { pointerId: 9, pointerType: 'mouse', clientX: 320, clientY: 100 }))
     host.dispatchEvent(pointer('pointermove', { pointerId: 9, pointerType: 'mouse', clientX: 460, clientY: 100 }))
     await vi.advanceTimersByTimeAsync(0)
     expect(w.emitted('cursor')?.at(-1)).toEqual([1])
+    expect(mockState.instances[0].cursor.idx).toBe(1)
   })
 
   it('preserves two-finger pinch zoom while centre mode is enabled', async () => {
