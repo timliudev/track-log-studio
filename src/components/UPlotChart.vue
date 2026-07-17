@@ -264,6 +264,30 @@ function clearApplyingRangeSoon(): void {
 }
 let applyingCursor = false
 
+/**
+ * Emit the sample at a centre needle from one specific uPlot instance. The
+ * identity check prevents a deferred emit from a destroyed chart instance
+ * reaching the shared analyzer cursor after a recreate.
+ */
+function emitCentreCursor(instance: uPlot): void {
+  if (!props.centreCursorMode || plot !== instance) return
+  const { min, max } = instance.scales.x
+  if (min == null || max == null) return
+  const xs = instance.data[0] as number[]
+  emit('cursor', centreCursorIndex(xs, { min, max }))
+  scheduleNeedlePos()
+}
+
+/**
+ * uPlot coalesces scale commits in a microtask. Schedule after that commit so
+ * an unchanged initial range and a same-range data replacement still publish
+ * the value under the fixed needle.
+ */
+function queueCentreCursor(instance: uPlot): void {
+  if (!props.centreCursorMode) return
+  queueMicrotask(() => emitCentreCursor(instance))
+}
+
 // B9 — whether the chart's CURRENT x scale is narrower than the full data
 // extent, i.e. "there's something to reset". Drives the reset-zoom button's
 // visibility. Updated from the `setScale` hook UNCONDITIONALLY (unlike the
@@ -394,9 +418,7 @@ function buildOptions(width: number): uPlot.Options {
           // instance's data. `u.data[0]` is assumed finite/ascending X — same
           // assumption the `externalCursor` watcher below already makes.
           if (props.centreCursorMode) {
-            const xs = u.data[0] as number[]
-            emit('cursor', centreCursorIndex(xs, { min, max }))
-            scheduleNeedlePos()
+            emitCentreCursor(u)
           }
         },
       ],
@@ -444,9 +466,11 @@ function create(): void {
   // see clearApplyingRangeSoon's comment for why a synchronous reset can't
   // guard an async hook fire.
   applyingRange = true
-  plot = new uPlot(buildOptions(width), props.data, host.value)
+  const instance = new uPlot(buildOptions(width), props.data, host.value)
+  plot = instance
   applyXRange(false) // adopt the shared zoom on (re)create, e.g. a newly added chart
   clearApplyingRangeSoon()
+  queueCentreCursor(instance)
   // T1 — the legend only exists AFTER construction, so the height baked into
   // buildOptions() couldn't subtract it yet; re-measure once now that it's in
   // the DOM so canvas + legend fit the host exactly (fillHeight mode only —
@@ -982,8 +1006,10 @@ watch(
       lastKey = key
       create()
     } else {
-      plot.setData(props.data)
+      const instance = plot
+      instance.setData(props.data)
       applyXRange()
+      queueCentreCursor(instance)
     }
   },
   { deep: false },

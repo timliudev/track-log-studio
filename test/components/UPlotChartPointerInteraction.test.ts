@@ -40,6 +40,7 @@ class MockPlot {
   }
 
   setScale(_key: string, range: { min: number; max: number }): void {
+    if (this.scales.x.min === range.min && this.scales.x.max === range.max) return
     this.scales.x = { ...range }
     this.setScaleCalls.push({ ...range })
     queueMicrotask(() => this.options.hooks?.setScale?.forEach((hook) => hook(this as never, 'x' as never)))
@@ -133,6 +134,34 @@ afterEach(() => {
 })
 
 describe('UPlotChart fixed centre geometry', () => {
+  it('emits the centre sample at initial full bounds even when uPlot does not change its scale', async () => {
+    const w = mountChart(true)
+    await Promise.resolve()
+
+    expect(w.emitted('cursor')).toEqual([[2]])
+  })
+
+  it('re-emits from replacement data when its x bounds stay unchanged', async () => {
+    const w = mountChart(true)
+    await Promise.resolve()
+    expect(w.emitted('cursor')).toEqual([[2]])
+
+    await w.setProps({ data: [[0, 60, 100], [1, 2, 3]] })
+    await Promise.resolve()
+
+    // The midpoint remains x=50, but its nearest sample is now index 1.
+    // MockPlot intentionally suppresses same-range setScale hooks above, so
+    // this proves the data-update lifecycle queues its own centre emission.
+    expect(w.emitted('cursor')).toEqual([[2], [1]])
+  })
+
+  it('does not publish a fixed-centre cursor while centre mode is disabled', async () => {
+    const w = mountChart(false)
+    await Promise.resolve()
+
+    expect(w.emitted('cursor')).toBeUndefined()
+  })
+
   it('tracks the live plot rectangle after resize and never spans axes/legend', async () => {
     const w = mountChart(true)
     const wrap = w.get('.uplot-wrap').element as HTMLElement
