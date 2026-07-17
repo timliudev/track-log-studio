@@ -9,9 +9,14 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { MEASURED_TOTAL_RATIO_CHANNEL } from '@/domain/analysis/analyzerChannels'
+import {
+  CVT_FRONT_RADIUS_CHANNEL,
+  PURE_CVT_RATIO_CHANNEL,
+} from '@/domain/analysis/cvtTrace'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
 
 function channel(name: string, values: number[]): Channel {
   return { name, rawName: name, description: undefined, data: new Float32Array(values) }
@@ -83,6 +88,36 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
       id: 1,
       channels: [MEASURED_TOTAL_RATIO_CHANNEL],
     })
+  })
+
+  it('offers pure CVT ratio before geometry and unlocks belt position only with complete measurements', () => {
+    const drivetrain = useDrivetrainStore()
+    drivetrain.setKind('cvt')
+    drivetrain.setCvtWheelCircumferenceMm(1000)
+    drivetrain.updateCvtProfile(drivetrain.activeCvtProfile.id, {
+      gearReduction: { mode: 'ratio', ratio: 1 },
+      finalReduction: { mode: 'ratio', ratio: 2 },
+    })
+
+    const ratioWrapper = mountChart([PURE_CVT_RATIO_CHANNEL])
+    const ratioData = ratioWrapper.findComponent(UPlotChart).props('data') as [number[], Array<number | null>]
+    expect(ratioData[1]).toEqual([1.5, 2, 2.5])
+    const initialOptions = ratioWrapper.findComponent(SearchableSelect).props('options') as Array<{ value?: string }>
+    expect(initialOptions.some((option) => option.value === CVT_FRONT_RADIUS_CHANNEL)).toBe(false)
+
+    drivetrain.updateCvtProfile(drivetrain.activeCvtProfile.id, {
+      belt: { lengthSource: 'pitch', pitchLengthMm: 650 },
+      geometry: {
+        centerDistanceMm: 190,
+        frontSheaveAngle: { valueDeg: 14, basis: 'half' },
+        rearSheaveAngle: { valueDeg: 14, basis: 'half' },
+        frontRadiusBoundsMm: { min: 25, max: 90 },
+        rearRadiusBoundsMm: { min: 25, max: 100 },
+      },
+    })
+    const geometryWrapper = mountChart([])
+    const completeOptions = geometryWrapper.findComponent(SearchableSelect).props('options') as Array<{ value?: string }>
+    expect(completeOptions.some((option) => option.value === CVT_FRONT_RADIUS_CHANNEL)).toBe(true)
   })
 
   it('derives the channel independently for every compared session', () => {

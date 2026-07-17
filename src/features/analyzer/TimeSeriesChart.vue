@@ -22,8 +22,15 @@ import {
   MEASURED_TOTAL_RATIO_CHANNEL,
   resolveAnalyzerChannel,
 } from '@/domain/analysis/analyzerChannels'
+import {
+  CVT_FRONT_DISPLACEMENT_CHANNEL,
+  CVT_FRONT_RADIUS_CHANNEL,
+  CVT_REAR_DISPLACEMENT_CHANNEL,
+  CVT_REAR_RADIUS_CHANNEL,
+  PURE_CVT_RATIO_CHANNEL,
+} from '@/domain/analysis/cvtTrace'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
-import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { toCvtTraceConfig, useDrivetrainStore } from '@/stores/drivetrainStore'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import { cachedChannelUpdateRateHz } from '@/composables/channelUpdateRateCache'
@@ -78,16 +85,33 @@ const dash = (i: number): number[] => DASHES[i % DASHES.length]
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
 const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
-const derivedContext = computed(() => ({
-  wheelCircumferenceMm: drivetrain.kind === 'mt'
-    ? drivetrain.inversionWheelCircumferenceMm
-    : drivetrain.cvt.wheelCircumferenceMm,
-}))
+function derivedContextFor(fileId?: number | null) {
+  return {
+    wheelCircumferenceMm: drivetrain.kind === 'mt'
+      ? drivetrain.inversionWheelCircumferenceMm
+      : drivetrain.activeCvtProfile.wheelCircumferenceMm,
+    fileId: fileId ?? 'unassigned',
+    cvtConfig: drivetrain.kind === 'cvt' ? toCvtTraceConfig(drivetrain.activeCvtProfile) : null,
+  }
+}
+const derivedContext = computed(() => derivedContextFor(props.primaryFileId))
 
 function channelLabel(id: string): string {
+  const keys: Record<string, string> = {
+    [MEASURED_TOTAL_RATIO_CHANNEL]: 'analyzer.gear.ratioSeriesLabel',
+    [PURE_CVT_RATIO_CHANNEL]: 'analyzer.gear.pureCvtRatioSeriesLabel',
+    [CVT_FRONT_RADIUS_CHANNEL]: 'analyzer.gear.frontPitchRadiusSeriesLabel',
+    [CVT_REAR_RADIUS_CHANNEL]: 'analyzer.gear.rearPitchRadiusSeriesLabel',
+    [CVT_FRONT_DISPLACEMENT_CHANNEL]: 'analyzer.gear.frontSheaveDisplacementSeriesLabel',
+    [CVT_REAR_DISPLACEMENT_CHANNEL]: 'analyzer.gear.rearSheaveDisplacementSeriesLabel',
+  }
+  return keys[id] ? t(keys[id]) as string : id
+}
+
+function channelDescription(id: string): string {
   return id === MEASURED_TOTAL_RATIO_CHANNEL
-    ? t('analyzer.gear.ratioSeriesLabel') as string
-    : id
+    ? t('analyzer.gear.measuredRatioChannelDescription') as string
+    : t('analyzer.gear.cvtDerivedChannelDescription') as string
 }
 
 const selectedChannelIds = computed<readonly string[]>(() => {
@@ -102,7 +126,7 @@ const allChannels = computed<Array<{ name: string; value?: string; description?:
     ...availableDerivedAnalyzerChannels(props.session, derivedContext.value).map((id) => ({
       name: channelLabel(id),
       value: id,
-      description: t('analyzer.gear.measuredRatioChannelDescription') as string,
+      description: channelDescription(id),
     })),
   ]
     .sort((a, b) => a.name.localeCompare(b.name)),
@@ -141,6 +165,11 @@ const unavailableDerivedMessage = computed<string | null>(() => {
     if (resolution.error === 'rpm') return t('analyzer.gear.noRpmChannel') as string
     if (resolution.error === 'speed') return t('analyzer.gear.noSpeedChannel') as string
     if (resolution.error === 'circumference') return t('analyzer.gear.invalidCircumference') as string
+    if (resolution.error === 'fixed-reduction') return t('analyzer.gear.cvtMissingFixedReduction') as string
+    if (resolution.error === 'belt-length') return t('analyzer.gear.cvtMissingBeltLength') as string
+    if (resolution.error === 'center-distance') return t('analyzer.gear.cvtMissingCenterDistance') as string
+    if (resolution.error === 'sheave-angle') return t('analyzer.gear.cvtMissingSheaveAngle') as string
+    if (resolution.error === 'radius-bounds') return t('analyzer.gear.cvtMissingRadiusBounds') as string
     if (resolution.data) {
       let finite = false
       for (let i = 0; i < resolution.data.length; i++) {
@@ -178,7 +207,7 @@ const timelineSources = computed<TimelineSource[]>(() => {
       primary: false,
       xValues: comparison.xValues,
       channels: new Map(present.value.flatMap((id) => {
-        const data = resolveAnalyzerChannel(comparison.session, id, derivedContext.value).data
+        const data = resolveAnalyzerChannel(comparison.session, id, derivedContextFor(comparison.id)).data
         return data ? [[id, data] as const] : []
       })),
     })
@@ -245,7 +274,7 @@ const crossLapSources = computed<CrossSessionLapSource[]>(() => {
     const lap = comparison?.laps.find((entry) => entry.index === ref.index)
     if (!comparison || !lap) continue
     const channels = present.value.map((name) => {
-      const data = resolveAnalyzerChannel(comparison.session, name, derivedContext.value).data
+      const data = resolveAnalyzerChannel(comparison.session, name, derivedContextFor(comparison.id)).data
       return { name, data: data ?? new Float32Array(comparison.session.rowCount).fill(NaN) }
     })
     sources.push({
