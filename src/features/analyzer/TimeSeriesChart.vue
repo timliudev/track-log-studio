@@ -12,7 +12,7 @@ import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
 import { buildCrossSessionLapOverlay, type CrossSessionLapSource } from '@/domain/analysis/crossSessionLapOverlay'
 import { sampleIndexAtGridX, gridIndexAtSampleIndex, lapContaining } from '@/domain/analysis/overlayCursor'
 import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
-import { sessionStartAnchor } from '@/domain/analysis/startTime'
+import { resolveClockTimezoneOffset, sessionStartAnchor } from '@/domain/analysis/startTime'
 import { lapColor } from './lapColors'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
@@ -324,14 +324,13 @@ const series = computed<uPlot.Series[]>(() =>
 // Absolute start instant (elapsed=0) of this session, for the clock-time axis.
 const anchor = computed(() => sessionStartAnchor(props.session))
 
-// Effective timezone offset (minutes east of UTC) for clock labels. 'auto' uses
-// the browser zone for GPS-derived anchors, but 0 for created-date anchors (whose
-// wall-clock components were reinterpreted as UTC). Reading the browser offset here
-// is display-only — it never becomes stored state.
+// Effective timezone offset (minutes east of UTC) for the absolute clock axis.
+// `auto` always follows the app's established local-time policy, irrespective of
+// whether the absolute anchor came from GPS UTC or a header created date. The
+// primary axis, uPlot legend, and cursor readout remain elapsed time/distance and
+// therefore deliberately have no timezone conversion to apply.
 const effectiveOffset = computed<number>(() => {
-  if (tzOverride.value !== 'auto') return tzOverride.value
-  if (anchor.value?.source === 'gpsUtc') return -new Date().getTimezoneOffset()
-  return 0
+  return resolveClockTimezoneOffset(tzOverride.value, -new Date().getTimezoneOffset())
 })
 
 // Label for the clock axis, e.g. 'UTC+8', 'UTC-3:30', 'UTC'.

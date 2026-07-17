@@ -11,6 +11,20 @@ export interface StartAnchor {
 }
 
 /**
+ * Resolve the wall-clock offset used by the full-session chart's optional
+ * clock axis. The caller supplies the browser's local offset so this remains
+ * deterministic domain logic: `auto` means the application's local-time
+ * policy, while a numeric preference is an explicit user override.
+ */
+export function resolveClockTimezoneOffset(
+  preference: 'auto' | number,
+  browserOffsetMinutesEast: number,
+): number {
+  if (typeof preference === 'number' && Number.isFinite(preference)) return preference
+  return Number.isFinite(browserOffsetMinutesEast) ? browserOffsetMinutesEast : 0
+}
+
+/**
  * Derive the absolute UTC instant that corresponds to the session's first sample
  * (elapsed time = 0), so a time axis of elapsed seconds can be relabelled with the
  * real wall-clock time.
@@ -20,8 +34,9 @@ export interface StartAnchor {
  *     finite UTC fix gives a real instant; its date comes from the header's created
  *     date. The fix is then back-dated by its own elapsed offset so the anchor lines
  *     up with elapsed=0.
- *  2. Created date — its LOCAL wall-clock components are reinterpreted as UTC, so
- *     rendering at offset 0 reproduces the time printed in the header.
+ *  2. Created date — retain the instant represented by the parsed local Date.
+ *     The chart's local/override timezone setting chooses how that instant is
+ *     displayed; do not reinterpret the wall-clock parts as UTC.
  *
  * Pure: no Date.now() and no timezone reads.
  * @param session the immutable parsed log
@@ -66,16 +81,7 @@ export function sessionStartAnchor(session: LogSession): StartAnchor | null {
   }
 
   if (created) {
-    const startUtcMs = Date.UTC(
-      created.getFullYear(),
-      created.getMonth(),
-      created.getDate(),
-      created.getHours(),
-      created.getMinutes(),
-      created.getSeconds(),
-      created.getMilliseconds(),
-    )
-    return { startUtcMs, source: 'created' }
+    return { startUtcMs: created.getTime(), source: 'created' }
   }
 
   return null
