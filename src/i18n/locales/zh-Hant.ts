@@ -336,6 +336,8 @@ export default {
       noteValuePlaceholder: '數值／說明',
       addNote: '新增備註欄位',
       removeNote: '刪除此備註欄位',
+      notesExportHint: '要把這些備註帶進檔案，請另存修改後的 .loga。',
+      notesExportAction: '前往另存修改 (.loga)',
     },
     gg: {
       xAxis: 'X 軸頻道',

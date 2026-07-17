@@ -342,6 +342,8 @@ export default {
       noteValuePlaceholder: 'Value / notes',
       addNote: 'Add note field',
       removeNote: 'Remove this note field',
+      notesExportHint: 'Save a modified .loga to include these notes in the file.',
+      notesExportAction: 'Go to Save modified (.loga)',
     },
     gg: {
       xAxis: 'X-axis channel',
