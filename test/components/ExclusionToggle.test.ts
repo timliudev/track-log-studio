@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
 import ExclusionToggle from '@/features/analyzer/ExclusionToggle.vue'
 
@@ -38,5 +40,13 @@ describe('ExclusionToggle', () => {
     // variables drive the normal and coarse rules in ExclusionToggle.vue.
     const style = wrapper.get('.exclude').attributes('style')
     expect(style).toContain('--exclude-toggle-coarse-size: 44px')
+    expect(style).toContain('--exclude-icon-size: 18px')
+    expect(style).toContain('--exclude-icon-coarse-size: 22px')
+  })
+
+  it('keeps optical centring in the one shared exclusion-control stylesheet', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/features/analyzer/ExclusionToggle.vue'), 'utf8')
+    expect(source).toContain('display: inline-grid')
+    expect(source).toContain('place-items: center')
   })
 })

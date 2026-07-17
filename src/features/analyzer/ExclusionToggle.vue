@@ -28,6 +28,8 @@ const emit = defineEmits<{ toggle: [] }>()
 // verify the coarse target remains the §8-required 44px.
 const compactToggleSize = '22px'
 const coarseToggleSize = '44px'
+const compactIconSize = '18px'
+const coarseIconSize = '22px'
 </script>
 
 <template>
@@ -40,7 +42,12 @@ const coarseToggleSize = '44px'
     :aria-pressed="excluded"
     :aria-disabled="disabled"
     :disabled="disabled"
-    :style="{ '--exclude-toggle-size': compactToggleSize, '--exclude-toggle-coarse-size': coarseToggleSize }"
+    :style="{
+      '--exclude-toggle-size': compactToggleSize,
+      '--exclude-toggle-coarse-size': coarseToggleSize,
+      '--exclude-icon-size': compactIconSize,
+      '--exclude-icon-coarse-size': coarseIconSize,
+    }"
     @click.stop="emit('toggle')"
   >
     <LapExclusionIcon :reason="reason ?? 'manual'" :sector-number="sectorNumber" />
@@ -59,11 +66,13 @@ const coarseToggleSize = '44px'
   padding: 0;
   line-height: 1;
   cursor: pointer;
+  display: inline-grid;
+  place-items: center;
 }
 .exclude svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: var(--exclude-icon-size);
+  height: var(--exclude-icon-size);
 }
 .exclude:hover {
   border-color: var(--color-accent);
@@ -88,7 +97,7 @@ const coarseToggleSize = '44px'
   height: var(--exclude-toggle-coarse-size);
 }
 :root[data-any-pointer-coarse] .exclude svg {
-  width: 22px;
-  height: 22px;
+  width: var(--exclude-icon-coarse-size);
+  height: var(--exclude-icon-coarse-size);
 }
 </style>
