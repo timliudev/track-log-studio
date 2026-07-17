@@ -396,12 +396,12 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   background: var(--color-bg);
   min-width: 0;
 }
-.value-cell--with-rate .value-label {
-  padding-right: 42px;
+.value-cell--with-rate {
+  padding-bottom: 20px;
 }
 .rate-badge {
   position: absolute;
-  top: 7px;
+  bottom: 7px;
   right: 8px;
   max-width: 42px;
   color: var(--color-text-muted);

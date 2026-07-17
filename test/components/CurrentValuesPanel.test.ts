@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import CurrentValuesPanel from '@/features/analyzer/CurrentValuesPanel.vue'
@@ -287,5 +289,14 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
     const steady = wrapper.findAll('.value-cell').find((c) => c.text().includes('Steady'))!
     expect(rpm.find('.rate-badge').text()).toBe('10.0 Hz')
     expect(steady.find('.rate-badge').text()).toBe('— Hz')
+  })
+
+  it('anchors update-rate badges at the lower right without reserving label space', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/features/analyzer/CurrentValuesPanel.vue'), 'utf8')
+    const rateBadgeCss = source.slice(source.indexOf('.rate-badge {'), source.indexOf('.value-cell--time {'))
+    expect(rateBadgeCss).toContain('bottom: 7px')
+    expect(rateBadgeCss).not.toContain('top: 7px')
+    expect(source).not.toContain('.value-cell--with-rate .value-label')
+    expect(source).toContain('.value-cell--with-rate {\n  padding-bottom: 20px')
   })
 })
