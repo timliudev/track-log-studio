@@ -83,6 +83,36 @@ export function defaultSuspensionConfig(): SuspensionConfig {
 }
 
 /**
+ * Validate and copy a calibration recovered from a portable file annotation.
+ * Import metadata is untrusted, so partial channel objects, non-finite values,
+ * and excessively long source names are rejected as one whole calibration.
+ */
+export function normalizeSuspensionConfig(value: unknown): SuspensionConfig | null {
+  if (value == null || typeof value !== 'object') return null
+  const readChannel = (part: SuspensionPart): SuspensionChannelConfig | null => {
+    const raw = (value as Record<string, unknown>)[part]
+    if (raw == null || typeof raw !== 'object') return null
+    const data = raw as Record<string, unknown>
+    const sourceChannel = typeof data.sourceChannel === 'string' ? data.sourceChannel.trim() : null
+    const numeric = ['minMv', 'maxMv', 'zeroMv', 'minMm', 'maxMm'] as const
+    if (typeof data.enabled !== 'boolean' || sourceChannel == null || sourceChannel.length > 200) return null
+    if (numeric.some((key) => typeof data[key] !== 'number' || !Number.isFinite(data[key]))) return null
+    return {
+      enabled: data.enabled,
+      sourceChannel,
+      minMv: data.minMv as number,
+      maxMv: data.maxMv as number,
+      zeroMv: data.zeroMv as number,
+      minMm: data.minMm as number,
+      maxMm: data.maxMm as number,
+    }
+  }
+  const front = readChannel('front')
+  const rear = readChannel('rear')
+  return front && rear ? { front, rear } : null
+}
+
+/**
  * Voltage (mv) → travel (mm), relative to the zero-point voltage. Linear
  * transfer defined by (minMv,minMm)–(maxMv,maxMm); output is offset so that
  * zeroMv reads 0mm. Returns NaN if the voltage span is degenerate.

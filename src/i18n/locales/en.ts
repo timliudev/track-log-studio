@@ -469,6 +469,8 @@ export default {
     statusEnabled: 'Enabled · source {channel} · {min}–{max} mm',
     statusDisabled: 'Disabled',
     statusChannelMissing: '(not present in the current log)',
+    importedCalibrationHint: 'This file contains suspension calibration; your current settings will not be changed automatically.',
+    applyImportedCalibration: 'Apply suspension calibration from file',
     save: {
       heading: 'Save updated .loga',
       intro: 'Write suspension calibration and CVT tuning notes to a new file without replacing the original.',
@@ -479,6 +481,7 @@ export default {
       replaced: 'replaced',
       appended: 'added',
       cvtNotesSaved: '{count} CVT notes',
+      calibrationSaved: 'Suspension calibration saved with the file',
     },
   },
   theme: {

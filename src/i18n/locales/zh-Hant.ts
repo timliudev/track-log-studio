@@ -463,6 +463,8 @@ export default {
     statusEnabled: '啟用 · 來源 {channel} · {min}–{max} mm',
     statusDisabled: '未啟用',
     statusChannelMissing: '（目前記錄無此通道）',
+    importedCalibrationHint: '此檔案包含避震校正設定；目前設定不會自動被覆蓋。',
+    applyImportedCalibration: '套用檔案內避震校正',
     save: {
       heading: '另存更新後的 .loga',
       intro: '把避震校正與 CVT 調教備註寫入新檔，不覆蓋原檔。',
@@ -473,6 +475,7 @@ export default {
       replaced: '替換',
       appended: '新增',
       cvtNotesSaved: 'CVT 備註 {count} 筆',
+      calibrationSaved: '避震校正設定已隨檔儲存',
     },
   },
   theme: {

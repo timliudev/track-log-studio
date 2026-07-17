@@ -8,6 +8,7 @@ import {
   derivedSuspensionNames,
 } from '@/domain/units/suspension'
 import { patchLogaText } from '@/domain/export/loga/LogaWriter'
+import { withSuspensionCalibration } from '@/domain/export/metadata'
 import { downloadText, downloadZip } from '@/features/converter/download'
 
 const { t } = useI18n()
@@ -25,10 +26,18 @@ function hasCvtNotes(entry: (typeof conv.savableEntries)[number]): boolean {
   return (entry.metadata.cvtNotes?.length ?? 0) > 0
 }
 
+function metadataFor(entry: (typeof conv.savableEntries)[number]) {
+  return withSuspensionCalibration(entry.metadata, susp.config)
+}
+
+function hasSuspensionCalibration(entry: (typeof conv.savableEntries)[number]): boolean {
+  return metadataFor(entry).suspensionCalibration != null
+}
+
 /** Entries that would write either calibrated channels or session notes. */
 const eligible = computed(() =>
   conv.savableEntries.filter(
-    (entry) => hasDerivedChannels(entry) || hasCvtNotes(entry),
+    (entry) => hasDerivedChannels(entry) || hasCvtNotes(entry) || hasSuspensionCalibration(entry),
   ),
 )
 
@@ -41,11 +50,13 @@ async function build(entry: (typeof eligible.value)[number]): Promise<{ name: st
   const text = await entry.file.text()
   const channels = deriveSuspensionChannels(entry.session, susp.config)
   const replacements = new Map(channels.map((c) => [c.name, c.data]))
-  const { text: out, replaced, appended } = patchLogaText(text, replacements, entry.metadata)
+  const metadata = metadataFor(entry)
+  const { text: out, replaced, appended } = patchLogaText(text, replacements, metadata)
   const parts: string[] = []
   if (replaced.length) parts.push(`${t('suspension.save.replaced')}: ${replaced.join(', ')}`)
   if (appended.length) parts.push(`${t('suspension.save.appended')}: ${appended.join(', ')}`)
   if (hasCvtNotes(entry)) parts.push(t('suspension.save.cvtNotesSaved', { count: entry.metadata.cvtNotes!.length }))
+  if (metadata.suspensionCalibration) parts.push(t('suspension.save.calibrationSaved'))
   results[entry.id] = parts.join(' · ')
   return { name: outName(entry), content: out }
 }

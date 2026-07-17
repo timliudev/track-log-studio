@@ -11,6 +11,7 @@ import {
   suggestConfig,
   type SuspensionChannelConfig,
   type SuspensionConfig,
+  normalizeSuspensionConfig,
 } from '@/domain/units/suspension'
 import { loadFixture } from '../fixtures'
 
@@ -100,6 +101,25 @@ describe('legacyAdChannelName (v1 -> v2 migration helper)', () => {
   it('maps the two hardcoded v1 sources to their .loga channel names', () => {
     expect(legacyAdChannelName('AD1')).toBe('SuspensionAD1')
     expect(legacyAdChannelName('AD2')).toBe('SuspensionAD2')
+  })
+})
+
+describe('normalizeSuspensionConfig', () => {
+  it('copies a complete serializable calibration without retaining caller references', () => {
+    const config = frontEnabled({ sourceChannel: 'FrontPot' })
+    config.rear = { ...config.rear, sourceChannel: 'RearPot', maxMm: 110 }
+    const normalized = normalizeSuspensionConfig(config)
+    expect(normalized).toEqual(config)
+    expect(normalized).not.toBe(config)
+    expect(normalized!.front).not.toBe(config.front)
+  })
+
+  it('rejects incomplete or non-finite calibration fields', () => {
+    expect(normalizeSuspensionConfig({ front: { enabled: true, sourceChannel: 'A' }, rear: {} })).toBeNull()
+    expect(normalizeSuspensionConfig({
+      front: { enabled: true, sourceChannel: 'A', minMv: 0, maxMv: Infinity, zeroMv: 0, minMm: 0, maxMm: 100 },
+      rear: { enabled: false, sourceChannel: 'B', minMv: 0, maxMv: 5000, zeroMv: 0, minMm: 0, maxMm: 100 },
+    })).toBeNull()
   })
 })
 
