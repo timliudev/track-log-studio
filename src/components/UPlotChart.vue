@@ -241,6 +241,9 @@ let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
 let needleFrame: number | null = null
+let needleSettleFrame: number | null = null
+let resizeFrame: number | null = null
+let resizeEpoch = 0
 // Guard so programmatic setScale (from a synced xRange, or uPlot's own
 // auto-ranging on (re)create) doesn't echo back out as a user xZoom.
 //
@@ -468,6 +471,7 @@ function create(): void {
   applyingRange = true
   const instance = new uPlot(buildOptions(width), props.data, host.value)
   plot = instance
+  observeChartGeometry()
   applyXRange(false) // adopt the shared zoom on (re)create, e.g. a newly added chart
   clearApplyingRangeSoon()
   queueCentreCursor(instance)
@@ -477,7 +481,7 @@ function create(): void {
   // fixed-height callers size the canvas to the `height` prop and let the
   // page flow around the legend, unchanged).
   if (props.fillHeight) {
-    resize()
+    scheduleResize()
     // #4 fix — a channel add/remove changes the series shape, which forces
     // THIS create() to run again (see the `[data, series]` watcher below).
     // That recreate happens inside the same reactive flush that may still be
@@ -493,9 +497,8 @@ function create(): void {
     // update (not just this component's own), self-healing without requiring
     // a manual drag. See uplotChartFillHeightResize.test.ts for the
     // regression this closes.
-    void nextTick(resize)
+    scheduleResize()
   }
-  updateNeedlePos()
   scheduleNeedlePos()
 }
 
@@ -511,12 +514,22 @@ function updateNeedlePos(): void {
   needleGeometry.value = centreNeedleGeometry(wrapRect, overRect)
 }
 
-/** uPlot commits setSize/setScale geometry asynchronously; measure after it. */
+/**
+ * uPlot and the responsive grid both commit geometry asynchronously. Measure
+ * in two frames: the first follows uPlot's own commit, the second follows a
+ * breakpoint reflow that lands in that first frame. Coalescing means a rapid
+ * resize can never leave an older frame to overwrite the newest rectangle.
+ */
 function scheduleNeedlePos(): void {
   if (needleFrame != null) cancelAnimationFrame(needleFrame)
+  if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
   needleFrame = requestAnimationFrame(() => {
     needleFrame = null
     updateNeedlePos()
+    needleSettleFrame = requestAnimationFrame(() => {
+      needleSettleFrame = null
+      updateNeedlePos()
+    })
   })
 }
 
@@ -950,13 +963,47 @@ function seriesKey(): string {
   return props.series.map((s) => s.label ?? '').join('|')
 }
 
-function resize(): void {
-  if (plot && host.value) {
-    emit('plotWidth', host.value.clientWidth)
-    plot.setSize({ width: host.value.clientWidth, height: targetHeight() })
-    updateNeedlePos()
-    scheduleNeedlePos()
-  }
+/** Resize only after Vue and the browser have settled the latest grid layout. */
+function scheduleResize(): void {
+  const epoch = ++resizeEpoch
+  void nextTick(() => {
+    if (epoch !== resizeEpoch) return
+    if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null
+      if (epoch !== resizeEpoch) return
+      resizeNow()
+    })
+  })
+}
+
+/** Apply a settled, non-transitional size to uPlot. */
+function resizeNow(): void {
+  if (!plot || !host.value) return
+  const width = host.value.clientWidth
+  const height = targetHeight()
+  // A breakpoint can transiently detach/collapse a grid item. Do not teach
+  // uPlot that zero is a real size and do not erase the last valid needle.
+  if (!(width > 0) || !(height > 0)) return
+  emit('plotWidth', width)
+  plot.setSize({ width, height })
+  scheduleNeedlePos()
+}
+
+/** Keep host/wrapper size changes separate from uPlot's own plot-area change. */
+function onChartGeometryResize(entries: ResizeObserverEntry[]): void {
+  const needsSize = entries.some((entry) => entry.target === host.value || entry.target === wrap.value)
+  if (needsSize) scheduleResize()
+  else scheduleNeedlePos()
+}
+
+/** Re-observe the live uPlot overlay after every create() replacement. */
+function observeChartGeometry(): void {
+  if (!ro) return
+  ro.disconnect()
+  if (host.value) ro.observe(host.value)
+  if (wrap.value) ro.observe(wrap.value)
+  if (plot) ro.observe(plot.over)
 }
 
 // Data-only change → fast setData. Series structure change → recreate. Seeded
@@ -969,11 +1016,11 @@ let lastKey = ''
 onMounted(() => {
   create()
   lastKey = seriesKey()
-  ro = new ResizeObserver(() => resize())
-  if (host.value) ro.observe(host.value)
+  ro = new ResizeObserver(onChartGeometryResize)
+  observeChartGeometry()
   // dpr / viewport changes (e.g. devtools device-mode toggle) don't trigger the
   // element ResizeObserver — also redraw on window resize.
-  window.addEventListener('resize', resize)
+  window.addEventListener('resize', scheduleResize)
   // Recreate with new colours when the theme (data-theme) changes.
   themeObs = new MutationObserver(() => create())
   themeObs.observe(document.documentElement, {
@@ -988,13 +1035,16 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   themeObs?.disconnect()
-  window.removeEventListener('resize', resize)
+  window.removeEventListener('resize', scheduleResize)
   host.value?.removeEventListener('mousedown', onHostMouseDown, true)
   window.removeEventListener('mousemove', onMousePanMove)
   window.removeEventListener('mouseup', onMousePanUp)
   clearLongPress()
   if (contextMenuResetTimer != null) clearTimeout(contextMenuResetTimer)
   if (needleFrame != null) cancelAnimationFrame(needleFrame)
+  if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
+  if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
+  resizeEpoch++
   destroy()
 })
 
