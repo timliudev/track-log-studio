@@ -58,6 +58,7 @@ import SectorPanel from './SectorPanel.vue'
 import TrackChannelPanel from './TrackChannelPanel.vue'
 import AccelTestPanel from './AccelTestPanel.vue'
 import GearPanel from './GearPanel.vue'
+import CvtDynamicsCard from './CvtDynamicsCard.vue'
 import TrackFilePanel from './TrackFilePanel.vue'
 import SessionMergePanel from './SessionMergePanel.vue'
 import SuspensionCard from './SuspensionCard.vue'
@@ -1187,6 +1188,24 @@ function titleForItemId(id: string): string {
                 :primary-file-name="activeFile?.name"
                 @cursor="analyzer.setCursor"
                 @x-zoom="onXZoom"
+              />
+            </DashboardCard>
+
+            <DashboardCard
+              v-else-if="item.i === 'cvtdynamics'"
+              :title="t('analyzer.layout.cardCvtDynamics')"
+              :collapsed="isCollapsed(item.i)"
+              :pinned="isPinned(item.i)"
+              :aspect-ratio="item.w / item.h"
+              @update:collapsed="toggleCollapsed(item.i)"
+              @update:pinned="togglePinned(item.i)"
+            >
+              <CvtDynamicsCard
+                :session="session"
+                :file-id="activeFile?.id"
+                :cursor-idx="cursorIdx"
+                :x-values="xValues"
+                :x-range="xRange"
               />
             </DashboardCard>
 

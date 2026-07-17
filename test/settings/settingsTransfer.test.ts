@@ -7,7 +7,7 @@ import {
   type SettingsExportBundle,
 } from '@/domain/settings/settingsTransfer'
 import { defaultAppearanceSettings } from '@/stores/settingsStore'
-import type { MtFormState } from '@/stores/drivetrainStore'
+import { mergeCvtFormState, type MtFormState } from '@/stores/drivetrainStore'
 import { defaultLayout } from '@/domain/layout/dashboardLayout'
 import { defaultPanelState } from '@/domain/layout/panelState'
 import { defaultCurrentValuesFieldPrefs } from '@/domain/analysis/currentValuesFieldPrefs'
@@ -34,7 +34,7 @@ const DRIVETRAIN = {
   kind: 'mt' as const,
   kindSelection: 'manual' as const,
   mt: SAMPLE_MT,
-  cvt: { wheelCircumferenceMm: 1400, tireSpec: '', notes: [] },
+  cvt: mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] }),
   inversionWheelCircumferenceMm: 1870,
 }
 
@@ -145,6 +145,53 @@ describe('settingsTransfer — parseImportBundle', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.bundle.drivetrain.kind).toBe('cvt')
+  })
+
+  it('round-trips and sanitizes structured CVT profiles through B19', () => {
+    const cvt = mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] })
+    cvt.profiles[0] = {
+      ...cvt.profiles[0],
+      name: 'Race setup',
+      actuationKind: 'electronic',
+      belt: { ...cvt.profiles[0].belt, outsideLengthMm: 882, cordOffsetFromOutsideMm: 2.7 },
+      geometry: {
+        ...cvt.profiles[0].geometry,
+        centerDistanceMm: 205,
+        frontSheaveAngle: { valueDeg: 13.8, basis: 'half' },
+      },
+      force: {
+        ...cvt.profiles[0].force,
+        roller: {
+          ...cvt.profiles[0].force.roller,
+          massesG: [9, 9, 9, 9, 9, 9],
+          track: [{ travelMm: 0, radiusMm: 24 }, { travelMm: 10, radiusMm: 34 }],
+          efficiency: 1,
+        },
+        couplingMode: 'ideal',
+      },
+      calibration: {
+        ...cvt.profiles[0].calibration,
+        setupIdentity: 'NMAX-RACE-A',
+        combinedFixedReduction: 12.5,
+        upshiftMap: [{ ratio: 1.2, scale: 0.96 }],
+        downshiftMap: [{ ratio: 1.2, scale: 1.04 }],
+      },
+    }
+    const result = parseImportBundle(JSON.stringify({ drivetrain: { kind: 'cvt', cvt } }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const profile = result.bundle.drivetrain.cvt.profiles[0]
+    expect(profile.name).toBe('Race setup')
+    expect(profile.actuationKind).toBe('electronic')
+    expect(profile.belt.outsideLengthMm).toBe(882)
+    expect(profile.geometry.frontSheaveAngle).toEqual({ valueDeg: 13.8, basis: 'half' })
+    expect(profile.force.roller.massesG).toEqual([9, 9, 9, 9, 9, 9])
+    expect(profile.force.roller.track).toHaveLength(2)
+    expect(profile.force.couplingMode).toBe('ideal')
+    expect(profile.calibration.setupIdentity).toBe('NMAX-RACE-A')
+    expect(profile.calibration.combinedFixedReduction).toBe(12.5)
+    expect(profile.calibration.upshiftMap).toEqual([{ ratio: 1.2, scale: 0.96 }])
+    expect(profile.calibration.downshiftMap).toEqual([{ ratio: 1.2, scale: 1.04 }])
   })
 
   it('migrates an older export without a selection marker to manual', () => {

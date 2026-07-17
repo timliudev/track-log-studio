@@ -7,6 +7,10 @@ import {
   MAX_GEARS,
   mergeMtFormState,
   mergeCvtFormState,
+  mergeCvtProfile,
+  toCvtForceBalanceInput,
+  toCvtTraceConfig,
+  usesCvtCalibrationFixedReduction,
 } from '@/stores/drivetrainStore'
 
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
@@ -46,11 +50,123 @@ describe('drivetrainStore persistence', () => {
     expect(s.mt.finalDrive).toEqual({ mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 })
   })
 
-  it('defaults CVT to the free-form note fields (no computed geometry fields)', () => {
+  it('defaults CVT to one incomplete profile without guessed physical values', () => {
     const s = useDrivetrainStore()
     expect(s.cvt.notes.length).toBeGreaterThan(0)
     expect(s.cvt.notes.some((n) => n.label.includes('終傳'))).toBe(true)
     expect(s.cvt.notes.every((n) => n.value === '')).toBe(true)
+    expect(s.cvt.profiles).toHaveLength(1)
+    expect(s.activeCvtProfile.id).toBe(s.cvt.activeProfileId)
+    expect(s.activeCvtProfile.belt.outsideLengthMm).toBeNull()
+    expect(s.activeCvtProfile.geometry.centerDistanceMm).toBeNull()
+    expect(s.activeCvtProfile.geometry.frontSheaveAngle.valueDeg).toBeNull()
+    expect(s.activeCvtProfile.gearReduction.ratio).toBe(0)
+    expect(s.activeCvtProfile.force.roller.track).toEqual([])
+    expect(s.activeCvtProfile.force.spring.mode).toBe('disabled')
+    expect(s.activeCvtProfile.force.couplingMode).toBe('disabled')
+    expect(s.activeCvtProfile.calibration.combinedFixedReduction).toBeNull()
+    expect(s.activeCvtProfile.calibration.upshiftMap).toEqual([])
+  })
+
+  it('persists profile geometry and keeps wheel conversion synced to the active profile', async () => {
+    const s1 = useDrivetrainStore()
+    s1.updateCvtProfile(s1.activeCvtProfile.id, {
+      name: 'NMAX race',
+      belt: { outsideLengthMm: 882, cordOffsetFromOutsideMm: 2.7 },
+      geometry: {
+        centerDistanceMm: 205,
+        frontSheaveAngle: { valueDeg: 13.8, basis: 'half' },
+        frontRadiusBoundsMm: { min: 23, max: 58 },
+      },
+      finalReduction: {
+        mode: 'stages',
+        stages: [
+          { driveTeeth: 13, drivenTeeth: 41 },
+          { driveTeeth: 12, drivenTeeth: 36 },
+        ],
+      },
+    })
+    s1.setCvtTireSpec('100/90-10')
+    await nextTick()
+
+    setActivePinia(createPinia())
+    const s2 = useDrivetrainStore()
+    expect(s2.activeCvtProfile.name).toBe('NMAX race')
+    expect(s2.activeCvtProfile.belt.outsideLengthMm).toBe(882)
+    expect(s2.activeCvtProfile.geometry.frontSheaveAngle.valueDeg).toBe(13.8)
+    expect(s2.activeCvtProfile.finalReduction.stages).toHaveLength(2)
+    expect(s2.activeCvtProfile.tireSpec).toBe('100/90-10')
+    expect(s2.activeCvtProfile.wheelCircumferenceMm).toBe(s2.cvt.wheelCircumferenceMm)
+  })
+
+  it('persists measured force parameters without converting a catalog rpm label', async () => {
+    const s1 = useDrivetrainStore()
+    s1.updateCvtProfile(s1.activeCvtProfile.id, {
+      force: {
+        roller: {
+          massesG: [9, 9, 9, 9, 9, 9],
+          track: [{ travelMm: 0, radiusMm: 24 }, { travelMm: 12, radiusMm: 36 }],
+          efficiency: 1,
+        },
+        spring: {
+          catalogLabel: '1500 rpm',
+          mode: 'linear',
+          rateNPerMm: 11,
+          installedPreloadMm: 8,
+        },
+        torqueCam: {
+          mode: 'profile',
+          points: [
+            { travelMm: 0, angleDeg: 42, effectiveRadiusMm: 38 },
+            { travelMm: 10, angleDeg: 45, effectiveRadiusMm: 38 },
+          ],
+          torqueShare: 0.5,
+          equalSplitAssumption: true,
+        },
+        couplingMode: 'ideal',
+        operatingFrontRpm: 7500,
+        operatingRearTorqueNm: 20,
+      },
+    })
+    await nextTick()
+    setActivePinia(createPinia())
+    const force = useDrivetrainStore().activeCvtProfile.force
+    expect(force.roller.massesG).toHaveLength(6)
+    expect(force.spring.catalogLabel).toBe('1500 rpm')
+    expect(force.spring.rateNPerMm).toBe(11)
+    expect(force.torqueCam.equalSplitAssumption).toBe(true)
+    expect(force.couplingMode).toBe('ideal')
+  })
+
+  it('retains directional maps but clears hold-out status when a physical input changes', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      calibration: {
+        accuracyTargetRpm: 100,
+        holdoutResidualRpm: 80,
+        upshiftMap: [{ ratio: 1.2, scale: 1.01 }],
+      },
+    })
+    s.updateCvtProfile(s.activeCvtProfile.id, { belt: { widthMm: 22 } })
+    expect(s.activeCvtProfile.calibration.upshiftMap).toEqual([{ ratio: 1.2, scale: 1.01 }])
+    expect(s.activeCvtProfile.calibration.holdoutResidualRpm).toBeNull()
+  })
+
+  it('adds, switches, duplicates and removes independent CVT profiles', () => {
+    const s = useDrivetrainStore()
+    const first = s.activeCvtProfile.id
+    s.updateCvtProfile(first, { name: 'Road' })
+    const second = s.addCvtProfile('Race')
+    s.updateCvtProfile(second, { actuationKind: 'electronic', vehicleId: 'nmax-turbo' })
+    expect(s.cvt.profiles).toHaveLength(2)
+    expect(s.activeCvtProfile.actuationKind).toBe('electronic')
+    s.setActiveCvtProfile(first)
+    expect(s.activeCvtProfile.name).toBe('Road')
+    const duplicate = s.duplicateCvtProfile(second)
+    expect(duplicate).not.toBeNull()
+    expect(s.activeCvtProfile.vehicleId).toBe('nmax-turbo')
+    s.removeCvtProfile(duplicate!)
+    expect(s.cvt.profiles).toHaveLength(2)
   })
 
   it('auto-saves kind/mt/cvt/inversion changes to localStorage', async () => {
@@ -465,6 +581,69 @@ describe('toMtDrivetrainSpec', () => {
   })
 })
 
+describe('toCvtForceBalanceInput', () => {
+  it('does not fill missing force measurements and converts axial cam angles explicitly', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      force: {
+        torqueCam: {
+          mode: 'profile',
+          angleBasis: 'axial',
+          points: [
+            { travelMm: 0, angleDeg: 30, effectiveRadiusMm: 40 },
+            { travelMm: 10, angleDeg: 35, effectiveRadiusMm: 40 },
+          ],
+        },
+      },
+    })
+    const input = toCvtForceBalanceInput(s.activeCvtProfile)
+    expect(input.frontRpm).toBeNaN()
+    expect(input.roller?.efficiency).toBeNull()
+    expect(input.spring).toBeNull()
+    expect(input.coupling.mode).toBe('disabled')
+    expect(input.torqueCam?.points[0].angleDeg).toBe(60)
+  })
+
+  it('derives linear spring preload only from measured free and installed lengths', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      force: { spring: { mode: 'linear', rateNPerMm: 10, freeLengthMm: 120, installedLengthMm: 105 } },
+    })
+    expect(toCvtForceBalanceInput(s.activeCvtProfile).spring).toEqual({
+      mode: 'linear', rateNPerMm: 10, installedPreloadMm: 15,
+    })
+  })
+
+  it('uses separate upshift/downshift calibration maps', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      calibration: {
+        activeDirection: 'downshift',
+        upshiftMap: [{ ratio: 1, scale: 0.9 }],
+        downshiftMap: [{ ratio: 1, scale: 1.1 }],
+      },
+    })
+    expect(toCvtForceBalanceInput(s.activeCvtProfile).coupling.calibrationMap).toEqual([{ ratio: 1, scale: 1.1 }])
+  })
+})
+
+describe('CVT fixed-reduction calibration fallback', () => {
+  it('is used only while the explicit gear/final pair is incomplete', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, { calibration: { combinedFixedReduction: 12.5 } })
+    expect(usesCvtCalibrationFixedReduction(s.activeCvtProfile)).toBe(true)
+    expect(toCvtTraceConfig(s.activeCvtProfile).gearReduction).toBe(12.5)
+    expect(toCvtTraceConfig(s.activeCvtProfile).finalReduction).toBe(1)
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      gearReduction: { mode: 'ratio', ratio: 2 },
+      finalReduction: { mode: 'ratio', ratio: 6 },
+    })
+    expect(usesCvtCalibrationFixedReduction(s.activeCvtProfile)).toBe(false)
+    expect(toCvtTraceConfig(s.activeCvtProfile).gearReduction).toBe(2)
+    expect(toCvtTraceConfig(s.activeCvtProfile).finalReduction).toBe(6)
+  })
+})
+
 // B19 — settings export/import reuses these same merge functions (see
 // domain/settings/settingsTransfer.ts's parseImportBundle) so an imported
 // drivetrain payload is sanitized identically to a normal localStorage load.
@@ -501,6 +680,34 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
     expect(merged.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))
     expect(merged.notes.length).toBeGreaterThan(0)
     expect(merged.notes.every((n) => n.value === '')).toBe(true)
+    expect(merged.profiles).toHaveLength(1)
+    expect(merged.activeProfileId).toBe(merged.profiles[0].id)
+  })
+
+  it('mergeCvtProfile rejects invalid optional measurements instead of inventing defaults', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      actuationKind: 'electronic',
+      belt: {
+        outsideLengthMm: -1,
+        cordOffsetFromOutsideMm: Number.NaN,
+      } as never,
+      geometry: {
+        centerDistanceMm: 0,
+        frontRadiusBoundsMm: { min: 80, max: 20 },
+      } as never,
+      finalReduction: {
+        mode: 'stages',
+        ratio: 999,
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: 0, drivenTeeth: 20 }],
+      },
+    })
+    expect(merged.actuationKind).toBe('electronic')
+    expect(merged.belt.outsideLengthMm).toBeNull()
+    expect(merged.belt.cordOffsetFromOutsideMm).toBeNull()
+    expect(merged.geometry.centerDistanceMm).toBeNull()
+    expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
+    expect(merged.finalReduction.stages).toEqual([{ driveTeeth: 13, drivenTeeth: 41 }])
   })
 
   it('mergeCvtFormState rejects a v1-shaped (ratioLow/ratioHigh) payload and falls back to defaults', () => {
