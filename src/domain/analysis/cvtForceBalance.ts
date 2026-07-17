@@ -209,10 +209,11 @@ export function cvtForceDisabledReasons(input: CvtForceBalanceInput): CvtForceDi
     reasons.push('torque-share')
   }
   if (input.coupling.mode === 'disabled') reasons.push('coupling')
+  const validCalibrationPoints = input.coupling.calibrationMap?.filter((point) => positive(point.ratio) && positive(point.scale)) ?? []
   if (
     input.coupling.mode === 'calibrated' &&
     !positive(input.coupling.calibratedScale ?? Number.NaN) &&
-    !(input.coupling.calibrationMap?.some((point) => positive(point.ratio) && positive(point.scale)) ?? false)
+    validCalibrationPoints.length < 2
   ) reasons.push('coupling')
   const geometry = input.geometry
   if (

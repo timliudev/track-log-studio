@@ -412,6 +412,7 @@ export default {
       frontForce: '前盤',
       springForce: '彈簧',
       camForce: '凸輪',
+      coilBindMargin: '併圈餘量',
       multipleRoots: '找到 {count} 個根；穩定性僅依準靜態啟發式判斷。',
       slipNotAssessed: '未填 μ：尚未評估 slip margin。',
       slipWarningOnly: '已記錄 μ 範圍，但缺完整接觸壓力／皮帶張力資料；目前只顯示滑差風險警示，不輸出虛構容量。',
@@ -442,6 +443,7 @@ export default {
       calibrationUnverified: '校正尚未通過 hold-out',
       massSensitivityResult: '總珠重 ±{delta} g 的定比值重算',
       sensitivityDisabled: '力學層不完整或指定行程無平衡根，無法輸出珠重 Δrpm。',
+      environmentSensitivityBoundary: '套管長度只有在量得行程零點如何平移後，才能改整條調速曲線；否則只改機械端點。氣溫／密度必須先經風阻與道路負載換成後盤扭矩，缺 CdA、風、坡度或加速度時只允許手動 torque sweep，不顯示假精確天氣修正。',
     },
     gear: {
       heading: '變速齒比計算器',

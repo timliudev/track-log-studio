@@ -299,6 +299,7 @@ function onBackdropPointer(event: PointerEvent): void {
             <label class="wide-field"><span>{{ t('analyzer.cvt.downshiftMap') }}</span><textarea rows="4" :value="formatPoints(profile.calibration.downshiftMap, ['ratio', 'scale'])" placeholder="1.0, 1.04&#10;1.5, 1.08" @change="patch({ calibration: { downshiftMap: parsePoints($event, ['ratio', 'scale']) as never, holdoutResidualRpm: null } })"></textarea></label>
           </div>
           <p class="field-note">{{ t('analyzer.cvt.calibrationBoundary') }}</p>
+          <p class="field-note">{{ t('analyzer.cvt.environmentSensitivityBoundary') }}</p>
         </details>
 
         <aside class="honesty-boundary">

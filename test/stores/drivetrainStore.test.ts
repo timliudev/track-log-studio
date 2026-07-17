@@ -604,6 +604,16 @@ describe('toCvtForceBalanceInput', () => {
     expect(input.torqueCam?.points[0].angleDeg).toBe(60)
   })
 
+  it('derives linear spring preload only from measured free and installed lengths', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      force: { spring: { mode: 'linear', rateNPerMm: 10, freeLengthMm: 120, installedLengthMm: 105 } },
+    })
+    expect(toCvtForceBalanceInput(s.activeCvtProfile).spring).toEqual({
+      mode: 'linear', rateNPerMm: 10, installedPreloadMm: 15,
+    })
+  })
+
   it('uses separate upshift/downshift calibration maps', () => {
     const s = useDrivetrainStore()
     s.updateCvtProfile(s.activeCvtProfile.id, {

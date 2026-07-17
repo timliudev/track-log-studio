@@ -248,7 +248,12 @@ export function toCvtForceBalanceInput(profile: CvtProfile): CvtForceBalanceInpu
     ? {
         mode: 'linear' as const,
         rateNPerMm: profile.force.spring.rateNPerMm ?? Number.NaN,
-        installedPreloadMm: profile.force.spring.installedPreloadMm ?? Number.NaN,
+        installedPreloadMm: profile.force.spring.installedPreloadMm ?? (
+          profile.force.spring.freeLengthMm != null && profile.force.spring.installedLengthMm != null &&
+          profile.force.spring.freeLengthMm >= profile.force.spring.installedLengthMm
+            ? profile.force.spring.freeLengthMm - profile.force.spring.installedLengthMm
+            : Number.NaN
+        ),
       }
     : profile.force.spring.mode === 'curve'
       ? { mode: 'curve' as const, points: profile.force.spring.forceCurve }

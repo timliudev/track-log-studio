@@ -95,6 +95,13 @@ const calibrationValidated = computed(() => {
   const residual = profile.value.calibration.holdoutResidualRpm
   return target != null && residual != null && residual <= target
 })
+const springCoilBindMarginMm = computed(() => {
+  const installed = profile.value.force.spring.installedLengthMm
+  const coilBind = profile.value.force.spring.coilBindLengthMm
+  const travel = forceResult.value.selected?.geometry.rearDisplacementMm
+  if (installed == null || coilBind == null || travel == null || !Number.isFinite(travel)) return Number.NaN
+  return installed - travel - coilBind
+})
 const forceStatusText = computed(() => {
   if (forceResult.value.status === 'equilibrium') return t('analyzer.cvt.forceEquilibrium') as string
   if (forceResult.value.status === 'endpoint') return t('analyzer.cvt.forceEndpoint') as string
@@ -288,6 +295,7 @@ const statusLabel = computed(() => {
           <div><dt>{{ t('analyzer.cvt.frontForce') }}</dt><dd>{{ format(forceResult.selected?.frontRollerForceN ?? Number.NaN, 0) }} N</dd></div>
           <div><dt>{{ t('analyzer.cvt.springForce') }}</dt><dd>{{ format(forceResult.selected?.rearSpringForceN ?? Number.NaN, 0) }} N</dd></div>
           <div><dt>{{ t('analyzer.cvt.camForce') }}</dt><dd>{{ format(forceResult.selected?.rearCamForceN ?? Number.NaN, 0) }} N</dd></div>
+          <div v-if="Number.isFinite(springCoilBindMarginMm)"><dt>{{ t('analyzer.cvt.coilBindMargin') }}</dt><dd>{{ format(springCoilBindMarginMm, 1) }} mm</dd></div>
         </dl>
         <p v-if="forceResult.roots.length > 1" class="warning-message">{{ t('analyzer.cvt.multipleRoots', { count: forceResult.roots.length }) }}</p>
         <div v-if="sensitivity.status === 'ok'" class="sensitivity-table">

@@ -418,6 +418,7 @@ export default {
       frontForce: 'Front',
       springForce: 'Spring',
       camForce: 'Cam',
+      coilBindMargin: 'Coil-bind margin',
       multipleRoots: '{count} roots found; stability uses only the quasi-static heuristic.',
       slipNotAssessed: 'No μ range: slip margin has not been assessed.',
       slipWarningOnly: 'A μ range is recorded, but contact-pressure and belt-tension data are incomplete. This level reports only slip risk, not an invented capacity.',
@@ -448,6 +449,7 @@ export default {
       calibrationUnverified: 'Calibration has not passed hold-out',
       massSensitivityResult: 'Fixed-ratio re-solve for total roller mass ±{delta} g',
       sensitivityDisabled: 'The force level is incomplete or has no equilibrium over the specified travel, so roller-mass Δrpm is unavailable.',
+      environmentSensitivityBoundary: 'Boss length can shift the whole governing curve only after its effect on the travel zero is measured; otherwise it changes mechanical endpoints only. Air temperature/density must first become rear torque through road-load and aero data. Without CdA, wind, grade, or acceleration, only a manual torque sweep is available—no false-precision weather correction.',
     },
     gear: {
       heading: 'Gear ratio calculator',
