@@ -302,7 +302,7 @@ export default {
       estimateApplied: 'Estimated circumference: {mm} mm ({n} samples) — applied to the field, fine-tune as needed.',
       estimateFailed: 'No stable estimate — not enough steady samples, or the whole log is in a single gear (set an approximate circumference as a reference and retry).',
       estimateNeedGears: 'Enter valid gear ratios and a final drive first (circumference not needed) to estimate from the log.',
-      estimateNotAvailableCvtHint: "A CVT has no discrete gear plateaus to solve for, so circumference can't be back-estimated from the log like MT can (an honest \"not available\" beats a made-up number). Measure the wheel circumference directly, or use the tire-spec converter above.",
+      estimateNotAvailableCvtHint: "A CVT changes ratio continuously and has no discrete gears to infer, so tire circumference can't be back-estimated from the log. Measure the wheel circumference directly, or use the tire-spec converter above.",
       redlineRpm: 'Redline / shift RPM',
       modeRatio: 'Ratio',
       modeTeeth: 'Teeth',

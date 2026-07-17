@@ -114,7 +114,8 @@ describe('GearPanel — CVT mode shows a disabled estimate button + explanation 
     const btn = wrapper.find('.apply-btn')
     expect(btn.exists()).toBe(true)
     expect((btn.element as HTMLButtonElement).disabled).toBe(true)
-    expect(wrapper.text()).toContain('CVT')
+    expect(wrapper.text()).toContain('CVT 為連續變速，沒有可用來反推的離散檔位')
+    expect(wrapper.text()).toContain('請直接量測後輪周長')
   })
 
   it('does not render the CVT-only hint text in MT mode (default)', () => {
