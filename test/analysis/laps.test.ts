@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectLapsByLine, detectLapsByChannel, inferLapLineFromChannel, segmentsIntersect, planarGate, type LapLine } from '@/domain/analysis/laps'
+import { detectLapsByLine, detectLapsByChannel, inferLapLineFromChannel, segmentsIntersect, planarGate, walkLapGates, type LapLine } from '@/domain/analysis/laps'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel, LogMeta } from '@/domain/model/types'
@@ -22,6 +22,37 @@ const meta: LogMeta = { formatId: 'superX', createdDate: null, headerInfo: {} }
 function ch(name: string, data: number[]): Channel {
   return { name, rawName: name, description: undefined, data: new Float32Array(data) }
 }
+
+describe('walkLapGates sampled-line crossing', () => {
+  const gate: LapLine = { a: { lat: -1, lon: 0 }, b: { lat: 1, lon: 0 } }
+
+  function crossCount(track: GpsTrack): { count: number; crossings: Array<{ prevIdx: number; idx: number }> } {
+    const crossings: Array<{ prevIdx: number; idx: number }> = []
+    const count = walkLapGates(track, { startIdx: 0, endIdx: track.valid.length - 1 }, [planarGate(gate)], (crossing) => {
+      crossings.push({ prevIdx: crossing.prevIdx, idx: crossing.idx })
+    })
+    return { count, crossings }
+  }
+
+  it('counts one crossing when a middle sample lies inside the gate and its neighbours are on opposite sides', () => {
+    expect(crossCount(makeTrack([0, 0, 0], [-1, 0, 1]))).toEqual({
+      count: 1,
+      crossings: [{ prevIdx: 1, idx: 1 }],
+    })
+  })
+
+  it('does not count a same-side touch at a sample on the gate', () => {
+    expect(crossCount(makeTrack([0, 0, 0], [-1, 0, -1])).count).toBe(0)
+  })
+
+  it('does not count a track sample that touches a gate endpoint', () => {
+    expect(crossCount(makeTrack([1, 1, 1], [-1, 0, 1])).count).toBe(0)
+  })
+
+  it('keeps an ordinary proper straddle as one crossing', () => {
+    expect(crossCount(makeTrack([0, 0], [-1, 1])).count).toBe(1)
+  })
+})
 
 describe('detectLapsByLine', () => {
   // A vertical start/finish line at lon = 0, spanning lat [-1, 1].
