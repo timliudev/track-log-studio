@@ -129,6 +129,7 @@ function exportSettings(): void {
     },
     drivetrain: {
       kind: drivetrainStore.kind,
+      kindSelection: drivetrainStore.kindSelection,
       mt: drivetrainStore.mt,
       cvt: drivetrainStore.cvt,
       inversionWheelCircumferenceMm: drivetrainStore.inversionWheelCircumferenceMm,

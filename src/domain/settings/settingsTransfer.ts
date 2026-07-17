@@ -140,6 +140,10 @@ export function parseImportBundle(json: string): ImportResult {
   const drivetrainRaw = (d.drivetrain && typeof d.drivetrain === 'object' ? d.drivetrain : {}) as Partial<PersistedDrivetrain>
   const drivetrain: PersistedDrivetrain = {
     kind: drivetrainRaw.kind === 'cvt' ? 'cvt' : 'mt',
+    // Older exports carry a chosen `kind` but no source marker. Treat that
+    // imported choice as manual so a subsequently loaded log cannot replace
+    // it. Newer exports can explicitly retain automatic selection.
+    kindSelection: drivetrainRaw.kindSelection === 'auto' ? 'auto' : 'manual',
     mt: mergeMtFormState(drivetrainRaw.mt),
     cvt: mergeCvtFormState(drivetrainRaw.cvt),
     inversionWheelCircumferenceMm:

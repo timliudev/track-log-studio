@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { LogSession } from '@/domain/model/LogSession'
-import { getExportFormat } from '@/domain/export/registry'
+import { getExportFormat, type ExportOptions } from '@/domain/export/registry'
 import { buildVboDisplayMap, type VboMapRow } from '@/domain/export/vbo/VboExporter'
 import {
   DEFAULT_PRESET,
@@ -215,7 +215,10 @@ export const useConverterStore = defineStore('converter', () => {
         if (!session) continue
         const augmented = applyDerivedChannels(session, suspension.config)
         const stem = stemOf(f.name)
-        const options = format.id === 'nmea' ? { mapping: mapping.value } : undefined
+        const options: ExportOptions = {
+          metadata: fileStore.getExportMetadata(f.id),
+          ...(format.id === 'nmea' ? { mapping: mapping.value } : {}),
+        }
         for (const art of format.exportSession(augmented, f.name, options)) {
           out.push({ name: `${stem}${art.suffix}.${art.ext}`, content: art.content })
         }

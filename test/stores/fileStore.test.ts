@@ -38,6 +38,22 @@ describe('fileStore', () => {
     expect(s.readyFiles).toHaveLength(1)
   })
 
+  it('keeps export notes isolated per imported session', () => {
+    const s = useFileStore()
+    const session = parseLoga(loadFixture('super2.loga'))
+    const first = s.beginImport(new File(['x'], 'first.loga'))
+    const second = s.beginImport(new File(['x'], 'second.loga'))
+    s.completeImport(first, session)
+    s.completeImport(second, session)
+
+    s.setExportMetadata(first, { cvtNotes: [{ label: '珠重', value: '12 g' }] })
+    s.setExportMetadata(second, { cvtNotes: [{ label: '珠重', value: '14 g' }] })
+
+    expect(s.getExportMetadata(first).cvtNotes?.[0].value).toBe('12 g')
+    expect(s.getExportMetadata(second).cvtNotes?.[0].value).toBe('14 g')
+    expect(s.savableEntries.find((entry) => entry.id === first)?.metadata.cvtNotes?.[0].value).toBe('12 g')
+  })
+
   it('failImport marks error', () => {
     const s = useFileStore()
     const id = s.beginImport(new File(['x'], 'bad.loga'))

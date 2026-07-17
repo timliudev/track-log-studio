@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import type { LogSession } from '@/domain/model/LogSession'
+import { normalizeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
 
 export interface ImportedFile {
   id: number
@@ -38,6 +39,7 @@ export const useFileStore = defineStore('file', () => {
   // Non-reactive: prevent Vue from deeply proxying large typed arrays
   const sessions = new Map<number, LogSession>()
   const originalFiles = new Map<number, File>()
+  const exportMetadata = reactive(new Map<number, ExportMetadata>())
 
   const readyFiles = computed(() => files.value.filter((f) => f.status === 'ready'))
 
@@ -50,7 +52,7 @@ export const useFileStore = defineStore('file', () => {
 
   /** Ready loga files paired with session + original File (for the loga writer). */
   const savableEntries = computed<
-    { id: number; name: string; session: LogSession; file: File }[]
+    { id: number; name: string; session: LogSession; file: File; metadata: ExportMetadata }[]
   >(() =>
     files.value
       .filter((f) => f.status === 'ready' && f.fileType === 'loga')
@@ -59,15 +61,25 @@ export const useFileStore = defineStore('file', () => {
         name: f.name,
         session: sessions.get(f.id),
         file: originalFiles.get(f.id),
+        metadata: getExportMetadata(f.id),
       }))
       .filter(
-        (e): e is { id: number; name: string; session: LogSession; file: File } =>
+        (e): e is { id: number; name: string; session: LogSession; file: File; metadata: ExportMetadata } =>
           e.session !== undefined && e.file !== undefined,
       ),
   )
 
   function getSession(id: number): LogSession | undefined {
     return sessions.get(id)
+  }
+
+  function getExportMetadata(id: number): ExportMetadata {
+    return exportMetadata.get(id) ?? normalizeExportMetadata(sessions.get(id)?.meta.exportMetadata)
+  }
+
+  function setExportMetadata(id: number, metadata: ExportMetadata): void {
+    if (!sessions.has(id)) return
+    exportMetadata.set(id, normalizeExportMetadata(metadata))
   }
 
   function beginImport(file: File): number {
@@ -98,6 +110,7 @@ export const useFileStore = defineStore('file', () => {
 
   function completeImport(id: number, session: LogSession): void {
     sessions.set(id, session)
+    exportMetadata.set(id, normalizeExportMetadata(session.meta.exportMetadata))
     withFile(id, (f) => {
       f.status = 'ready'
       f.progress = 1
@@ -124,6 +137,7 @@ export const useFileStore = defineStore('file', () => {
   function addMergedSession(name: string, session: LogSession): number {
     const id = nextId++
     sessions.set(id, session)
+    exportMetadata.set(id, normalizeExportMetadata(session.meta.exportMetadata))
     files.value.push({
       id,
       name,
@@ -140,12 +154,14 @@ export const useFileStore = defineStore('file', () => {
   function removeFile(id: number): void {
     sessions.delete(id)
     originalFiles.delete(id)
+    exportMetadata.delete(id)
     files.value = files.value.filter((f) => f.id !== id)
   }
 
   function clearFiles(): void {
     sessions.clear()
     originalFiles.clear()
+    exportMetadata.clear()
     files.value = []
   }
 
@@ -155,6 +171,8 @@ export const useFileStore = defineStore('file', () => {
     readySessions,
     savableEntries,
     getSession,
+    getExportMetadata,
+    setExportMetadata,
     beginImport,
     setProgress,
     completeImport,

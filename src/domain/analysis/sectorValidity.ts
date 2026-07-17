@@ -3,6 +3,34 @@ import type { Lap } from '@/domain/model/Lap'
 import type { LapLine } from '@/domain/analysis/laps'
 import { planarGate, walkLapGates } from '@/domain/analysis/laps'
 
+export interface SectorLapFailure {
+  lapIndex: number
+  /** One-based number of the first gate the lap did not reach in sequence. */
+  missedSector: number
+}
+
+export interface SectorValidityResult {
+  failures: SectorLapFailure[]
+  /** True when gates exist, laps exist, and not one lap passes all gates. */
+  allFailed: boolean
+}
+
+/** Detailed sector-check result used by policy/UI consumers. */
+export function evaluateSectorValidity(
+  laps: readonly Lap[],
+  track: GpsTrack,
+  gates: readonly LapLine[],
+): SectorValidityResult {
+  if (gates.length === 0 || laps.length === 0) return { failures: [], allFailed: false }
+  const planarGates = gates.map(planarGate)
+  const failures: SectorLapFailure[] = []
+  for (const lap of laps) {
+    const crossed = walkLapGates(track, lap, planarGates, () => {})
+    if (crossed < planarGates.length) failures.push({ lapIndex: lap.index, missedSector: crossed + 1 })
+  }
+  return { failures, allFailed: failures.length === laps.length }
+}
+
 /**
  * Given a set of confirmed sector gates (in sector order), decide which laps
  * FAIL the "crossed every gate, in order" test — i.e. the lap either misses a
@@ -31,26 +59,5 @@ export function invalidSectorLapIndices(
   track: GpsTrack,
   gates: readonly LapLine[],
 ): number[] {
-  if (gates.length === 0) return []
-
-  // Precompute each gate's planar endpoints once, centred on ITS OWN midpoint
-  // (matching detectLapsByLine's per-line local frame — fine at track scale
-  // since every test below is sign-based, not absolute-distance-based).
-  const planarGates = gates.map(planarGate)
-
-  const invalid: number[] = []
-
-  for (const lap of laps) {
-    // A lap spans samples [startIdx, endIdx] inclusive (endIdx is the boundary
-    // sample where the NEXT crossing occurs — see lapsFromCrossings in
-    // laps.ts), and the final segment (endIdx-1, endIdx) is the one whose
-    // crossing closes this lap. A gate crossed right at the line (e.g. the last
-    // sector gate coinciding with, or sitting just before, the finish) must
-    // still count towards THIS lap, so that segment has to be tested too —
-    // walkLapGates already includes `endIdx` in its walk.
-    const crossed = walkLapGates(track, lap, planarGates, () => {})
-    if (crossed < planarGates.length) invalid.push(lap.index)
-  }
-
-  return invalid
+  return evaluateSectorValidity(laps, track, gates).failures.map((failure) => failure.lapIndex)
 }

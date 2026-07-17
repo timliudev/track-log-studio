@@ -68,7 +68,7 @@ const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
 const sectorStore = useSectorStore()
-const { charts, xAxis, xRange, cursorIdx, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
+const { charts, xAxis, xRange, cursorIdx, mapMaximized, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
   storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
@@ -450,6 +450,7 @@ const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.lengt
 // How many laps fail the sector-gate-crossing check (0 when no gates are
 // confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
 const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
+const sectorAllFailed = computed(() => lapStore.sectorAllFailed)
 
 // --- 鎖定布局: a single global toggle disabling drag+resize for every card,
 // independent of per-card pin (see usePanelState below) — folded into
@@ -774,8 +775,6 @@ function onResetLayout(): void {
 // canvas + buttons, not these sibling elements declared in this template.
 // With those hidden, TrackMap's existing `.fill` flex-grow expands to fill
 // the whole card body; no special sizing logic is needed here.
-const mapMaximized = ref(false)
-
 /** Per-chart card title: numbered by POSITION among same-kind charts (1-based,
  *  in `charts` array order) so titles stay short and stable-looking even
  *  though the underlying grid-item id is keyed by the chart's store id (see
@@ -939,6 +938,7 @@ function titleForItemId(id: string): string {
             >
               <TrackMap
                 fill-height
+                :maximized="mapMaximized"
                 :track="track"
                 :cursor-idx="cursorIdx"
                 :line="lapStore.line"
@@ -1114,6 +1114,7 @@ function titleForItemId(id: string): string {
               <SectorPanel
                 :laps="laps"
                 :invalid-count="sectorInvalidCount"
+                :all-failed="sectorAllFailed"
                 :track="track"
                 :time-ms="timeMs"
                 :cursor-idx="cursorIdx"
@@ -1605,6 +1606,18 @@ function titleForItemId(id: string): string {
 .grid-wrap {
   position: relative;
 }
+/* B63 — grid-layout-plus does not write `touch-action` inline: its GridItem
+   adds `.vgl-item--no-touch` on Android whenever an item is draggable or
+   resizable, and the library's injected stylesheet gives that ancestor
+   `touch-action: none`. The browser intersects a target's touch-action with
+   every ancestor, so DashboardCard's `pan-y` header rule could never restore
+   native scrolling during B61's pending long-press window. Scope the override
+   to dashboard grid items. Explicit gesture surfaces (map/chart) and the
+   resize handle retain their own `touch-action: none`, while a fast swipe
+   beginning on a title can once again be claimed by native vertical scroll. */
+.grid-wrap :deep(.vgl-item--no-touch) {
+  touch-action: pan-y;
+}
 /* One draggable hit-box per shared card edge, sized/positioned to exactly
    fill the margin gap between two touching cards (gridGutter.ts's
    `gutterRect`) — invisible by default (a visible line there all the time
@@ -1689,20 +1702,7 @@ function titleForItemId(id: string): string {
 @media (max-width: 768px) {
   .pinned-anchor :deep(.dashboard-card) {
     width: 100%;
-  }
-  /* B36 — grid-resident cards go genuinely edge-to-edge on mobile (App.vue's
-     `.content` drops its own horizontal padding for exactly this — see its
-     comment), but a PINNED card deliberately keeps its full floating chrome
-     (border/radius/shadow — see DashboardCard.vue's `:not(.pinned)` bleed
-     exclusion): it's a floating element, not a flush list section. Without
-     its own inset here it would otherwise inherit `.analyzer`'s now-zero
-     ambient padding and sit border-to-screen-edge, which reads as a
-     misaligned card rather than a deliberately floating one. Restoring a
-     small gutter on the ANCHOR (rather than the card itself) means the
-     card's own `width: 100%` above still correctly fills 100% of this now-
-     inset content box. */
-  .pinned-anchor {
-    padding: 0 calc(var(--space) * 1.5);
+    margin-bottom: calc(var(--space) * 1.5);
   }
 }
 .pin-placeholder {

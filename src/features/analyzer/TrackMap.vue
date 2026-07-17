@@ -21,7 +21,20 @@ import {
   type HighlightSegment,
 } from '@/domain/analysis/trackMapGeometry'
 import { fitProjection, type MapProjection } from './projection'
-import { nearestSample, resolveTrackHitRadius } from './trackNearestSample'
+import {
+  meanCompositedLuminance,
+  parseCssRgb,
+  relativeLuminance,
+  resolveTrackContrast,
+  type Rgb,
+  type TrackContrastPalette,
+} from '@/domain/analysis/trackContrast'
+import {
+  buildTrackSampleSpatialIndex,
+  nearestIndexedSample,
+  resolveTrackHitRadius,
+  type TrackSampleSpatialIndex,
+} from './trackNearestSample'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 import { useMapBackground } from '@/composables/useMapBackground'
@@ -140,11 +153,17 @@ const props = defineProps<{
    * actual layout size).
    */
   fillHeight?: boolean
+  /** Store-owned host state, allowing maximize to survive view unmount/remount. */
+  maximized?: boolean
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
 // red (cursor / start-finish handles) and from the lap-identity palette.
 const GATE_COLOR = '#00c2ff'
+// Theme-independent flag colours: a map tile may be light even while the app
+// uses its dark theme, so UI theme tokens cannot guarantee map contrast.
+const START_FINISH_DARK = '#111111'
+const START_FINISH_LIGHT = '#ffffff'
 
 // Number of discrete colour buckets: caps strokes per frame regardless of
 // sample count, so the heatmap stays as cheap as the plain single-stroke track.
@@ -325,11 +344,65 @@ function drawImageBackground(ctx: CanvasRenderingContext2D, w: number, h: number
 const { anyPointerCoarse } = useInputCapabilities()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
+const cursorCanvas = ref<HTMLCanvasElement | null>(null)
 let ro: ResizeObserver | null = null
+let themeObserver: MutationObserver | null = null
+
+const CONTRAST_SAMPLE_SIZE = 24
+let contrastSampleCanvas: HTMLCanvasElement | null = null
+let contrastCache: { key: string; palette: TrackContrastPalette } | null = null
+
+/** Sample only the local uploaded image on a tiny dedicated canvas. OSM and
+ * satellite tiles are intentionally never read: their cross-origin pixels
+ * would taint the renderer canvas and make getImageData throw. */
+function sampleLocalBackgroundLuminance(image: HTMLImageElement, w: number, h: number, fallback: Rgb): number | null {
+  try {
+    const cv = contrastSampleCanvas ??= document.createElement('canvas')
+    cv.width = CONTRAST_SAMPLE_SIZE
+    cv.height = CONTRAST_SAMPLE_SIZE
+    const ctx = cv.getContext('2d', { willReadFrequently: true })
+    if (!ctx || image.naturalWidth <= 0 || image.naturalHeight <= 0 || w <= 0 || h <= 0) return null
+    ctx.clearRect(0, 0, CONTRAST_SAMPLE_SIZE, CONTRAST_SAMPLE_SIZE)
+    ctx.fillStyle = `rgb(${fallback[0]}, ${fallback[1]}, ${fallback[2]})`
+    ctx.fillRect(0, 0, CONTRAST_SAMPLE_SIZE, CONTRAST_SAMPLE_SIZE)
+    const alignment = background.settings.value.alignment
+    const factor = Math.min(w / image.naturalWidth, h / image.naturalHeight) * alignment.scale
+    const scaleX = CONTRAST_SAMPLE_SIZE / w
+    const scaleY = CONTRAST_SAMPLE_SIZE / h
+    const iw = image.naturalWidth * factor
+    const ih = image.naturalHeight * factor
+    ctx.drawImage(
+      image,
+      ((w - iw) / 2 + alignment.x) * scaleX,
+      ((h - ih) / 2 + alignment.y) * scaleY,
+      iw * scaleX,
+      ih * scaleY,
+    )
+    return meanCompositedLuminance(ctx.getImageData(0, 0, CONTRAST_SAMPLE_SIZE, CONTRAST_SAMPLE_SIZE).data, fallback)
+  } catch {
+    // Defensive fallback for unexpected image origins/decoder failures. The
+    // opposite-colour casing still guarantees visibility without pixel reads.
+    return null
+  }
+}
+
+function backgroundTrackContrast(w: number, h: number): TrackContrastPalette {
+  const kind = background.settings.value.kind
+  const fallback = parseCssRgb(cssVar('--color-bg')) ?? [128, 128, 128]
+  const alignment = background.settings.value.alignment
+  const image = background.image.value
+  const key = [kind, w, h, fallback.join(','), image?.src ?? '', alignment.x, alignment.y, alignment.scale].join('|')
+  if (contrastCache?.key === key) return contrastCache.palette
+  const sampled = kind === 'image' && image ? sampleLocalBackgroundLuminance(image, w, h, fallback) : null
+  const palette = resolveTrackContrast(kind, sampled, relativeLuminance(fallback))
+  contrastCache = { key, palette }
+  return palette
+}
 
 // Projected pixel coords per sample (NaN where no fix); recomputed on draw.
 let px: Float64Array | null = null
 let py: Float64Array | null = null
+let sampleIndex: TrackSampleSpatialIndex | null = null
 // The projection used by the last draw(); shared with line hit-testing/dragging.
 // This is the *view* projection (base fit composed with the zoom/pan below), so
 // hit-testing and dragging happen in the same on-screen coordinate frame.
@@ -374,7 +447,7 @@ const showReset = computed(() => zoom.value !== 1 || panX.value !== 0 || panY.va
 // redrawing as that flex-driven size change happens. Still purely local UI
 // state (no analyzerStore/grid-layout involvement) beyond the one emitted
 // event a host may listen to.
-const maximized = ref(false)
+const maximized = ref(props.maximized ?? false)
 function toggleMaximize(): void {
   maximized.value = !maximized.value
 }
@@ -382,6 +455,9 @@ function onMaximizedKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape' && maximized.value) maximized.value = false
 }
 watch(maximized, (isMax) => emit('update:maximized', isMax))
+watch(() => props.maximized, (isMax) => {
+  if (isMax != null && isMax !== maximized.value) maximized.value = isMax
+})
 
 const PAD = 16
 // Visible endpoint radius and a larger touch-friendly hit radius (~44px target).
@@ -545,9 +621,20 @@ function drawTrackPath(
   anySelection: boolean,
   colorVals: Float64Array | null | undefined,
   swatches: string[],
+  contrast: TrackContrastPalette,
 ): void {
   if (heat && !anySelection && colorVals) {
     drawHeatmapSegment(ctx, px, py, colorVals, swatches, 0, n - 1, 2.5)
+  } else if (!heat && !anySelection) {
+    // Opposite-colour casing makes the line survive mixed imagery: the inner
+    // stroke is visible on the dominant background, while the wider outer
+    // stroke remains visible wherever brightness flips underneath it.
+    ctx.strokeStyle = contrast.casing
+    ctx.lineWidth = 5
+    drawPlainSegment(ctx, px, py, 0, n - 1)
+    ctx.strokeStyle = contrast.inner
+    ctx.lineWidth = 2.5
+    drawPlainSegment(ctx, px, py, 0, n - 1)
   } else {
     ctx.strokeStyle = cssVar(anySelection ? '--color-border' : '--color-text-muted')
     ctx.lineWidth = 2
@@ -633,17 +720,16 @@ function drawComparisonHighlights(
 }
 
 /** Start/finish line + draggable endpoints. Drawn as a checkered-flag band
- *  (the universal start/finish marker) in the text/surface two-tone so it
- *  has contrast in both themes and reads completely differently from the
- *  round red (--color-accent) cursor dot and the colourful track/heatmap —
- *  the #3 fix. The band's polygon geometry itself comes from
+ *  (the universal start/finish marker) in fixed black/white so it remains
+ *  legible against either light or dark map imagery, independently of the
+ *  app theme. The band's polygon geometry itself comes from
  *  computeCheckeredBand (trackMapGeometry.ts); this only fills/strokes it. */
 function drawStartFinishLine(ctx: CanvasRenderingContext2D, proj: MapProjection, line: LapLine | null | undefined): void {
   if (!line) return
   const a = proj.toPixel(line.a.lat, line.a.lon)
   const b = proj.toPixel(line.b.lat, line.b.lon)
-  const dark = cssVar('--color-text')
-  const light = cssVar('--color-surface')
+  const dark = START_FINISH_DARK
+  const light = START_FINISH_LIGHT
 
   const SQ = 6 // target checker square size (px)
   const band = computeCheckeredBand(a, b, SQ)
@@ -660,7 +746,7 @@ function drawStartFinishLine(ctx: CanvasRenderingContext2D, proj: MapProjection,
     }
     // Outline so the band stays delineated against either theme background.
     ctx.strokeStyle = dark
-    ctx.lineWidth = 1
+    ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.moveTo(...band.outline[0])
     ctx.lineTo(...band.outline[1])
@@ -693,18 +779,29 @@ function drawSectorGates(
   ctx: CanvasRenderingContext2D,
   proj: MapProjection,
   gates: { line: LapLine; confirmed: boolean }[],
+  hiddenIndex = -1,
 ): void {
   gates.forEach((g, i) => {
-    const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
-    const b = proj.toPixel(g.line.b.lat, g.line.b.lon)
-    ctx.strokeStyle = GATE_COLOR
-    ctx.lineWidth = g.confirmed ? 3 : 2
-    ctx.setLineDash(g.confirmed ? [] : [5, 4])
-    ctx.beginPath()
-    ctx.moveTo(a.x, a.y)
-    ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-    ctx.setLineDash([])
+    if (i !== hiddenIndex) drawSectorGate(ctx, proj, g, i + 1)
+  })
+}
+
+function drawSectorGate(
+  ctx: CanvasRenderingContext2D,
+  proj: MapProjection,
+  g: { line: LapLine; confirmed: boolean },
+  number: number,
+): void {
+  const a = proj.toPixel(g.line.a.lat, g.line.a.lon)
+  const b = proj.toPixel(g.line.b.lat, g.line.b.lon)
+  ctx.strokeStyle = GATE_COLOR
+  ctx.lineWidth = g.confirmed ? 3 : 2
+  ctx.setLineDash(g.confirmed ? [] : [5, 4])
+  ctx.beginPath()
+  ctx.moveTo(a.x, a.y)
+  ctx.lineTo(b.x, b.y)
+  ctx.stroke()
+  ctx.setLineDash([])
 
     const mx = (a.x + b.x) / 2
     const my = (a.y + b.y) / 2
@@ -719,8 +816,7 @@ function drawSectorGates(
     ctx.font = '10px sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(String(i + 1), mx, my)
-  })
+  ctx.fillText(String(number), mx, my)
 }
 
 /** A9 — unified extrema markers: numbered markers colour-graded green->red
@@ -823,6 +919,10 @@ function draw(): void {
   const track = props.track
   if (!track) {
     projection = null
+    px = null
+    py = null
+    sampleIndex = null
+    drawInteractionOverlay()
     return
   }
 
@@ -869,6 +969,7 @@ function draw(): void {
   const activeProjected = projectSamples(track.lat, track.lon, track.valid, base.toPixel, z, tx, ty, props.focusRange)
   px = activeProjected.px
   py = activeProjected.py
+  sampleIndex = buildTrackSampleSpatialIndex(px, py)
   let bbox: BBox | null = activeProjected.bbox
 
   const overlayPixels = overlayTracks.map((entry) => {
@@ -913,13 +1014,14 @@ function draw(): void {
   const comparisonHighlights = props.comparisonLapHighlights ?? []
   const anySelection = highlightLaps.length > 0 || comparisonHighlights.length > 0
 
-  drawTrackPath(ctx, px, py, n, heat, anySelection, colorVals, swatches)
+  drawTrackPath(ctx, px, py, n, heat, anySelection, colorVals, swatches, backgroundTrackContrast(w, h))
   drawLapHighlights(ctx, highlightLaps, px, py, n, heat, colorVals, swatches, pixelShift)
   drawComparisonHighlights(ctx, comparisonHighlights, base, z, tx, ty, pixelShift)
-  drawStartFinishLine(ctx, proj, props.line)
-  drawSectorGates(ctx, proj, props.gates ?? [])
+  if (dragging?.target.kind !== 'line') drawStartFinishLine(ctx, proj, props.line)
+  const hiddenGateIndex = dragging?.target.kind === 'gate' ? dragging.target.index : -1
+  drawSectorGates(ctx, proj, props.gates ?? [], hiddenGateIndex)
   drawExtremaMarkers(ctx, proj, props.extremaMarkers ?? [])
-  drawCursorMarker(ctx, px, py, props.cursorIdx, n)
+  drawInteractionOverlay()
 }
 
 // ── zoom / pan ──────────────────────────────────────────────────────────────
@@ -1015,9 +1117,47 @@ let mode: Mode = 'idle'
 // same hit radius, pointer-capture and toGeo conversion as the start/finish
 // line; only the emitted event and its target line differ.
 type DragTarget = { kind: 'line' } | { kind: 'gate'; index: number }
-let dragging: { target: DragTarget; handle: 'a' | 'b' } | null = null
+type DragHandle = 'a' | 'b' | 'mid'
+let dragging: { target: DragTarget; handle: DragHandle } | null = null
+let dragStartGeo: { lat: number; lon: number } | null = null
+let dragOriginLine: LapLine | null = null
+// Drag geometry is deliberately local until pointer-up. Updating the Pinia
+// owner on every pixel used to invalidate lap detection, validity bands and
+// sector checks for the full recording during the gesture. The overlay canvas
+// keeps the handle visually live while only the final geometry is committed.
+let draftLine: LapLine | null = null
+let draftGate: { index: number; line: LapLine } | null = null
 let panLast: { x: number; y: number } | null = null
 let pinchLast: { dist: number; cx: number; cy: number } | null = null
+
+function setupInteractionFrame(): CanvasRenderingContext2D | null {
+  const cv = cursorCanvas.value
+  if (!cv) return null
+  const ctx = cv.getContext('2d')
+  if (!ctx) return null
+  const dpr = window.devicePixelRatio || 1
+  const w = cv.clientWidth
+  const h = cv.clientHeight
+  const backingW = Math.round(w * dpr)
+  const backingH = Math.round(h * dpr)
+  if (cv.width !== backingW || cv.height !== backingH) {
+    cv.width = backingW
+    cv.height = backingH
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+  return ctx
+}
+
+/** O(1) interaction layer: the shared cursor and an in-progress gate/line
+ * preview never require the static track, tiles, heatmap or labels to redraw. */
+function drawInteractionOverlay(): void {
+  const ctx = setupInteractionFrame()
+  if (!ctx || !projection) return
+  if (draftLine) drawStartFinishLine(ctx, projection, draftLine)
+  if (draftGate) drawSectorGate(ctx, projection, { line: draftGate.line, confirmed: true }, draftGate.index + 1)
+  if (px && py) drawCursorMarker(ctx, px, py, props.cursorIdx, Math.min(px.length, py.length))
+}
 
 /** Position relative to the canvas, in CSS px, from any event with clientX/Y. */
 function clientPos(e: { clientX: number; clientY: number }): { x: number; y: number } | null {
@@ -1048,14 +1188,26 @@ function nearestHandle(
   return da <= db ? { handle: 'a', distSq: da } : { handle: 'b', distSq: db }
 }
 
+function gateHandle(line: LapLine, mx: number, my: number): { handle: DragHandle; distSq: number } | null {
+  const endpoint = nearestHandle(line, mx, my)
+  if (!projection) return endpoint
+  const a = projection.toPixel(line.a.lat, line.a.lon)
+  const b = projection.toPixel(line.b.lat, line.b.lon)
+  const midX = (a.x + b.x) / 2
+  const midY = (a.y + b.y) / 2
+  const distSq = (midX - mx) ** 2 + (midY - my) ** 2
+  if (distSq > HANDLE_HIT * HANDLE_HIT) return endpoint
+  return !endpoint || distSq < endpoint.distSq ? { handle: 'mid', distSq } : endpoint
+}
+
 /**
  * Which handle (if any) is under the pointer, within the hit radius — checked
  * across the start/finish line AND every gate. When several targets' handles
  * overlap, the closest one wins.
  */
-function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | 'b' } | null {
+function handleAt(mx: number, my: number): { target: DragTarget; handle: DragHandle } | null {
   if (!projection) return null
-  let best: { target: DragTarget; handle: 'a' | 'b'; distSq: number } | null = null
+  let best: { target: DragTarget; handle: DragHandle; distSq: number } | null = null
 
   if (props.line) {
     const hit = nearestHandle(props.line, mx, my)
@@ -1064,7 +1216,7 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 
   const gates = props.gates ?? []
   gates.forEach((g, index) => {
-    const hit = nearestHandle(g.line, mx, my)
+    const hit = gateHandle(g.line, mx, my)
     if (hit && (!best || hit.distSq < best.distSq)) {
       best = { target: { kind: 'gate', index }, handle: hit.handle, distSq: hit.distSq }
     }
@@ -1074,6 +1226,7 @@ function handleAt(mx: number, my: number): { target: DragTarget; handle: 'a' | '
 }
 
 function onPointerDown(e: PointerEvent): void {
+  cancelPendingHover()
   // B36 — the map now bleeds to the true viewport edge on mobile (see
   // `.track-wrap.fill`'s `--card-bleed-x` styling below), so a touch drag
   // STARTING right at that edge would fight the OS/browser's own edge-swipe
@@ -1095,8 +1248,11 @@ function onPointerDown(e: PointerEvent): void {
     // Second finger down → pinch zoom/pan; abandon any line/pan in progress.
     mode = 'pinch'
     dragging = null
+    draftLine = null
+    draftGate = null
     const [p1, p2] = twoPointers()!
     pinchLast = { dist: Math.hypot(p2.x - p1.x, p2.y - p1.y), cx: (p1.x + p2.x) / 2, cy: (p1.y + p2.y) / 2 }
+    draw()
     e.preventDefault()
     return
   }
@@ -1113,6 +1269,20 @@ function onPointerDown(e: PointerEvent): void {
   if (h) {
     mode = 'line'
     dragging = h
+    dragStartGeo = projection?.toGeo(pos.x, pos.y) ?? null
+    if (h.target.kind === 'line' && props.line) {
+      draftLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+      dragOriginLine = { a: { ...props.line.a }, b: { ...props.line.b } }
+    } else if (h.target.kind === 'gate') {
+      const gate = (props.gates ?? [])[h.target.index]
+      draftGate = gate
+        ? { index: h.target.index, line: { a: { ...gate.line.a }, b: { ...gate.line.b } } }
+        : null
+      dragOriginLine = gate ? { a: { ...gate.line.a }, b: { ...gate.line.b } } : null
+    }
+    // Remove the dragged target from the static layer once; subsequent moves
+    // repaint only the tiny interaction overlay.
+    draw()
   } else {
     mode = 'pan'
     panLast = pos
@@ -1149,17 +1319,24 @@ function onPointerMove(e: PointerEvent): void {
     const geo = projection.toGeo(pos.x, pos.y)
     const { target, handle } = dragging
     if (target.kind === 'line') {
-      if (!props.line) return
-      const next: LapLine = { a: { ...props.line.a }, b: { ...props.line.b } }
-      next[handle] = { lat: geo.lat, lon: geo.lon }
-      emit('update:line', next)
+      if (!draftLine) return
+      const next: LapLine = { a: { ...draftLine.a }, b: { ...draftLine.b } }
+      if (handle !== 'mid') next[handle] = { lat: geo.lat, lon: geo.lon }
+      draftLine = next
     } else {
-      const g = (props.gates ?? [])[target.index]
-      if (!g) return
-      const next: LapLine = { a: { ...g.line.a }, b: { ...g.line.b } }
-      next[handle] = { lat: geo.lat, lon: geo.lon }
-      emit('update:gate', target.index, next)
+      if (!draftGate || draftGate.index !== target.index) return
+      const next: LapLine = { a: { ...draftGate.line.a }, b: { ...draftGate.line.b } }
+      if (handle === 'mid' && dragStartGeo && dragOriginLine) {
+        const dLat = geo.lat - dragStartGeo.lat
+        const dLon = geo.lon - dragStartGeo.lon
+        next.a = { lat: dragOriginLine.a.lat + dLat, lon: dragOriginLine.a.lon + dLon }
+        next.b = { lat: dragOriginLine.b.lat + dLat, lon: dragOriginLine.b.lon + dLon }
+      } else if (handle !== 'mid') {
+        next[handle] = { lat: geo.lat, lon: geo.lon }
+      }
+      draftGate = { index: target.index, line: next }
     }
+    drawInteractionOverlay()
     return
   }
 
@@ -1186,7 +1363,7 @@ function onPointerMove(e: PointerEvent): void {
   // Idle hover (mouse, no button): scrub the nearest sample for chart sync.
   // Only selects when the pointer is actually near the track line (HIT radius),
   // so the whitespace around it doesn't snap to the outermost point.
-  if (!px || !py) return
+  if (!sampleIndex) return
   const pos = clientPos(e)
   if (!pos) return
   // B30b(a) — prefer snapping onto a currently highlighted/selected SAME-FILE
@@ -1196,9 +1373,40 @@ function onPointerMove(e: PointerEvent): void {
   // that's actually inside a selected lap). `highlightLaps` indexes into
   // THIS track's own samples (unlike `comparisonLapHighlights`, which indexes
   // into other sessions' tracks — never valid ranges here).
-  const preferredRanges = (props.highlightLaps ?? []).map((l) => ({ startIdx: l.startIdx, endIdx: l.endIdx }))
-  const HIT = resolveTrackHitRadius(anyPointerCoarse.value)
-  emit('cursor', nearestSample(px, py, pos.x, pos.y, HIT, preferredRanges))
+  scheduleHover(pos)
+}
+
+let pendingHover: { x: number; y: number } | null = null
+let hoverFrame: number | null = null
+function cancelPendingHover(): void {
+  pendingHover = null
+  if (hoverFrame != null) cancelAnimationFrame(hoverFrame)
+  hoverFrame = null
+}
+function scheduleHover(pos: { x: number; y: number }): void {
+  pendingHover = pos
+  if (hoverFrame != null) return
+  hoverFrame = requestAnimationFrame(() => {
+    hoverFrame = null
+    const current = pendingHover
+    pendingHover = null
+    const index = sampleIndex
+    if (!current || !index) return
+    const preferredRanges = (props.highlightLaps ?? []).map((lap) => ({
+      startIdx: lap.startIdx,
+      endIdx: lap.endIdx,
+    }))
+    emit(
+      'cursor',
+      nearestIndexedSample(
+        index,
+        current.x,
+        current.y,
+        resolveTrackHitRadius(anyPointerCoarse.value),
+        preferredRanges,
+      ),
+    )
+  })
 }
 
 function onPointerUp(e: PointerEvent): void {
@@ -1219,53 +1427,34 @@ function onPointerUp(e: PointerEvent): void {
   }
 
   if (pointers.size === 0) {
+    if (dragging?.target.kind === 'line' && draftLine) emit('update:line', draftLine)
+    if (dragging?.target.kind === 'gate' && draftGate) emit('update:gate', draftGate.index, draftGate.line)
     mode = 'idle'
     dragging = null
+    dragStartGeo = null
+    dragOriginLine = null
     panLast = null
+    drawInteractionOverlay()
   }
 }
 
 function onPointerLeave(): void {
   // Clear the scrub cursor only when not mid-gesture (capture keeps gestures alive).
-  if (mode === 'idle') emit('cursor', null)
+  if (mode === 'idle') {
+    cancelPendingHover()
+    emit('cursor', null)
+  }
 }
 
-// B30 — coalesce cursorIdx-driven redraws to at most one per animation frame.
-// `draw()` re-renders the WHOLE canvas every time (full track polyline,
-// heatmap buckets, highlight/comparison segments, gates, extrema
-// labels/strokeText, start/finish band — see the function above), not just
-// the cursor dot. `watch(() => props.cursorIdx, () => draw())` used to call
-// that full pipeline SYNCHRONOUSLY on every single hover-driven cursor
-// change — i.e. on every mousemove pixel, since map→chart cursor forwarding
-// (TrackMap's own idle-hover branch in onPointerMove below) emits a new
-// cursorIdx on every pointermove. On a real multi-lap/heatmap track (tens of
-// thousands of samples, HEAT_BUCKETS strokes, per-marker strokeText/fillText)
-// a single draw() can take long enough that a fast mouse move floods the main
-// thread with a backlog of queued draw() calls it can't keep up with — from
-// the user's POV the map cursor "freezes" near wherever it first landed while
-// the backlog slowly (or never, in practice) catches up, exactly matching the
-// "only the first touched point registers, not continuous" symptom. This
-// doesn't reproduce on a small synthetic track (draw() is cheap enough there
-// to always keep up), which is why it wasn't caught by a plain small-fixture
-// component test.
-//
-// scheduleDraw() fixes this the standard way: coalesce however many
-// cursorIdx changes land within one frame into a SINGLE draw() call that
-// reads props.cursorIdx fresh (not a captured stale value) — so the render
-// loop can never fall behind the input rate, capping redraw work to the
-// display's own refresh rate regardless of how fast the pointer moves. Only
-// used for the two purely-hover-driven triggers below (the cursorIdx prop
-// watch, and onPointerLeave's clear-to-null) — every OTHER draw() call site
-// (zoom/pan, line/gate drag, resize, focusRange fit) stays synchronous and
-// unchanged, since those either need draw()'s side effects (focusMinX/Y etc.)
-// available immediately afterward, or aren't high-frequency enough to matter.
+// Cursor changes are coalesced to one cheap overlay paint per display frame.
+// Static map work is intentionally absent from this path.
 let cursorDrawScheduled = false
 function scheduleDraw(): void {
   if (cursorDrawScheduled) return
   cursorDrawScheduled = true
   requestAnimationFrame(() => {
     cursorDrawScheduled = false
-    draw()
+    drawInteractionOverlay()
   })
 }
 
@@ -1276,9 +1465,15 @@ onMounted(() => {
   // dpr / viewport changes (devtools device-mode toggle) may not trigger RO.
   window.addEventListener('resize', draw)
   window.addEventListener('keydown', onMaximizedKeydown)
+  themeObserver = new MutationObserver(() => {
+    contrastCache = null
+    draw()
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 onBeforeUnmount(() => {
   ro?.disconnect()
+  themeObserver?.disconnect()
   window.removeEventListener('resize', draw)
   window.removeEventListener('keydown', onMaximizedKeydown)
   // B54 — a pending settle-debounced tile fetch must not fire (and call
@@ -1287,12 +1482,16 @@ onBeforeUnmount(() => {
     clearTimeout(tileSettleTimer)
     tileSettleTimer = null
   }
+  cancelPendingHover()
 })
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
 watch(() => props.track, () => resetView())
 watch(() => props.cursorIdx, () => scheduleDraw())
-watch(() => props.line, () => draw())
+watch(() => props.line, () => {
+  if (dragging?.target.kind !== 'line') draftLine = null
+  draw()
+})
 watch(() => props.highlightLaps, () => draw())
 watch(() => props.comparisonLapHighlights, () => draw())
 // #7: on a focusRange CHANGE (not every draw — see fitToFocus's docs), draw
@@ -1310,7 +1509,10 @@ watch(
 )
 watch(() => props.colorValues, () => draw())
 watch(() => props.colormap, () => draw())
-watch(() => props.gates, () => draw())
+watch(() => props.gates, () => {
+  if (dragging?.target.kind !== 'gate') draftGate = null
+  draw()
+})
 watch(() => props.extremaMarkers, () => draw())
 // Multi-file overlay: toggling a session on/off changes what's drawn AND the
 // combined fit (fitProjection bounds), so just redraw — the user's zoom/pan
@@ -1343,6 +1545,7 @@ watch(background.image, () => draw())
       @wheel.prevent="onWheel"
       @dblclick="resetView"
     />
+    <canvas ref="cursorCanvas" class="track-interaction" aria-hidden="true" />
     <MapBackgroundControls
       class="background-control"
       :settings="background.settings.value"
@@ -1369,7 +1572,9 @@ watch(background.image, () => draw())
       v-tooltip="t('analyzer.maximizeMap')"
       @click="toggleMaximize"
     >
-      <span aria-hidden="true">⛶</span>
+      <svg class="maximize-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+      </svg>
     </button>
     <button
       v-else
@@ -1379,7 +1584,9 @@ watch(background.image, () => draw())
       v-tooltip="t('analyzer.minimizeMap')"
       @click="toggleMaximize"
     >
-      <span aria-hidden="true">✕</span>
+      <svg class="maximize-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" />
+      </svg>
     </button>
   </div>
 </template>
@@ -1427,7 +1634,15 @@ watch(background.image, () => draw())
   flex: 1 1 auto;
   min-height: 0;
 }
-.background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 6px; }
+.track-interaction {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  border-radius: var(--radius);
+}
+.background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 3px 6px; }
 .align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
 .osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: 10px; }
 :root[data-any-pointer-coarse] .align-background { min-height: 44px; display: flex; align-items: center; }
@@ -1474,5 +1689,11 @@ watch(background.image, () => draw())
 }
 .maximize-toggle:hover {
   border-color: var(--color-text-muted);
+}
+.maximize-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 </style>

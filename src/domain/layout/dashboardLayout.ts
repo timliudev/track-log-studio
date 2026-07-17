@@ -532,41 +532,38 @@ export function isChartItemId(id: string): boolean {
  * here — this is a fixed grid-unit array, not something that measures the
  * user's real viewport).
  *
+ * B66 — these heights are deliberate defaults for a NEW layout, not a
+ * runtime content measurement. They leave ordinary card content expanded and
+ * readable on both desktop and the mobile one-column layout, while existing
+ * persisted layouts remain exactly as the user sized them.
+ *
  * Column A (x:0..4): map + lap table + sectors — the "at a glance" cards.
  * Column B (x:4..8): the remaining control panels (channel/accel/gear/file).
- * Column C (x:8..12): session-merge + the first chart, with the align panels
- * (hidden until ≥2 laps are selected — see AnalyzerView's isVisibleId) placed
- * BELOW the chart rather than above it, so their default hidden state never
- * leaves a gap above visible content in this column.
+ * Column C (x:8..12): session-merge + the first chart + current values, with
+ * the align panels (hidden until ≥2 laps are selected — see AnalyzerView's
+ * isVisibleId) placed BELOW them so their default hidden state never leaves a
+ * gap above visible content in this column.
  */
 export function defaultLayout(): DashboardLayoutItem[] {
   return [
-    // Column A — B15's current-values card goes here, right under sectors:
-    // it's the same kind of "at a glance, always relevant" card as the
-    // map/lap table above it, and column A (bottom y=24 before this card)
-    // had the most headroom to absorb it at its minimum height (3 rows)
-    // without unbalancing the three columns (see the "balances column
-    // heights" test below) or opening a gap ahead of column B's bottom
-    // (y=27) that compactLayoutTopLeft could pull column C's hidden
-    // align-panel stack sideways into (see the "is a no-op on defaultLayout"
-    // regression test).
-    { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 10 },
-    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 10, w: 4, h: 8 },
-    { i: STATIC_CARD_IDS.sectors, x: 0, y: 18, w: 4, h: 6 },
-    { i: STATIC_CARD_IDS.currentValues, x: 0, y: 24, w: 4, h: 3 },
+    // Column A — the at-a-glance map/lap/sector stack.
+    { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 12 },
+    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 12, w: 4, h: 16 },
+    { i: STATIC_CARD_IDS.sectors, x: 0, y: 28, w: 4, h: 20 },
     // Column B
-    { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 5 },
-    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 5, w: 4, h: 5 },
-    { i: STATIC_CARD_IDS.gear, x: 4, y: 10, w: 4, h: 7 },
-    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 17, w: 4, h: 5 },
-    { i: STATIC_CARD_IDS.suspension, x: 4, y: 22, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 7 },
+    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 7, w: 4, h: 12 },
+    { i: STATIC_CARD_IDS.gear, x: 4, y: 19, w: 4, h: 14 },
+    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 33, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.suspension, x: 4, y: 41, w: 4, h: 12 },
     // Column C — first chart (the store's initial default chart) sits right
     // under session-merge; further charts are appended below by
     // reconcileLayout's "new item" path (see defaultChartItem).
-    { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 8 },
-    { i: chartItemId(1), x: 8, y: 8, w: 4, h: 11 },
-    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 19, w: 4, h: 5 },
-    { i: STATIC_CARD_IDS.lapAlign, x: 8, y: 24, w: 4, h: 5 },
+    { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 10 },
+    { i: chartItemId(1), x: 8, y: 10, w: 4, h: 14 },
+    { i: STATIC_CARD_IDS.currentValues, x: 8, y: 24, w: 4, h: 22 },
+    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 46, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.lapAlign, x: 0, y: 48, w: 4, h: 8 },
   ]
 }
 
@@ -576,7 +573,7 @@ export function defaultLayout(): DashboardLayoutItem[] {
  *  settles it upward if there's room. */
 function defaultChartItem(id: string, layout: DashboardLayoutItem[]): DashboardLayoutItem {
   const maxY = layout.reduce((m, it) => Math.max(m, it.y + it.h), 0)
-  return { i: id, x: 8, y: maxY, w: 4, h: 9 }
+  return { i: id, x: 8, y: maxY, w: 4, h: 14 }
 }
 
 /** Parse persisted JSON into a layout array, or null if missing/invalid

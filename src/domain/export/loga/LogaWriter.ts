@@ -1,5 +1,6 @@
 import { detectFormat } from '@/domain/parsing/HeaderDetector'
 import { canonicalName } from '@/domain/parsing/canonical'
+import { exportMetadataHeader, type ExportMetadata } from '@/domain/export/metadata'
 
 export interface PatchResult {
   text: string
@@ -44,6 +45,7 @@ function fmtVal(v: number, decimals: number): string {
 export function patchLogaText(
   text: string,
   replacements: Map<string, Float32Array>,
+  metadata?: ExportMetadata,
 ): PatchResult {
   const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const lines = text.split(/\r?\n/)
@@ -89,7 +91,18 @@ export function patchLogaText(
     const raw = APPEND_DESC[t.name] ? `${t.name}/${APPEND_DESC[t.name]}` : t.name
     namesArr.splice(appendAt + k, 0, raw)
   })
-  if (appendTargets.length > 0) lines[namesLineIndex] = namesArr.join(',')
+  const metadataHeader = exportMetadataHeader(metadata)
+  let insertedMetadataAt = -1
+  if (metadataHeader) {
+    const existingMetadataAt = namesArr.findIndex((name) => name.startsWith('TLS_Metadata/'))
+    if (existingMetadataAt >= 0) {
+      namesArr[existingMetadataAt] = metadataHeader
+    } else {
+      insertedMetadataAt = appendAt + appendTargets.length
+      namesArr.splice(insertedMetadataAt, 0, metadataHeader)
+    }
+  }
+  if (appendTargets.length > 0 || metadataHeader) lines[namesLineIndex] = namesArr.join(',')
 
   let row = 0
   for (let i = dataStartLine; i < lines.length; i++) {
@@ -105,6 +118,10 @@ export function patchLogaText(
       while (fields.length < pos) fields.push('')
       fields.splice(pos, 0, fmtVal(t.data[row], t.decimals))
     })
+    if (insertedMetadataAt >= 0) {
+      while (fields.length < insertedMetadataAt) fields.push('')
+      fields.splice(insertedMetadataAt, 0, '')
+    }
     lines[i] = fields.join(',')
     row++
   }

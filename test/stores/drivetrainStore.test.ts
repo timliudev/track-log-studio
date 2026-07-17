@@ -41,6 +41,7 @@ describe('drivetrainStore persistence', () => {
   it('defaults to MT with the built-in spec when nothing is persisted', () => {
     const s = useDrivetrainStore()
     expect(s.kind).toBe('mt')
+    expect(s.kindSelection).toBe('auto')
     expect(s.mt.gearRatios.map((g) => g.ratio)).toEqual([2.615, 1.812, 1.409, 1.16, 1.0, 0.885])
     expect(s.mt.finalDrive).toEqual({ mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 })
   })
@@ -63,6 +64,7 @@ describe('drivetrainStore persistence', () => {
     expect(raw).not.toBeNull()
     const data = JSON.parse(raw as string)
     expect(data.kind).toBe('cvt')
+    expect(data.kindSelection).toBe('manual')
     expect(data.cvt.notes[0].value).toBe('48mm')
     expect(data.inversionWheelCircumferenceMm).toBe(1999)
   })
@@ -79,6 +81,7 @@ describe('drivetrainStore persistence', () => {
     setActivePinia(createPinia())
     const s2 = useDrivetrainStore()
     expect(s2.kind).toBe('cvt')
+    expect(s2.kindSelection).toBe('manual')
     expect(s2.mt.gearRatios).toHaveLength(4)
     expect(s2.mt.gearRatios[1].ratio).toBe(1.5)
     expect(s2.mt.redlineRpm).toBe(12000)
@@ -142,6 +145,41 @@ describe('drivetrainStore persistence', () => {
     const s = useDrivetrainStore()
     expect(s.mt.gearRatios.every((g) => typeof g === 'object' && 'mode' in g)).toBe(true)
     expect(s.cvt.notes.length).toBeGreaterThan(0)
+  })
+
+  it('allows session inference until the user explicitly chooses a tab', () => {
+    const s = useDrivetrainStore()
+    expect(s.applyDetectedKind('cvt')).toBe(true)
+    expect(s.kind).toBe('cvt')
+    expect(s.kindSelection).toBe('auto')
+
+    s.setKind('mt')
+    expect(s.kindSelection).toBe('manual')
+    expect(s.applyDetectedKind('cvt')).toBe(false)
+    expect(s.kind).toBe('mt')
+  })
+
+  it('migrates an existing unmarked v2 kind as manual so inference cannot overwrite it', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ kind: 'cvt', mt: {}, cvt: {}, inversionWheelCircumferenceMm: 1870 }),
+    )
+    const s = useDrivetrainStore()
+    expect(s.kind).toBe('cvt')
+    expect(s.kindSelection).toBe('manual')
+    expect(s.applyDetectedKind('mt')).toBe(false)
+    expect(s.kind).toBe('cvt')
+  })
+
+  it('restores an explicitly auto-marked profile and keeps following inference', () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ kind: 'mt', kindSelection: 'auto', mt: {}, cvt: {}, inversionWheelCircumferenceMm: 1870 }),
+    )
+    const s = useDrivetrainStore()
+    expect(s.kindSelection).toBe('auto')
+    expect(s.applyDetectedKind('cvt')).toBe(true)
+    expect(s.kind).toBe('cvt')
   })
 })
 
@@ -320,10 +358,10 @@ describe('#7/#12 — gear count is adjustable 1..8 (was hardcoded to 6)', () => 
 })
 
 describe('#7/#12 — setCvtTireSpec: CVT gets the same tire-spec live conversion as MT', () => {
-  it('defaults to a blank spec (CVT sizes vary too much for one sane guessed default)', () => {
+  it('defaults new profiles to the Taiwan scooter size 120/80-12', () => {
     const s = useDrivetrainStore()
-    expect(s.cvt.tireSpec).toBe('')
-    expect(s.cvt.wheelCircumferenceMm).toBe(1400)
+    expect(s.cvt.tireSpec).toBe('120/80-12')
+    expect(s.cvt.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))
   })
 
   it('auto-applies a valid spec into cvt.wheelCircumferenceMm (rounded whole mm)', () => {
@@ -459,13 +497,15 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
 
   it('mergeCvtFormState fills in default notes for an empty/undefined payload', () => {
     const merged = mergeCvtFormState(undefined)
+    expect(merged.tireSpec).toBe('120/80-12')
+    expect(merged.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))
     expect(merged.notes.length).toBeGreaterThan(0)
     expect(merged.notes.every((n) => n.value === '')).toBe(true)
   })
 
   it('mergeCvtFormState rejects a v1-shaped (ratioLow/ratioHigh) payload and falls back to defaults', () => {
     const merged = mergeCvtFormState({ ratioLow: 2.4, ratioHigh: 0.9 } as never)
-    expect(merged.wheelCircumferenceMm).toBe(1400)
+    expect(merged.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))
     expect(merged.notes.length).toBeGreaterThan(0)
   })
 })

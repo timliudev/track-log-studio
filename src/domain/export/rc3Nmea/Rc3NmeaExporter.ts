@@ -4,6 +4,7 @@ import { makeSentence } from '../nmeaChecksum'
 import { computeSmoothedCourses } from './heading'
 import { SLOT_IDS, LEGACY_PY_MAPPING, type Rc3Mapping } from './mapping'
 import { makeFixResolver, type GpsFix } from '@/domain/gps/gpsFix'
+import { encodeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
 
 /** Format a number with fixed decimals (matches Python f"{v:.Nf}"). */
 function fmt(v: number, decimals = 3): string {
@@ -56,6 +57,7 @@ export class Rc3NmeaExporter implements Exporter {
     session: LogSession,
     mapping: Rc3Mapping = LEGACY_PY_MAPPING,
     now: Date = new Date(),
+    metadata?: ExportMetadata,
   ): string {
     const n = session.rowCount
     const arr = (name: string): Float32Array | undefined => session.get(name)?.data
@@ -126,6 +128,13 @@ export class Rc3NmeaExporter implements Exporter {
     }
 
     const out: string[] = []
+    const metadataPayload = encodeExportMetadata(metadata)
+    if (metadataPayload) {
+      const chunks = metadataPayload.match(/.{1,48}/g) ?? []
+      for (let i = 0; i < chunks.length; i++) {
+        out.push(makeSentence(`PTLS,META,${i + 1},${chunks.length},${chunks[i]}`))
+      }
+    }
 
     // No GPS position at all → standalone RC3 with count field.
     if (!hasPosition) {

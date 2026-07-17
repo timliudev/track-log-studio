@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { PIN_FLIP_EASING } from '@/domain/layout/flip'
 import { playFlipTransition, prefersReducedMotion, useAutoFlip } from '@/composables/useFlipAnimation'
@@ -173,6 +173,21 @@ const dragHandleEl = ref<HTMLElement | null>(null)
 const touchArmed = ref(false)
 const TOUCH_ARMED_VISUAL_MS = 400
 
+// B64 — a phone-only, session-scoped compact state for the floating pinned
+// card. It intentionally is not written to panel/layout persistence: it is a
+// quick reading-mode choice, not a rearrangement of the user's dashboard.
+const pinnedMini = ref(false)
+function togglePinnedMini(): void {
+  pinnedMini.value = !pinnedMini.value
+}
+function resetPinnedMiniOutsideMobile(): void {
+  if (window.innerWidth > 768) pinnedMini.value = false
+}
+onMounted(() => window.addEventListener('resize', resetPinnedMiniOutsideMobile))
+watch(() => props.pinned, (isPinned) => {
+  if (!isPinned) pinnedMini.value = false
+})
+
 let touchDragState: TouchDragDelayState | null = null
 let touchDragTimer: ReturnType<typeof setTimeout> | null = null
 let touchDragStart: { x: number; y: number; pointerId: number } | null = null
@@ -345,6 +360,7 @@ function onPinResizePointerUp(): void {
   pinResizeStart = null
   window.removeEventListener('pointermove', onPinResizePointerMove)
   window.removeEventListener('pointerup', onPinResizePointerUp)
+  window.removeEventListener('resize', resetPinnedMiniOutsideMobile)
 }
 /** Double-clicking the handle drops the manual size and reverts to the
  *  automatic aspect-ratio sizing — an easy way back after an experimental drag. */
@@ -526,7 +542,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootEl" class="dashboard-card" :class="{ pinned, collapsed }" :style="cardStyle">
+  <div ref="rootEl" class="dashboard-card" :class="{ pinned, collapsed, 'pinned-mini': pinnedMini }" :style="cardStyle">
     <header
       ref="dragHandleEl"
       class="drag-handle"
@@ -536,6 +552,21 @@ onBeforeUnmount(() => {
       <span class="title">{{ title }}</span>
       <span class="actions">
         <slot name="actions" />
+        <button
+          v-if="pinned"
+          type="button"
+          class="icon-btn mini-btn"
+          :class="{ active: pinnedMini }"
+          v-tooltip="pinnedMini ? t('analyzer.layout.expandPinned') : t('analyzer.layout.minimizePinned')"
+          :aria-label="pinnedMini ? t('analyzer.layout.expandPinned') : t('analyzer.layout.minimizePinned')"
+          :aria-pressed="pinnedMini"
+          @click="togglePinnedMini"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path v-if="pinnedMini" d="M7 14l5-5 5 5" />
+            <path v-else d="m7 10 5 5 5-5" />
+          </svg>
+        </button>
         <button
           type="button"
           class="icon-btn pin-btn"
@@ -574,7 +605,7 @@ onBeforeUnmount(() => {
       @enter-cancelled="onBodyAfterTransition"
       @leave-cancelled="onBodyAfterTransition"
     >
-      <div v-if="!collapsed" class="body">
+      <div v-if="!collapsed && !pinnedMini" class="body">
         <slot />
       </div>
     </Transition>
@@ -582,7 +613,7 @@ onBeforeUnmount(() => {
          resize otherwise) and not collapsed (a header-only card has no body
          to grow — see this handle's module doc above `pinnedSize`). -->
     <div
-      v-if="pinned && !collapsed"
+      v-if="pinned && !collapsed && !pinnedMini"
       class="pin-resize-handle"
       v-tooltip="t('analyzer.layout.pinnedResizeHandle')"
       :aria-label="t('analyzer.layout.pinnedResizeHandle')"
@@ -647,6 +678,17 @@ onBeforeUnmount(() => {
     border-radius: 0;
     --card-body-pad-x: 4px;
     --card-bleed-x: 4px;
+  }
+  /* B64 — the pinned card uses the same flush full-width treatment as the
+     mobile grid cards. A restrained bottom shadow and divider keep its sticky
+     role legible without reintroducing a side inset. */
+  .dashboard-card.pinned {
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+    --card-body-pad-x: 4px;
+    --card-bleed-x: 4px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
   }
 }
 /* Collapsed: shrink the card itself to just its header. On desktop the
@@ -747,6 +789,14 @@ onBeforeUnmount(() => {
 .icon-btn svg {
   width: 16px;
   height: 16px;
+}
+.mini-btn {
+  display: none;
+}
+@media (max-width: 768px) {
+  .mini-btn {
+    display: inline-flex;
+  }
 }
 .icon-btn:hover {
   color: var(--color-text);

@@ -19,8 +19,11 @@ import {
   cvtRatioSummary,
   estimateClutchEngagementRpm,
   estimateCircumferenceFromLog,
+  inferDrivetrainKind,
   type MtDrivetrainSpec,
 } from '@/domain/analysis/drivetrain'
+import { LogSession } from '@/domain/model/LogSession'
+import type { Channel } from '@/domain/model/types'
 
 // Real-ish MT reference bike, hand-computed in Python (see PR description):
 // primary 2.833, gears [2.615, 1.812, 1.409, 1.16, 1.0, 0.885], 15/45
@@ -321,6 +324,61 @@ describe('computeRatioSeries', () => {
     const ratio = computeRatioSeries(rpm, speed, { wheelCircumferenceMm: 1870, minSpeedKmh: 10 })
     expect(Number.isNaN(ratio[0])).toBe(true)
     expect(Number.isFinite(ratio[1])).toBe(true)
+  })
+})
+
+describe('inferDrivetrainKind', () => {
+  function channel(name: string, values: number[]): Channel {
+    return { name, rawName: name, description: undefined, data: new Float32Array(values) }
+  }
+
+  function session(channels: Channel[]): LogSession {
+    return new LogSession(channels, { formatId: 'synthetic', createdDate: null, headerInfo: {} })
+  }
+
+  it('uses a multi-value discrete gear channel as definitive MT evidence', () => {
+    const gears = Array.from({ length: 60 }, (_, i) => 1 + Math.floor(i / 20))
+    expect(inferDrivetrainKind(session([channel('Gear', gears)]))).toMatchObject({
+      kind: 'mt',
+      basis: 'gearChannel',
+    })
+  })
+
+  it('recognises repeated stepped ratio plateaus as MT without a gear channel', () => {
+    const speed: number[] = []
+    const rpm: number[] = []
+    for (const ratio of [18, 13, 9]) {
+      for (let i = 0; i < 140; i++) {
+        const kmh = 25 + (i % 70) * 0.45
+        const noise = 1 + ((i % 5) - 2) * 0.001
+        speed.push(kmh)
+        rpm.push(speedKmhToWheelRpm(kmh, 1870) * ratio * noise)
+      }
+    }
+    expect(inferDrivetrainKind(session([channel('RPM', rpm), channel('GPS_Speed', speed)]))).toMatchObject({
+      kind: 'mt',
+      basis: 'ratioPlateaus',
+    })
+  })
+
+  it('recognises a broad continuous ratio sweep as CVT', () => {
+    const n = 600
+    const speed = Array.from({ length: n }, (_, i) => 12 + (88 * i) / (n - 1))
+    const rpm = speed.map((kmh, i) => {
+      const ratio = 16 - (8 * i) / (n - 1)
+      return speedKmhToWheelRpm(kmh, 1870) * ratio
+    })
+    expect(inferDrivetrainKind(session([channel('RPM', rpm), channel('GPS_Speed', speed)]))).toMatchObject({
+      kind: 'cvt',
+      basis: 'continuousRatio',
+    })
+  })
+
+  it('returns null for short or single-gear recordings instead of guessing', () => {
+    const speed = new Array(200).fill(50)
+    const rpm = speed.map((kmh) => speedKmhToWheelRpm(kmh, 1870) * 10)
+    expect(inferDrivetrainKind(session([channel('RPM', rpm), channel('GPS_Speed', speed)]))).toBeNull()
+    expect(inferDrivetrainKind(session([channel('RPM', rpm.slice(0, 50)), channel('GPS_Speed', speed.slice(0, 50))]))).toBeNull()
   })
 })
 

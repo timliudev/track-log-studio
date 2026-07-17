@@ -15,10 +15,9 @@ export interface CurrentValueField {
    *  channel's own name otherwise (channel names are unique within a session
    *  — LogSession itself indexes them by name). */
   key: string
-  /** Display label — the caller's i18n string for the time field, the
-   *  channel's own name otherwise. */
+  /** Display label — translated for synthetic fields, the channel name for raw fields. */
   label: string
-  kind: 'time' | 'channel'
+  kind: 'time' | 'channel' | 'updateRate'
   value: number
 }
 
@@ -68,11 +67,11 @@ export function buildCurrentValueFields(
   return fields
 }
 
-/** Format one field's value for display: '—' for NaN (not computable —
- *  matches every other lap/metric formatter in format.ts), `m:ss.mmm` for the
- *  time field (same idiom as lap times), the generic magnitude-aware
- *  formatter for everything else. */
+/** Format time, raw-channel and synthetic update-rate fields for display. */
 export function formatCurrentValueField(field: CurrentValueField): string {
+  if (field.kind === 'updateRate') {
+    return Number.isFinite(field.value) ? `${formatMetricValue(field.value)} Hz` : '— Hz'
+  }
   if (Number.isNaN(field.value)) return '—'
   return field.kind === 'time' ? formatLapTime(field.value) : formatMetricValue(field.value)
 }

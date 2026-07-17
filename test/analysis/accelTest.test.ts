@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import type { AccelSegment } from '@/domain/analysis/accelTest'
-import { fastestDistanceFromLaunch, fastestSpeedSegment, sortSegmentsByTime } from '@/domain/analysis/accelTest'
+import {
+  assessAccelSegmentQuality,
+  fastestDistanceFromLaunch,
+  fastestSpeedSegment,
+  sortSegmentsByTime,
+} from '@/domain/analysis/accelTest'
 
 /**
  * Build synthetic time/distance/speed arrays for a constant-acceleration ramp
@@ -369,6 +374,86 @@ describe('fastestSpeedSegment', () => {
   })
 })
 
+describe('acceleration result quality', () => {
+  const segment = {
+    startIdx: 0,
+    endIdx: 1,
+    timeMs: 1000,
+    distanceM: 100,
+    entrySpeedKmh: 0,
+    peakSpeedKmh: 2,
+  }
+
+  it('rejects a GPS reacquisition jump unsupported by the observed speed', () => {
+    const quality = assessAccelSegmentQuality(
+      segment,
+      new Float64Array([0, 1000]),
+      new Float64Array([0, 2]),
+      new Float64Array([0, 335]),
+    )
+    expect(quality.autoExcludedReason).toBe('gpsJump')
+    expect(quality.speedIntegratedDistanceM).toBeLessThan(1)
+  })
+
+  it('rejects slow stationary drift whose integrated speed explains less than 40% of GPS distance', () => {
+    const time = Float64Array.from({ length: 11 }, (_, i) => i * 10_000)
+    const speed = new Float64Array(11).fill(1)
+    const distance = Float64Array.from({ length: 11 }, (_, i) => i * 10)
+    const quality = assessAccelSegmentQuality(
+      { ...segment, endIdx: 10, timeMs: 100_000, peakSpeedKmh: 1 },
+      time,
+      speed,
+      distance,
+    )
+    expect(quality.autoExcludedReason).toBe('speedDistanceMismatch')
+    expect(quality.speedIntegratedDistanceM).toBeCloseTo(27.78, 1)
+  })
+
+  it('rejects a noise-triggered start followed by a long stationary wait', () => {
+    const quality = assessAccelSegmentQuality(
+      { ...segment, endIdx: 4, timeMs: 40_000, peakSpeedKmh: 100 },
+      new Float64Array([0, 10_000, 20_000, 30_000, 40_000]),
+      new Float64Array([0, 0, 0, 0, 100]),
+      new Float64Array([0, 0, 0, 0, 100]),
+    )
+    expect(quality.autoExcludedReason).toBe('insufficientMovement')
+    expect(quality.movingTimeRatio).toBe(0.25)
+  })
+
+  it('keeps a normal launch whose speed trace supports its displacement', () => {
+    const quality = assessAccelSegmentQuality(
+      { ...segment, endIdx: 4, timeMs: 8000, peakSpeedKmh: 90 },
+      new Float64Array([0, 2000, 4000, 6000, 8000]),
+      new Float64Array([0, 30, 60, 80, 90]),
+      new Float64Array([0, 10, 35, 70, 100]),
+    )
+    expect(quality.autoExcludedReason).toBeNull()
+    expect(quality.movingTimeRatio).toBe(1)
+  })
+
+  it('does not create overlapping attempts from low-speed noise inside a resolved 100 m run', () => {
+    const time = Float64Array.from({ length: 12 }, (_, i) => i * 1000)
+    const speed = new Float64Array([0, 1, 0, 36, 36, 36, 36, 36, 36, 36, 36, 36])
+    const distance = new Float64Array([0, 1, 1, 11, 21, 31, 41, 51, 61, 71, 81, 101])
+    const results = fastestDistanceFromLaunch(distance, time, speed, { distanceM: 100, entrySpeedKmh: 0 })
+    expect(results).toHaveLength(1)
+  })
+
+  it('keeps an implausible jump visible but awards fastest only to a later usable launch', () => {
+    const results = fastestDistanceFromLaunch(
+      new Float64Array([0, 335, 335, 335, 355, 380, 410, 435]),
+      new Float64Array([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]),
+      new Float64Array([0, 2, 0, 0, 30, 60, 80, 90]),
+      { distanceM: 100, entrySpeedKmh: 0 },
+    )
+    expect(results).toHaveLength(2)
+    expect(results[0].autoExcludedReason).toBe('gpsJump')
+    expect(results[0].isFastest).toBe(false)
+    expect(results[1].autoExcludedReason).toBeNull()
+    expect(results[1].isFastest).toBe(true)
+  })
+})
+
 // B48: the panel displays results fastest-to-slowest; the search functions
 // above stay chronological (asserted above), so the UI applies this separate
 // sort on top.
@@ -382,6 +467,9 @@ describe('sortSegmentsByTime (B48)', () => {
       entrySpeedKmh: 0,
       exitSpeedKmh: 100,
       peakSpeedKmh: 100,
+      speedIntegratedDistanceM: 100,
+      movingTimeRatio: 1,
+      autoExcludedReason: null,
       isFastest,
     }
   }

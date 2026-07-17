@@ -9,6 +9,9 @@ import type { Channel } from '@/domain/model/types'
 import { vTooltip } from '@/directives/tooltip'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { speedKmhToWheelRpm } from '@/domain/analysis/drivetrain'
+import { useFileStore } from '@/stores/fileStore'
 
 /**
  * Regression test for 4d2f90d — GearPanel is a single long-lived instance in
@@ -41,7 +44,16 @@ function sessionWithSteadyGear1(n = 30): LogSession {
   )
 }
 
-function mountPanel(session: LogSession | null) {
+function continuousCvtSession(n = 400): LogSession {
+  const speed = Array.from({ length: n }, (_, i) => 12 + (88 * i) / (n - 1))
+  const rpm = speed.map((kmh, i) => speedKmhToWheelRpm(kmh, 1870) * (16 - (8 * i) / (n - 1)))
+  return new LogSession(
+    [channel('RPM', rpm), channel('GPS_Speed', speed)],
+    { formatId: 'nmea', createdDate: null, headerInfo: {} },
+  )
+}
+
+function mountPanel(session: LogSession | null, primaryFileId?: number | null) {
   const i18n = createI18n({
     legacy: false,
     locale: 'zh-Hant',
@@ -49,7 +61,7 @@ function mountPanel(session: LogSession | null) {
     messages: { 'zh-Hant': zhHant, en },
   })
   return mount(GearPanel, {
-    props: { session },
+    props: { session, primaryFileId },
     global: { plugins: [i18n], directives: { tooltip: vTooltip } },
   })
 }
@@ -151,5 +163,42 @@ describe('GearPanel — session-switch clears stale estimate (regression 4d2f90d
     await wrapper.setProps({ session: sessionWithSteadyGear1() })
 
     expect(wrapper.find('.estimate-err').exists()).toBe(false)
+  })
+
+  it('auto-selects the inferred page for a new session but respects a manual tab choice', async () => {
+    const wrapper = mountPanel(null)
+    const store = useDrivetrainStore()
+    expect(store.kindSelection).toBe('auto')
+
+    await wrapper.setProps({ session: continuousCvtSession() })
+    expect(store.kind).toBe('cvt')
+
+    store.setKind('mt')
+    await wrapper.setProps({ session: continuousCvtSession(450) })
+    expect(store.kind).toBe('mt')
+  })
+
+  it('keeps CVT notes attached to the file selected in the long-lived panel', async () => {
+    const fileStore = useFileStore()
+    const firstSession = sessionWithSteadyGear1(30)
+    const secondSession = sessionWithSteadyGear1(35)
+    const firstId = fileStore.beginImport(new File(['x'], 'first.loga'))
+    const secondId = fileStore.beginImport(new File(['x'], 'second.loga'))
+    fileStore.completeImport(firstId, firstSession)
+    fileStore.completeImport(secondId, secondSession)
+
+    const wrapper = mountPanel(firstSession, firstId)
+    useDrivetrainStore().setKind('cvt')
+    await wrapper.vm.$nextTick()
+    await wrapper.findAll('input.note-value')[0].setValue('12 g')
+    expect(fileStore.getExportMetadata(firstId).cvtNotes?.[0].value).toBe('12 g')
+
+    await wrapper.setProps({ session: secondSession, primaryFileId: secondId })
+    expect((wrapper.findAll('input.note-value')[0].element as HTMLInputElement).value).toBe('')
+    await wrapper.findAll('input.note-value')[0].setValue('14 g')
+
+    await wrapper.setProps({ session: firstSession, primaryFileId: firstId })
+    expect((wrapper.findAll('input.note-value')[0].element as HTMLInputElement).value).toBe('12 g')
+    expect(fileStore.getExportMetadata(secondId).cvtNotes?.[0].value).toBe('14 g')
   })
 })

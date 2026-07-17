@@ -26,6 +26,7 @@ import type { ComparisonSession } from '@/composables/useSessionComparison'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
+import { cachedChannelUpdateRateHz } from '@/composables/channelUpdateRateCache'
 
 const props = defineProps<{
   /** Persisted dashboard config for a user-added ordinary time-series card.
@@ -122,6 +123,17 @@ const presentSources = computed<Array<{ name: string; data: ArrayLike<number> }>
   return sources
 })
 const present = computed(() => presentSources.value.map((source) => source.name))
+const updateRateHz = computed<number | null>(() => {
+  let highest: number | null = null
+  for (const source of presentSources.value) {
+    const rate = cachedChannelUpdateRateHz(props.session, source.name, source.data)
+    if (rate != null && (highest == null || rate > highest)) highest = rate
+  }
+  return highest
+})
+const updateRateLabel = computed(() =>
+  updateRateHz.value == null ? null : `${updateRateHz.value.toFixed(1)} Hz`,
+)
 const unavailableDerivedMessage = computed<string | null>(() => {
   for (const id of selectedChannelIds.value) {
     if (!isDerivedAnalyzerChannel(id)) continue
@@ -475,9 +487,12 @@ function removeChannel(name: string): void {
       <div v-if="canEditChannels" class="picker">
         <SearchableSelect :model-value="null" :options="pickerOptions" @update:model-value="addChannel" />
       </div>
-      <button v-if="chart" type="button" class="remove" @click="analyzer.removeChart(chart.id)">
-        {{ t('analyzer.removeChart') }}
-      </button>
+      <div class="toolbar-meta">
+        <span v-if="updateRateLabel" class="update-rate">{{ updateRateLabel }}</span>
+        <button v-if="chart" type="button" class="remove" @click="analyzer.removeChart(chart.id)">
+          {{ t('analyzer.removeChart') }}
+        </button>
+      </div>
     </div>
 
     <div class="chips">
@@ -568,6 +583,18 @@ function removeChannel(name: string): void {
   flex: 1;
   min-width: 200px;
   max-width: 360px;
+}
+.toolbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.update-rate {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .remove {
   background: var(--color-bg);

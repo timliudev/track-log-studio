@@ -20,6 +20,96 @@ export interface SampleIndexRange {
   endIdx: number
 }
 
+/**
+ * Screen-space lookup built when the map projection changes. Pointer hover is
+ * much more frequent than projection changes, so bucketing projected samples
+ * once avoids an O(rowCount) scan for every pointer event on long recordings.
+ */
+export interface TrackSampleSpatialIndex {
+  readonly px: ArrayLike<number>
+  readonly py: ArrayLike<number>
+  readonly cellSize: number
+  readonly cells: ReadonlyMap<string, readonly number[]>
+}
+
+function cellKey(x: number, y: number): string {
+  return `${x}:${y}`
+}
+
+export function buildTrackSampleSpatialIndex(
+  px: ArrayLike<number>,
+  py: ArrayLike<number>,
+  cellSize = TRACK_HIT_RADIUS_FINE,
+): TrackSampleSpatialIndex {
+  const size = Math.max(1, cellSize)
+  const cells = new Map<string, number[]>()
+  const n = Math.min(px.length, py.length)
+  for (let i = 0; i < n; i++) {
+    if (!Number.isFinite(px[i]) || !Number.isFinite(py[i])) continue
+    const key = cellKey(Math.floor(px[i] / size), Math.floor(py[i] / size))
+    const bucket = cells.get(key)
+    if (bucket) bucket.push(i)
+    else cells.set(key, [i])
+  }
+  return { px, py, cellSize: size, cells }
+}
+
+function inPreferredRange(index: number, ranges: readonly SampleIndexRange[]): boolean {
+  return ranges.some((range) => {
+    const lo = Math.min(range.startIdx, range.endIdx)
+    const hi = Math.max(range.startIdx, range.endIdx)
+    return index >= lo && index <= hi
+  })
+}
+
+/** Indexed counterpart of {@link nearestSample}. It preserves the selected-lap
+ * preference and earliest-index tie break while inspecting only buckets that
+ * intersect the pointer's hit square. */
+export function nearestIndexedSample(
+  index: TrackSampleSpatialIndex,
+  x: number,
+  y: number,
+  hitRadius: number,
+  preferredRanges?: readonly SampleIndexRange[],
+): number | null {
+  const { px, py, cellSize, cells } = index
+  const minCellX = Math.floor((x - hitRadius) / cellSize)
+  const maxCellX = Math.floor((x + hitRadius) / cellSize)
+  const minCellY = Math.floor((y - hitRadius) / cellSize)
+  const maxCellY = Math.floor((y + hitRadius) / cellSize)
+  const hitSq = hitRadius * hitRadius
+  let bestAny = -1
+  let bestAnyDist = Infinity
+  let bestPreferred = -1
+  let bestPreferredDist = Infinity
+
+  for (let cy = minCellY; cy <= maxCellY; cy++) {
+    for (let cx = minCellX; cx <= maxCellX; cx++) {
+      const bucket = cells.get(cellKey(cx, cy))
+      if (!bucket) continue
+      for (const sampleIndex of bucket) {
+        const dx = px[sampleIndex] - x
+        const dy = py[sampleIndex] - y
+        const distSq = dx * dx + dy * dy
+        if (distSq > hitSq) continue
+        if (distSq < bestAnyDist || (distSq === bestAnyDist && sampleIndex < bestAny)) {
+          bestAny = sampleIndex
+          bestAnyDist = distSq
+        }
+        if (
+          preferredRanges?.length
+          && inPreferredRange(sampleIndex, preferredRanges)
+          && (distSq < bestPreferredDist || (distSq === bestPreferredDist && sampleIndex < bestPreferred))
+        ) {
+          bestPreferred = sampleIndex
+          bestPreferredDist = distSq
+        }
+      }
+    }
+  }
+  return bestPreferred >= 0 ? bestPreferred : bestAny >= 0 ? bestAny : null
+}
+
 /** Nearest-neighbour scan restricted to `[lo, hi]` (inclusive); returns the
  *  best candidate's index and its squared pixel distance, or `null` if the
  *  range is empty or every sample in it is a gap (NaN px, no GPS fix). No

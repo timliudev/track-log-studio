@@ -1,10 +1,34 @@
 import { describe, it, expect } from 'vitest'
 import {
+  buildTrackSampleSpatialIndex,
+  nearestIndexedSample,
   nearestSample,
   resolveTrackHitRadius,
   TRACK_HIT_RADIUS_FINE,
   TRACK_HIT_RADIUS_COARSE,
 } from '@/features/analyzer/trackNearestSample'
+
+describe('nearestIndexedSample', () => {
+  it('matches the full scan, including preferred ranges and earliest-index ties', () => {
+    const px = [0, 10, 20, 0, 10, 20, NaN]
+    const py = [0, 0, 0, 1, 1, 1, NaN]
+    const index = buildTrackSampleSpatialIndex(px, py, 8)
+    const preferred = [{ startIdx: 0, endIdx: 2 }]
+    for (const point of [[10, 0.6], [20, 0], [100, 100], [5, 0]] as const) {
+      expect(nearestIndexedSample(index, point[0], point[1], 24, preferred)).toBe(
+        nearestSample(px, py, point[0], point[1], 24, preferred),
+      )
+    }
+  })
+
+  it('only opens buckets intersecting the hit area on a long projected track', () => {
+    const px = Float64Array.from({ length: 50_000 }, (_, i) => i * 4)
+    const py = new Float64Array(50_000)
+    const index = buildTrackSampleSpatialIndex(px, py, 32)
+    expect(nearestIndexedSample(index, 120_001, 0, 8)).toBe(30_000)
+    expect(index.cells.size).toBeGreaterThan(1_000)
+  })
+})
 
 describe('nearestSample', () => {
   const px = [0, 10, 20, 30]

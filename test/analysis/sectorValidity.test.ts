@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { invalidSectorLapIndices } from '@/domain/analysis/sectorValidity'
+import { evaluateSectorValidity, invalidSectorLapIndices } from '@/domain/analysis/sectorValidity'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LapLine } from '@/domain/analysis/laps'
 import type { Lap } from '@/domain/model/Lap'
@@ -95,6 +95,17 @@ describe('invalidSectorLapIndices', () => {
       lap(2, 0, 5), // stops short of gate 2: invalid
     ]
     expect(invalidSectorLapIndices(laps, straightTrack, gates).sort()).toEqual([2])
+  })
+
+  it('reports the first missed sector and detects an all-failed gate configuration', () => {
+    const result = evaluateSectorValidity([lap(7, 0, 5), lap(9, 0, 2)], straightTrack, gates)
+    expect(result).toEqual({
+      failures: [
+        { lapIndex: 7, missedSector: 2 },
+        { lapIndex: 9, missedSector: 1 },
+      ],
+      allFailed: true,
+    })
   })
 
   it('single gate: a lap crossing it is valid, one that does not is invalid', () => {

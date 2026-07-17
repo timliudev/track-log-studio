@@ -2,6 +2,7 @@ import type { Channel } from '@/domain/model/types'
 import { LogSession } from '@/domain/model/LogSession'
 import { canonicalName, descriptionOf } from './canonical'
 import { detectFormat } from './HeaderDetector'
+import { exportMetadataFromHeader, type ExportMetadata } from '@/domain/export/metadata'
 
 /** Progress callback: receives a fraction in [0, 1]. */
 export type ParseProgress = (fraction: number) => void
@@ -36,10 +37,19 @@ export function parseLoga(text: string, onProgress?: ParseProgress): LogSession 
 
   // Drop trailing empty column names (some formats end the name row with a
   // trailing comma). Interior columns are preserved.
-  const rawColumns = header.rawColumns.slice()
-  while (rawColumns.length > 0 && rawColumns[rawColumns.length - 1].trim() === '') {
-    rawColumns.pop()
+  const allRawColumns = header.rawColumns.slice()
+  while (allRawColumns.length > 0 && allRawColumns[allRawColumns.length - 1].trim() === '') {
+    allRawColumns.pop()
   }
+  let exportMetadata: ExportMetadata = {}
+  const columns = allRawColumns
+    .map((raw, sourceIndex) => ({ raw, sourceIndex }))
+    .filter(({ raw }) => {
+      if (!raw.startsWith('TLS_Metadata/')) return true
+      exportMetadata = exportMetadataFromHeader(raw)
+      return false
+    })
+  const rawColumns = columns.map(({ raw }) => raw)
   const colCount = rawColumns.length
   if (colCount === 0) throw new Error('No columns found in .loga header')
 
@@ -59,7 +69,8 @@ export function parseLoga(text: string, onProgress?: ParseProgress): LogSession 
     if (line.length === 0 || line.trim().length === 0) continue
     const fields = line.split(',')
     for (let c = 0; c < colCount; c++) {
-      arrays[c][r] = c < fields.length ? parseField(fields[c]) : NaN
+      const sourceIndex = columns[c].sourceIndex
+      arrays[c][r] = sourceIndex < fields.length ? parseField(fields[sourceIndex]) : NaN
     }
     r++
     if (onProgress && (r & 0x3fff) === 0) {
@@ -79,6 +90,7 @@ export function parseLoga(text: string, onProgress?: ParseProgress): LogSession 
     formatId: format.id,
     createdDate: header.createdDate,
     headerInfo: header.headerInfo,
+    exportMetadata,
   })
 }
 

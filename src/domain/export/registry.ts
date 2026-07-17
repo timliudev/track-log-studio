@@ -3,6 +3,8 @@ import { Rc3NmeaExporter } from './rc3Nmea/Rc3NmeaExporter'
 import { LEGACY_PY_MAPPING, type Rc3Mapping } from './rc3Nmea/mapping'
 import { convertToVbo } from './vbo/VboExporter'
 import { convertToCsv } from './csv/CsvExporter'
+import type { ExportMetadata } from './metadata'
+import { normalizeExportMetadata } from './metadata'
 
 /** One output file produced by an ExportFormat. */
 export interface ExportArtifact {
@@ -19,6 +21,8 @@ export interface ExportOptions {
   readonly mapping?: Rc3Mapping
   /** Clock anchor for synthesized timestamps; defaults to `new Date()`. */
   readonly now?: Date
+  /** Session-specific annotations supplied by the file/session owner. */
+  readonly metadata?: ExportMetadata
 }
 
 /**
@@ -44,11 +48,16 @@ export interface ExportFormat {
 
 const rc3Exporter = new Rc3NmeaExporter()
 
+function metadataFor(session: LogSession, options?: ExportOptions): ExportMetadata {
+  return normalizeExportMetadata(options?.metadata ?? session.meta.exportMetadata)
+}
+
 const nmeaFormat: ExportFormat = {
   id: 'nmea',
   fileExtension: 'nmea',
   exportSession(session, _sourceName, options) {
-    const content = rc3Exporter.export(session, options?.mapping ?? LEGACY_PY_MAPPING, options?.now)
+    const metadata = metadataFor(session, options)
+    const content = rc3Exporter.export(session, options?.mapping ?? LEGACY_PY_MAPPING, options?.now, metadata)
     return [{ suffix: '', ext: 'nmea', content }]
   },
 }
@@ -57,7 +66,8 @@ const vboFormat: ExportFormat = {
   id: 'vbo',
   fileExtension: 'vbo',
   exportSession(session, sourceName, options) {
-    return convertToVbo(session, sourceName, options?.now).map((a) => ({
+    const metadata = metadataFor(session, options)
+    return convertToVbo(session, sourceName, options?.now, metadata).map((a) => ({
       suffix: a.suffix,
       ext: a.ext,
       content: a.content,
@@ -68,8 +78,9 @@ const vboFormat: ExportFormat = {
 const csvFormat: ExportFormat = {
   id: 'csv',
   fileExtension: 'csv',
-  exportSession(session) {
-    return convertToCsv(session).map((a) => ({
+  exportSession(session, _sourceName, options) {
+    const metadata = metadataFor(session, options)
+    return convertToCsv(session, metadata).map((a) => ({
       suffix: a.suffix,
       ext: a.ext,
       content: a.content,

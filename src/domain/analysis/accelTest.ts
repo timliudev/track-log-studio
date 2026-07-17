@@ -22,10 +22,14 @@
  * Both search functions below return an ARRAY of every qualifying segment
  * found, in chronological order (ascending `startIdx` — this falls out
  * naturally since each is a single forward scan over the session), with
- * exactly one element flagged `isFastest: true` (the minimum `timeMs` among
- * them) so the UI can highlight the best while still listing every run. An
- * empty array means the search ran but nothing qualified.
+ * exactly one usable element flagged `isFastest: true` (the minimum `timeMs`
+ * among candidates that pass structural quality checks) so the UI can
+ * highlight the best while still listing auto-excluded runs for inspection
+ * and manual restoration. An empty array means the search ran but nothing
+ * qualified; when every result is auto-excluded, none is marked fastest.
  */
+
+export type AccelAutoExclusionReason = 'gpsJump' | 'speedDistanceMismatch' | 'insufficientMovement'
 
 /** A found matching segment. */
 export interface AccelSegment {
@@ -49,6 +53,16 @@ export interface AccelSegment {
    * cases.
    */
   peakSpeedKmh: number
+  /** Distance implied by integrating the selected speed channel over this
+   * segment. Kept beside GPS distance so the UI can explain quality decisions. */
+  speedIntegratedDistanceM: number
+  /** Fraction of elapsed time spent meaningfully above the configured entry
+   * speed. A long stationary wait followed by one real launch is not itself a
+   * launch from the earlier GPS-noise crossing. */
+  movingTimeRatio: number
+  /** Structural quality decision. The row remains visible and can be restored
+   * manually; excluded rows are ignored when choosing the fastest result. */
+  autoExcludedReason: AccelAutoExclusionReason | null
   /** True for the single fastest (lowest `timeMs`) segment among all the
    *  segments returned by the same search call; false for the rest. */
   isFastest: boolean
@@ -66,17 +80,88 @@ function peakSpeedInRange(speedKmh: ArrayLike<number>, lo: number, hi: number): 
   return Number.isFinite(peak) ? peak : speedKmh[lo]
 }
 
-/** Mark the minimum-`timeMs` element of `segments` as `isFastest`, in place.
- *  No-op on an empty array. Segments are compared by `timeMs` only — ties
- *  keep whichever is encountered first (earliest in the chronological list). */
+/** Mark the minimum-`timeMs` usable element of `segments` as `isFastest`, in
+ *  place. Auto-excluded rows stay visible but cannot become the record; ties
+ *  keep whichever is encountered first (earliest in chronological order). */
 function markFastest(segments: AccelSegment[]): AccelSegment[] {
-  if (segments.length === 0) return segments
-  let fastest = 0
-  for (let i = 1; i < segments.length; i++) {
-    if (segments[i].timeMs < segments[fastest].timeMs) fastest = i
+  let fastest = -1
+  for (let i = 0; i < segments.length; i++) {
+    segments[i].isFastest = false
+    if (segments[i].autoExcludedReason != null) continue
+    if (fastest < 0 || segments[i].timeMs < segments[fastest].timeMs) fastest = i
   }
-  segments[fastest].isFastest = true
+  if (fastest >= 0) segments[fastest].isFastest = true
   return segments
+}
+
+const MIN_QUALITY_DISTANCE_M = 10
+const MIN_SPEED_DISTANCE_RATIO = 0.4
+const MIN_MOVING_TIME_RATIO = 0.5
+
+/**
+ * Judge whether a candidate's GPS displacement is physically supported by
+ * the selected speed channel. This catches both abrupt GPS reacquisition
+ * jumps and slow stationary drift without imposing vehicle-specific power or
+ * acceleration thresholds.
+ */
+export function assessAccelSegmentQuality(
+  segment: Pick<AccelSegment, 'startIdx' | 'endIdx' | 'timeMs' | 'distanceM' | 'entrySpeedKmh' | 'peakSpeedKmh'>,
+  timeMs: ArrayLike<number>,
+  speedKmh: ArrayLike<number>,
+  cumDistM: ArrayLike<number>,
+): Pick<AccelSegment, 'speedIntegratedDistanceM' | 'movingTimeRatio' | 'autoExcludedReason'> {
+  const lo = Math.max(0, Math.min(segment.startIdx, segment.endIdx))
+  const hi = Math.min(timeMs.length - 1, speedKmh.length - 1, cumDistM.length - 1, Math.max(segment.startIdx, segment.endIdx))
+  let elapsedSec = 0
+  let movingSec = 0
+  let speedDistanceM = 0
+  let hasImplausibleGpsStep = false
+  const movingThreshold = segment.entrySpeedKmh + 1
+
+  for (let i = lo + 1; i <= hi; i++) {
+    const dt = (timeMs[i] - timeMs[i - 1]) / 1000
+    const v0 = speedKmh[i - 1]
+    const v1 = speedKmh[i]
+    if (!(dt > 0) || !Number.isFinite(v0) || !Number.isFinite(v1)) continue
+    const avgKmh = (Math.max(0, v0) + Math.max(0, v1)) / 2
+    const supportedStepM = (avgKmh / 3.6) * dt
+    speedDistanceM += supportedStepM
+    elapsedSec += dt
+    if (avgKmh > movingThreshold) movingSec += dt
+
+    const gpsStepM = cumDistM[i] - cumDistM[i - 1]
+    // 25 m tolerates ordinary low-rate GPS fixes; above that, require the
+    // speed channel to support the step even with a generous 4× noise margin.
+    if (Number.isFinite(gpsStepM) && gpsStepM > Math.max(25, supportedStepM * 4 + 10)) {
+      hasImplausibleGpsStep = true
+    }
+  }
+
+  const movingTimeRatio = elapsedSec > 0 ? movingSec / elapsedSec : 0
+  const expectedDistanceM = Math.abs(segment.distanceM)
+  const ratio = expectedDistanceM > 0 ? speedDistanceM / expectedDistanceM : 1
+  const requiredAverageKmh = segment.timeMs > 0 ? (expectedDistanceM / (segment.timeMs / 1000)) * 3.6 : Infinity
+  let autoExcludedReason: AccelAutoExclusionReason | null = null
+  if (expectedDistanceM >= MIN_QUALITY_DISTANCE_M) {
+    if (hasImplausibleGpsStep || requiredAverageKmh > segment.peakSpeedKmh * 1.5 + 5) {
+      autoExcludedReason = 'gpsJump'
+    } else if (ratio < MIN_SPEED_DISTANCE_RATIO) {
+      autoExcludedReason = 'speedDistanceMismatch'
+    } else if (movingTimeRatio < MIN_MOVING_TIME_RATIO) {
+      autoExcludedReason = 'insufficientMovement'
+    }
+  }
+  return { speedIntegratedDistanceM: speedDistanceM, movingTimeRatio, autoExcludedReason }
+}
+
+function finalizeSegments(
+  segments: AccelSegment[],
+  timeMs: ArrayLike<number>,
+  speedKmh: ArrayLike<number>,
+  cumDistM: ArrayLike<number>,
+): AccelSegment[] {
+  for (const segment of segments) Object.assign(segment, assessAccelSegmentQuality(segment, timeMs, speedKmh, cumDistM))
+  return markFastest(segments)
 }
 
 /**
@@ -256,11 +341,18 @@ export function fastestDistanceFromLaunch(
       entrySpeedKmh: startSpeedKmh,
       exitSpeedKmh,
       peakSpeedKmh: peakSpeedInRange(speedKmh, startI, end),
+      speedIntegratedDistanceM: 0,
+      movingTimeRatio: 0,
+      autoExcludedReason: null,
       isFastest: false,
     })
+    // A second launch cannot begin before this distance attempt has ended.
+    // Advancing the outer scan prevents low-speed noise inside the already
+    // resolved window from spawning many overlapping copies of one attempt.
+    i = end
   }
 
-  return markFastest(segments)
+  return finalizeSegments(segments, timeMs, speedKmh, cumDistM)
 }
 
 export interface FastestSpeedOptions {
@@ -385,6 +477,9 @@ export function fastestSpeedSegment(
         entrySpeedKmh,
         exitSpeedKmh: toKmh,
         peakSpeedKmh: peakSpeedInRange(speedKmh, startI, i),
+        speedIntegratedDistanceM: 0,
+        movingTimeRatio: 0,
+        autoExcludedReason: null,
         isFastest: false,
       })
     }
@@ -395,5 +490,5 @@ export function fastestSpeedSegment(
     lastLowIdx = -1
   }
 
-  return markFastest(segments)
+  return finalizeSegments(segments, timeMs, speedKmh, cumDistM)
 }
