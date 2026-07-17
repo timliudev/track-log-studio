@@ -705,9 +705,9 @@ function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): vo
 }
 
 // --- #2/#5: draggable gutters between adjacent cards — dragging a gap
-// resizes the card whose edge that gap is (the OTHER side reflows, it isn't
-// traded against — see gridGutter.ts's module doc for the domain math and
-// the #5 revision note) via useGridGutters.ts for the DOM/pointer wiring
+// resizes the card whose edge that gap is. A left/right gap exchanges width
+// with its adjacent right card; a top/bottom gap retains the existing reflow
+// model. See gridGutter.ts for the domain math. useGridGutters.ts owns DOM/pointer wiring
 // this just calls into. Desktop-only (isMobile has no side-by-side pairs)
 // and disabled while the dashboard is locked, same two conditions that
 // already gate the grid's own drag/resize (isDraggable/isResizable in
@@ -736,17 +736,10 @@ const gridGutters = useGridGutters({
   rowHeight: GRID_ROW_HEIGHT,
   marginX: GRID_MARGIN[0],
   marginY: GRID_MARGIN[1],
-  // Same persistence path as onLayoutUpdated above (#1's fix) — a gutter drag
-  // is just another source of new coordinates for the ONE resized card,
-  // merged back into the full layout the identical way a corner-resize's
-  // `layout-updated` is. Everything ELSE that needs to reflow around it
-  // (#5) arrives here too, but via a SEPARATE round trip: this writes
-  // `layout.value`, which flows out through `activeLayout` to
-  // `<GridLayout>`'s `layout` prop, whose own vertical-compaction reacts and
-  // re-emits `layout-updated` with the reflowed positions, which
-  // `onLayoutUpdated` merges back in — see gridGutter.ts's module doc for
-  // why this round trip is safe (doesn't loop) rather than a hand-rolled
-  // reflow living here.
+  // Same persistence path as onLayoutUpdated above (#1's fix). A vertical
+  // split already supplies both changed cards, so it reaches GridLayout as a
+  // non-overlapping layout and the right card stays on its row. Horizontal
+  // gutters keep their existing reflow through the normal grid round trip.
   //
   // B52 fix — `next` is the FULL `gutterItems` array (display heights), so
   // EVERY currently-collapsed card in it still carries its COLLAPSED_ROWS
@@ -1344,7 +1337,16 @@ function titleForItemId(id: string): string {
         :class="[g.orientation, { dragging: draggingKey === g.key }]"
         :style="{ left: `${g.rect.left}px`, top: `${g.rect.top}px`, width: `${g.rect.width}px`, height: `${g.rect.height}px` }"
         @pointerdown="onGutterPointerDown(g, $event)"
-      />
+      >
+        <span
+          class="grid-gutter-grip"
+          role="separator"
+          :aria-orientation="g.orientation === 'vertical' ? 'vertical' : 'horizontal'"
+          :aria-label="t(g.orientation === 'vertical' ? 'analyzer.layout.resizeAdjacentWidth' : 'analyzer.layout.resizeAdjacentHeight')"
+        >
+          <span class="grid-gutter-grip-mark" aria-hidden="true" />
+        </span>
+      </div>
       </div>
     </template>
   </div>
@@ -1672,7 +1674,8 @@ function titleForItemId(id: string): string {
 .grid-gutter {
   position: absolute;
   z-index: 25;
-  touch-action: none;
+  /* The narrow desktop strip must not claim an incidental finger swipe. */
+  touch-action: pan-y;
   background: transparent;
   border-radius: calc(var(--radius) * 1.5);
   transition: background-color 0.1s ease;
@@ -1686,6 +1689,37 @@ function titleForItemId(id: string): string {
 .grid-gutter:hover,
 .grid-gutter.dragging {
   background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+.grid-gutter-grip {
+  display: none;
+}
+/* Touch users get an always-visible 44px grip, not a hover-only hidden gap.
+   Its local touch-action is intentionally none: choosing this handle is an
+   explicit resize gesture, unlike a swipe that begins on card content. */
+:global(:root[data-any-pointer-coarse]) .grid-gutter-grip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+  background: color-mix(in srgb, var(--color-surface) 82%, var(--color-accent));
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
+}
+:global(:root[data-any-pointer-coarse]) .grid-gutter.vertical .grid-gutter-grip-mark {
+  width: 4px;
+  height: 18px;
+  border-inline: 1px solid var(--color-text-muted);
+}
+:global(:root[data-any-pointer-coarse]) .grid-gutter.horizontal .grid-gutter-grip-mark {
+  width: 18px;
+  height: 4px;
+  border-block: 1px solid var(--color-text-muted);
 }
 
 /* #8 — snap grid items to position instead of easing the library's default

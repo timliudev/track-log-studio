@@ -597,6 +597,8 @@ export default {
       resetLayoutConfirm: '確定要將儀表板布局重設為預設排列嗎？',
       dragHint: '拖曳卡片標題列可調整位置，拖曳右下角可調整大小',
       dragHintMobile: '長按卡片標題列可重新排序，拖曳右下角可調整高度',
+      resizeAdjacentWidth: '拖曳調整左右相鄰卡片寬度',
+      resizeAdjacentHeight: '拖曳調整上下相鄰卡片高度',
       lockLayout: '鎖定布局',
       unlockLayout: '解除鎖定布局',
       lockLayoutHint: '鎖定後所有卡片都無法拖曳或縮放，再按一次解除',

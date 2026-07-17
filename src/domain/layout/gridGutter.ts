@@ -5,26 +5,11 @@
  * gives every card its OWN bottom-right resize handle, which only ever
  * changes THAT card's own w/h. This module adds the other half: dragging the
  * GAP itself resizes the card whose edge that gap actually is (`a` — the
- * left/top side) — exactly like grabbing that card's own edge and pulling it,
- * NOT a fixed two-card zero-sum trade with whatever happens to be its
- * immediate neighbour (`b`) at that moment.
- *
- * #5 fix (revised from the original zero-sum design): earlier, `applyGutterDrag`
- * grew `a` by exactly what it shrank `b` by, sliding `b`'s x/y to keep them
- * touching — feedback was that this is the wrong mental model. Dragging a
- * horizontal gutter down should grow the card ABOVE it and push everything
- * BELOW further down (or, for a vertical gutter, to the side) — a reflow, not
- * a private negotiation between two specific cards. `b`'s own position is now
- * left untouched by this module entirely; `useGridGutters.ts` feeds the
- * result back through AnalyzerView's normal `layout` prop / `onLayoutUpdated`
- * pipeline, and grid-layout-plus's OWN vertical-compaction (`compact()`,
- * confirmed by reading its source — it pulls every item up as far as it can
- * without colliding, then pushes down whatever still collides, and runs on
- * EVERY change to its `layout` prop, not just its own native drag gestures)
- * does the actual reflow. This only works safely because AnalyzerView's
- * write-back (`mergeLayoutPositions`) is idempotent on a converged layout
- * (#4's crash fix) — otherwise a self-triggered `layout-updated` echo after
- * compaction could loop.
+ * left/top side). A vertical (left/right) gap is a split: it widens one card
+ * while narrowing its immediate right neighbour, keeping their shared edge
+ * under the pointer and avoiding a grid collision that would push the right
+ * card into a later row. Horizontal (top/bottom) gaps retain their existing
+ * reflow behaviour: only the card above changes height.
  *
  * Kept as pure functions (no Vue/DOM) so the tricky part — which two cards
  * actually share a draggable edge, and how a pixel delta maps to a grid-unit
@@ -36,8 +21,8 @@
  * meet along one straight edge (e.g. two short cards stacked against one tall
  * neighbour), each adjacent pair gets its own independently-draggable gutter
  * segment rather than one shared "column border" — dragging one segment only
- * ever resizes the ONE card that segment belongs to, same as the task's
- * "drag the boundary" framing. A full "resize this whole column/row" mode is
+ * exchanges width between the TWO cards meeting at that segment. A full
+ * "resize this whole column/row" mode is
  * bigger scope (would need to grow a SET of cards together) and isn't what
  * was asked for here.
  */
@@ -114,20 +99,11 @@ export function detectGutters(items: DashboardLayoutItem[]): GridGutter[] {
 }
 
 /**
- * Clamp a proposed grid-unit delta so dragging a gutter can never shrink the
- * DRAGGED side (`a` — the card whose trailing/bottom edge this gutter sits
- * on) past its own {@link minSizeFor} floor (same floor the card's own
- * corner-resize handle already respects — B6), nor — for a VERTICAL gutter,
- * when `cols` is given — grow it past the grid's own column count: this grid
- * only ever compacts VERTICALLY (see applyGutterDrag's doc), so there's no
- * "push sideways to make room" for a width that would overflow the grid.
- *
- * #5 fix — `b` (the neighbour on the other side of the edge) is no longer
- * involved in this clamp at all: it isn't resized by a gutter drag anymore,
- * only reflowed (by grid-layout-plus's own compaction) around whatever `a`
- * becomes. `a` is assumed to already meet its own minimum (true for anything
- * that ever reaches the grid — see dashboardLayout.ts's clampToMinSize), so
- * the returned range always straddles zero (a no-op drag is always valid).
+ * Clamp a single-side gutter delta at its own minimum. The horizontal
+ * top/bottom reflow path uses this directly. The vertical branch remains
+ * available for callers that need a standalone edge resize, while the
+ * left/right split path below uses {@link clampVerticalSplitDeltaUnits} so it
+ * can enforce both cards' minima together.
  */
 export function clampGutterDeltaUnits(
   orientation: GutterOrientation,
@@ -147,23 +123,63 @@ export function clampGutterDeltaUnits(
   return Math.min(Math.max(deltaUnits, low), high)
 }
 
+function rectsOverlap(a: DashboardLayoutItem, b: DashboardLayoutItem): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
+}
+
+function splitItems(
+  items: DashboardLayoutItem[],
+  a: DashboardLayoutItem,
+  b: DashboardLayoutItem,
+  delta: number,
+): DashboardLayoutItem[] {
+  return items.map((item) => {
+    if (item.i === a.i) return { ...item, w: item.w + delta }
+    if (item.i === b.i) return { ...item, x: item.x + delta, w: item.w - delta }
+    return item
+  })
+}
+
+function splitAvoidsOtherCards(items: DashboardLayoutItem[], a: DashboardLayoutItem, b: DashboardLayoutItem, delta: number): boolean {
+  const nextA: DashboardLayoutItem = { ...a, w: a.w + delta }
+  const nextB: DashboardLayoutItem = { ...b, x: b.x + delta, w: b.w - delta }
+  return items.every((item) =>
+    item.i === a.i || item.i === b.i || (!rectsOverlap(nextA, item) && !rectsOverlap(nextB, item)),
+  )
+}
+
 /**
- * Apply a gutter drag: resizes ONLY `a` (the card whose trailing/bottom edge
- * this gutter is) by the clamped delta — `b` is left completely untouched
- * here (see this module's doc for why: reflowing `b`, and anything past it,
- * is grid-layout-plus's OWN vertical-compaction's job once this result flows
- * back through the normal `layout` prop, not something this pure function
- * does directly). `b` still has to EXIST for the drag to mean anything (an
- * edge is only meaningful between two real cards), so this remains a no-op
- * when either id can't be found.
+ * Clamp a left/right split to both cards' minimum widths. If a partial-height
+ * neighbour would make the newly widened area collide with a third card,
+ * search the at-most-12 grid columns back toward zero for the farthest safe
+ * whole-column split in the requested direction.
+ */
+export function clampVerticalSplitDeltaUnits(
+  items: DashboardLayoutItem[],
+  a: DashboardLayoutItem,
+  b: DashboardLayoutItem,
+  deltaUnits: number,
+): number {
+  const low = minSizeFor(a.i).minW - a.w
+  const high = b.w - minSizeFor(b.i).minW
+  const bounded = Math.min(Math.max(deltaUnits, low), high)
+  if (bounded === 0 || splitAvoidsOtherCards(items, a, b, bounded)) return bounded
+  const direction = Math.sign(bounded)
+  for (let magnitude = Math.abs(bounded) - 1; magnitude > 0; magnitude--) {
+    const candidate = magnitude * direction
+    if (splitAvoidsOtherCards(items, a, b, candidate)) return candidate
+  }
+  return 0
+}
+
+/**
+ * Apply a gutter drag. A vertical gutter moves its shared split while keeping
+ * `b`'s right edge and both cards' y positions unchanged. A horizontal
+ * gutter keeps the established reflow behaviour and changes only `a`'s
+ * height. `b` still has to exist for either gesture to be meaningful.
  *
- * `cols` is optional (needed only to cap a VERTICAL gutter's growth at the
- * grid's own column count — see {@link clampGutterDeltaUnits}); omit it for
- * a horizontal gutter or when the caller doesn't care about that ceiling.
- *
- * Pure: returns a NEW array (only `a` is replaced; every other item is
- * returned as-is) and is a no-op (returns `items` unchanged) if either card
- * can't be found or the clamped delta is zero.
+ * Pure: returns a NEW array (both sides of a vertical split are replaced) and
+ * is a no-op if either card can't be found or the clamped delta is zero.
  */
 export function applyGutterDrag(
   items: DashboardLayoutItem[],
@@ -174,14 +190,13 @@ export function applyGutterDrag(
   const a = items.find((it) => it.i === gutter.aId)
   const b = items.find((it) => it.i === gutter.bId)
   if (!a || !b) return items
-  const delta = clampGutterDeltaUnits(gutter.orientation, a, deltaUnits, cols)
+  const delta = gutter.orientation === 'vertical'
+    ? clampVerticalSplitDeltaUnits(items, a, b, deltaUnits)
+    : clampGutterDeltaUnits(gutter.orientation, a, deltaUnits, cols)
   if (delta === 0) return items
+  if (gutter.orientation === 'vertical') return splitItems(items, a, b, delta)
   return items.map((it) =>
-    it.i === a.i
-      ? gutter.orientation === 'vertical'
-        ? { ...it, w: it.w + delta }
-        : { ...it, h: it.h + delta }
-      : it,
+    it.i === a.i ? { ...it, h: it.h + delta } : it,
   )
 }
 
