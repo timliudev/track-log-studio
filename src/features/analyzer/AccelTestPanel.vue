@@ -7,6 +7,7 @@ import type { AccelCondition } from '@/stores/analyzerStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { formatLapTime } from '@/domain/analysis/format'
 import CardFillScroll from '@/components/CardFillScroll.vue'
+import ExclusionToggle from './ExclusionToggle.vue'
 
 const props = defineProps<{
   /** EVERY matching segment for the current condition, in chronological order
@@ -287,22 +288,17 @@ function showsPeak(seg: AccelSegment): boolean {
         <span
           v-if="exclusionReason(seg)"
           class="result-detail exclusion-reason"
-          :title="exclusionText(exclusionReason(seg))"
         >
           {{ exclusionText(exclusionReason(seg)) }}
         </span>
         <button type="button" class="focus-btn" :class="{ active: isFocused(seg) }" @click="onFocusClick(seg)">
           {{ isFocused(seg) ? t('analyzer.accelUnfocus') : t('analyzer.accelFocus') }}
         </button>
-        <button
-          type="button"
-          class="exclude-btn"
-          :class="{ active: isExcluded(seg) }"
-          :aria-pressed="isExcluded(seg)"
-          @click="toggleExcluded(seg)"
-        >
-          {{ isExcluded(seg) ? t('analyzer.accelRestore') : t('analyzer.accelExclude') }}
-        </button>
+        <ExclusionToggle
+          :excluded="isExcluded(seg)"
+          :label="isExcluded(seg) ? t('analyzer.accelRestore') : t('analyzer.accelExclude')"
+          @toggle="toggleExcluded(seg)"
+        />
       </li>
     </ul>
   </CardFillScroll>
@@ -465,23 +461,8 @@ function showsPeak(seg: AccelSegment): boolean {
   color: var(--color-accent-text);
   border-color: var(--color-accent);
 }
-.exclude-btn {
-  background: var(--color-surface);
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 5px 10px;
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-.exclude-btn:hover,
-.exclude-btn.active {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
 :root[data-any-pointer-coarse] .focus-btn,
-:root[data-any-pointer-coarse] .exclude-btn {
+:root[data-any-pointer-coarse] .focus-btn {
   min-height: 44px;
 }
 </style>
