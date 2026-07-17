@@ -33,8 +33,8 @@ beforeEach(() => {
   localStorage.clear()
 })
 
-function channel(name: string, data: number[]): Channel {
-  return { name, rawName: name, description: undefined, data: new Float32Array(data) }
+function channel(name: string, data: number[], unit?: string): Channel {
+  return { name, rawName: name, description: undefined, unit, data: new Float32Array(data) }
 }
 
 function session(channels: Channel[]): LogSession {
@@ -289,6 +289,19 @@ describe('CurrentValuesPanel (B15/B16 — 目前數值 dashboard card)', () => {
     const steady = wrapper.findAll('.value-cell').find((c) => c.text().includes('Steady'))!
     expect(rpm.find('.rate-badge').text()).toBe('10.0 Hz')
     expect(steady.find('.rate-badge').text()).toBe('— Hz')
+  })
+
+  it('shows a source-provided unit but omits an unknown unit', () => {
+    const s = session([
+      channel('Time', [0]),
+      channel('RPM', [1000], 'rpm'),
+      channel('Raw', [12]),
+    ])
+    const wrapper = mountPanel({ session: s, cursorIdx: 0 })
+    const rpm = wrapper.findAll('.value-cell').find((c) => c.text().includes('RPM'))!
+    const raw = wrapper.findAll('.value-cell').find((c) => c.text().includes('Raw'))!
+    expect(rpm.find('.value-unit').text()).toBe('rpm')
+    expect(raw.find('.value-unit').exists()).toBe(false)
   })
 
   it('anchors update-rate badges at the lower right without reserving label space', () => {

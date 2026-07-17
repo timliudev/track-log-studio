@@ -7,7 +7,7 @@ describe('rebuildLogSession', () => {
   it('reconstructs a working LogSession from serialized channels', () => {
     const channels: SerializedChannel[] = [
       { name: 'Time', rawName: 'Time', description: undefined, data: new Float32Array([0, 62.5, 125]) },
-      { name: 'RPM', rawName: 'RPM/引擎轉速', description: '引擎轉速', data: new Float32Array([1000, 2000, 3000]) },
+      { name: 'RPM', rawName: 'RPM/引擎轉速', description: '引擎轉速', unit: 'rpm', data: new Float32Array([1000, 2000, 3000]) },
     ]
     const meta: LogMeta = { formatId: 'superX', createdDate: null, headerInfo: {} }
 
@@ -16,6 +16,7 @@ describe('rebuildLogSession', () => {
     expect(session.rowCount).toBe(3)
     expect(session.has('RPM')).toBe(true)
     expect(session.get('RPM')?.data[1]).toBe(2000)
+    expect(session.get('RPM')?.unit).toBe('rpm')
     expect(session.sampleIntervalMs).toBeCloseTo(62.5, 5)
     expect(session.meta.formatId).toBe('superX')
   })

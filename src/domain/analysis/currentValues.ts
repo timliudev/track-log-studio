@@ -18,6 +18,8 @@ export interface CurrentValueField {
   /** Display label — translated for synthetic fields, the channel name for raw fields. */
   label: string
   kind: 'time' | 'channel' | 'updateRate'
+  /** Source-provided unit, omitted when the log does not define one. */
+  unit?: string
   value: number
 }
 
@@ -62,7 +64,7 @@ export function buildCurrentValueFields(
   const fields: CurrentValueField[] = [{ key: 'time', label: timeLabel, kind: 'time', value: timeValue }]
   for (const ch of session.channels) {
     const value = index != null && index < ch.data.length ? ch.data[index] : NaN
-    fields.push({ key: ch.name, label: ch.name, kind: 'channel', value })
+    fields.push({ key: ch.name, label: ch.name, kind: 'channel', unit: ch.unit, value })
   }
   return fields
 }

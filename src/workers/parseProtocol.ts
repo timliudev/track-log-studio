@@ -19,6 +19,7 @@ export interface SerializedChannel {
   name: string
   rawName: string
   description: string | undefined
+  unit?: string
   data: Float32Array
 }
 

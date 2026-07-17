@@ -48,7 +48,7 @@ const props = defineProps<{
   selectedLaps?: Lap[]
   /** Fixed derived series (e.g. drivetrain ratio). When supplied, the chart
    *  uses the same plot/overlay/cursor pipeline but hides the channel picker. */
-  fixedSeries?: readonly { name: string; data: ArrayLike<number> }[]
+  fixedSeries?: readonly { name: string; data: ArrayLike<number>; unit?: string }[]
   /** Empty-state copy for a fixed derived chart whose prerequisites failed. */
   emptyMessage?: string
   /** #8 — forwarded to UPlotChart: fill the dashboard grid item's height
@@ -112,17 +112,28 @@ const pickerOptions = computed(() =>
     (c) => !selectedChannelIds.value.includes(c.value ?? c.name),
   ),
 )
-const presentSources = computed<Array<{ name: string; data: ArrayLike<number> }>>(() => {
+const presentSources = computed<Array<{ name: string; data: ArrayLike<number>; unit?: string }>>(() => {
   if (props.fixedSeries) return [...props.fixedSeries]
   if (selectedChannelIds.value.length === 0) return []
-  const sources: Array<{ name: string; data: ArrayLike<number> }> = []
+  const sources: Array<{ name: string; data: ArrayLike<number>; unit?: string }> = []
   for (const name of selectedChannelIds.value) {
-    const data = resolveAnalyzerChannel(props.session, name, derivedContext.value).data
-    if (data) sources.push({ name, data })
+    const resolution = resolveAnalyzerChannel(props.session, name, derivedContext.value)
+    if (resolution.data) sources.push({ name, data: resolution.data, unit: resolution.unit })
   }
   return sources
 })
 const present = computed(() => presentSources.value.map((source) => source.name))
+// Source units are resolved with the selected channels/session, never while a
+// cursor moves. The raw channel id remains the scale key below; B81 can use
+// this map to group compatible units without changing persisted channel ids.
+const unitsByChannel = computed(() => new Map(
+  presentSources.value.flatMap((source) => source.unit ? [[source.name, source.unit] as const] : []),
+))
+function channelDisplayLabel(id: string): string {
+  const unit = unitsByChannel.value.get(id)
+  const label = channelLabel(id)
+  return unit ? `${label} (${unit})` : label
+}
 const updateRateHz = computed<number | null>(() => {
   let highest: number | null = null
   for (const source of presentSources.value) {
@@ -200,7 +211,7 @@ const timelineData = computed<uPlot.AlignedData>(
 const timelineSeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
   ...timeline.value.series.map((entry) => ({
-    label: `${entry.sourceLabel} · ${channelLabel(entry.channel)}`,
+    label: `${entry.sourceLabel} · ${channelDisplayLabel(entry.channel)}`,
     stroke: entry.color,
     dash: dash(entry.channelIndex),
     width: entry.primary ? 1.5 : 1,
@@ -294,7 +305,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
     return [
       { label: xUnit.value },
       ...crossOverlay.value.series.map((s) => ({
-        label: `${s.sessionName} · #${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
+        label: `${s.sessionName} · #${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
         stroke: s.color,
         dash: dash(s.channelIndex),
         width: 1 + (s.lapOrder % 3) * 0.35,
@@ -305,7 +316,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
   return [
     { label: xUnit.value },
     ...overlay.value.series.map((s) => ({
-      label: `#${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
+      label: `#${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
       stroke: lapColor(s.lapOrder),
       dash: dash(s.channelIndex),
       width: 1,
@@ -393,7 +404,7 @@ const axes = computed<uPlot.Axis[]>(() => {
     ...present.value.map((n, i) => ({
       scale: n,
       side: i % 2 === 0 ? 3 : 1,
-      label: channelLabel(n),
+      label: channelDisplayLabel(n),
       ...(hasSelection.value || comparisonActive.value ? {} : { stroke: color(i) }),
     })),
   ]
@@ -501,7 +512,7 @@ function removeChannel(name: string): void {
           :class="{ line: hasSelection || comparisonActive }"
           :style="hasSelection || comparisonActive ? {} : { background: color(i) }"
         />
-        {{ channelLabel(name) }}
+        {{ channelDisplayLabel(name) }}
         <button v-if="canEditChannels && !lockedChannels?.includes(name)" type="button" class="x" @click="removeChannel(name)">×</button>
       </span>
       <span v-if="present.length === 0" class="muted">{{ unavailableDerivedMessage ?? emptyMessage ?? t('analyzer.pickChannel') }}</span>

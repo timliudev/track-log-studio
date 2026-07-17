@@ -283,6 +283,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
             :title="t('analyzer.currentValues.channelUpdateRate', { rate: f.rateBadge })"
           >{{ f.rateBadge }}</span>
           <span class="value-number">{{ f.text }}</span>
+          <span v-if="f.unit" class="value-unit">{{ f.unit }}</span>
           <div v-if="editing && f.kind !== 'time'" class="edit-controls">
             <label class="hide-toggle">
               <input
@@ -451,6 +452,15 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   font-weight: 600;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.value-unit {
+  color: var(--color-text-muted);
+  font-size: 0.68rem;
+  line-height: 1;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;

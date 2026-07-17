@@ -176,18 +176,18 @@ export function parseRcz(bytes: Uint8Array): LogSession {
   const channels: Channel[] = []
   const used = new Set<string>()
   /** Push a channel, ensuring its name is unique (else append `_<id>`). */
-  const pushUnique = (baseName: string, id: number, data: Float32Array): void => {
+  const pushUnique = (baseName: string, id: number, data: Float32Array, unit?: string): void => {
     let name = baseName
     if (used.has(name)) name = `${baseName}_${id}`
     if (used.has(name)) return // give up rather than collide silently
     used.add(name)
-    channels.push({ name, rawName: name, description: undefined, data })
+    channels.push({ name, rawName: name, description: undefined, unit, data })
   }
 
   // --- Time channel (ms, first = 0) from ECU clock ---
   const time = new Float32Array(rowCount)
   for (let i = 0; i < rowCount; i++) time[i] = ecuTs[i] - t0
-  pushUnique('Time', 0, time)
+  pushUnique('Time', 0, time, 'ms')
 
   // --- ECU telemetry: channel2_*_101_0_<id>_3 (float64) ---
   for (const f of files.values()) {
@@ -207,13 +207,18 @@ export function parseRcz(bytes: Uint8Array): LogSession {
     const idx = gpsMap ? gpsMap[row] : row
     return idx < raw.length ? raw[idx] : NaN
   }
-  const pushGps = (name: string, raw: number[], transform: (v: number) => number): void => {
+  const pushGps = (
+    name: string,
+    raw: number[],
+    transform: (v: number) => number,
+    unit?: string,
+  ): void => {
     const data = new Float32Array(rowCount)
     for (let i = 0; i < rowCount; i++) {
       const v = sampleAt(raw, i)
       data[i] = Number.isFinite(v) ? transform(v) : NaN
     }
-    pushUnique(name, 0, data)
+    pushUnique(name, 0, data, unit)
   }
 
   for (const f of files.values()) {
@@ -231,20 +236,20 @@ export function parseRcz(bytes: Uint8Array): LogSession {
         lat[i] = latRaw === undefined ? NaN : latRaw / 6_000_000
         lon[i] = lonRaw === undefined ? NaN : lonRaw / 6_000_000 // keep sign (E +)
       }
-      pushUnique('GPS_Lat', 0, lat)
-      pushUnique('GPS_Lon', 0, lon)
+      pushUnique('GPS_Lat', 0, lat, '°')
+      pushUnique('GPS_Lon', 0, lon, '°')
       continue
     }
     if (f.id === 4) {
-      pushGps('GPS_Speed', readArray(f.bytes, 0), (v) => v * 0.0036) // mm/s → km/h
+      pushGps('GPS_Speed', readArray(f.bytes, 0), (v) => v * 0.0036, 'km/h') // mm/s → km/h
       continue
     }
     if (f.id === 5) {
-      pushGps('GPS_Altitude', readArray(f.bytes, 0), (v) => v)
+      pushGps('GPS_Altitude', readArray(f.bytes, 0), (v) => v, 'm')
       continue
     }
     if (f.id === 6) {
-      pushGps('GPS_Course', readArray(f.bytes, 0), (v) => v / 1000) // millideg → deg
+      pushGps('GPS_Course', readArray(f.bytes, 0), (v) => v / 1000, '°') // millideg → deg
       continue
     }
     if (f.id === 30002) {

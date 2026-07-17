@@ -11,6 +11,7 @@ export function rebuildLogSession(
     name: c.name,
     rawName: c.rawName,
     description: c.description,
+    unit: c.unit,
     data: c.data,
   }))
   return new LogSession(ch, meta)

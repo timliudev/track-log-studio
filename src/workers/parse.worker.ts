@@ -76,6 +76,7 @@ ctx.onmessage = async (event: MessageEvent<ParseRequest>) => {
       name: c.name,
       rawName: c.rawName,
       description: c.description,
+      unit: c.unit,
       data: c.data,
     }))
     const transfer = channels.map((c) => c.data.buffer)

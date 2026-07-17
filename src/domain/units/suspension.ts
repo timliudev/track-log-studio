@@ -131,6 +131,7 @@ export function deriveSuspensionChannels(
       name: OUTPUT_NAME[part],
       rawName: OUTPUT_NAME[part],
       description: DERIVED_DESC[part],
+      unit: 'mm',
       data,
     })
   }

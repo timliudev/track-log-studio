@@ -15,6 +15,8 @@ export interface AnalyzerChannelContext {
 
 export interface AnalyzerChannelResolution {
   data: ArrayLike<number> | null
+  /** Source-provided physical unit, when available. */
+  unit?: string
   error: GearRatioTraceError | null
   derived: boolean
 }
@@ -35,7 +37,8 @@ export function resolveAnalyzerChannel(
     const result = cachedGearRatioTrace(session, context.wheelCircumferenceMm)
     return { data: result.data, error: result.error, derived: true }
   }
-  return { data: session.get(id)?.data ?? null, error: null, derived: false }
+  const channel = session.get(id)
+  return { data: channel?.data ?? null, unit: channel?.unit, error: null, derived: false }
 }
 
 /** Virtual channels which can actually be calculated for this session. */

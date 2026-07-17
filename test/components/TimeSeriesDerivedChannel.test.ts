@@ -13,8 +13,8 @@ import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 
-function channel(name: string, values: number[]): Channel {
-  return { name, rawName: name, description: undefined, data: new Float32Array(values) }
+function channel(name: string, values: number[], unit?: string): Channel {
+  return { name, rawName: name, description: undefined, unit, data: new Float32Array(values) }
 }
 
 const session = new LogSession([
@@ -66,6 +66,30 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
   it('shows no chart update rate when every selected channel is constant', () => {
     const wrapper = mountChart(['GPS_Speed'])
     expect(wrapper.find('.update-rate').exists()).toBe(false)
+  })
+
+  it('adds a known unit to the y-axis and uPlot legend without changing the scale key', () => {
+    const unitSession = new LogSession([
+      channel('Time', [0, 100, 200], 'ms'),
+      channel('Boost', [1, 2, 3], 'bar'),
+    ], { formatId: 'test', createdDate: null, headerInfo: {} })
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        chart: { kind: 'timeseries', id: 1, channels: ['Boost'] },
+        session: unitSession,
+        xValues: new Float64Array([0, 0.1, 0.2]),
+        selectedLaps: [],
+      },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })],
+        stubs: { UPlotChart: true, SearchableSelect: true },
+      },
+    })
+    const plot = wrapper.findComponent(UPlotChart)
+    const series = plot.props('series') as Array<{ label?: string; scale?: string }>
+    const axes = plot.props('axes') as Array<{ label?: string; scale?: string }>
+    expect(series[1]).toMatchObject({ label: 'Primary · Boost (bar)', scale: 'Boost' })
+    expect(axes[1]).toMatchObject({ label: 'Boost (bar)', scale: 'Boost' })
   })
 
   it('offers a translated picker label while emitting only the stable id', () => {

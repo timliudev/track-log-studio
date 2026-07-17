@@ -362,30 +362,30 @@ export async function parseRcnx(
     const t0 = time[0] * 1000 + ms[0]
 
     const channels: Channel[] = []
-    const pushChannel = (name: string, data: Float32Array): void => {
-      channels.push({ name, rawName: name, description: undefined, data })
+    const pushChannel = (name: string, data: Float32Array, unit?: string): void => {
+      channels.push({ name, rawName: name, description: undefined, unit, data })
     }
     /** Build a Float32Array channel directly from a source column. */
-    const pushCol = (name: string, source: Column): void => {
+    const pushCol = (name: string, source: Column, unit?: string): void => {
       const data = new Float32Array(rowCount)
       for (let i = 0; i < rowCount; i++) data[i] = source[i]
-      pushChannel(name, data)
+      pushChannel(name, data, unit)
     }
 
     // Time (ms, first = 0).
     const timeData = new Float32Array(rowCount)
     for (let i = 0; i < rowCount; i++) timeData[i] = time[i] * 1000 + ms[i] - t0
-    pushChannel('Time', timeData)
+    pushChannel('Time', timeData, 'ms')
 
-    pushCol('GPS_Lat', col('lat'))
-    pushCol('GPS_Lon', col('lon'))
-    pushCol('GPS_Speed', col('speed'))
-    pushCol('GPS_Course', col('heading'))
-    pushCol('GPS_Altitude', col('altitude'))
-    pushCol('Gx', col('Gx'))
-    pushCol('Gy', col('Gy'))
-    pushCol('Gz', col('Gz'))
-    pushCol('distance', col('distance'))
+    pushCol('GPS_Lat', col('lat'), '°')
+    pushCol('GPS_Lon', col('lon'), '°')
+    pushCol('GPS_Speed', col('speed'), 'km/h')
+    pushCol('GPS_Course', col('heading'), '°')
+    pushCol('GPS_Altitude', col('altitude'), 'm')
+    pushCol('Gx', col('Gx'), 'g')
+    pushCol('Gy', col('Gy'), 'g')
+    pushCol('Gz', col('Gz'), 'g')
+    pushCol('distance', col('distance'), 'km')
 
     // --- lap data (optional, from the matching sana_N.db) ---
     const wpId = col('id')
