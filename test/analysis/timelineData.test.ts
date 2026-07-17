@@ -29,9 +29,9 @@ describe('buildTimelineData', () => {
       [10, null, 20, null, 30],
       [null, 15, null, 25, null],
     ])
-    expect(result.series.map((entry) => [entry.sourceId, entry.channel])).toEqual([
-      [1, 'RPM'],
-      [2, 'RPM'],
+    expect(result.series.map((entry) => [entry.sourceId, entry.channel, entry.sourceOrder])).toEqual([
+      [1, 'RPM', 0],
+      [2, 'RPM', 1],
     ])
   })
 
