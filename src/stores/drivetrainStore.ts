@@ -121,8 +121,8 @@ export interface CvtProfile {
 }
 
 export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'gearReduction' | 'finalReduction'>> & {
-  belt?: Partial<CvtBeltProfile> & { wedgeAngle?: Partial<CvtAngleInput> }
-  geometry?: Partial<CvtGeometryProfile> & {
+  belt?: Partial<Omit<CvtBeltProfile, 'wedgeAngle'>> & { wedgeAngle?: Partial<CvtAngleInput> }
+  geometry?: Partial<Omit<CvtGeometryProfile, 'frontSheaveAngle' | 'rearSheaveAngle'>> & {
     frontSheaveAngle?: Partial<CvtAngleInput>
     rearSheaveAngle?: Partial<CvtAngleInput>
   }

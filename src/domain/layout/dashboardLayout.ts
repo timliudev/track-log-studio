@@ -47,6 +47,7 @@ export const STATIC_CARD_IDS = {
   trackChannel: 'trackchannel',
   accelTest: 'acceltest',
   gear: 'gear',
+  cvtDynamics: 'cvtdynamics',
   trackFile: 'trackfile',
   mapAlign: 'mapalign',
   lapAlign: 'lapalign',
@@ -78,6 +79,7 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.trackChannel]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.accelTest]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.gear]: { minW: 3, minH: 4 },
+  [STATIC_CARD_IDS.cvtDynamics]: { minW: 3, minH: 7 },
   [STATIC_CARD_IDS.trackFile]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.mapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
@@ -196,6 +198,7 @@ export const STATIC_CARD_TITLE_KEYS: Record<string, string> = {
   [STATIC_CARD_IDS.trackChannel]: 'analyzer.layout.cardTrackChannel',
   [STATIC_CARD_IDS.accelTest]: 'analyzer.layout.cardAccelTest',
   [STATIC_CARD_IDS.gear]: 'analyzer.layout.cardGear',
+  [STATIC_CARD_IDS.cvtDynamics]: 'analyzer.layout.cardCvtDynamics',
   [STATIC_CARD_IDS.trackFile]: 'analyzer.layout.cardTrackFile',
   [STATIC_CARD_IDS.mapAlign]: 'analyzer.layout.cardMapAlign',
   [STATIC_CARD_IDS.lapAlign]: 'analyzer.layout.cardLapAlign',
@@ -562,7 +565,8 @@ export function defaultLayout(): DashboardLayoutItem[] {
     { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 10 },
     { i: chartItemId(1), x: 8, y: 10, w: 4, h: 14 },
     { i: STATIC_CARD_IDS.currentValues, x: 8, y: 24, w: 4, h: 22 },
-    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 46, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.cvtDynamics, x: 8, y: 46, w: 4, h: 12 },
+    { i: STATIC_CARD_IDS.mapAlign, x: 4, y: 53, w: 4, h: 8 },
     { i: STATIC_CARD_IDS.lapAlign, x: 0, y: 48, w: 4, h: 8 },
   ]
 }
