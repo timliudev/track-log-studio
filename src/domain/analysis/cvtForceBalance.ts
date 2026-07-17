@@ -191,7 +191,7 @@ export function rearCamForceN(model: CvtTorqueCamModel, travelMm: number, rearTo
   return (1 / Math.tan(cam.angleDeg * DEG_TO_RAD)) * effectiveTorqueNm / (cam.effectiveRadiusMm / 1000)
 }
 
-function disabledReasons(input: CvtForceBalanceInput): CvtForceDisabledReason[] {
+export function cvtForceDisabledReasons(input: CvtForceBalanceInput): CvtForceDisabledReason[] {
   const reasons: CvtForceDisabledReason[] = []
   if (input.actuationKind === 'electronic') reasons.push('electronic-actuation')
   if (!positive(input.frontRpm) || !nonNegative(input.rearTorqueNm)) reasons.push('operating-condition')
@@ -219,7 +219,7 @@ function disabledReasons(input: CvtForceBalanceInput): CvtForceDisabledReason[] 
   return [...new Set(reasons)]
 }
 
-function evaluate(input: CvtForceBalanceInput, ratio: number): CvtForcePoint | null {
+export function evaluateCvtForceAtRatio(input: CvtForceBalanceInput, ratio: number): CvtForcePoint | null {
   const geometry = solveCvtGeometry({ ...input.geometry, pureRatio: ratio })
   if (geometry.status !== 'ok') return null
   const frontRollerForceN = rollerAxialForceN(input.roller!, geometry.frontDisplacementMm, input.frontRpm)
@@ -252,7 +252,7 @@ function findRoot(input: CvtForceBalanceInput, leftPoint: CvtForcePoint, rightPo
   let left = leftPoint
   let right = rightPoint
   for (let step = 0; step < 70; step += 1) {
-    const middle = evaluate(input, (left.ratio + right.ratio) / 2)
+    const middle = evaluateCvtForceAtRatio(input, (left.ratio + right.ratio) / 2)
     if (!middle) break
     if (Math.abs(middle.residualN) < 1e-7) {
       left = middle
@@ -262,10 +262,10 @@ function findRoot(input: CvtForceBalanceInput, leftPoint: CvtForcePoint, rightPo
     if (Math.sign(middle.residualN) === Math.sign(left.residualN)) left = middle
     else right = middle
   }
-  const root = evaluate(input, (left.ratio + right.ratio) / 2) ?? left
+  const root = evaluateCvtForceAtRatio(input, (left.ratio + right.ratio) / 2) ?? left
   const span = Math.max(1e-5, root.ratio * 1e-4)
-  const before = evaluate(input, root.ratio - span)
-  const after = evaluate(input, root.ratio + span)
+  const before = evaluateCvtForceAtRatio(input, root.ratio - span)
+  const after = evaluateCvtForceAtRatio(input, root.ratio + span)
   const slopeNPerRatio = before && after
     ? (after.residualN - before.residualN) / (after.ratio - before.ratio)
     : (rightPoint.residualN - leftPoint.residualN) / (rightPoint.ratio - leftPoint.ratio)
@@ -274,7 +274,7 @@ function findRoot(input: CvtForceBalanceInput, leftPoint: CvtForcePoint, rightPo
 
 /** Solve all quasi-static equilibria and report the mechanical endpoint when no root exists. */
 export function solveCvtForceBalance(input: CvtForceBalanceInput): CvtForceBalanceResult {
-  const reasons = disabledReasons(input)
+  const reasons = cvtForceDisabledReasons(input)
   if (reasons.length > 0) {
     return { status: 'disabled', disabledReasons: reasons, curve: [], roots: [], selected: null, endpoint: null }
   }
@@ -284,7 +284,7 @@ export function solveCvtForceBalance(input: CvtForceBalanceInput): CvtForceBalan
   const curve: CvtForcePoint[] = []
   for (let index = 0; index < count; index += 1) {
     const ratio = lowerRatio + (upperRatio - lowerRatio) * index / (count - 1)
-    const point = evaluate(input, ratio)
+    const point = evaluateCvtForceAtRatio(input, ratio)
     if (point) curve.push(point)
   }
   if (curve.length === 0) {
