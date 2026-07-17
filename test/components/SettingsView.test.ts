@@ -13,6 +13,7 @@ import {
   serializeExportBundle,
 } from '@/domain/settings/settingsTransfer'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { mergeCvtFormState } from '@/stores/drivetrainStore'
 
 // settingsStore reads/writes localStorage on construction — happy-dom's jsdom
 // shim doesn't ship one here, so stub an in-memory implementation (mirrors
@@ -176,7 +177,7 @@ describe('SettingsView', () => {
             wheelCircumferenceMm: 1884,
             redlineRpm: 10000,
           },
-          cvt: { wheelCircumferenceMm: 1400, tireSpec: '', notes: [] },
+          cvt: mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] }),
           inversionWheelCircumferenceMm: 1870,
         },
       })
@@ -215,7 +216,7 @@ describe('SettingsView', () => {
             wheelCircumferenceMm: 1884,
             redlineRpm: 10000,
           },
-          cvt: { wheelCircumferenceMm: 1400, tireSpec: '', notes: [] },
+          cvt: mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] }),
           inversionWheelCircumferenceMm: 1870,
         },
       })

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { tireSpecToCircumferenceMm, type GearRatioInput, type FinalDriveInput, type MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
+import type { FixedReductionInput, RadiusBoundsMm, ReductionStageInput } from '@/domain/analysis/cvtDynamics'
 
 export type DrivetrainKind = 'mt' | 'cvt'
 export type DrivetrainKindSelection = 'auto' | 'manual'
@@ -66,6 +67,62 @@ export interface CvtNoteField {
   value: string
 }
 
+export type CvtActuationKind = 'mechanical' | 'electronic'
+export type CvtBeltLengthSource = 'pitch' | 'outside'
+export type CvtAngleBasis = 'half' | 'included'
+
+export interface CvtAngleInput {
+  valueDeg: number | null
+  basis: CvtAngleBasis
+}
+
+export interface CvtBeltProfile {
+  partNumber: string
+  lengthSource: CvtBeltLengthSource
+  pitchLengthMm: number | null
+  outsideLengthMm: number | null
+  cordOffsetFromOutsideMm: number | null
+  widthMm: number | null
+  heightMm: number | null
+  wedgeAngle: CvtAngleInput
+}
+
+export interface CvtGeometryProfile {
+  centerDistanceMm: number | null
+  frontSheaveAngle: CvtAngleInput
+  rearSheaveAngle: CvtAngleInput
+  frontRadiusBoundsMm: RadiusBoundsMm | null
+  rearRadiusBoundsMm: RadiusBoundsMm | null
+  frontReferenceRadiusMm: number | null
+  rearReferenceRadiusMm: number | null
+  frontBarePulleyDiameterMm: number | null
+  rearBarePulleyDiameterMm: number | null
+  sleeveLengthMm: number | null
+}
+
+export interface CvtProfile {
+  id: string
+  name: string
+  vehicleId: string
+  actuationKind: CvtActuationKind
+  wheelCircumferenceMm: number
+  tireSpec: string
+  gearReduction: FixedReductionInput
+  finalReduction: FixedReductionInput
+  belt: CvtBeltProfile
+  geometry: CvtGeometryProfile
+}
+
+export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'gearReduction' | 'finalReduction'>> & {
+  belt?: Partial<CvtBeltProfile> & { wedgeAngle?: Partial<CvtAngleInput> }
+  geometry?: Partial<CvtGeometryProfile> & {
+    frontSheaveAngle?: Partial<CvtAngleInput>
+    rearSheaveAngle?: Partial<CvtAngleInput>
+  }
+  gearReduction?: Partial<FixedReductionInput>
+  finalReduction?: Partial<FixedReductionInput>
+}
+
 export interface CvtFormState {
   /** Wheel circumference used for the CVT's own log-inversion view (kept
    *  separate from MT's so switching kind doesn't clobber either). */
@@ -80,6 +137,8 @@ export interface CvtFormState {
   tireSpec: string
   /** Free-form tuning notes, e.g. 前普利尺寸/珠重/彈簧硬度/開閉盤規格/終傳比. */
   notes: CvtNoteField[]
+  profiles: CvtProfile[]
+  activeProfileId: string
 }
 
 function defaultMtGear(ratio: number): MtGearFormInput {
@@ -119,10 +178,60 @@ function defaultCvtNotes(): CvtNoteField[] {
   ]
 }
 
+const DEFAULT_CVT_PROFILE_ID = 'cvt-profile-default'
+
+function blankReduction(): FixedReductionInput {
+  return { mode: 'ratio', ratio: 0, stages: [] }
+}
+
+function blankAngle(): CvtAngleInput {
+  return { valueDeg: null, basis: 'half' }
+}
+
+function defaultCvtProfile(
+  wheelCircumferenceMm = Math.round(tireSpecToCircumferenceMm('120/80-12')),
+  tireSpec = '120/80-12',
+): CvtProfile {
+  return {
+    id: DEFAULT_CVT_PROFILE_ID,
+    name: 'CVT 1',
+    vehicleId: '',
+    actuationKind: 'mechanical',
+    wheelCircumferenceMm,
+    tireSpec,
+    gearReduction: blankReduction(),
+    finalReduction: blankReduction(),
+    belt: {
+      partNumber: '',
+      lengthSource: 'outside',
+      pitchLengthMm: null,
+      outsideLengthMm: null,
+      cordOffsetFromOutsideMm: null,
+      widthMm: null,
+      heightMm: null,
+      wedgeAngle: blankAngle(),
+    },
+    geometry: {
+      centerDistanceMm: null,
+      frontSheaveAngle: blankAngle(),
+      rearSheaveAngle: blankAngle(),
+      frontRadiusBoundsMm: null,
+      rearRadiusBoundsMm: null,
+      frontReferenceRadiusMm: null,
+      rearReferenceRadiusMm: null,
+      frontBarePulleyDiameterMm: null,
+      rearBarePulleyDiameterMm: null,
+      sleeveLengthMm: null,
+    },
+  }
+}
+
 const DEFAULT_CVT: CvtFormState = {
   wheelCircumferenceMm: Math.round(tireSpecToCircumferenceMm('120/80-12')),
   tireSpec: '120/80-12',
   notes: defaultCvtNotes(),
+  profiles: [defaultCvtProfile()],
+  activeProfileId: DEFAULT_CVT_PROFILE_ID,
 }
 
 /** Turn one gear's UI form input into the domain layer's {@link GearRatioInput}
@@ -184,6 +293,7 @@ const MAX_GEARS = 8
 // the persisted payload doesn't look like v2 shape — the old v1 key is left
 // alone (not deleted) rather than overwritten, in case that's useful later.
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
+let profileSequence = 0
 
 export interface PersistedDrivetrain {
   kind: DrivetrainKind
@@ -216,10 +326,93 @@ function looksLikeV2Cvt(v: unknown): v is Partial<CvtFormState> {
   if (v == null || typeof v !== 'object') return false
   const c = v as Record<string, unknown>
   if (c.notes != null && !Array.isArray(c.notes)) return false
+  if (c.profiles != null && !Array.isArray(c.profiles)) return false
   // v1 had numeric ratioLow/ratioHigh/finalReduction/maxRpm fields — if any of
   // those are present it's a v1 payload, not v2 (v2 has no such fields).
   if ('ratioLow' in c || 'ratioHigh' in c || 'finalReduction' in c || 'maxRpm' in c) return false
   return true
+}
+
+function positiveNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+}
+
+function sanitizeAngle(value: unknown, fallback: CvtAngleInput): CvtAngleInput {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<CvtAngleInput>) : {}
+  return {
+    valueDeg: positiveNumberOrNull(raw.valueDeg),
+    basis: raw.basis === 'included' ? 'included' : raw.basis === 'half' ? 'half' : fallback.basis,
+  }
+}
+
+function sanitizeBounds(value: unknown): RadiusBoundsMm | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Partial<RadiusBoundsMm>
+  const min = positiveNumberOrNull(raw.min)
+  const max = positiveNumberOrNull(raw.max)
+  return min != null && max != null && max >= min ? { min, max } : null
+}
+
+function sanitizeReductionStage(value: unknown): ReductionStageInput | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Partial<ReductionStageInput>
+  const driveTeeth = positiveNumberOrNull(raw.driveTeeth)
+  const drivenTeeth = positiveNumberOrNull(raw.drivenTeeth)
+  return driveTeeth != null && drivenTeeth != null ? { driveTeeth, drivenTeeth } : null
+}
+
+function sanitizeReduction(value: unknown, fallback: FixedReductionInput): FixedReductionInput {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<FixedReductionInput>) : {}
+  const stages = Array.isArray(raw.stages)
+    ? raw.stages.map(sanitizeReductionStage).filter((stage): stage is ReductionStageInput => stage != null)
+    : fallback.stages.map((stage) => ({ ...stage }))
+  return {
+    mode: raw.mode === 'stages' ? 'stages' : 'ratio',
+    ratio: positiveNumberOrNull(raw.ratio) ?? 0,
+    stages,
+  }
+}
+
+/** Sanitize one persisted/imported profile without inventing missing physical values. */
+export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, fallback?: CvtProfile): CvtProfile {
+  const base = fallback ?? defaultCvtProfile()
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  const rawBelt: Partial<CvtBeltProfile> =
+    raw.belt && typeof raw.belt === 'object' && !Array.isArray(raw.belt) ? raw.belt : {}
+  const rawGeometry =
+    (raw.geometry && typeof raw.geometry === 'object' && !Array.isArray(raw.geometry) ? raw.geometry : {}) as Partial<CvtGeometryProfile>
+  return {
+    id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : base.id,
+    name: typeof raw.name === 'string' ? raw.name : base.name,
+    vehicleId: typeof raw.vehicleId === 'string' ? raw.vehicleId : base.vehicleId,
+    actuationKind: raw.actuationKind === 'electronic' ? 'electronic' : 'mechanical',
+    wheelCircumferenceMm: positiveNumberOrNull(raw.wheelCircumferenceMm) ?? base.wheelCircumferenceMm,
+    tireSpec: typeof raw.tireSpec === 'string' ? raw.tireSpec : base.tireSpec,
+    gearReduction: sanitizeReduction(raw.gearReduction, base.gearReduction),
+    finalReduction: sanitizeReduction(raw.finalReduction, base.finalReduction),
+    belt: {
+      partNumber: typeof rawBelt.partNumber === 'string' ? rawBelt.partNumber : base.belt.partNumber,
+      lengthSource: rawBelt.lengthSource === 'pitch' ? 'pitch' : 'outside',
+      pitchLengthMm: positiveNumberOrNull(rawBelt.pitchLengthMm),
+      outsideLengthMm: positiveNumberOrNull(rawBelt.outsideLengthMm),
+      cordOffsetFromOutsideMm: positiveNumberOrNull(rawBelt.cordOffsetFromOutsideMm),
+      widthMm: positiveNumberOrNull(rawBelt.widthMm),
+      heightMm: positiveNumberOrNull(rawBelt.heightMm),
+      wedgeAngle: sanitizeAngle(rawBelt.wedgeAngle, base.belt.wedgeAngle),
+    },
+    geometry: {
+      centerDistanceMm: positiveNumberOrNull(rawGeometry.centerDistanceMm),
+      frontSheaveAngle: sanitizeAngle(rawGeometry.frontSheaveAngle, base.geometry.frontSheaveAngle),
+      rearSheaveAngle: sanitizeAngle(rawGeometry.rearSheaveAngle, base.geometry.rearSheaveAngle),
+      frontRadiusBoundsMm: sanitizeBounds(rawGeometry.frontRadiusBoundsMm),
+      rearRadiusBoundsMm: sanitizeBounds(rawGeometry.rearRadiusBoundsMm),
+      frontReferenceRadiusMm: positiveNumberOrNull(rawGeometry.frontReferenceRadiusMm),
+      rearReferenceRadiusMm: positiveNumberOrNull(rawGeometry.rearReferenceRadiusMm),
+      frontBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.frontBarePulleyDiameterMm),
+      rearBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.rearBarePulleyDiameterMm),
+      sleeveLengthMm: positiveNumberOrNull(rawGeometry.sleeveLengthMm),
+    },
+  }
 }
 
 /**
@@ -247,11 +440,27 @@ export function mergeCvtFormState(partial: Partial<CvtFormState> | null | undefi
   // Preserve their stored circumference and retain the old blank spec rather
   // than presenting the new default as if that user had configured it.
   const legacyWithoutTireSpec = p != null && !Object.prototype.hasOwnProperty.call(p, 'tireSpec')
+  const wheelCircumferenceMm = positiveNumberOrNull(p?.wheelCircumferenceMm) ?? DEFAULT_CVT.wheelCircumferenceMm
+  const tireSpec = legacyWithoutTireSpec ? '' : typeof p?.tireSpec === 'string' ? p.tireSpec : DEFAULT_CVT.tireSpec
+  const fallbackProfile = defaultCvtProfile(wheelCircumferenceMm, tireSpec)
+  const profiles =
+    p?.profiles && p.profiles.length > 0
+      ? p.profiles.map((profile, index) =>
+          mergeCvtProfile(profile, { ...fallbackProfile, id: `${DEFAULT_CVT_PROFILE_ID}-${index + 1}` }),
+        )
+      : [fallbackProfile]
+  const requestedActive = typeof p?.activeProfileId === 'string' ? p.activeProfileId : ''
+  const activeProfileId = profiles.some((profile) => profile.id === requestedActive) ? requestedActive : profiles[0].id
   return {
-    ...DEFAULT_CVT,
-    ...p,
-    ...(legacyWithoutTireSpec ? { tireSpec: '' } : {}),
-    notes: p?.notes ? p.notes.map((n) => ({ ...n })) : defaultCvtNotes(),
+    wheelCircumferenceMm,
+    tireSpec,
+    notes: p?.notes
+      ? p.notes
+          .filter((note) => note && typeof note.label === 'string' && typeof note.value === 'string')
+          .map((note) => ({ label: note.label, value: note.value }))
+      : defaultCvtNotes(),
+    profiles,
+    activeProfileId,
   }
 }
 
@@ -292,6 +501,9 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
   )
   const mt = ref<MtFormState>(mergeMtFormState(persisted.mt))
   const cvt = ref<CvtFormState>(mergeCvtFormState(persisted.cvt))
+  const activeCvtProfile = computed(
+    () => cvt.value.profiles.find((profile) => profile.id === cvt.value.activeProfileId) ?? cvt.value.profiles[0],
+  )
   // Tire-spec live conversion (user decision, 2026-07-08): the spec field now
   // converts + auto-applies into the circumference field AS YOU TYPE (see
   // `setTireSpec`), so the old tire/direct mode toggle is gone from the UI
@@ -353,7 +565,90 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
   }
 
   function setCvtWheelCircumferenceMm(mm: number): void {
-    cvt.value = { ...cvt.value, wheelCircumferenceMm: mm }
+    const nextProfiles = cvt.value.profiles.map((profile) =>
+      profile.id === cvt.value.activeProfileId ? { ...profile, wheelCircumferenceMm: mm } : profile,
+    )
+    cvt.value = { ...cvt.value, wheelCircumferenceMm: mm, profiles: nextProfiles }
+  }
+
+  function setActiveCvtProfile(profileId: string): void {
+    const profile = cvt.value.profiles.find((candidate) => candidate.id === profileId)
+    if (!profile) return
+    cvt.value = {
+      ...cvt.value,
+      activeProfileId: profileId,
+      wheelCircumferenceMm: profile.wheelCircumferenceMm,
+      tireSpec: profile.tireSpec,
+    }
+  }
+
+  function updateCvtProfile(profileId: string, patch: CvtProfilePatch): void {
+    const nextProfiles = cvt.value.profiles.map((profile) => {
+      if (profile.id !== profileId) return profile
+      const mergedPatch: Partial<CvtProfile> = {
+        ...profile,
+        ...patch,
+        belt: {
+          ...profile.belt,
+          ...patch.belt,
+          wedgeAngle: { ...profile.belt.wedgeAngle, ...patch.belt?.wedgeAngle },
+        },
+        geometry: {
+          ...profile.geometry,
+          ...patch.geometry,
+          frontSheaveAngle: { ...profile.geometry.frontSheaveAngle, ...patch.geometry?.frontSheaveAngle },
+          rearSheaveAngle: { ...profile.geometry.rearSheaveAngle, ...patch.geometry?.rearSheaveAngle },
+        },
+        gearReduction: { ...profile.gearReduction, ...patch.gearReduction },
+        finalReduction: { ...profile.finalReduction, ...patch.finalReduction },
+      }
+      return mergeCvtProfile(mergedPatch, profile)
+    })
+    const active = nextProfiles.find((profile) => profile.id === cvt.value.activeProfileId)
+    cvt.value = {
+      ...cvt.value,
+      profiles: nextProfiles,
+      ...(active
+        ? { wheelCircumferenceMm: active.wheelCircumferenceMm, tireSpec: active.tireSpec }
+        : {}),
+    }
+  }
+
+  function addCvtProfile(name = ''): string {
+    profileSequence += 1
+    const id = `cvt-profile-${Date.now().toString(36)}-${profileSequence.toString(36)}`
+    const profile = {
+      ...defaultCvtProfile(cvt.value.wheelCircumferenceMm, cvt.value.tireSpec),
+      id,
+      name: name || `CVT ${cvt.value.profiles.length + 1}`,
+    }
+    cvt.value = { ...cvt.value, profiles: [...cvt.value.profiles, profile], activeProfileId: id }
+    return id
+  }
+
+  function duplicateCvtProfile(profileId: string): string | null {
+    const source = cvt.value.profiles.find((profile) => profile.id === profileId)
+    if (!source) return null
+    profileSequence += 1
+    const id = `cvt-profile-${Date.now().toString(36)}-${profileSequence.toString(36)}`
+    const duplicate = mergeCvtProfile({ ...source, id, name: `${source.name} copy` })
+    cvt.value = { ...cvt.value, profiles: [...cvt.value.profiles, duplicate], activeProfileId: id }
+    return id
+  }
+
+  function removeCvtProfile(profileId: string): void {
+    if (cvt.value.profiles.length <= 1) return
+    const profiles = cvt.value.profiles.filter((profile) => profile.id !== profileId)
+    if (profiles.length === cvt.value.profiles.length) return
+    const activeProfileId = cvt.value.activeProfileId === profileId ? profiles[0].id : cvt.value.activeProfileId
+    const active = profiles.find((profile) => profile.id === activeProfileId) ?? profiles[0]
+    cvt.value = {
+      ...cvt.value,
+      profiles,
+      activeProfileId: active.id,
+      wheelCircumferenceMm: active.wheelCircumferenceMm,
+      tireSpec: active.tireSpec,
+    }
   }
 
   function setCvtNote(index: number, patch: Partial<CvtNoteField>): void {
@@ -452,11 +747,11 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     const nextValid = Number.isFinite(nextCirc) && nextCirc > 0
     const prevValid = Number.isFinite(prevCirc) && prevCirc > 0
     const apply = nextValid && (!prevValid || Math.round(nextCirc) !== Math.round(prevCirc))
-    cvt.value = {
-      ...cvt.value,
-      tireSpec: spec,
-      ...(apply ? { wheelCircumferenceMm: Math.round(nextCirc) } : {}),
-    }
+    const wheelCircumferenceMm = apply ? Math.round(nextCirc) : cvt.value.wheelCircumferenceMm
+    const profiles = cvt.value.profiles.map((profile) =>
+      profile.id === cvt.value.activeProfileId ? { ...profile, tireSpec: spec, wheelCircumferenceMm } : profile,
+    )
+    cvt.value = { ...cvt.value, tireSpec: spec, wheelCircumferenceMm, profiles }
     return apply
   }
 
@@ -481,6 +776,7 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     kindSelection,
     mt,
     cvt,
+    activeCvtProfile,
     inversionWheelCircumferenceMm,
     setKind,
     applyDetectedKind,
@@ -488,6 +784,11 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     setFinalDrive,
     setCvtWheelCircumferenceMm,
     setCvtTireSpec,
+    setActiveCvtProfile,
+    updateCvtProfile,
+    addCvtProfile,
+    duplicateCvtProfile,
+    removeCvtProfile,
     setCvtNote,
     addCvtNote,
     removeCvtNote,

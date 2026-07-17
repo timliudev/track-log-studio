@@ -7,7 +7,7 @@ import {
   type SettingsExportBundle,
 } from '@/domain/settings/settingsTransfer'
 import { defaultAppearanceSettings } from '@/stores/settingsStore'
-import type { MtFormState } from '@/stores/drivetrainStore'
+import { mergeCvtFormState, type MtFormState } from '@/stores/drivetrainStore'
 import { defaultLayout } from '@/domain/layout/dashboardLayout'
 import { defaultPanelState } from '@/domain/layout/panelState'
 import { defaultCurrentValuesFieldPrefs } from '@/domain/analysis/currentValuesFieldPrefs'
@@ -34,7 +34,7 @@ const DRIVETRAIN = {
   kind: 'mt' as const,
   kindSelection: 'manual' as const,
   mt: SAMPLE_MT,
-  cvt: { wheelCircumferenceMm: 1400, tireSpec: '', notes: [] },
+  cvt: mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] }),
   inversionWheelCircumferenceMm: 1870,
 }
 
@@ -145,6 +145,29 @@ describe('settingsTransfer — parseImportBundle', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.bundle.drivetrain.kind).toBe('cvt')
+  })
+
+  it('round-trips and sanitizes structured CVT profiles through B19', () => {
+    const cvt = mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] })
+    cvt.profiles[0] = {
+      ...cvt.profiles[0],
+      name: 'Race setup',
+      actuationKind: 'electronic',
+      belt: { ...cvt.profiles[0].belt, outsideLengthMm: 882, cordOffsetFromOutsideMm: 2.7 },
+      geometry: {
+        ...cvt.profiles[0].geometry,
+        centerDistanceMm: 205,
+        frontSheaveAngle: { valueDeg: 13.8, basis: 'half' },
+      },
+    }
+    const result = parseImportBundle(JSON.stringify({ drivetrain: { kind: 'cvt', cvt } }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const profile = result.bundle.drivetrain.cvt.profiles[0]
+    expect(profile.name).toBe('Race setup')
+    expect(profile.actuationKind).toBe('electronic')
+    expect(profile.belt.outsideLengthMm).toBe(882)
+    expect(profile.geometry.frontSheaveAngle).toEqual({ valueDeg: 13.8, basis: 'half' })
   })
 
   it('migrates an older export without a selection marker to manual', () => {

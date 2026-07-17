@@ -7,6 +7,7 @@ import {
   MAX_GEARS,
   mergeMtFormState,
   mergeCvtFormState,
+  mergeCvtProfile,
 } from '@/stores/drivetrainStore'
 
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
@@ -46,11 +47,65 @@ describe('drivetrainStore persistence', () => {
     expect(s.mt.finalDrive).toEqual({ mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 })
   })
 
-  it('defaults CVT to the free-form note fields (no computed geometry fields)', () => {
+  it('defaults CVT to one incomplete profile without guessed physical values', () => {
     const s = useDrivetrainStore()
     expect(s.cvt.notes.length).toBeGreaterThan(0)
     expect(s.cvt.notes.some((n) => n.label.includes('終傳'))).toBe(true)
     expect(s.cvt.notes.every((n) => n.value === '')).toBe(true)
+    expect(s.cvt.profiles).toHaveLength(1)
+    expect(s.activeCvtProfile.id).toBe(s.cvt.activeProfileId)
+    expect(s.activeCvtProfile.belt.outsideLengthMm).toBeNull()
+    expect(s.activeCvtProfile.geometry.centerDistanceMm).toBeNull()
+    expect(s.activeCvtProfile.geometry.frontSheaveAngle.valueDeg).toBeNull()
+    expect(s.activeCvtProfile.gearReduction.ratio).toBe(0)
+  })
+
+  it('persists profile geometry and keeps wheel conversion synced to the active profile', async () => {
+    const s1 = useDrivetrainStore()
+    s1.updateCvtProfile(s1.activeCvtProfile.id, {
+      name: 'NMAX race',
+      belt: { outsideLengthMm: 882, cordOffsetFromOutsideMm: 2.7 },
+      geometry: {
+        centerDistanceMm: 205,
+        frontSheaveAngle: { valueDeg: 13.8, basis: 'half' },
+        frontRadiusBoundsMm: { min: 23, max: 58 },
+      },
+      finalReduction: {
+        mode: 'stages',
+        stages: [
+          { driveTeeth: 13, drivenTeeth: 41 },
+          { driveTeeth: 12, drivenTeeth: 36 },
+        ],
+      },
+    })
+    s1.setCvtTireSpec('100/90-10')
+    await nextTick()
+
+    setActivePinia(createPinia())
+    const s2 = useDrivetrainStore()
+    expect(s2.activeCvtProfile.name).toBe('NMAX race')
+    expect(s2.activeCvtProfile.belt.outsideLengthMm).toBe(882)
+    expect(s2.activeCvtProfile.geometry.frontSheaveAngle.valueDeg).toBe(13.8)
+    expect(s2.activeCvtProfile.finalReduction.stages).toHaveLength(2)
+    expect(s2.activeCvtProfile.tireSpec).toBe('100/90-10')
+    expect(s2.activeCvtProfile.wheelCircumferenceMm).toBe(s2.cvt.wheelCircumferenceMm)
+  })
+
+  it('adds, switches, duplicates and removes independent CVT profiles', () => {
+    const s = useDrivetrainStore()
+    const first = s.activeCvtProfile.id
+    s.updateCvtProfile(first, { name: 'Road' })
+    const second = s.addCvtProfile('Race')
+    s.updateCvtProfile(second, { actuationKind: 'electronic', vehicleId: 'nmax-turbo' })
+    expect(s.cvt.profiles).toHaveLength(2)
+    expect(s.activeCvtProfile.actuationKind).toBe('electronic')
+    s.setActiveCvtProfile(first)
+    expect(s.activeCvtProfile.name).toBe('Road')
+    const duplicate = s.duplicateCvtProfile(second)
+    expect(duplicate).not.toBeNull()
+    expect(s.activeCvtProfile.vehicleId).toBe('nmax-turbo')
+    s.removeCvtProfile(duplicate!)
+    expect(s.cvt.profiles).toHaveLength(2)
   })
 
   it('auto-saves kind/mt/cvt/inversion changes to localStorage', async () => {
@@ -501,6 +556,34 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
     expect(merged.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))
     expect(merged.notes.length).toBeGreaterThan(0)
     expect(merged.notes.every((n) => n.value === '')).toBe(true)
+    expect(merged.profiles).toHaveLength(1)
+    expect(merged.activeProfileId).toBe(merged.profiles[0].id)
+  })
+
+  it('mergeCvtProfile rejects invalid optional measurements instead of inventing defaults', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      actuationKind: 'electronic',
+      belt: {
+        outsideLengthMm: -1,
+        cordOffsetFromOutsideMm: Number.NaN,
+      } as never,
+      geometry: {
+        centerDistanceMm: 0,
+        frontRadiusBoundsMm: { min: 80, max: 20 },
+      } as never,
+      finalReduction: {
+        mode: 'stages',
+        ratio: 999,
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: 0, drivenTeeth: 20 }],
+      },
+    })
+    expect(merged.actuationKind).toBe('electronic')
+    expect(merged.belt.outsideLengthMm).toBeNull()
+    expect(merged.belt.cordOffsetFromOutsideMm).toBeNull()
+    expect(merged.geometry.centerDistanceMm).toBeNull()
+    expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
+    expect(merged.finalReduction.stages).toEqual([{ driveTeeth: 13, drivenTeeth: 41 }])
   })
 
   it('mergeCvtFormState rejects a v1-shaped (ratioLow/ratioHigh) payload and falls back to defaults', () => {
