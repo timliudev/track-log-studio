@@ -614,6 +614,119 @@ F_{road}=ma+mg\sin\beta+C_{rr}mg\cos\beta+F_{aero}
 
 ---
 
+## 5. 逆向調教求解的可行性與限制
+
+### 5.1 先拆成兩個不同機構的目標
+
+使用者目標「起步接合在最大扭力轉速、之後定在最大馬力轉速不飄不掉」包含兩個不同子系統：
+
+1. **起步離合器接合**由後離心離合器的蹄塊質量、重心半徑、蹄片小彈簧、槓桿幾何、鼓徑與摩擦決定。珠重／大彈簧會改接合過程中的負載與引擎爬升，但不能取代 clutch-shoe model。[S19] 的離心離合器研究也把接合轉速對 spring constant、spring compression、guide/pad mass 的敏感度分開分析。
+2. **離合器鎖定後的 CVT 變速平台**才由 §2 的前盤滾珠、大彈簧、torque cam 與皮帶平衡決定。
+
+離合器初接觸可抽象為另一條根方程：
+
+\[
+G_{clutch}(n;,m_{shoe},r_{shoe},k_{shoe},preload,geometry)=0
+\tag{5-1}
+\]
+
+**來源：**離心蹄塊的 `m r ω²` 與彈簧反力平衡；參數結構參考 [S19]。精確式取決於特定蹄塊槓桿與彈簧掛點，未量幾何前不展開成假通式。
+
+故若候選變數只有「珠重＋大彈簧」，要求 `n_engage = n_peak_torque` 是**控制權不足的不可行約束**。app 應回覆「需加入離合器小彈簧／蹄塊參數」，而不是硬推薦一組珠重。
+
+### 5.2 目標轉速的正確語意
+
+- `n_peak_torque`：由同車同設定馬力機 torque curve 找最大扭矩點，可作離合器開始／完成接合的候選，但必須同時檢查滑摩熱與可控性；接合不是瞬間鎖死。
+- `n_peak_power`：適合定義**全油門加速期間的變速平台**。若「巡航」是指固定車速、部分油門道路巡航，把引擎維持最大馬力轉速通常不是相同目標；此時應用部分油門效率／油耗 map，而非 WOT power peak。
+- 「不飄不掉」應量化為 `q` 與負載範圍內的最大允許轉速帶，例如 `n_target ±150 rpm`。純被動 CVT 同時含 `ω²` speed feedback 與 `T_r` torque feedback，不可能在所有坡度、風、油門、溫度與升降檔歷史下精確維持單一 rpm。
+
+### 5.3 前向模型轉成反問題
+
+令可調設計向量為：
+
+```text
+x = {
+  roller masses / arrangement,
+  contra-spring catalog ID and preload,
+  torque-cam catalog ID,
+  sleeve / shim configuration,
+  optional clutch-shoe spring ID and preload
+}
+```
+
+對每個代表工況 `j`（比值、後盤扭矩、方向、溫度），前向模型給出 `n_eq,j(x)`。最基本的加權最小平方目標：
+
+\[
+J(x)=\sum_j w_j\left[n_{eq,j}(x)-n_{target,j}\right]^2
++w_sP_{slip}(x)+w_bP_{bounds}(x)+w_cP_{change}(x)
+\tag{5-2}
+\]
+
+**來源：**本文件依 §2 前向平衡與 [S2]「由 equilibrium equation 反求 desired engine speed 的 flyweight mass」擴充成多工況受限最佳化。[S12] 也採從道路、車輛與期望性能逐步設計 mechanical centrifugal actuator 的數值方法。
+
+各 penalty 的產品語意：
+
+- `P_slip`：式 (2-15) 容量不足、預測 gross slip 或 clutch 長時間滑摩即快速增加。
+- `P_bounds`：無法涵蓋要求的起步／高速 `q`、盤面干涉、滾珠／凸輪超行程、彈簧 coil-bind。
+- `P_change`：偏好離目前已驗證 setup 較近、少換零件的方案，避免數學上等效但維護成本高的答案。
+
+若要求對天氣與負載都「不飄」，應做 robust optimization：
+
+\[
+\min_x\ \max_{s\in\mathcal S}
+\left|n_{eq}(x;s)-n_{target}(s)\right|
+\tag{5-3}
+\]
+
+**來源：**本文件把式 (5-2) 改成場景集合 `S` 上的 minimax；場景由 §4.4／§4.6 的低中高負載、冷熱、升降檔與參數不確定度組成。輸出是「最壞情況仍在 ±Δrpm」的候選，而非名義天氣下一個漂亮點。
+
+### 5.4 離散零件與連續參數的求解方式
+
+珠重可有離散 0.25/0.5 g 級距，大彈簧與 torque cam 通常是 catalog part，套管／墊片也有可裝組合；因此不是單純對連續函數求導。建議結構：
+
+1. 枚舉實際買得到、幾何相容的 spring／cam／sleeve／clutch-spring 組合。
+2. 每組先用式 (4-3) 或式 (5-2) 估連續最佳總珠重，再投影到可配出的單顆重量與混珠排列。
+3. 用完整 `K_stat`、摩擦容量與 §4 場景重算每個離散候選。
+4. 移除違反硬約束者，對剩餘方案按 nominal error、worst-case error、slip margin、改裝量與 calibration confidence 排 Pareto front。
+5. 最終只推薦 2–5 組可實測候選，並明列下一輪 A/B test（例如只改總珠重，其他不動）。
+
+[S2] 指出在其單點、固定其餘量的式 (9) 中，flyweight mass 可顯式反解；同一報告也把實驗驗證、真實非線性 ramp／helix、摩擦與 transient response 列為後續工作。這恰好界定 app 可做的是「縮小試裝範圍」，不是跳過調車。
+
+### 5.5 為何反解通常不唯一
+
+以下變更都可能把同一工況的平衡 rpm 推向相同方向：
+
+- 減輕珠重；
+- 增加大彈簧預載／剛性；
+- 換更有機械利益的 torque cam 區段；
+- 改變珠道斜率或其有效摩擦；
+- 增加道路／馬力機負載；
+- 改變套管後，讓同一 `q` 落在另一個珠道位置。
+
+所以只有一條 `rpm vs speed` 曲線時，未知數數量通常大於獨立資訊量。可辨識的做法是先鎖 A/B 級幾何、用基準 setup 校正 C 級 map，再每次只改一項。若同時換珠、彈簧、cam 與皮帶，反問題應標成 underdetermined，不產生「唯一最佳組合」。
+
+### 5.6 建議結果格式
+
+每個候選應回報：
+
+- 離合器初接觸／近鎖定轉速（只有 clutch 參數齊全時）。
+- WOT 變速平台 `rpm(q)`，低／中／高負載及升／降檔分線。
+- 相對 `n_peak_power` 的平均、最大偏差與不確定帶。
+- 起步與高速可達比值、套管／盤徑／彈簧行程 margin。
+- 式 (2-15) 的 slip margin 與哪些點依賴未知 `μ`。
+- 推薦理由、相對目前 setup 的單項變更、必做的實車驗證。
+- confidence：`幾何`、`準靜態未校正`、`已校正`、`hold-out 已驗證` 四級。
+
+### 5.7 不可承諾的輸出
+
+- 沒有離合器幾何／小彈簧資料時，不反推接合 rpm。
+- 沒有 baseline calibration 時，不以個位數 rpm 或 0.1 g 精度推薦。
+- 沒有 torque／throttle／坡度資訊時，不把賽道 rpm 波動全解釋成 CVT 調校。
+- 被動零件無法保證任何天氣、任何負載、任何磨耗下「完全不飄不掉」；只能在已定義場景內最小化偏差。
+- 逆解不能保證耐久、皮帶溫度與離合器熱負荷安全；需另有製造商極限與實車熱測。
+
+---
+
 ## 引用文獻
 
 - **[S1]** Vincenzo La Battaglia, Alessandro Giorgetti, Stefano Marini, Gabriele Arcidiacono, Paolo Citti, “Kinematic Analysis of V-Belt CVT for Efficient System Development in Motorcycle Applications,” *Machines*, 10(1), 16, 2022. <https://doi.org/10.3390/machines10010016>
@@ -634,3 +747,4 @@ F_{road}=ma+mg\sin\beta+C_{rr}mg\cos\beta+F_{aero}
 - **[S16]** Enrico Nino Manes, “Design and Modeling of a Novel Continuously Variable Transmission,” Ph.D. dissertation, Purdue University. <https://docs.lib.purdue.edu/dissertations/AAI3481098/>
 - **[S17]** NASA Glenn Research Center, “Equation of State (Ideal Gas).” <https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/equation-of-state-ideal-gas-2/>
 - **[S18]** Reza N. Jazar, *Vehicle Dynamics: Theory and Application*, 3rd ed., Springer, 2017. <https://doi.org/10.1007/978-3-319-53441-1>
+- **[S19]** Ki-Kap Kim, Yoon-Sik Jun, “A Study of Kinematic Analysis for Improvement of Transmitting Torque of Centrifugal Clutch,” *Journal of the Korean Society of Manufacturing Technology*, 12(4), 173–178, 2010. <https://doi.org/10.17958/ksmt.12.4.201012.173>
