@@ -12,6 +12,10 @@ import { useSectorStore } from '@/stores/sectorStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import LapTableView from './LapTableView.vue'
 import LapExcludeToggle from './LapExcludeToggle.vue'
+import LapExclusionLegend from './LapExclusionLegend.vue'
+import type { LapExclusionReason } from './LapExclusionIcon.vue'
+
+type ComparisonExclusionReason = Exclude<LapExclusionReason, 'sector'>
 
 const props = defineProps<{
   primaryLaps: Lap[]
@@ -126,9 +130,16 @@ function excludeDisabled(table: ComparisonTable, index: number): boolean {
  *  mirroring LapTable.vue's `excludeLabel` — same i18n keys. */
 function excludeLabel(table: ComparisonTable, index: number): string {
   const reason = exclusionReasonFor(table, index)
+  if (reason === 'manual') return t('analyzer.excludedManually')
   if (reason === 'timeBand') return t('analyzer.excludedByBand')
   if (reason === 'distBand') return t('analyzer.excludedByDistanceBand')
   return reason === 'manual' ? t('analyzer.includeLap') : t('analyzer.excludeLap')
+}
+
+function exclusionLegendReasons(table: ComparisonTable): LapExclusionReason[] {
+  const order: ComparisonExclusionReason[] = ['manual', 'timeBand', 'distBand']
+  const reasons = new Set(table.rows.map((row) => exclusionReasonFor(table, row.index)).filter((reason): reason is ComparisonExclusionReason => reason != null))
+  return order.filter((reason) => reasons.has(reason))
 }
 
 function delta(value: number | null): string {
@@ -197,6 +208,7 @@ function resetChartOffset(id: number): void {
               :excluded="row.isExcluded"
               :disabled="excludeDisabled(table, row.index)"
               :label="excludeLabel(table, row.index)"
+              :reason="exclusionReasonFor(table, row.index)"
               @toggle="lapStore.toggleSessionExcluded(table.id, row.index)"
             />
             <span
@@ -231,6 +243,7 @@ function resetChartOffset(id: number): void {
           </div>
         </template>
       </LapTableView>
+      <LapExclusionLegend :reasons="exclusionLegendReasons(table)" />
     </div>
   </section>
 </template>

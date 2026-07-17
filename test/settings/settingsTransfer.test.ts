@@ -32,6 +32,7 @@ const SAMPLE_MT: MtFormState = {
 
 const DRIVETRAIN = {
   kind: 'mt' as const,
+  kindSelection: 'manual' as const,
   mt: SAMPLE_MT,
   cvt: { wheelCircumferenceMm: 1400, tireSpec: '', notes: [] },
   inversionWheelCircumferenceMm: 1870,
@@ -144,6 +145,20 @@ describe('settingsTransfer — parseImportBundle', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.bundle.drivetrain.kind).toBe('cvt')
+  })
+
+  it('migrates an older export without a selection marker to manual', () => {
+    const result = parseImportBundle(JSON.stringify({ drivetrain: { kind: 'cvt' } }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.bundle.drivetrain.kindSelection).toBe('manual')
+  })
+
+  it('preserves an explicit automatic selection marker in newer exports', () => {
+    const result = parseImportBundle(JSON.stringify({ drivetrain: { kind: 'mt', kindSelection: 'auto' } }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.bundle.drivetrain.kindSelection).toBe('auto')
   })
 
   it('falls back to the default dashboard layout when layout.dashboardLayout is malformed', () => {

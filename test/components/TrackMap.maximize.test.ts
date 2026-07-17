@@ -69,6 +69,7 @@ describe('TrackMap in-card maximize (B7)', () => {
     const trigger = w.find('.maximize-toggle:not(.maximize-toggle--close)')
     expect(trigger.exists()).toBe(true)
     expect(trigger.attributes('aria-label')).toBe('放大賽道地圖')
+    expect(trigger.find('svg.maximize-icon[viewBox="0 0 24 24"]').exists()).toBe(true)
     expect(w.find('.maximize-toggle--close').exists()).toBe(false)
     expect(w.find('.track-wrap.maximized').exists()).toBe(false)
   })
@@ -81,6 +82,7 @@ describe('TrackMap in-card maximize (B7)', () => {
     const closeBtn = w.find('.maximize-toggle--close')
     expect(closeBtn.exists()).toBe(true)
     expect(closeBtn.attributes('aria-label')).toBe('還原賽道地圖')
+    expect(closeBtn.find('svg.maximize-icon[viewBox="0 0 24 24"]').exists()).toBe(true)
     expect(w.find('.maximize-toggle:not(.maximize-toggle--close)').exists()).toBe(false)
   })
 

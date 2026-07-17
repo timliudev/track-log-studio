@@ -9,6 +9,7 @@ import {
   SEMANTIC,
   humanize,
 } from './semantic'
+import { encodeExportMetadata, normalizeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
 
 const EOL = '\r\n'
 
@@ -238,6 +239,7 @@ export function convertToVbo(
   session: LogSession,
   sourceName: string,
   now: Date = new Date(),
+  metadata?: ExportMetadata,
 ): VboArtifact[] {
   const n = session.rowCount
   const created = session.meta.createdDate
@@ -320,6 +322,7 @@ export function convertToVbo(
   for (const c of channels) {
     commentMap.push(`  ${c.ctTitle} | ${c.rcLabel} | ${c.rcName} | ${c.unit}`)
   }
+  const metadataPayload = encodeExportMetadata(metadata)
 
   // --- Render a .vbo (ct = ECU names, rc = rc_ identifiers) ---
   const stamp = created ?? now
@@ -351,6 +354,7 @@ export function convertToVbo(
         ) + EOL,
       )
     }
+    if (metadataPayload) out.push(`TLS-Metadata: ${metadataPayload}` + EOL)
     for (const line of commentMap) out.push(safeComment(line) + EOL)
 
     out.push(EOL + '[column names]' + EOL)
@@ -400,6 +404,12 @@ export function convertToVbo(
         c.unit,
         kindLabel[c.kind],
       ])
+    }
+    const cvtNotes = normalizeExportMetadata(metadata).cvtNotes ?? []
+    if (cvtNotes.length > 0) {
+      rows.push([])
+      rows.push(['CVT 調教備註', '值'])
+      for (const note of cvtNotes) rows.push([note.label, note.value])
     }
     const body = rows.map((r) => r.map(csvField).join(',')).join('\r\n') + '\r\n'
     return '﻿' + body // UTF-8 BOM so Excel reads the Chinese correctly

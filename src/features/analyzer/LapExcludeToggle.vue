@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LapExclusionIcon, { type LapExclusionReason } from './LapExclusionIcon.vue'
 /**
  * The ⦸ manual-exclude toggle shared by every lap table's lead cell — the
  * primary LapTable.vue and every comparison recording's SessionLapComparison
@@ -19,6 +20,10 @@ defineProps<{
   disabled: boolean
   /** Localized tooltip/aria-label text (include/exclude, or the reason it's locked). */
   label: string
+  /** Which exclusion rule applies. A non-excluded row uses the manual icon as
+   *  the familiar action affordance until the user excludes it. */
+  reason?: LapExclusionReason | null
+  sectorNumber?: number | null
 }>()
 
 const emit = defineEmits<{ toggle: [] }>()
@@ -35,7 +40,7 @@ const emit = defineEmits<{ toggle: [] }>()
     :aria-disabled="disabled"
     @click.stop="!disabled && emit('toggle')"
   >
-    ⦸
+    <LapExclusionIcon :reason="reason ?? 'manual'" :sector-number="sectorNumber" />
   </button>
 </template>
 
@@ -49,9 +54,13 @@ const emit = defineEmits<{ toggle: [] }>()
   height: 22px;
   flex: none;
   padding: 0;
-  font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
+}
+.exclude svg {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 .exclude:hover {
   border-color: var(--color-accent);
@@ -80,6 +89,9 @@ const emit = defineEmits<{ toggle: [] }>()
 :root[data-any-pointer-coarse] .exclude {
   width: 44px;
   height: 44px;
-  font-size: 1.1rem;
+}
+:root[data-any-pointer-coarse] .exclude svg {
+  width: 22px;
+  height: 22px;
 }
 </style>

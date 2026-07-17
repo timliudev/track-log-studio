@@ -588,7 +588,10 @@ describe('lapStore', () => {
       Array.from({ length: 11 }, (_, i) => i),
     )
     s.setTrack(track)
-    s.setLaps([{ index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 25000 }])
+    s.setLaps([
+      { index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 25000 },
+      { index: 1, startIdx: 0, endIdx: 10, lapTimeMs: 50000 },
+    ])
     sectors.addGate(gateAt(3.5))
     sectors.addGate(gateAt(7.5))
     expect(s.excluded).toEqual([0])
@@ -626,10 +629,30 @@ describe('lapStore', () => {
       Array.from({ length: 11 }, (_, i) => i),
     )
     s.setTrack(track)
-    s.setLaps([{ index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 25000 }])
+    s.setLaps([
+      { index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 25000 },
+      { index: 1, startIdx: 0, endIdx: 10, lapTimeMs: 50000 },
+    ])
     sectors.addGate(gateAt(3.5))
     sectors.addGate(gateAt(7.5))
     expect(s.exclusionReason(0)).toBe('sector')
+    expect(s.sectorFailureNumber(0)).toBe(2)
+  })
+
+  it('warns but does not exclude when every lap fails the sector configuration', () => {
+    const s = useLapStore()
+    const sectors = useSectorStore()
+    const track = makeTrack(
+      Array.from({ length: 11 }, () => 0),
+      Array.from({ length: 11 }, (_, i) => i),
+    )
+    s.setTrack(track)
+    s.setLaps([{ index: 0, startIdx: 0, endIdx: 5, lapTimeMs: 25000 }])
+    sectors.addGate(gateAt(3.5))
+    sectors.addGate(gateAt(7.5))
+    expect(s.sectorAllFailed).toBe(true)
+    expect(s.sectorInvalid).toEqual([])
+    expect(s.excluded).toEqual([])
   })
 
   it('exclusionReason prefers manual when a lap is both manual and auto-excluded', () => {

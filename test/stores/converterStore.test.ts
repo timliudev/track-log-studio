@@ -4,6 +4,8 @@ import { useConverterStore } from '@/stores/converterStore'
 import { parseLoga } from '@/domain/parsing/LogaParser'
 import { DEFAULT_PRESET } from '@/domain/export/rc3Nmea/mapping'
 import { loadFixture } from '../fixtures'
+import { useFileStore } from '@/stores/fileStore'
+import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -48,6 +50,23 @@ describe('converterStore', () => {
     expect(results[0].name).toBe('Super2.nmea')
     expect(results[0].content).toContain('$RC3')
     expect(s.availableChannels.length).toBeGreaterThan(0)
+  })
+
+  it('threads each file session\'s own CVT notes into every registry export', () => {
+    const s = useConverterStore()
+    const session = parseLoga(loadFixture('super2.loga'))
+    const first = s.beginImport(new File(['x'], 'first.loga'))
+    const second = s.beginImport(new File(['x'], 'second.loga'))
+    s.completeImport(first, session)
+    s.completeImport(second, session)
+    const fileStore = useFileStore()
+    fileStore.setExportMetadata(first, { cvtNotes: [{ label: '珠重', value: '12 g' }] })
+    fileStore.setExportMetadata(second, { cvtNotes: [{ label: '珠重', value: '14 g' }] })
+
+    const results = s.convertAll()
+    expect(results).toHaveLength(2)
+    expect(nmeaToSession(results[0].content).meta.exportMetadata?.cvtNotes?.[0].value).toBe('12 g')
+    expect(nmeaToSession(results[1].content).meta.exportMetadata?.cvtNotes?.[0].value).toBe('14 g')
   })
 
   it('convertAll in .vbo mode emits _ct, _rc and _channels.csv per log', () => {

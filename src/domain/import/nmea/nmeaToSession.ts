@@ -3,7 +3,7 @@ import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 
 export function nmeaToSession(text: string): LogSession {
-  const { fixes } = parseNmea(text)
+  const { fixes, exportMetadata } = parseNmea(text)
   const n = fixes.length
   const time = new Float32Array(n)
   const lat = new Float32Array(n)
@@ -31,5 +31,6 @@ export function nmeaToSession(text: string): LogSession {
     formatId: 'nmea',
     createdDate: null,
     headerInfo: {},
+    exportMetadata,
   })
 }

@@ -46,6 +46,8 @@ describe('MapBackgroundControls collapse toggle (B60)', () => {
     await toggle.trigger('click')
     expect(toggle.attributes('aria-expanded')).toBe('true')
     expect(wrapper.find('.background-controls').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('IndexedDB')
+    expect(wrapper.text()).not.toContain('localStorage')
   })
 
   it('collapses again on a second click', async () => {

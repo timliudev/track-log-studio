@@ -32,4 +32,6 @@ export interface LogMeta {
   readonly createdDate: Date | null
   /** Extra header key/values (e.g. ECU SN, Hardware ID, Table ID). */
   readonly headerInfo: Readonly<Record<string, string>>
+  /** Portable annotations recovered from an exported source file. */
+  readonly exportMetadata?: import('@/domain/export/metadata').ExportMetadata
 }

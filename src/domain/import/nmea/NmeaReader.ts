@@ -1,4 +1,5 @@
 import { nmeaChecksum } from '@/domain/export/nmeaChecksum'
+import { decodeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
 
 /** One GPS fix parsed from an NMEA stream. */
 export interface NmeaFix {
@@ -14,6 +15,7 @@ export interface NmeaFix {
 
 export interface NmeaData {
   fixes: NmeaFix[]
+  exportMetadata: ExportMetadata
 }
 
 function checksumOk(line: string): boolean {
@@ -51,12 +53,26 @@ function parseTimeMs(t: string): number {
  */
 export function parseNmea(text: string): NmeaData {
   const fixes: NmeaFix[] = []
+  let exportMetadata: ExportMetadata = {}
+  const metadataChunks = new Map<number, string>()
+  let metadataChunkCount = 0
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim()
     if (!line.startsWith('$') || !checksumOk(line)) continue
     const body = line.slice(1, line.lastIndexOf('*'))
     const f = body.split(',')
     const id = f[0]
+    if (id === 'PTLS' && f[1] === 'META') {
+      const index = Number(f[2])
+      const count = Number(f[3])
+      if (Number.isInteger(index) && index >= 1 && Number.isInteger(count) && count >= 1 && f[4]) {
+        if (metadataChunkCount === 0 || metadataChunkCount === count) {
+          metadataChunkCount = count
+          metadataChunks.set(index, f[4])
+        }
+      }
+      continue
+    }
     if ((id === 'GPRMC' || id === 'GNRMC') && f[2] === 'A') {
       const lat = parseLatLon(f[3], f[4])
       const lon = parseLatLon(f[5], f[6])
@@ -70,5 +86,9 @@ export function parseNmea(text: string): NmeaData {
       })
     }
   }
-  return { fixes }
+  if (metadataChunkCount > 0 && metadataChunks.size === metadataChunkCount) {
+    const payload = Array.from({ length: metadataChunkCount }, (_, index) => metadataChunks.get(index + 1) ?? '').join('')
+    exportMetadata = decodeExportMetadata(payload)
+  }
+  return { fixes, exportMetadata }
 }

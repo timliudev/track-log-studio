@@ -60,6 +60,12 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
       [MEASURED_TOTAL_RATIO_CHANNEL, '總傳動比'],
       ['RPM', 'RPM'],
     ])
+    expect(wrapper.find('.update-rate').text()).toBe('10.0 Hz')
+  })
+
+  it('shows no chart update rate when every selected channel is constant', () => {
+    const wrapper = mountChart(['GPS_Speed'])
+    expect(wrapper.find('.update-rate').exists()).toBe(false)
   })
 
   it('offers a translated picker label while emitting only the stable id', () => {

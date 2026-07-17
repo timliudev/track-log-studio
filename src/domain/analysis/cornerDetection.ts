@@ -363,15 +363,29 @@ function headingAtIndex(track: GpsTrack, index: number, halfWindow = 6): number 
  */
 export function cornerGateLine(track: GpsTrack, corner: Corner, halfWidthM = 15): LapLine {
   const heading = headingAtIndex(track, corner.index)
+  // A detected corner sits exactly on one recorded GPS sample. Centring the
+  // gate on that same sample makes the reference path touch the gate at a
+  // segment endpoint twice (previous -> sample, sample -> next), while the
+  // shared robust intersection test intentionally rejects endpoint-only
+  // touches to avoid double counting. Put the gate halfway toward the next
+  // valid fix instead: the reference segment now properly straddles it, with
+  // a sub-sample spatial shift that is negligible versus the 15 m half-width.
+  let next = corner.index + 1
+  while (
+    next < track.valid.length &&
+    (!track.valid[next] || (track.lat[next] === corner.lat && track.lon[next] === corner.lon))
+  ) next++
+  const centreLat = next < track.valid.length ? (corner.lat + track.lat[next]) / 2 : corner.lat
+  const centreLon = next < track.valid.length ? (corner.lon + track.lon[next]) / 2 : corner.lon
   const rad = toRadians(heading)
-  const cosLat = Math.cos(toRadians(corner.lat)) || 1
+  const cosLat = Math.cos(toRadians(centreLat)) || 1
   // Perpendicular unit vector (east, north) — rotate the heading vector -90°.
   const east = Math.cos(rad)
   const north = -Math.sin(rad)
   const dLat = toDegrees((north * halfWidthM) / EARTH_R)
   const dLon = toDegrees((east * halfWidthM) / (EARTH_R * cosLat))
   return {
-    a: { lat: corner.lat + dLat, lon: corner.lon + dLon },
-    b: { lat: corner.lat - dLat, lon: corner.lon - dLon },
+    a: { lat: centreLat + dLat, lon: centreLon + dLon },
+    b: { lat: centreLat - dLat, lon: centreLon - dLon },
   }
 }

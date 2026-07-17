@@ -17,27 +17,37 @@ const susp = useSuspensionStore()
 const busy = ref(false)
 const results = reactive<Record<number, string>>({})
 
-/** Entries that would actually produce a calibrated channel. */
+function hasDerivedChannels(entry: (typeof conv.savableEntries)[number]): boolean {
+  return derivedSuspensionNames(entry.session, susp.config).length > 0
+}
+
+function hasCvtNotes(entry: (typeof conv.savableEntries)[number]): boolean {
+  return (entry.metadata.cvtNotes?.length ?? 0) > 0
+}
+
+/** Entries that would write either calibrated channels or session notes. */
 const eligible = computed(() =>
   conv.savableEntries.filter(
-    (e) => derivedSuspensionNames(e.session, susp.config).length > 0,
+    (entry) => hasDerivedChannels(entry) || hasCvtNotes(entry),
   ),
 )
 
-function outName(name: string): string {
-  return name.replace(/\.loga$/i, '') + '_calibrated.loga'
+function outName(entry: (typeof conv.savableEntries)[number]): string {
+  const suffix = hasDerivedChannels(entry) ? '_calibrated.loga' : '_annotated.loga'
+  return entry.name.replace(/\.loga$/i, '') + suffix
 }
 
 async function build(entry: (typeof eligible.value)[number]): Promise<{ name: string; content: string }> {
   const text = await entry.file.text()
   const channels = deriveSuspensionChannels(entry.session, susp.config)
   const replacements = new Map(channels.map((c) => [c.name, c.data]))
-  const { text: out, replaced, appended } = patchLogaText(text, replacements)
+  const { text: out, replaced, appended } = patchLogaText(text, replacements, entry.metadata)
   const parts: string[] = []
   if (replaced.length) parts.push(`${t('suspension.save.replaced')}: ${replaced.join(', ')}`)
   if (appended.length) parts.push(`${t('suspension.save.appended')}: ${appended.join(', ')}`)
+  if (hasCvtNotes(entry)) parts.push(t('suspension.save.cvtNotesSaved', { count: entry.metadata.cvtNotes!.length }))
   results[entry.id] = parts.join(' · ')
-  return { name: outName(entry.name), content: out }
+  return { name: outName(entry), content: out }
 }
 
 async function saveOne(entry: (typeof eligible.value)[number]): Promise<void> {
@@ -77,7 +87,7 @@ async function saveAll(): Promise<void> {
       <ul class="items">
         <li v-for="e in eligible" :key="e.id" class="item">
           <div class="info">
-            <span class="name">{{ outName(e.name) }}</span>
+            <span class="name">{{ outName(e) }}</span>
             <span v-if="results[e.id]" class="result">{{ results[e.id] }}</span>
           </div>
           <button type="button" class="btn-secondary" :disabled="busy" @click="saveOne(e)">

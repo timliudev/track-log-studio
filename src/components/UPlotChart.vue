@@ -132,9 +132,15 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { panRange, pinchRange, type XRange } from '@/features/analyzer/xRangeGesture'
+import { panRange, pinchRange, zoomRange, type XRange } from '@/features/analyzer/xRangeGesture'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
+import {
+  centreNeedleGeometry,
+  clampPlotPoint,
+  pendingTouchIntent,
+  type CentreNeedleGeometry,
+} from '@/domain/analysis/chartPointerGesture'
 
 const { t } = useI18n()
 // B36 — edge-gesture guard for the mobile full-bleed chart (see this file's
@@ -192,8 +198,9 @@ const props = defineProps<{
    *    local scale): dragging one centre-mode chart pans that shared range,
    *    which every other chart bound to the same range already re-renders
    *    against — so their needles end up pointing at the same instant too.
-   *    (Multi-touch pinch-zoom is intentionally NOT part of this mode — one
-   *    single-pointer drag gesture only, per the "pick ONE gesture" brief.)
+   *    Touch keeps two-finger pinch zoom available, while mouse/trackpad can
+   *    wheel-zoom about the needle; a full-range chart can therefore be
+   *    narrowed before it is panned under the fixed line.
    *  - Default false/undefined: every existing chart's pan/zoom/cursor-sync
    *    behaviour is completely unchanged.
    */
@@ -221,10 +228,11 @@ const wrap = ref<HTMLDivElement | null>(null)
  *  narrower than `host`'s full width once axis label gutters are accounted
  *  for. `null` (hidden) whenever centre-needle mode is off or the plot/host
  *  aren't measurable yet. */
-const needleLeft = ref<number | null>(null)
+const needleGeometry = ref<CentreNeedleGeometry | null>(null)
 let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
+let needleFrame: number | null = null
 // Guard so programmatic setScale (from a synced xRange, or uPlot's own
 // auto-ranging on (re)create) doesn't echo back out as a user xZoom.
 //
@@ -364,6 +372,7 @@ function buildOptions(width: number): uPlot.Options {
           if (props.centreCursorMode) {
             const xs = u.data[0] as number[]
             emit('cursor', centreCursorIndex(xs, { min, max }))
+            scheduleNeedlePos()
           }
         },
       ],
@@ -439,23 +448,28 @@ function create(): void {
     void nextTick(resize)
   }
   updateNeedlePos()
+  scheduleNeedlePos()
 }
 
-/** B31 — recompute the fixed needle's `left` offset from uPlot's OWN plot
- *  area (`plot.over`), relative to `wrap`. Called after every layout change
- *  that could move/resize the plot area (create/recreate, resize, including
- *  axis-width changes from a channel add/remove) — mirrors how `resize()`
- *  already re-measures `targetHeight()` on the same triggers. A no-op
- *  (leaves `needleLeft` at whatever it was) when centre-needle mode is off,
- *  the plot doesn't exist yet, or `wrap` isn't mounted. */
+/** Recompute the fixed needle from uPlot's interactive plot rectangle.
+ * Horizontal centre plus plot-only top/height keeps it out of axes/legend. */
 function updateNeedlePos(): void {
   if (!props.centreCursorMode || !plot || !wrap.value) {
-    needleLeft.value = null
+    needleGeometry.value = null
     return
   }
   const wrapRect = wrap.value.getBoundingClientRect()
   const overRect = plot.over.getBoundingClientRect()
-  needleLeft.value = needleOffsetX(overRect.left - wrapRect.left, overRect.width)
+  needleGeometry.value = centreNeedleGeometry(wrapRect, overRect)
+}
+
+/** uPlot commits setSize/setScale geometry asynchronously; measure after it. */
+function scheduleNeedlePos(): void {
+  if (needleFrame != null) cancelAnimationFrame(needleFrame)
+  needleFrame = requestAnimationFrame(() => {
+    needleFrame = null
+    updateNeedlePos()
+  })
 }
 
 function destroy(): void {
@@ -480,10 +494,56 @@ function destroy(): void {
 // owner (analyzerStore.xRange, or a local xRange for callers that don't sync
 // one), rather than each chart maintaining its own touch-only zoom state.
 const touchPointers = new Map<number, { x: number; y: number }>()
-type TouchMode = 'idle' | 'pan' | 'pinch'
+type TouchMode = 'idle' | 'pending' | 'pan' | 'pinch' | 'scroll' | 'select'
 let touchMode: TouchMode = 'idle'
 let panLastX = 0
 let pinchLast: { dist: number; midX: number } | null = null
+const touchSelectionActive = ref(false)
+const TOUCH_LONG_PRESS_MS = 450
+const TOUCH_SLOP_PX = 10
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let pendingTouchId: number | null = null
+let pendingTouchStart: { x: number; y: number } | null = null
+let suppressTouchContextMenu = false
+let contextMenuResetTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearLongPress(): void {
+  if (longPressTimer != null) clearTimeout(longPressTimer)
+  longPressTimer = null
+  pendingTouchId = null
+  pendingTouchStart = null
+}
+
+function captureTouchPointer(pointerId: number): void {
+  host.value?.setPointerCapture?.(pointerId)
+}
+
+function selectTouchCursor(pos: { x: number; y: number }): void {
+  if (!plot) return
+  const rect = plot.over.getBoundingClientRect()
+  const point = clampPlotPoint(pos, rect.width, rect.height)
+  plot.setCursor({ left: point.x, top: point.y })
+}
+
+function armLongPress(pointerId: number, start: { x: number; y: number }): void {
+  clearLongPress()
+  pendingTouchId = pointerId
+  pendingTouchStart = start
+  longPressTimer = setTimeout(() => {
+    if (touchMode !== 'pending' || pendingTouchId !== pointerId || touchPointers.size !== 1) return
+    touchMode = 'select'
+    touchSelectionActive.value = true
+    suppressTouchContextMenu = true
+    if (contextMenuResetTimer != null) clearTimeout(contextMenuResetTimer)
+    contextMenuResetTimer = setTimeout(() => {
+      suppressTouchContextMenu = false
+      contextMenuResetTimer = null
+    }, 1500)
+    selectTouchCursor(touchPointers.get(pointerId) ?? start)
+    captureTouchPointer(pointerId)
+    longPressTimer = null
+  }, TOUCH_LONG_PRESS_MS)
+}
 
 /** Current X data-bounds (full data extent), used to clamp touch pan/pinch —
  * same bounds uPlot itself would use for a fully-zoomed-out view. */
@@ -516,7 +576,7 @@ function emitXRange(range: XRange): void {
   // round-trips back down (parent may re-derive xRange asynchronously).
   applyingRange = true
   plot?.setScale('x', range)
-  applyingRange = false
+  clearApplyingRangeSoon()
   emit('xZoom', range)
 }
 
@@ -614,16 +674,130 @@ function overPos(e: PointerEvent): { x: number; y: number } | null {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
 
+function startTouchGesture(e: PointerEvent, allowLongPress: boolean): void {
+  const pos = overPos(e)
+  if (!pos || !plot) return
+  touchPointers.set(e.pointerId, pos)
+
+  if (touchPointers.size >= 2) {
+    clearLongPress()
+    touchSelectionActive.value = false
+    touchMode = 'pinch'
+    for (const pointerId of touchPointers.keys()) captureTouchPointer(pointerId)
+    const mid = touchMidpoint()
+    pinchLast = mid ? { dist: touchDist(), midX: mid.x } : null
+    e.preventDefault()
+    return
+  }
+
+  if (allowLongPress) {
+    touchMode = 'pending'
+    armLongPress(e.pointerId, pos)
+    // Do not capture or prevent the pending event: dominant vertical motion
+    // must remain available to the page's native pan-y scroll.
+    return
+  }
+
+  touchMode = 'pan'
+  panLastX = pos.x
+  captureTouchPointer(e.pointerId)
+  e.preventDefault()
+}
+
+function moveTouchGesture(e: PointerEvent): void {
+  if (!touchPointers.has(e.pointerId) || !plot) return
+  const pos = overPos(e)
+  if (!pos) return
+
+  if (touchMode === 'pending') {
+    const start = pendingTouchStart
+    if (!start || pendingTouchId !== e.pointerId) return
+    const intent = pendingTouchIntent(start, pos, TOUCH_SLOP_PX)
+    if (intent === 'pending') {
+      touchPointers.set(e.pointerId, pos)
+      return
+    }
+    clearLongPress()
+    if (intent === 'scroll') {
+      touchMode = 'scroll'
+      touchPointers.set(e.pointerId, pos)
+      return
+    }
+    touchMode = 'pan'
+    panLastX = start.x
+    captureTouchPointer(e.pointerId)
+  }
+
+  touchPointers.set(e.pointerId, pos)
+
+  if (touchMode === 'scroll') return
+  if (touchMode === 'select') {
+    selectTouchCursor(pos)
+    e.preventDefault()
+    return
+  }
+
+  const bounds = dataXBounds()
+  if (!bounds) return
+  const range = currentXRange() ?? bounds
+
+  if (touchMode === 'pinch') {
+    const mid = touchMidpoint()
+    if (!mid || !pinchLast) return
+    const dist = touchDist()
+    if (dist <= 0 || pinchLast.dist <= 0) return
+    const factor = dist / pinchLast.dist
+    const aboutVal = plot.posToVal(pinchLast.midX, 'x')
+    const midValNow = plot.posToVal(mid.x, 'x')
+    const midValPrev = plot.posToVal(pinchLast.midX, 'x')
+    const deltaX = midValPrev - midValNow
+    emitXRange(pinchRange(range, factor, aboutVal, -deltaX, bounds))
+    pinchLast = { dist, midX: mid.x }
+    e.preventDefault()
+    return
+  }
+
+  if (touchMode === 'pan') {
+    const prevVal = plot.posToVal(panLastX, 'x')
+    const curVal = plot.posToVal(pos.x, 'x')
+    emitXRange(panRange(range, curVal - prevVal, bounds))
+    panLastX = pos.x
+    e.preventDefault()
+  }
+}
+
+function endTouchGesture(e: PointerEvent): void {
+  if (!touchPointers.has(e.pointerId)) return
+  clearLongPress()
+  touchPointers.delete(e.pointerId)
+  touchSelectionActive.value = false
+
+  if (touchMode === 'pinch' && touchPointers.size === 1) {
+    touchMode = 'pan'
+    panLastX = touchPointers.values().next().value?.x ?? panLastX
+    pinchLast = null
+    return
+  }
+  if (touchPointers.size === 0) {
+    touchMode = 'idle'
+    pinchLast = null
+  }
+}
+
+function onTouchContextMenu(e: Event): void {
+  if (suppressTouchContextMenu || (e as PointerEvent).pointerType === 'touch') {
+    e.preventDefault()
+    suppressTouchContextMenu = false
+    if (contextMenuResetTimer != null) clearTimeout(contextMenuResetTimer)
+    contextMenuResetTimer = null
+  }
+}
+
 // ── B31 centre-needle scrub gesture ─────────────────────────────────────────
-// ONE drag gesture for EVERY pointer type (touch/mouse/pen — per DESIGN.md §8
-// layer 1, every interaction must be reachable by every input method) while
-// centre-needle mode is active: reuses the exact same
+// Mouse/pen drag while centre-needle mode is active: reuses the exact same
 // dataXBounds/currentXRange/panRange/emitXRange pipeline the touch-pan
-// gesture above already uses, just without the touch-only pointerType gate
-// and without pinch (a single active pointer only — "pick ONE gesture" per
-// the brief). Kept as its own small set of functions (rather than folding
-// into the touch-gesture branches above) so the existing touch/mouse/pen
-// pointer handling is untouched when this mode is off.
+// gesture above already uses. Touch is routed through the shared touch state
+// machine instead, preserving two-finger pinch and pointerType separation.
 let centreScrubPointerId: number | null = null
 let centreScrubLastX = 0
 
@@ -670,89 +844,49 @@ function onPointerDown(e: PointerEvent): void {
   if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
     return
   }
+  if (isTouchGesturePointer(e.pointerType)) {
+    // Normal mode waits for long press vs horizontal pan vs vertical page
+    // scroll. Centre mode starts panning immediately but still admits a
+    // second touch for pinch zoom.
+    startTouchGesture(e, !props.centreCursorMode)
+    return
+  }
   if (props.centreCursorMode) {
     onCentrePointerDown(e)
     return
   }
-  if (!isTouchGesturePointer(e.pointerType)) return // mouse AND pen keep uPlot's native drag-zoom (B35 §8 layer 2)
-  const pos = overPos(e)
-  if (!pos || !plot) return
-  touchPointers.set(e.pointerId, pos)
-  ;(e.target as Element).setPointerCapture?.(e.pointerId)
-
-  if (touchPointers.size >= 2) {
-    touchMode = 'pinch'
-    const mid = touchMidpoint()
-    pinchLast = mid ? { dist: touchDist(), midX: mid.x } : null
-  } else {
-    touchMode = 'pan'
-    panLastX = pos.x
-  }
-  e.preventDefault()
+  // Mouse and pen keep uPlot's native drag-zoom outside centre mode.
 }
 
 function onPointerMove(e: PointerEvent): void {
+  if (isTouchGesturePointer(e.pointerType)) {
+    moveTouchGesture(e)
+    return
+  }
   if (props.centreCursorMode) {
     onCentrePointerMove(e)
-    return
-  }
-  if (!isTouchGesturePointer(e.pointerType)) return
-  if (!touchPointers.has(e.pointerId)) return
-  const pos = overPos(e)
-  if (!pos || !plot) return
-  touchPointers.set(e.pointerId, pos)
-
-  const bounds = dataXBounds()
-  if (!bounds) return
-  const range = currentXRange() ?? bounds
-
-  if (touchMode === 'pinch') {
-    const mid = touchMidpoint()
-    if (!mid || !pinchLast) return
-    const dist = touchDist()
-    if (dist <= 0 || pinchLast.dist <= 0) return
-    const factor = dist / pinchLast.dist
-    const aboutVal = plot.posToVal(pinchLast.midX, 'x')
-    const midValNow = plot.posToVal(mid.x, 'x')
-    const midValPrev = plot.posToVal(pinchLast.midX, 'x')
-    const deltaX = midValPrev - midValNow // content should follow the fingers
-    emitXRange(pinchRange(range, factor, aboutVal, -deltaX, bounds))
-    pinchLast = { dist, midX: mid.x }
-    return
-  }
-
-  if (touchMode === 'pan') {
-    const prevVal = plot.posToVal(panLastX, 'x')
-    const curVal = plot.posToVal(pos.x, 'x')
-    const deltaX = curVal - prevVal // > 0 when the finger moves right
-    // Content should follow the finger (drag right → reveal earlier/smaller X,
-    // i.e. the window shifts left) — panRange's deltaX shifts min/max by -deltaX,
-    // so pass +deltaX here to get the window to move by -deltaX.
-    emitXRange(panRange(range, deltaX, bounds))
-    panLastX = pos.x
   }
 }
 
 function onPointerUp(e: PointerEvent): void {
+  if (isTouchGesturePointer(e.pointerType)) {
+    endTouchGesture(e)
+    return
+  }
   if (props.centreCursorMode) {
     onCentrePointerUp(e)
-    return
   }
-  if (!isTouchGesturePointer(e.pointerType)) return
-  touchPointers.delete(e.pointerId)
+}
 
-  if (touchMode === 'pinch') {
-    if (touchPointers.size === 1) {
-      touchMode = 'pan'
-      panLastX = touchPointers.values().next().value?.x ?? panLastX
-      pinchLast = null
-    } else if (touchPointers.size === 0) {
-      touchMode = 'idle'
-      pinchLast = null
-    }
-    return
-  }
-  if (touchPointers.size === 0) touchMode = 'idle'
+function onCentreWheel(e: WheelEvent): void {
+  if (!props.centreCursorMode || !plot || e.deltaY === 0) return
+  const bounds = dataXBounds()
+  if (!bounds) return
+  const range = currentXRange() ?? bounds
+  const about = (range.min + range.max) / 2
+  const factor = Math.exp(-e.deltaY * 0.002)
+  emitXRange(zoomRange(range, factor, about, bounds))
+  e.preventDefault()
 }
 
 /** A signature of the series shape; changing it requires re-creating uPlot. */
@@ -765,6 +899,7 @@ function resize(): void {
     emit('plotWidth', host.value.clientWidth)
     plot.setSize({ width: host.value.clientWidth, height: targetHeight() })
     updateNeedlePos()
+    scheduleNeedlePos()
   }
 }
 
@@ -801,6 +936,9 @@ onBeforeUnmount(() => {
   host.value?.removeEventListener('mousedown', onHostMouseDown, true)
   window.removeEventListener('mousemove', onMousePanMove)
   window.removeEventListener('mouseup', onMousePanUp)
+  clearLongPress()
+  if (contextMenuResetTimer != null) clearTimeout(contextMenuResetTimer)
+  if (needleFrame != null) cancelAnimationFrame(needleFrame)
   destroy()
 })
 
@@ -862,18 +1000,28 @@ watch(
     <div
       ref="host"
       class="uplot-host"
-      :class="{ fill: fillHeight }"
+      :class="{ fill: fillHeight, 'touch-selecting': touchSelectionActive }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
+      @contextmenu="onTouchContextMenu"
+      @wheel="onCentreWheel"
     />
     <!-- B31 — always-visible fixed centre needle (replaces uPlot's own hover
          crosshair in this mode, see buildOptions' cursor.x/y). Plain CSS
          overlay positioned against `wrap`, NOT a child of `host` — see
          `wrap`'s doc for why. `pointer-events: none` so it never steals the
          drag gesture from the host underneath it. -->
-    <div v-if="centreCursorMode && needleLeft != null" class="centre-needle" :style="{ left: `${needleLeft}px` }" />
+    <div
+      v-if="centreCursorMode && needleGeometry"
+      class="centre-needle"
+      :style="{
+        left: `${needleGeometry.left}px`,
+        top: `${needleGeometry.top}px`,
+        height: `${needleGeometry.height}px`,
+      }"
+    />
     <!-- B9 — reset-zoom control: only shown while actually zoomed (see the
          `zoomed` ref's doc), so it doesn't clutter the chart at the default
          full view. Double-click also resets (uPlot's own default dblclick
@@ -922,8 +1070,6 @@ watch(
    stays put while the user drags the chart underneath it. */
 .centre-needle {
   position: absolute;
-  top: 0;
-  bottom: 0;
   width: 0;
   border-left: 2px dashed var(--color-accent);
   pointer-events: none;
