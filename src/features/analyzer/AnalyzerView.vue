@@ -447,9 +447,10 @@ function onDistBandInput(which: 'min' | 'max', e: Event): void {
 // How many laps the distance band currently excludes (0 when no band).
 const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.length)
 
-// How many laps fail the sector-gate-crossing check (0 when no gates are
-// confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
-const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
+// Raw sector failures remain visible even when B67's all-failed safety policy
+// deliberately suppresses effective exclusions. This gives gate edits an
+// immediate, truthful result without removing every lap from the analysis.
+const sectorFailureCount = computed(() => lapStore.sectorFailureCount)
 const sectorAllFailed = computed(() => lapStore.sectorAllFailed)
 
 // --- 鎖定布局: a single global toggle disabling drag+resize for every card,
@@ -1113,7 +1114,7 @@ function titleForItemId(id: string): string {
             >
               <SectorPanel
                 :laps="laps"
-                :invalid-count="sectorInvalidCount"
+                :failed-count="sectorFailureCount"
                 :all-failed="sectorAllFailed"
                 :track="track"
                 :time-ms="timeMs"

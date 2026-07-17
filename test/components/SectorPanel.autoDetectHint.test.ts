@@ -11,7 +11,7 @@ beforeEach(() => setActivePinia(createPinia()))
 describe('SectorPanel auto-detect hint', () => {
   it('explains why corner detection cannot run without an included lap', async () => {
     const wrapper = mount(SectorPanel, {
-      props: { laps: [], invalidCount: 0, track: null, timeMs: null, cursorIdx: null },
+      props: { laps: [], failedCount: 0, track: null, timeMs: null, cursorIdx: null },
       global: {
         plugins: [createPinia(), createI18n({ legacy: false, locale: 'zh-Hant', messages: { 'zh-Hant': zhHant } })],
       },
