@@ -13,10 +13,10 @@ import { buildCrossSessionLapOverlay, type CrossSessionLapSource } from '@/domai
 import { sampleIndexAtGridX, gridIndexAtSampleIndex, lapContaining } from '@/domain/analysis/overlayCursor'
 import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
 import { resolveClockTimezoneOffset, sessionStartAnchor } from '@/domain/analysis/startTime'
-import { lapColor } from './lapColors'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
 import { planTimeSeriesAxes } from '@/domain/analysis/timeSeriesAxes'
+import { channelColor } from '@/domain/analysis/channelPalette'
 import {
   availableDerivedAnalyzerChannels,
   isDerivedAnalyzerChannel,
@@ -28,6 +28,7 @@ import { useDrivetrainStore } from '@/stores/drivetrainStore'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import { cachedChannelUpdateRateHz } from '@/composables/channelUpdateRateCache'
+import { useDocumentTheme } from '@/composables/useDocumentTheme'
 
 const props = defineProps<{
   /** Persisted dashboard config for a user-added ordinary time-series card.
@@ -69,16 +70,15 @@ const lapStore = useLapStore()
 const settings = useSettingsStore()
 const drivetrain = useDrivetrainStore()
 const { tzOverride, centreCursorMode } = storeToRefs(settings)
+const documentTheme = useDocumentTheme()
 
-const PALETTE = ['#e23b3b', '#3b82e2', '#2ea043', '#e2a33b', '#9b3be2', '#3bd6e2']
-const color = (i: number): string => PALETTE[i % PALETTE.length]
+const channelStroke = (channelIndex: number): string => channelColor(channelIndex, documentTheme.value)
 // Line-dash patterns for overlay mode: style encodes the channel ([] = solid).
 const DASHES: number[][] = [[], [6, 4], [2, 3], [8, 3, 2, 3], [12, 4]]
 const dash = (i: number): number[] => DASHES[i % DASHES.length]
 
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
-const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
 const derivedContext = computed(() => ({
   wheelCircumferenceMm: drivetrain.kind === 'mt'
     ? drivetrain.inversionWheelCircumferenceMm
@@ -220,7 +220,7 @@ const timelineSeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
   ...timeline.value.series.map((entry) => ({
     label: `${entry.sourceLabel} · ${channelDisplayLabel(entry.channel)}`,
-    stroke: entry.color,
+    stroke: channelStroke(entry.channelIndex),
     dash: dash(entry.channelIndex),
     width: entry.primary ? 1.5 : 1,
     scale: valueAxes.value.scaleFor(entry.channel),
@@ -314,7 +314,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
       { label: xUnit.value },
       ...crossOverlay.value.series.map((s) => ({
         label: `${s.sessionName} · #${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
-        stroke: s.color,
+        stroke: channelStroke(s.channelIndex),
         dash: dash(s.channelIndex),
         width: 1 + (s.lapOrder % 3) * 0.35,
         scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
@@ -325,7 +325,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
     { label: xUnit.value },
     ...overlay.value.series.map((s) => ({
       label: `#${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
-      stroke: lapColor(s.lapOrder),
+      stroke: channelStroke(s.channelIndex),
       dash: dash(s.channelIndex),
       width: 1,
       scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
@@ -517,8 +517,7 @@ function removeChannel(name: string): void {
       <span v-for="(name, i) in present" :key="name" class="chip">
         <span
           class="dot"
-          :class="{ line: hasSelection || comparisonActive }"
-          :style="hasSelection || comparisonActive ? {} : { background: color(i) }"
+          :style="{ background: channelStroke(i) }"
         />
         {{ channelDisplayLabel(name) }}
         <button v-if="canEditChannels && !lockedChannels?.includes(name)" type="button" class="x" @click="removeChannel(name)">×</button>
@@ -655,14 +654,6 @@ function removeChannel(name: string): void {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-}
-/* In overlay mode colour means "lap", so the chip shows the channel's line
-   STYLE (a neutral dash sample) instead of a colour. */
-.dot.line {
-  width: 16px;
-  height: 0;
-  border-radius: 0;
-  border-top: 2px dashed var(--color-text-muted);
 }
 .chip .x {
   background: none;
