@@ -1,7 +1,14 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { tireSpecToCircumferenceMm, type GearRatioInput, type FinalDriveInput, type MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
-import type { FixedReductionInput, RadiusBoundsMm, ReductionStageInput } from '@/domain/analysis/cvtDynamics'
+import {
+  pitchLengthFromOutsideMm,
+  resolveFixedReduction,
+  type FixedReductionInput,
+  type RadiusBoundsMm,
+  type ReductionStageInput,
+} from '@/domain/analysis/cvtDynamics'
+import type { CvtTraceConfig } from '@/domain/analysis/cvtTrace'
 
 export type DrivetrainKind = 'mt' | 'cvt'
 export type DrivetrainKindSelection = 'auto' | 'manual'
@@ -121,6 +128,38 @@ export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'ge
   }
   gearReduction?: Partial<FixedReductionInput>
   finalReduction?: Partial<FixedReductionInput>
+}
+
+function halfAngleDeg(angle: CvtAngleInput): number {
+  if (angle.valueDeg == null) return Number.NaN
+  return angle.basis === 'included' ? angle.valueDeg / 2 : angle.valueDeg
+}
+
+/** Normalize a persisted profile into the immutable derived-trace contract. */
+export function toCvtTraceConfig(profile: CvtProfile): CvtTraceConfig {
+  const pitchLengthMm =
+    profile.belt.lengthSource === 'pitch'
+      ? profile.belt.pitchLengthMm ?? Number.NaN
+      : pitchLengthFromOutsideMm(
+          profile.belt.outsideLengthMm ?? Number.NaN,
+          profile.belt.cordOffsetFromOutsideMm ?? Number.NaN,
+        )
+  return {
+    profileId: profile.id,
+    wheelCircumferenceMm: profile.wheelCircumferenceMm,
+    gearReduction: resolveFixedReduction(profile.gearReduction),
+    finalReduction: resolveFixedReduction(profile.finalReduction),
+    pitchLengthMm,
+    centerDistanceMm: profile.geometry.centerDistanceMm ?? Number.NaN,
+    frontSheaveHalfAngleDeg: halfAngleDeg(profile.geometry.frontSheaveAngle),
+    rearSheaveHalfAngleDeg: halfAngleDeg(profile.geometry.rearSheaveAngle),
+    frontRadiusBoundsMm: profile.geometry.frontRadiusBoundsMm,
+    rearRadiusBoundsMm: profile.geometry.rearRadiusBoundsMm,
+    frontReferenceRadiusMm:
+      profile.geometry.frontReferenceRadiusMm ?? profile.geometry.frontRadiusBoundsMm?.min ?? Number.NaN,
+    rearReferenceRadiusMm:
+      profile.geometry.rearReferenceRadiusMm ?? profile.geometry.rearRadiusBoundsMm?.max ?? Number.NaN,
+  }
 }
 
 export interface CvtFormState {
