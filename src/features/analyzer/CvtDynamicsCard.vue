@@ -5,7 +5,8 @@ import type { LogSession } from '@/domain/model/LogSession'
 import { cachedGearRatioTrace } from '@/domain/analysis/gearRatioTrace'
 import { cachedCvtDerivedTraces } from '@/domain/analysis/cvtTrace'
 import { sheaveAngleMismatch } from '@/domain/analysis/cvtDynamics'
-import { toCvtTraceConfig, useDrivetrainStore } from '@/stores/drivetrainStore'
+import { solveCvtForceBalance, type CvtForceDisabledReason } from '@/domain/analysis/cvtForceBalance'
+import { toCvtForceBalanceInput, toCvtTraceConfig, useDrivetrainStore } from '@/stores/drivetrainStore'
 import CvtProfileEditor from './CvtProfileEditor.vue'
 
 const props = defineProps<{
@@ -63,6 +64,45 @@ const angleMismatch = computed(() => {
   const sheave = halfAngle(profile.value.geometry.frontSheaveAngle)
   if (!Number.isFinite(belt) || !Number.isFinite(sheave) || profile.value.belt.heightMm == null) return null
   return sheaveAngleMismatch(belt, sheave, profile.value.belt.heightMm)
+})
+const forceResult = computed(() => solveCvtForceBalance(toCvtForceBalanceInput(profile.value)))
+const forceStatusText = computed(() => {
+  if (forceResult.value.status === 'equilibrium') return t('analyzer.cvt.forceEquilibrium') as string
+  if (forceResult.value.status === 'endpoint') return t('analyzer.cvt.forceEndpoint') as string
+  if (forceResult.value.status === 'no-feasible-geometry') return t('analyzer.cvt.forceNoGeometry') as string
+  return t('analyzer.cvt.forceDisabled') as string
+})
+const forceReasonKeys: Record<CvtForceDisabledReason, string> = {
+  'electronic-actuation': 'forceReasonElectronic',
+  'operating-condition': 'forceReasonCondition',
+  'roller-masses': 'forceReasonMasses',
+  'roller-track': 'forceReasonTrack',
+  'roller-efficiency': 'forceReasonEfficiency',
+  'rear-spring': 'forceReasonSpring',
+  'torque-cam': 'forceReasonCam',
+  'torque-share': 'forceReasonTorqueShare',
+  coupling: 'forceReasonCoupling',
+  geometry: 'forceReasonGeometry',
+}
+const forceDisabledText = computed(() => forceResult.value.disabledReasons
+  .map((reason) => t(`analyzer.cvt.${forceReasonKeys[reason]}`) as string)
+  .join('、'))
+const forceChart = computed(() => {
+  const curve = forceResult.value.curve
+  if (curve.length < 2) return null
+  const allForces = curve.flatMap((point) => [point.frontRollerForceN, point.couplingRatio * point.rearTotalForceN])
+  const min = Math.min(...allForces)
+  const max = Math.max(...allForces)
+  const span = Math.max(1e-9, max - min)
+  const points = (pick: (index: number) => number) => curve.map((_, index) => {
+    const x = 8 + 284 * index / (curve.length - 1)
+    const y = 92 - 78 * (pick(index) - min) / span
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+  return {
+    front: points((index) => curve[index].frontRollerForceN),
+    rear: points((index) => curve[index].couplingRatio * curve[index].rearTotalForceN),
+  }
 })
 
 const geometryErrorText = computed(() => {
@@ -173,6 +213,7 @@ const statusLabel = computed(() => {
     <div class="status-row">
       <span class="status-chip" :class="`status-${displayed.status}`">{{ statusLabel }}</span>
       <span v-if="profile.actuationKind === 'electronic'" class="status-chip electronic">{{ t('analyzer.cvt.electronicObservationOnly') }}</span>
+      <span class="status-chip" :class="forceResult.status === 'disabled' ? 'status-unavailable' : 'status-ok'">{{ forceStatusText }}</span>
     </div>
 
     <svg class="cvt-svg" viewBox="0 0 360 180" role="img" :aria-label="t('analyzer.cvt.animationLabel')">
@@ -199,6 +240,28 @@ const statusLabel = computed(() => {
       <div><dt>{{ t('analyzer.cvt.frontRadius') }}</dt><dd>{{ format(displayed.frontRadiusMm, 1) }}<small> mm</small></dd></div>
       <div><dt>{{ t('analyzer.cvt.rearRadius') }}</dt><dd>{{ format(displayed.rearRadiusMm, 1) }}<small> mm</small></dd></div>
     </dl>
+
+    <details class="force-readout">
+      <summary>{{ t('analyzer.cvt.forceReadout') }}</summary>
+      <p v-if="forceResult.status === 'disabled'" class="layer-message">{{ forceDisabledText }}</p>
+      <p v-else-if="forceResult.status === 'no-feasible-geometry'" class="warning-message">{{ t('analyzer.cvt.forceNoGeometryDetail') }}</p>
+      <template v-else>
+        <svg v-if="forceChart" class="force-chart" viewBox="0 0 300 100" role="img" :aria-label="t('analyzer.cvt.forceChartLabel')">
+          <line x1="8" y1="92" x2="292" y2="92" />
+          <polyline :points="forceChart.front" class="front-force" />
+          <polyline :points="forceChart.rear" class="rear-force" />
+        </svg>
+        <div class="force-legend"><span class="front-key">{{ t('analyzer.cvt.frontRollerForce') }}</span><span class="rear-key">{{ t('analyzer.cvt.coupledRearForce') }}</span></div>
+        <dl class="force-values">
+          <div><dt>q</dt><dd>{{ format(forceResult.selected?.ratio ?? Number.NaN, 3) }}</dd></div>
+          <div><dt>{{ t('analyzer.cvt.frontForce') }}</dt><dd>{{ format(forceResult.selected?.frontRollerForceN ?? Number.NaN, 0) }} N</dd></div>
+          <div><dt>{{ t('analyzer.cvt.springForce') }}</dt><dd>{{ format(forceResult.selected?.rearSpringForceN ?? Number.NaN, 0) }} N</dd></div>
+          <div><dt>{{ t('analyzer.cvt.camForce') }}</dt><dd>{{ format(forceResult.selected?.rearCamForceN ?? Number.NaN, 0) }} N</dd></div>
+        </dl>
+        <p v-if="forceResult.roots.length > 1" class="warning-message">{{ t('analyzer.cvt.multipleRoots', { count: forceResult.roots.length }) }}</p>
+      </template>
+      <p class="field-note">{{ profile.force.frictionCoefficientMin == null || profile.force.frictionCoefficientMax == null ? t('analyzer.cvt.slipNotAssessed') : t('analyzer.cvt.slipWarningOnly') }}</p>
+    </details>
 
     <p v-if="geometryErrorText" class="layer-message">{{ geometryErrorText }}</p>
     <p v-else-if="displayed.status === 'out-of-bounds' || displayed.status === 'no-root'" class="warning-message">{{ t('analyzer.cvt.nonGeometricWarning') }}</p>
@@ -234,6 +297,22 @@ const statusLabel = computed(() => {
 .live-values dt { overflow: hidden; color: var(--color-text-muted); font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
 .live-values dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; font-weight: 600; }
 .live-values small { font-weight: 400; color: var(--color-text-muted); }
+.force-readout { padding: 7px 9px; background: var(--color-surface-raised); border-radius: var(--radius); font-size: 0.75rem; }
+.force-readout summary { cursor: pointer; font-weight: 600; }
+.force-readout[open] summary { margin-bottom: 8px; }
+.force-chart { width: 100%; height: 86px; }
+.force-chart line { stroke: var(--color-border); }
+.force-chart polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.front-force { stroke: var(--color-accent); }
+.rear-force { stroke: #d19a47; }
+.force-legend { display: flex; gap: 14px; margin: 2px 0 7px; color: var(--color-text-muted); }
+.force-legend span::before { content: ''; display: inline-block; width: 12px; height: 2px; margin-right: 5px; vertical-align: middle; background: var(--color-accent); }
+.force-legend .rear-key::before { background: #d19a47; }
+.force-values { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin: 0; }
+.force-values div { min-width: 0; }
+.force-values dt { color: var(--color-text-muted); font-size: 0.65rem; }
+.force-values dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; }
+.field-note { margin: 7px 0 0; color: var(--color-text-muted); line-height: 1.35; }
 .layer-message, .warning-message, .confidence-note { margin: 0; line-height: 1.35; }
 .layer-message { padding: 7px 9px; color: var(--color-text-muted); background: var(--color-surface-raised); border-radius: var(--radius); font-size: 0.75rem; }
 .warning-message { color: var(--color-warning, #c99100); font-size: 0.72rem; }

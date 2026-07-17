@@ -116,4 +116,40 @@ describe('CvtDynamicsCard', () => {
     expect(wrapper.text()).toContain('電子致動 CVT')
     expect(wrapper.text()).toContain('不套用滾珠離心力')
   })
+
+  it('shows a force equilibrium only after every required physical layer is explicit', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0)
+      return 1
+    })
+    const drivetrain = useDrivetrainStore()
+    drivetrain.updateCvtProfile(drivetrain.activeCvtProfile.id, {
+      belt: { lengthSource: 'pitch', pitchLengthMm: 800 },
+      geometry: {
+        centerDistanceMm: 250,
+        frontSheaveAngle: { valueDeg: 14, basis: 'half' },
+        rearSheaveAngle: { valueDeg: 14, basis: 'half' },
+        frontRadiusBoundsMm: { min: 32, max: 70 },
+        rearRadiusBoundsMm: { min: 32, max: 70 },
+        frontReferenceRadiusMm: 32,
+        rearReferenceRadiusMm: 70,
+      },
+      force: {
+        operatingFrontRpm: 3000,
+        operatingRearTorqueNm: 0,
+        roller: {
+          massesG: [9, 9, 9, 9, 9, 9],
+          track: [{ travelMm: 0, radiusMm: 25 }, { travelMm: 20, radiusMm: 45 }],
+          efficiency: 1,
+        },
+        spring: { mode: 'linear', rateNPerMm: 8, installedPreloadMm: 10 },
+        couplingMode: 'ideal',
+      },
+    })
+    const wrapper = mountCard()
+    await nextTick()
+    expect(wrapper.text()).toContain('力平衡根')
+    expect(wrapper.text()).toContain('尚未評估 slip margin')
+    expect(wrapper.find('.force-chart').exists()).toBe(true)
+  })
 })

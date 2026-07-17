@@ -17,6 +17,13 @@ function optionalNumber(event: Event): number | null {
   return Number.isFinite(value) && value > 0 ? value : null
 }
 
+function optionalNonNegativeNumber(event: Event): number | null {
+  const raw = (event.target as HTMLInputElement).value.trim()
+  if (!raw) return null
+  const value = Number(raw)
+  return Number.isFinite(value) && value >= 0 ? value : null
+}
+
 function textValue(event: Event): string {
   return (event.target as HTMLInputElement | HTMLSelectElement).value
 }
@@ -32,6 +39,37 @@ function patchAngle(key: 'frontSheaveAngle' | 'rearSheaveAngle', value: Partial<
 function patchBounds(side: 'frontRadiusBoundsMm' | 'rearRadiusBoundsMm', edge: 'min' | 'max', event: Event): void {
   const current = profile.value.geometry[side] ?? { min: 0, max: 0 }
   patch({ geometry: { [side]: { ...current, [edge]: optionalNumber(event) ?? 0 } } })
+}
+
+function formatMasses(values: readonly number[]): string {
+  return values.join(', ')
+}
+
+function parseMasses(event: Event): number[] {
+  return (event.target as HTMLInputElement).value
+    .split(/[，,\s]+/)
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value > 0)
+}
+
+function formatPoints(points: readonly Record<string, number>[], keys: readonly string[]): string {
+  return points.map((point) => keys.map((key) => point[key]).join(', ')).join('\n')
+}
+
+function parsePoints(event: Event, keys: readonly string[]): Record<string, number>[] {
+  return (event.target as HTMLTextAreaElement).value.split(/\r?\n/).flatMap((line) => {
+    const values = line.trim().split(/[，,\s]+/).map(Number)
+    if (values.length !== keys.length || values.some((value) => !Number.isFinite(value) || value < 0)) return []
+    return [Object.fromEntries(keys.map((key, index) => [key, values[index]]))]
+  })
+}
+
+function setIdealEfficiency(enabled: boolean): void {
+  patch({ force: { roller: { efficiency: enabled ? 1 : null } } })
+}
+
+function setEqualSplit(enabled: boolean): void {
+  patch({ force: { torqueCam: { equalSplitAssumption: enabled, torqueShare: enabled ? 0.5 : null } } })
 }
 
 function addProfile(): void {
@@ -142,6 +180,57 @@ function onBackdropPointer(event: PointerEvent): void {
           <p class="field-note">{{ t('analyzer.cvt.bareDiameterNote') }}</p>
         </section>
 
+        <details class="form-section force-section">
+          <summary><strong>{{ t('analyzer.cvt.forceHeading') }}</strong><span>{{ t('analyzer.cvt.forceSummary') }}</span></summary>
+
+          <h4>{{ t('analyzer.cvt.operatingHeading') }}</h4>
+          <div class="form-grid">
+            <label><span>{{ t('analyzer.cvt.operatingRpm') }}</span><input type="number" inputmode="decimal" min="0" step="100" :value="profile.force.operatingFrontRpm ?? ''" @change="patch({ force: { operatingFrontRpm: optionalNumber($event) } })" /></label>
+            <label><span>{{ t('analyzer.cvt.rearTorque') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.force.operatingRearTorqueNm ?? ''" @change="patch({ force: { operatingRearTorqueNm: optionalNonNegativeNumber($event) } })" /></label>
+          </div>
+
+          <h4>{{ t('analyzer.cvt.rollerHeading') }}</h4>
+          <div class="form-grid">
+            <label><span>{{ t('analyzer.cvt.rollerKind') }}</span><select :value="profile.force.roller.kind" @change="patch({ force: { roller: { kind: textValue($event) as 'roller' | 'slider' | 'mixed' } } })"><option value="roller">{{ t('analyzer.cvt.roller') }}</option><option value="slider">{{ t('analyzer.cvt.slider') }}</option><option value="mixed">{{ t('analyzer.cvt.mixedRollers') }}</option></select></label>
+            <label><span>{{ t('analyzer.cvt.rollerMasses') }}</span><input type="text" inputmode="decimal" :value="formatMasses(profile.force.roller.massesG)" placeholder="9, 9, 9, 9, 9, 9" @change="patch({ force: { roller: { massesG: parseMasses($event) } } })" /></label>
+          </div>
+          <label class="wide-field"><span>{{ t('analyzer.cvt.rollerTrack') }}</span><textarea rows="4" :value="formatPoints(profile.force.roller.track, ['travelMm', 'radiusMm'])" placeholder="0, 24&#10;5, 29&#10;10, 35" @change="patch({ force: { roller: { track: parsePoints($event, ['travelMm', 'radiusMm']) as never } } })"></textarea></label>
+          <label class="check-field"><input type="checkbox" :checked="profile.force.roller.efficiency === 1" @change="setIdealEfficiency(($event.target as HTMLInputElement).checked)" /><span>{{ t('analyzer.cvt.idealRollerEfficiency') }}</span></label>
+          <p class="field-note">{{ t('analyzer.cvt.rollerTrackNote') }}</p>
+
+          <h4>{{ t('analyzer.cvt.springHeading') }}</h4>
+          <div class="form-grid">
+            <label><span>{{ t('analyzer.cvt.springCatalogLabel') }}</span><input type="text" :value="profile.force.spring.catalogLabel" placeholder="1000 rpm / 1500 rpm" @change="patch({ force: { spring: { catalogLabel: textValue($event) } } })" /></label>
+            <label><span>{{ t('analyzer.cvt.springInputMode') }}</span><select :value="profile.force.spring.mode" @change="patch({ force: { spring: { mode: textValue($event) as 'disabled' | 'linear' | 'curve' } } })"><option value="disabled">{{ t('analyzer.cvt.notEnabled') }}</option><option value="linear">{{ t('analyzer.cvt.linearSpring') }}</option><option value="curve">{{ t('analyzer.cvt.measuredForceCurve') }}</option></select></label>
+            <label><span>{{ t('analyzer.cvt.freeLength') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.force.spring.freeLengthMm ?? ''" @change="patch({ force: { spring: { freeLengthMm: optionalNumber($event) } } })" /></label>
+            <label><span>{{ t('analyzer.cvt.installedLength') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.force.spring.installedLengthMm ?? ''" @change="patch({ force: { spring: { installedLengthMm: optionalNumber($event) } } })" /></label>
+            <label v-if="profile.force.spring.mode === 'linear'"><span>{{ t('analyzer.cvt.springRate') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.force.spring.rateNPerMm ?? ''" @change="patch({ force: { spring: { rateNPerMm: optionalNumber($event) } } })" /></label>
+            <label v-if="profile.force.spring.mode === 'linear'"><span>{{ t('analyzer.cvt.installedPreload') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.force.spring.installedPreloadMm ?? ''" @change="patch({ force: { spring: { installedPreloadMm: optionalNonNegativeNumber($event) } } })" /></label>
+            <label><span>{{ t('analyzer.cvt.coilBindLength') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.force.spring.coilBindLengthMm ?? ''" @change="patch({ force: { spring: { coilBindLengthMm: optionalNumber($event) } } })" /></label>
+          </div>
+          <label v-if="profile.force.spring.mode === 'curve'" class="wide-field"><span>{{ t('analyzer.cvt.springForceCurve') }}</span><textarea rows="4" :value="formatPoints(profile.force.spring.forceCurve, ['travelMm', 'value'])" placeholder="0, 100&#10;5, 160&#10;10, 225" @change="patch({ force: { spring: { forceCurve: parsePoints($event, ['travelMm', 'value']) as never } } })"></textarea></label>
+          <p class="field-note">{{ t('analyzer.cvt.springCatalogWarning') }}</p>
+
+          <h4>{{ t('analyzer.cvt.camHeading') }}</h4>
+          <div class="form-grid">
+            <label><span>{{ t('analyzer.cvt.camInputMode') }}</span><select :value="profile.force.torqueCam.mode" @change="patch({ force: { torqueCam: { mode: textValue($event) === 'profile' ? 'profile' : 'disabled' } } })"><option value="disabled">{{ t('analyzer.cvt.notEnabled') }}</option><option value="profile">{{ t('analyzer.cvt.measuredCamProfile') }}</option></select></label>
+            <label><span>{{ t('analyzer.cvt.camAngleBasis') }}</span><select :value="profile.force.torqueCam.angleBasis" @change="patch({ force: { torqueCam: { angleBasis: textValue($event) === 'axial' ? 'axial' : 'circumferential' } } })"><option value="circumferential">{{ t('analyzer.cvt.circumferentialAngle') }}</option><option value="axial">{{ t('analyzer.cvt.axialAngle') }}</option></select></label>
+            <label><span>{{ t('analyzer.cvt.torsionTorque') }}</span><input type="number" inputmode="decimal" min="0" step="0.1" :value="profile.force.torqueCam.torsionTorqueNm ?? ''" @change="patch({ force: { torqueCam: { torsionTorqueNm: optionalNonNegativeNumber($event) } } })" /></label>
+            <label v-if="!profile.force.torqueCam.equalSplitAssumption"><span>{{ t('analyzer.cvt.torqueShare') }}</span><input type="number" inputmode="decimal" min="0" max="1" step="0.01" :value="profile.force.torqueCam.torqueShare ?? ''" @change="patch({ force: { torqueCam: { torqueShare: optionalNumber($event) } } })" /></label>
+          </div>
+          <label v-if="profile.force.torqueCam.mode === 'profile'" class="wide-field"><span>{{ t('analyzer.cvt.camProfile') }}</span><textarea rows="4" :value="formatPoints(profile.force.torqueCam.points, ['travelMm', 'angleDeg', 'effectiveRadiusMm'])" placeholder="0, 42, 38&#10;5, 44, 38&#10;10, 47, 39" @change="patch({ force: { torqueCam: { points: parsePoints($event, ['travelMm', 'angleDeg', 'effectiveRadiusMm']) as never } } })"></textarea></label>
+          <label class="check-field"><input type="checkbox" :checked="profile.force.torqueCam.equalSplitAssumption" @change="setEqualSplit(($event.target as HTMLInputElement).checked)" /><span>{{ t('analyzer.cvt.equalSplitAssumption') }}</span></label>
+
+          <h4>{{ t('analyzer.cvt.couplingHeading') }}</h4>
+          <div class="form-grid">
+            <label><span>{{ t('analyzer.cvt.couplingModel') }}</span><select :value="profile.force.couplingMode" @change="patch({ force: { couplingMode: textValue($event) as 'disabled' | 'ideal' | 'calibrated' } })"><option value="disabled">{{ t('analyzer.cvt.notEnabled') }}</option><option value="ideal">{{ t('analyzer.cvt.idealCoupling') }}</option><option value="calibrated">{{ t('analyzer.cvt.calibratedCoupling') }}</option></select></label>
+            <label v-if="profile.force.couplingMode === 'calibrated'"><span>{{ t('analyzer.cvt.couplingScale') }}</span><input type="number" inputmode="decimal" min="0" step="0.01" :value="profile.force.couplingScale ?? ''" @change="patch({ force: { couplingScale: optionalNumber($event) } })" /></label>
+            <label><span>{{ t('analyzer.cvt.frictionMin') }}</span><input type="number" inputmode="decimal" min="0" step="0.01" :value="profile.force.frictionCoefficientMin ?? ''" @change="patch({ force: { frictionCoefficientMin: optionalNumber($event) } })" /></label>
+            <label><span>{{ t('analyzer.cvt.frictionMax') }}</span><input type="number" inputmode="decimal" min="0" step="0.01" :value="profile.force.frictionCoefficientMax ?? ''" @change="patch({ force: { frictionCoefficientMax: optionalNumber($event) } })" /></label>
+          </div>
+          <p class="field-note">{{ t('analyzer.cvt.couplingWarning') }}</p>
+        </details>
+
         <aside class="honesty-boundary">
           <strong>{{ t('analyzer.cvt.boundaryHeading') }}</strong>
           <p>{{ t('analyzer.cvt.honestyBoundary') }}</p>
@@ -166,6 +255,13 @@ button:disabled { opacity: 0.45; cursor: default; }
 .editor-scroll { min-height: 0; overflow: auto; padding: 16px 20px 28px; display: grid; gap: 16px; }
 .form-section { padding: 14px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: calc(var(--radius) * 1.25); }
 .form-section h3 { margin-bottom: 12px; }
+.form-section h4 { margin: 18px 0 10px; }
+.force-section summary { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; cursor: pointer; }
+.force-section summary span { color: var(--color-text-muted); font-size: 0.78rem; }
+.wide-field { display: grid; gap: 5px; margin-top: 10px; color: var(--color-text-muted); font-size: 0.78rem; }
+.wide-field textarea { min-height: 96px; resize: vertical; padding: 8px 9px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); font-family: var(--font-mono, monospace); }
+.check-field { min-height: 36px; display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; }
+.check-field input { min-height: auto; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
 .reduction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .honesty-boundary { padding: 14px; border: 1px solid var(--color-warning, #c99100); border-radius: var(--radius); background: color-mix(in srgb, var(--color-warning, #c99100) 10%, transparent); }
