@@ -9,6 +9,12 @@ import {
   type ReductionStageInput,
 } from '@/domain/analysis/cvtDynamics'
 import type { CvtTraceConfig } from '@/domain/analysis/cvtTrace'
+import type {
+  CvtForceBalanceInput,
+  ForceCurvePoint,
+  RollerTrackPoint,
+  TorqueCamPoint,
+} from '@/domain/analysis/cvtForceBalance'
 
 export type DrivetrainKind = 'mt' | 'cvt'
 export type DrivetrainKindSelection = 'auto' | 'manual'
@@ -107,6 +113,45 @@ export interface CvtGeometryProfile {
   sleeveLengthMm: number | null
 }
 
+export interface CvtRollerProfile {
+  kind: 'roller' | 'slider' | 'mixed'
+  massesG: number[]
+  track: RollerTrackPoint[]
+  efficiency: number | null
+}
+
+export interface CvtSpringProfile {
+  catalogLabel: string
+  mode: 'disabled' | 'linear' | 'curve'
+  freeLengthMm: number | null
+  installedLengthMm: number | null
+  coilBindLengthMm: number | null
+  rateNPerMm: number | null
+  installedPreloadMm: number | null
+  forceCurve: ForceCurvePoint[]
+}
+
+export interface CvtTorqueCamProfile {
+  mode: 'disabled' | 'profile'
+  angleBasis: 'circumferential' | 'axial'
+  points: TorqueCamPoint[]
+  torqueShare: number | null
+  equalSplitAssumption: boolean
+  torsionTorqueNm: number | null
+}
+
+export interface CvtForceProfile {
+  roller: CvtRollerProfile
+  spring: CvtSpringProfile
+  torqueCam: CvtTorqueCamProfile
+  couplingMode: 'disabled' | 'ideal' | 'calibrated'
+  couplingScale: number | null
+  operatingFrontRpm: number | null
+  operatingRearTorqueNm: number | null
+  frictionCoefficientMin: number | null
+  frictionCoefficientMax: number | null
+}
+
 export interface CvtProfile {
   id: string
   name: string
@@ -118,9 +163,10 @@ export interface CvtProfile {
   finalReduction: FixedReductionInput
   belt: CvtBeltProfile
   geometry: CvtGeometryProfile
+  force: CvtForceProfile
 }
 
-export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'gearReduction' | 'finalReduction'>> & {
+export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'force' | 'gearReduction' | 'finalReduction'>> & {
   belt?: Partial<Omit<CvtBeltProfile, 'wedgeAngle'>> & { wedgeAngle?: Partial<CvtAngleInput> }
   geometry?: Partial<Omit<CvtGeometryProfile, 'frontSheaveAngle' | 'rearSheaveAngle'>> & {
     frontSheaveAngle?: Partial<CvtAngleInput>
@@ -128,6 +174,11 @@ export type CvtProfilePatch = Partial<Omit<CvtProfile, 'belt' | 'geometry' | 'ge
   }
   gearReduction?: Partial<FixedReductionInput>
   finalReduction?: Partial<FixedReductionInput>
+  force?: Partial<Omit<CvtForceProfile, 'roller' | 'spring' | 'torqueCam'>> & {
+    roller?: Partial<CvtRollerProfile>
+    spring?: Partial<CvtSpringProfile>
+    torqueCam?: Partial<CvtTorqueCamProfile>
+  }
 }
 
 function halfAngleDeg(angle: CvtAngleInput): number {
@@ -159,6 +210,56 @@ export function toCvtTraceConfig(profile: CvtProfile): CvtTraceConfig {
       profile.geometry.frontReferenceRadiusMm ?? profile.geometry.frontRadiusBoundsMm?.min ?? Number.NaN,
     rearReferenceRadiusMm:
       profile.geometry.rearReferenceRadiusMm ?? profile.geometry.rearRadiusBoundsMm?.max ?? Number.NaN,
+  }
+}
+
+/** Build the force solver input without filling any absent physical measurement. */
+export function toCvtForceBalanceInput(profile: CvtProfile): CvtForceBalanceInput {
+  const trace = toCvtTraceConfig(profile)
+  const spring = profile.force.spring.mode === 'linear'
+    ? {
+        mode: 'linear' as const,
+        rateNPerMm: profile.force.spring.rateNPerMm ?? Number.NaN,
+        installedPreloadMm: profile.force.spring.installedPreloadMm ?? Number.NaN,
+      }
+    : profile.force.spring.mode === 'curve'
+      ? { mode: 'curve' as const, points: profile.force.spring.forceCurve }
+      : null
+  const camPoints = profile.force.torqueCam.points.map((point) => ({
+    ...point,
+    angleDeg: profile.force.torqueCam.angleBasis === 'axial' ? 90 - point.angleDeg : point.angleDeg,
+  }))
+  return {
+    actuationKind: profile.actuationKind,
+    geometry: {
+      pitchLengthMm: trace.pitchLengthMm,
+      centerDistanceMm: trace.centerDistanceMm,
+      frontSheaveHalfAngleDeg: trace.frontSheaveHalfAngleDeg,
+      rearSheaveHalfAngleDeg: trace.rearSheaveHalfAngleDeg,
+      frontRadiusBoundsMm: trace.frontRadiusBoundsMm ?? { min: Number.NaN, max: Number.NaN },
+      rearRadiusBoundsMm: trace.rearRadiusBoundsMm ?? { min: Number.NaN, max: Number.NaN },
+      frontReferenceRadiusMm: trace.frontReferenceRadiusMm,
+      rearReferenceRadiusMm: trace.rearReferenceRadiusMm,
+    },
+    frontRpm: profile.force.operatingFrontRpm ?? Number.NaN,
+    rearTorqueNm: profile.force.operatingRearTorqueNm ?? Number.NaN,
+    roller: {
+      massesG: profile.force.roller.massesG,
+      track: profile.force.roller.track,
+      efficiency: profile.force.roller.efficiency,
+    },
+    spring,
+    torqueCam: profile.force.torqueCam.mode === 'profile'
+      ? {
+          points: camPoints,
+          torqueShare: profile.force.torqueCam.torqueShare,
+          torsionTorqueNm: profile.force.torqueCam.torsionTorqueNm ?? 0,
+        }
+      : null,
+    coupling: {
+      mode: profile.force.couplingMode,
+      calibratedScale: profile.force.couplingScale,
+    },
   }
 }
 
@@ -261,6 +362,33 @@ function defaultCvtProfile(
       frontBarePulleyDiameterMm: null,
       rearBarePulleyDiameterMm: null,
       sleeveLengthMm: null,
+    },
+    force: {
+      roller: { kind: 'roller', massesG: [], track: [], efficiency: null },
+      spring: {
+        catalogLabel: '',
+        mode: 'disabled',
+        freeLengthMm: null,
+        installedLengthMm: null,
+        coilBindLengthMm: null,
+        rateNPerMm: null,
+        installedPreloadMm: null,
+        forceCurve: [],
+      },
+      torqueCam: {
+        mode: 'disabled',
+        angleBasis: 'circumferential',
+        points: [],
+        torqueShare: null,
+        equalSplitAssumption: false,
+        torsionTorqueNm: null,
+      },
+      couplingMode: 'disabled',
+      couplingScale: null,
+      operatingFrontRpm: null,
+      operatingRearTorqueNm: null,
+      frictionCoefficientMin: null,
+      frictionCoefficientMax: null,
     },
   }
 }
@@ -376,6 +504,10 @@ function positiveNumberOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
 }
 
+function nonNegativeNumberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
 function sanitizeAngle(value: unknown, fallback: CvtAngleInput): CvtAngleInput {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<CvtAngleInput>) : {}
   return {
@@ -412,6 +544,48 @@ function sanitizeReduction(value: unknown, fallback: FixedReductionInput): Fixed
   }
 }
 
+function sanitizeMasses(value: unknown): number[] {
+  return Array.isArray(value)
+    ? value.map(positiveNumberOrNull).filter((mass): mass is number => mass != null)
+    : []
+}
+
+function sanitizeRollerTrack(value: unknown): RollerTrackPoint[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const raw = entry as Partial<RollerTrackPoint>
+    const travelMm = nonNegativeNumberOrNull(raw.travelMm)
+    const radiusMm = positiveNumberOrNull(raw.radiusMm)
+    return travelMm != null && radiusMm != null ? [{ travelMm, radiusMm }] : []
+  }).sort((a, b) => a.travelMm - b.travelMm)
+}
+
+function sanitizeForceCurve(value: unknown): ForceCurvePoint[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const raw = entry as Partial<ForceCurvePoint>
+    const travelMm = nonNegativeNumberOrNull(raw.travelMm)
+    const pointValue = nonNegativeNumberOrNull(raw.value)
+    return travelMm != null && pointValue != null ? [{ travelMm, value: pointValue }] : []
+  }).sort((a, b) => a.travelMm - b.travelMm)
+}
+
+function sanitizeCamPoints(value: unknown): TorqueCamPoint[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+    const raw = entry as Partial<TorqueCamPoint>
+    const travelMm = nonNegativeNumberOrNull(raw.travelMm)
+    const angleDeg = positiveNumberOrNull(raw.angleDeg)
+    const effectiveRadiusMm = positiveNumberOrNull(raw.effectiveRadiusMm)
+    return travelMm != null && angleDeg != null && angleDeg < 90 && effectiveRadiusMm != null
+      ? [{ travelMm, angleDeg, effectiveRadiusMm }]
+      : []
+  }).sort((a, b) => a.travelMm - b.travelMm)
+}
+
 /** Sanitize one persisted/imported profile without inventing missing physical values. */
 export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, fallback?: CvtProfile): CvtProfile {
   const base = fallback ?? defaultCvtProfile()
@@ -420,6 +594,14 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
     raw.belt && typeof raw.belt === 'object' && !Array.isArray(raw.belt) ? raw.belt : {}
   const rawGeometry =
     (raw.geometry && typeof raw.geometry === 'object' && !Array.isArray(raw.geometry) ? raw.geometry : {}) as Partial<CvtGeometryProfile>
+  const rawForce =
+    (raw.force && typeof raw.force === 'object' && !Array.isArray(raw.force) ? raw.force : {}) as Partial<CvtForceProfile>
+  const rawRoller =
+    (rawForce.roller && typeof rawForce.roller === 'object' && !Array.isArray(rawForce.roller) ? rawForce.roller : {}) as Partial<CvtRollerProfile>
+  const rawSpring =
+    (rawForce.spring && typeof rawForce.spring === 'object' && !Array.isArray(rawForce.spring) ? rawForce.spring : {}) as Partial<CvtSpringProfile>
+  const rawCam =
+    (rawForce.torqueCam && typeof rawForce.torqueCam === 'object' && !Array.isArray(rawForce.torqueCam) ? rawForce.torqueCam : {}) as Partial<CvtTorqueCamProfile>
   return {
     id: typeof raw.id === 'string' && raw.id.trim() ? raw.id : base.id,
     name: typeof raw.name === 'string' ? raw.name : base.name,
@@ -450,6 +632,46 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
       frontBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.frontBarePulleyDiameterMm),
       rearBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.rearBarePulleyDiameterMm),
       sleeveLengthMm: positiveNumberOrNull(rawGeometry.sleeveLengthMm),
+    },
+    force: {
+      roller: {
+        kind: rawRoller.kind === 'slider' || rawRoller.kind === 'mixed' ? rawRoller.kind : 'roller',
+        massesG: sanitizeMasses(rawRoller.massesG),
+        track: sanitizeRollerTrack(rawRoller.track),
+        efficiency: (() => {
+          const efficiency = positiveNumberOrNull(rawRoller.efficiency)
+          return efficiency != null && efficiency <= 1 ? efficiency : null
+        })(),
+      },
+      spring: {
+        catalogLabel: typeof rawSpring.catalogLabel === 'string' ? rawSpring.catalogLabel : base.force.spring.catalogLabel,
+        mode: rawSpring.mode === 'linear' || rawSpring.mode === 'curve' ? rawSpring.mode : 'disabled',
+        freeLengthMm: positiveNumberOrNull(rawSpring.freeLengthMm),
+        installedLengthMm: positiveNumberOrNull(rawSpring.installedLengthMm),
+        coilBindLengthMm: positiveNumberOrNull(rawSpring.coilBindLengthMm),
+        rateNPerMm: positiveNumberOrNull(rawSpring.rateNPerMm),
+        installedPreloadMm: nonNegativeNumberOrNull(rawSpring.installedPreloadMm),
+        forceCurve: sanitizeForceCurve(rawSpring.forceCurve),
+      },
+      torqueCam: {
+        mode: rawCam.mode === 'profile' ? 'profile' : 'disabled',
+        angleBasis: rawCam.angleBasis === 'axial' ? 'axial' : 'circumferential',
+        points: sanitizeCamPoints(rawCam.points),
+        torqueShare: (() => {
+          const share = positiveNumberOrNull(rawCam.torqueShare)
+          return share != null && share < 1 ? share : null
+        })(),
+        equalSplitAssumption: rawCam.equalSplitAssumption === true && rawCam.torqueShare === 0.5,
+        torsionTorqueNm: nonNegativeNumberOrNull(rawCam.torsionTorqueNm),
+      },
+      couplingMode: rawForce.couplingMode === 'ideal' || rawForce.couplingMode === 'calibrated'
+        ? rawForce.couplingMode
+        : 'disabled',
+      couplingScale: positiveNumberOrNull(rawForce.couplingScale),
+      operatingFrontRpm: positiveNumberOrNull(rawForce.operatingFrontRpm),
+      operatingRearTorqueNm: nonNegativeNumberOrNull(rawForce.operatingRearTorqueNm),
+      frictionCoefficientMin: positiveNumberOrNull(rawForce.frictionCoefficientMin),
+      frictionCoefficientMax: positiveNumberOrNull(rawForce.frictionCoefficientMax),
     },
   }
 }
@@ -637,6 +859,13 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
           ...patch.geometry,
           frontSheaveAngle: { ...profile.geometry.frontSheaveAngle, ...patch.geometry?.frontSheaveAngle },
           rearSheaveAngle: { ...profile.geometry.rearSheaveAngle, ...patch.geometry?.rearSheaveAngle },
+        },
+        force: {
+          ...profile.force,
+          ...patch.force,
+          roller: { ...profile.force.roller, ...patch.force?.roller },
+          spring: { ...profile.force.spring, ...patch.force?.spring },
+          torqueCam: { ...profile.force.torqueCam, ...patch.force?.torqueCam },
         },
         gearReduction: { ...profile.gearReduction, ...patch.gearReduction },
         finalReduction: { ...profile.finalReduction, ...patch.finalReduction },

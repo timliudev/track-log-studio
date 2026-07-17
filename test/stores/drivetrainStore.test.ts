@@ -8,6 +8,7 @@ import {
   mergeMtFormState,
   mergeCvtFormState,
   mergeCvtProfile,
+  toCvtForceBalanceInput,
 } from '@/stores/drivetrainStore'
 
 const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
@@ -58,6 +59,9 @@ describe('drivetrainStore persistence', () => {
     expect(s.activeCvtProfile.geometry.centerDistanceMm).toBeNull()
     expect(s.activeCvtProfile.geometry.frontSheaveAngle.valueDeg).toBeNull()
     expect(s.activeCvtProfile.gearReduction.ratio).toBe(0)
+    expect(s.activeCvtProfile.force.roller.track).toEqual([])
+    expect(s.activeCvtProfile.force.spring.mode).toBe('disabled')
+    expect(s.activeCvtProfile.force.couplingMode).toBe('disabled')
   })
 
   it('persists profile geometry and keeps wheel conversion synced to the active profile', async () => {
@@ -89,6 +93,45 @@ describe('drivetrainStore persistence', () => {
     expect(s2.activeCvtProfile.finalReduction.stages).toHaveLength(2)
     expect(s2.activeCvtProfile.tireSpec).toBe('100/90-10')
     expect(s2.activeCvtProfile.wheelCircumferenceMm).toBe(s2.cvt.wheelCircumferenceMm)
+  })
+
+  it('persists measured force parameters without converting a catalog rpm label', async () => {
+    const s1 = useDrivetrainStore()
+    s1.updateCvtProfile(s1.activeCvtProfile.id, {
+      force: {
+        roller: {
+          massesG: [9, 9, 9, 9, 9, 9],
+          track: [{ travelMm: 0, radiusMm: 24 }, { travelMm: 12, radiusMm: 36 }],
+          efficiency: 1,
+        },
+        spring: {
+          catalogLabel: '1500 rpm',
+          mode: 'linear',
+          rateNPerMm: 11,
+          installedPreloadMm: 8,
+        },
+        torqueCam: {
+          mode: 'profile',
+          points: [
+            { travelMm: 0, angleDeg: 42, effectiveRadiusMm: 38 },
+            { travelMm: 10, angleDeg: 45, effectiveRadiusMm: 38 },
+          ],
+          torqueShare: 0.5,
+          equalSplitAssumption: true,
+        },
+        couplingMode: 'ideal',
+        operatingFrontRpm: 7500,
+        operatingRearTorqueNm: 20,
+      },
+    })
+    await nextTick()
+    setActivePinia(createPinia())
+    const force = useDrivetrainStore().activeCvtProfile.force
+    expect(force.roller.massesG).toHaveLength(6)
+    expect(force.spring.catalogLabel).toBe('1500 rpm')
+    expect(force.spring.rateNPerMm).toBe(11)
+    expect(force.torqueCam.equalSplitAssumption).toBe(true)
+    expect(force.couplingMode).toBe('ideal')
   })
 
   it('adds, switches, duplicates and removes independent CVT profiles', () => {
@@ -517,6 +560,30 @@ describe('toMtDrivetrainSpec', () => {
     s.setMt({ primaryReduction: 0 })
     const spec = toMtDrivetrainSpec(s.mt)
     expect(spec.primaryReduction).toBeUndefined()
+  })
+})
+
+describe('toCvtForceBalanceInput', () => {
+  it('does not fill missing force measurements and converts axial cam angles explicitly', () => {
+    const s = useDrivetrainStore()
+    s.updateCvtProfile(s.activeCvtProfile.id, {
+      force: {
+        torqueCam: {
+          mode: 'profile',
+          angleBasis: 'axial',
+          points: [
+            { travelMm: 0, angleDeg: 30, effectiveRadiusMm: 40 },
+            { travelMm: 10, angleDeg: 35, effectiveRadiusMm: 40 },
+          ],
+        },
+      },
+    })
+    const input = toCvtForceBalanceInput(s.activeCvtProfile)
+    expect(input.frontRpm).toBeNaN()
+    expect(input.roller?.efficiency).toBeNull()
+    expect(input.spring).toBeNull()
+    expect(input.coupling.mode).toBe('disabled')
+    expect(input.torqueCam?.points[0].angleDeg).toBe(60)
   })
 })
 

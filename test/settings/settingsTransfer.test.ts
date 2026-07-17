@@ -159,6 +159,16 @@ describe('settingsTransfer — parseImportBundle', () => {
         centerDistanceMm: 205,
         frontSheaveAngle: { valueDeg: 13.8, basis: 'half' },
       },
+      force: {
+        ...cvt.profiles[0].force,
+        roller: {
+          ...cvt.profiles[0].force.roller,
+          massesG: [9, 9, 9, 9, 9, 9],
+          track: [{ travelMm: 0, radiusMm: 24 }, { travelMm: 10, radiusMm: 34 }],
+          efficiency: 1,
+        },
+        couplingMode: 'ideal',
+      },
     }
     const result = parseImportBundle(JSON.stringify({ drivetrain: { kind: 'cvt', cvt } }))
     expect(result.ok).toBe(true)
@@ -168,6 +178,9 @@ describe('settingsTransfer — parseImportBundle', () => {
     expect(profile.actuationKind).toBe('electronic')
     expect(profile.belt.outsideLengthMm).toBe(882)
     expect(profile.geometry.frontSheaveAngle).toEqual({ valueDeg: 13.8, basis: 'half' })
+    expect(profile.force.roller.massesG).toEqual([9, 9, 9, 9, 9, 9])
+    expect(profile.force.roller.track).toHaveLength(2)
+    expect(profile.force.couplingMode).toBe('ideal')
   })
 
   it('migrates an older export without a selection marker to manual', () => {
