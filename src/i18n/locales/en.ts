@@ -195,8 +195,8 @@ export default {
     trackChannel: 'Channel',
     trackColor: 'Track colour',
     mapBackground: {
-      title: 'Base map', layer: 'Layer', none: 'No base map', image: 'Uploaded image', osm: 'OpenStreetMap streets', satellite: 'Satellite (Mapbox)',
-      upload: 'Upload image (PNG/JPEG/WebP, max 10 MB)', uploadTypeError: 'Only PNG, JPEG, or WebP images are accepted.', uploadSizeError: 'The image must be larger than 0 and no more than 10 MB.',
+      title: 'Base map', layer: 'Layer', none: 'No base map', image: 'Custom image', osm: 'OpenStreetMap streets', satellite: 'Satellite (Mapbox)',
+      upload: 'Choose image (PNG/JPEG/WebP/SVG, max 10 MB)', uploadTypeError: 'Only PNG, JPEG, WebP, or SVG images are accepted.', uploadSizeError: 'The image must be larger than 0 and no more than 10 MB.',
       mapboxKey: 'Mapbox API key', dragAlign: 'Drag to align image',
       up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right', zoomIn: 'Zoom image in', zoomOut: 'Zoom image out', reset: 'Reset image alignment',
     },
