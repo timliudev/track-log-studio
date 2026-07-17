@@ -473,6 +473,147 @@ T_r\approx\eta_{cvt}\,q\,T_e
 
 ---
 
+## 4. 敏感度分析：從零件變更到 `Δrpm`
+
+### 4.1 先定義「變速轉速」在哪個 operating point
+
+「換 1 g 會差幾 rpm」若沒有指定比值、負載、油門與升／降檔方向，並不是單一物理常數。本文定義三種可重現輸出：
+
+1. **定比值敏感度**：在指定 `q*`、後盤扭矩 `T_r*`、方向與溫度下，求式 (2-14) 的平衡轉速 `n_f*`。
+2. **全行程調速曲線**：對 `q` 的 10/25/50/75/90% 行程各求 `n_f(q)`，顯示零件變更後整條曲線，不只報一個平均。
+3. **實測工況敏感度**：以某圈 log 的 `(T_r(t),q(t),dir(t),weather)` 重播模型，報中位數、10–90 percentile 與區段圖。
+
+UI 的「珠重總重 ±1 g → 變速轉速 ±Δrpm」應預設使用第 2 種並明列基準，例如「50% 行程、後盤 12 N·m、熱車升檔」；否則不同人得到的數字不可比較。
+
+### 4.2 隱函數敏感度
+
+平衡由 `Ψ(q,ω_f,T_r,p)=0` 定義。在固定 `q*` 與 `T_r*` 下，任一參數 `p_k` 對平衡轉速的局部敏感度為：
+
+\[
+\frac{\partial\omega_f^*}{\partial p_k}
+=-\frac{\partial\Psi/\partial p_k}{\partial\Psi/\partial\omega_f}
+\tag{4-1}
+\]
+
+**來源：**本文件對式 (2-14) 做隱函數微分。若分母接近 0，代表平衡曲線近水平／可能在分岔或端點附近，局部 `rpm/unit` 會爆大；此時 UI 應顯示「非線性／端點敏感」，不可只顯示一個巨大數字。
+
+數值上可用有界中央差分：
+
+\[
+S_{p_k}\approx
+\frac{n_f(p_k+\Delta p_k)-n_f(p_k-\Delta p_k)}{2\Delta p_k}
+\tag{4-2}
+\]
+
+**來源：**式 (4-1) 的二階中央差分近似。每個擾動點都要重新解完整平衡與摩擦容量，而非把原曲線上下平移。若 `p_k±Δp_k` 超出物理界限，改用單邊差分並標示。
+
+### 4.3 珠重 `±1 g` 的解析基準與 200 rpm/g 對照
+
+若固定 `q/T_r`、忽略摩擦與前盤彈簧，式 (2-3) 可寫成 `F_f=A(q)M_jω_f²`；平衡所需前盤力 `B` 固定時：
+
+\[
+\omega_f^*=\sqrt{\frac{B}{A(q)M_j}},
+\qquad
+\frac{\partial n_f^*}{\partial M_j}
+=-\frac{n_f^*}{2M_j}
+\tag{4-3}
+\]
+
+**來源：**本文件由式 (2-3) 與式 (2-14) 在上述簡化假設下推導。它提供量級 sanity check：珠重增加，平衡轉速下降；而且關係是反平方根，不是全域線性。
+
+例：總珠重 `M_j=54 g`、基準 `8000 rpm` 時，式 (4-3) 的局部斜率約為 **−74 rpm／總重 g**。若六顆都各加 1 g（總重加 6 g），精確反平方根估計為：
+
+\[
+\Delta n=8000\left(\sqrt{54/60}-1\right)\approx-410\ \mathrm{rpm}
+\tag{4-4}
+\]
+
+**來源：**式 (4-3) 代數計算；只作量級例，不是特定車種預測。
+
+因此「實務約 200 rpm/g」必須先釐清 `g` 的定義：
+
+- 若指**整組總重**增加 1 g，54 g／8000 rpm 的理想基準只有約 74 rpm/g；實測 200 表示 `K_stat`、珠道效率、負載、量測區段或端點效應顯著，應以 calibration 覆蓋理想斜率。
+- 若指常見口語「每顆由 9 g 換成 10 g」，六珠總重其實增加 6 g；理想量級約 410 rpm，而實測 200 rpm 並不矛盾，因後盤力、珠道斜率與行程都在變。
+
+產品輸入與報表必須同時顯示「單顆標稱重量」「顆數」「總重變化」，禁止只寫 `±1 g`。建議曲線同時畫：理想 `M^{-1/2}` 虛線、完整模型實線、實測點；200 rpm/g 作對照標記，不作預設校正常數。
+
+### 4.4 全域 sweep 與不確定度帶
+
+局部導數只適合小變更。實際零件建議用：
+
+1. 對珠重、彈簧預載、`k_r`、凸輪角、套管長度逐項掃描實際可購／可裝值。
+2. 每組在完整 `q` 網格與至少低／中／高三個 `T_r` 求解式 (2-14)。
+3. 對 C 級參數（`K_stat/η_r/λ_T/μ`）使用校正分布或上下界重算，輸出中位線與 10–90% band。
+4. 檢查每點是否超出盤徑／行程、彈簧 coil-bind、珠道端點或式 (2-15) 摩擦容量。
+5. 將升檔、降檔分開；兩條線間距就是模型可表達的遲滯，不用一條平均線掩蓋。
+
+推薦輸出：`rpm vs q`、`Δrpm vs total roller mass`、`slip margin vs torque`、`q endpoint vs sleeve length`，另附「最敏感參數 tornado chart」。只有在參數範圍與 operating point 相同時，才比較不同 setup 的斜率。
+
+### 4.5 套管長度的影響路徑
+
+套管／boss 長度首先是**幾何邊界參數**，不是像珠重一樣直接進入 `m r ω²`：
+
+```text
+套管／墊片厚度
+  → 前盤最小間隙、可閉合行程與 x_f 零點
+  → R_f,min / R_f,max 與可達 q 範圍
+  → 同一 q 對應的滾珠位置 r_j(x_f)、局部斜率 dr_j/dx_f
+  → 前盤軸向力 F_f 與平衡 rpm
+```
+
+若只是端點 stop 改變，行程中段的變速轉速可能幾乎不變，只改低速端／高速端能否到達；若整個移動盤相對珠道導板的零點也被改變，同一 `q` 會落在不同珠道斜率，才會改整條調速曲線。不同總成的墊片位置與受力路徑不同，故不設定「加長一定升 rpm／降 rpm」的通則；需量 `x_f` 零點與端點後再跑 §4.4 sweep。
+
+### 4.6 天氣與溫度的影響路徑
+
+乾空氣的一階密度可用：
+
+\[
+\rho=\frac{p_{atm}}{R_{air}T_{air}}
+\tag{4-5}
+\]
+
+**來源：**NASA Glenn 的 ideal-gas equation of state [S17]；`T_air` 必須用 K。濕度高時水氣改變混合氣密度，第一版可用天氣服務提供的 density，或標示「乾空氣近似」。
+
+速可達與騎士的空氣阻力：
+
+\[
+F_{aero}=\frac12\rho C_dA\,(v-v_{wind})^2
+\tag{4-6}
+\]
+
+**來源：**NASA Glenn drag equation [S15]，相對風速改寫。縱向輪端需求可寫成：
+
+\[
+F_{road}=ma+mg\sin\beta+C_{rr}mg\cos\beta+F_{aero}
+\tag{4-7}
+\]
+
+**來源：**車輛縱向 Newton 平衡，參考 Jazar [S18] 的 longitudinal dynamics；未量坡度、風與 `C_dA/C_rr` 時應標成估計。
+
+力平衡的天氣路徑為：
+
+```text
+氣壓／氣溫／濕度 → 空氣密度 ρ → 空阻 → 輪端需求扭矩
+→ 後盤 T_r → torque-cam 軸向力 → 所需前盤離心力 → 平衡 rpm
+```
+
+定壓下升溫會降低 `ρ` 與同速空阻，單看負載路徑會降低 torque-cam 反力；但同時還有三條方向未必相同的路徑：
+
+- 進氣密度／濕度改變小型 SI 引擎可用 torque；Olmos 等人的小型引擎試驗甚至指出通用 SAE J1349／濕度修正未必完全補償特定引擎 [S14]。
+- 皮帶本體溫度改變橫向剛性、遲滯與摩擦；[S3] 的材料值與橫向剛性即分室溫／60°C 處理。
+- 大彈簧與盤面溫度、皮帶磨耗會改預載與 `K_stat`，其量級需實測。
+
+因此 app 應把 `T_air`（環境）、`T_belt`（皮帶／CVT 箱）與 engine correction 分開。沒有 `T_belt` 感測時，只能以「冷車／熱車」類別或騎乘時間代理，不能聲稱由氣象溫度直接得到皮帶摩擦係數。
+
+### 4.7 敏感度結果的驗證門檻
+
+- 至少保留一組未參與校正的珠重或彈簧 setup 作 hold-out；只有 hold-out 的 `rpm(q)` 誤差也在容許範圍內，才可稱為預測。
+- 報告需同時列絕對誤差、方向是否正確、升／降檔差與滑差警示；只命中一個「變速 rpm」不足以驗證模型。
+- 若模型對總重 1 g 預測 70 rpm、實測 200 rpm，不得把實測點刪掉或偷偷重定義單位；應把差異歸入 `K_stat/η_r/load` 的識別工作。
+- 每次換皮帶、torque cam、套管位置或大彈簧，依 §3.6 降級 calibration，重新驗證。
+
+---
+
 ## 引用文獻
 
 - **[S1]** Vincenzo La Battaglia, Alessandro Giorgetti, Stefano Marini, Gabriele Arcidiacono, Paolo Citti, “Kinematic Analysis of V-Belt CVT for Efficient System Development in Motorcycle Applications,” *Machines*, 10(1), 16, 2022. <https://doi.org/10.3390/machines10010016>
@@ -491,3 +632,5 @@ T_r\approx\eta_{cvt}\,q\,T_e
 - **[S14]** Adrian Olmos Jr., Steven Griffin, Gary Price, Nathan Beilke, Scott Sajdowitz, “Investigating Humidity Effects on Small Offroad Engine SI Performance and Emissions,” SAE Technical Paper 2021-01-1224, 2021. <https://doi.org/10.4271/2021-01-1224>
 - **[S15]** NASA Glenn Research Center, “Drag of a Sphere” （空氣阻力方程與各變數定義）. <https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-of-a-sphere/>
 - **[S16]** Enrico Nino Manes, “Design and Modeling of a Novel Continuously Variable Transmission,” Ph.D. dissertation, Purdue University. <https://docs.lib.purdue.edu/dissertations/AAI3481098/>
+- **[S17]** NASA Glenn Research Center, “Equation of State (Ideal Gas).” <https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/equation-of-state-ideal-gas-2/>
+- **[S18]** Reza N. Jazar, *Vehicle Dynamics: Theory and Application*, 3rd ed., Springer, 2017. <https://doi.org/10.1007/978-3-319-53441-1>
