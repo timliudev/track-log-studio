@@ -329,8 +329,15 @@ export function detectLapsByLine(
 
 /**
  * Detect laps from the ECU's own lap channel when present. Uses IR_LapNumber
- * (a lap counter that increments) to find boundaries; lap duration comes from
- * the time axis between boundaries to stay consistent with the line method.
+ * (a lap counter that increments) to find boundaries; a boundary is the first
+ * logged sample after its value changes. Lap duration comes from the time axis
+ * between those boundaries to stay consistent with the line method.
+ *
+ * The boundary is therefore limited by the source Time sampling interval
+ * (commonly 31.25 ms). Do not mix or interpolate the undocumented IR_LapTime
+ * counter here: its clock and reset semantics are not verified. A vendor tool
+ * that timestamps another edge or clock can consequently differ by a fixed
+ * offset; this detector deliberately does not force a correction.
  * Returns [] if there is no IR_LapNumber channel or fewer than two boundaries.
  *
  * `timeMs` is the per-sample time axis; its units determine lapTimeMs units.

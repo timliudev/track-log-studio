@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { detectLapsByLine, detectLapsByChannel, inferLapLineFromChannel, segmentsIntersect, planarGate, walkLapGates, type LapLine } from '@/domain/analysis/laps'
+import { cumulativeDistanceM } from '@/domain/analysis/distance'
+import { lapDistanceM } from '@/domain/analysis/lapDistance'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel, LogMeta } from '@/domain/model/types'
@@ -21,6 +23,13 @@ const meta: LogMeta = { formatId: 'superX', createdDate: null, headerInfo: {} }
 
 function ch(name: string, data: number[]): Channel {
   return { name, rawName: name, description: undefined, data: new Float32Array(data) }
+}
+
+function float64Bits(value: number): string {
+  const bytes = new ArrayBuffer(Float64Array.BYTES_PER_ELEMENT)
+  const view = new DataView(bytes)
+  view.setFloat64(0, value)
+  return view.getBigUint64(0).toString()
 }
 
 describe('walkLapGates sampled-line crossing', () => {
@@ -173,6 +182,44 @@ describe('detectLapsByChannel', () => {
     const session = new LogSession([ch('IR_LapNumber', [1, 1, 1, 2, 2])], meta)
     const timeMs = new Float64Array([0, 1000, 2000, 3000, 4000])
     expect(detectLapsByChannel(session, timeMs)).toEqual([])
+  })
+
+  it('rebuilds ECU lap times and GPS distances with identical IEEE-754 results', () => {
+    // Typical ECU timestamps advance in 31.25 ms ticks. The deliberately
+    // non-linear path ensures each cumulative-distance subtraction is real
+    // floating-point work rather than a convenient integer fixture.
+    const raw = {
+      time: [0, 31.25, 62.5, 93.75, 125, 156.25, 187.5, 218.75, 250, 281.25, 312.5, 343.75, 375, 406.25, 437.5, 468.75, 500, 531.25, 562.5, 593.75, 625, 656.25],
+      lapNumber: [4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 8, 8],
+      lat: [23.001, 23.00107, 23.00113, 23.00121, 23.00126, 23.00132, 23.00141, 23.0015, 23.00156, 23.00167, 23.00173, 23.00181, 23.00188, 23.00196, 23.00204, 23.00211, 23.0022, 23.00226, 23.00235, 23.00243, 23.0025, 23.00258],
+      lon: [120.001, 120.00106, 120.00117, 120.00121, 120.00132, 120.00143, 120.00147, 120.00158, 120.00169, 120.00174, 120.00186, 120.00194, 120.00205, 120.0021, 120.0022, 120.00231, 120.00237, 120.00248, 120.00255, 120.00267, 120.00274, 120.00284],
+    }
+
+    const snapshots: Array<Array<{ startIdx: number; endIdx: number; lapTimeBits: string; distanceBits: string }>> = []
+    for (let attempt = 0; attempt < 32; attempt++) {
+      const session = new LogSession([
+        ch('Time', raw.time),
+        ch('IR_LapNumber', raw.lapNumber),
+        ch('GPS_Lat', raw.lat),
+        ch('GPS_Lon', raw.lon),
+      ], meta)
+      const timeMs = Float64Array.from(session.get('Time')!.data)
+      const track = makeTrack(
+        Array.from(session.get('GPS_Lat')!.data),
+        Array.from(session.get('GPS_Lon')!.data),
+      )
+      const cumulativeDistance = cumulativeDistanceM(track.lat, track.lon, track.valid)
+      snapshots.push(detectLapsByChannel(session, timeMs).map((lap) => ({
+        startIdx: lap.startIdx,
+        endIdx: lap.endIdx,
+        lapTimeBits: float64Bits(lap.lapTimeMs),
+        distanceBits: float64Bits(lapDistanceM(lap, cumulativeDistance)),
+      })))
+    }
+
+    expect(snapshots).toHaveLength(32)
+    expect(snapshots.every((snapshot) => JSON.stringify(snapshot) === JSON.stringify(snapshots[0]))).toBe(true)
+    expect(snapshots[0]).toHaveLength(3)
   })
 })
 
