@@ -54,12 +54,15 @@ Once installed, the app works **offline** (previously loaded pages and code are 
 | `.loga` | aRacer ECU raw log (Super2 / SuperX / RaceAMP / aRacer X tune App headers all auto-detected) |
 | `.nmea` | a previously converted NMEA/RC3 log |
 | `.vbo` | Racelogic VBOX format (including files exported by this app, or from other sources) |
+| `.csv` | Generic telemetry CSV; its first nonblank row must be a header containing `Time` or `Timer` |
 | `.rcz` | RaceChrono log (ZIP containing session.json + binary channel data) |
 | `.xrk` | AiM Solo 2 DL / MyChron5 log |
 | `.rcnx` | Qstarz LT-Q6000 / Q6000S (QRacing) log |
 | `.zip` | a share-export from the aRacer x Tune app; auto-extracted and detected on upload |
 
 The app auto-detects the format from the file extension and content on upload — you don't need to manually pick "which format to import."
+
+For a generic CSV, use comma-separated, one-sample-per-row data. Header names become channel names; blank or non-numeric cells are treated as missing values. Re-importing a CSV exported by this app also preserves its tuning notes and suspension-calibration data.
 
 #### RCNX multi-session files
 

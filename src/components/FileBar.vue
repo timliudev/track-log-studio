@@ -105,6 +105,7 @@ const ecuExt = computed(() => dotExt('loga'))
 const gpsFormats = computed(() => [
   { id: 'nmea', ext: dotExt('nmea') },
   { id: 'vbo', ext: dotExt('vbo') },
+  { id: 'csv', ext: dotExt('csv') },
   { id: 'rcz', ext: dotExt('rcz') },
   { id: 'xrk', ext: dotExt('xrk') },
   { id: 'rcnx', ext: dotExt('rcnx') },

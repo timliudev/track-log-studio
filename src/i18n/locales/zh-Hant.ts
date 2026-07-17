@@ -97,6 +97,7 @@ export default {
       gpsFormat: {
         nmea: '先前已轉出的 NMEA/RC3 記錄',
         vbo: 'Racelogic VBOX（Circuit Tools 3 / RaceChrono）',
+        csv: '一般 CSV 遙測（標題列需有 Time 或 Timer）',
         rcz: 'RaceChrono 記錄檔',
         xrk: 'AiM Solo 2 DL / MyChron5',
         rcnx: 'Qstarz LT-Q6000（QRacing）',

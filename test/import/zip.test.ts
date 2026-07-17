@@ -33,6 +33,12 @@ describe('extractLogFiles', () => {
     expect(extractLogFiles(zip)).toEqual([])
   })
 
+  it('extracts a registered generic CSV log', () => {
+    const zip = zipSync({ 'telemetry.csv': strToU8('Time,RPM\n0,1000\n') })
+    const logs = extractLogFiles(zip)
+    expect(logs.map((log) => log.name)).toEqual(['telemetry.csv'])
+  })
+
   it('refuses to inflate beyond the uncompressed safety cap (zip-bomb guard)', () => {
     // 4 KB of log content with a 1 KB cap → the filter trips before inflating.
     const big = strToU8('x'.repeat(4096))

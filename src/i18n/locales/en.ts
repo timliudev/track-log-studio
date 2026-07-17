@@ -100,6 +100,7 @@ export default {
       gpsFormat: {
         nmea: 'previously exported NMEA/RC3 log',
         vbo: 'Racelogic VBOX (Circuit Tools 3 / RaceChrono)',
+        csv: 'general CSV telemetry (header row with Time or Timer)',
         rcz: 'RaceChrono log file',
         xrk: 'AiM Solo 2 DL / MyChron5',
         rcnx: 'Qstarz LT-Q6000 (QRacing)',

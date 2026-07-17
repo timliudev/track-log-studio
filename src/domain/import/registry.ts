@@ -2,6 +2,7 @@ import type { Importer, ImportCandidate } from './Importer'
 import { logaImporter } from './loga/LogaImporter'
 import { nmeaImporter } from './nmea/NmeaImporter'
 import { vboImporter } from './vbo/VboImporter'
+import { csvImporter } from './csv/CsvImporter'
 import { rczImporter } from './rcz/RczImporter'
 import { rcnxImporter } from './rcnx/RcnxImporter'
 import { xrkImporter } from './xrk/XrkImporter'
@@ -11,6 +12,7 @@ export const IMPORTERS: readonly Importer[] = [
   logaImporter,
   nmeaImporter,
   vboImporter,
+  csvImporter,
   rczImporter,
   rcnxImporter,
   xrkImporter,
