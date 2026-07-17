@@ -16,6 +16,7 @@ import { resolveClockTimezoneOffset, sessionStartAnchor } from '@/domain/analysi
 import { lapColor } from './lapColors'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
+import { planTimeSeriesAxes } from '@/domain/analysis/timeSeriesAxes'
 import {
   availableDerivedAnalyzerChannels,
   isDerivedAnalyzerChannel,
@@ -134,6 +135,13 @@ function channelDisplayLabel(id: string): string {
   const label = channelLabel(id)
   return unit ? `${label} (${unit})` : label
 }
+const valueAxes = computed(() => planTimeSeriesAxes(
+  present.value.map((id) => ({
+    id,
+    label: channelDisplayLabel(id),
+    unit: unitsByChannel.value.get(id),
+  })),
+))
 const updateRateHz = computed<number | null>(() => {
   let highest: number | null = null
   for (const source of presentSources.value) {
@@ -215,7 +223,7 @@ const timelineSeries = computed<uPlot.Series[]>(() => [
     stroke: entry.color,
     dash: dash(entry.channelIndex),
     width: entry.primary ? 1.5 : 1,
-    scale: entry.channel,
+    scale: valueAxes.value.scaleFor(entry.channel),
     spanGaps: true,
   })),
 ])
@@ -309,7 +317,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
         stroke: s.color,
         dash: dash(s.channelIndex),
         width: 1 + (s.lapOrder % 3) * 0.35,
-        scale: present.value[s.channelIndex],
+        scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
       })),
     ]
   }
@@ -320,7 +328,7 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
       stroke: lapColor(s.lapOrder),
       dash: dash(s.channelIndex),
       width: 1,
-      scale: present.value[s.channelIndex],
+      scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
     })),
   ]
 })
@@ -401,11 +409,11 @@ const axes = computed<uPlot.Axis[]>(() => {
   }
   return [
     ...xAxes,
-    ...present.value.map((n, i) => ({
-      scale: n,
-      side: i % 2 === 0 ? 3 : 1,
-      label: channelDisplayLabel(n),
-      ...(hasSelection.value || comparisonActive.value ? {} : { stroke: color(i) }),
+    ...valueAxes.value.axes.map((axis) => ({
+      scale: axis.scale,
+      side: axis.side,
+      label: axis.label,
+      show: axis.show,
     })),
   ]
 })

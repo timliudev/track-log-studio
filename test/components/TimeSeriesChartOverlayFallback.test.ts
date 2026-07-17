@@ -21,13 +21,13 @@ import en from '@/i18n/locales/en'
  * exists on the component at all).
  */
 
-function channel(name: string, data: number[]): Channel {
-  return { name, rawName: name, description: undefined, data: new Float32Array(data) }
+function channel(name: string, data: number[], unit?: string): Channel {
+  return { name, rawName: name, description: undefined, unit, data: new Float32Array(data) }
 }
 
 function makeSession(): LogSession {
   return new LogSession(
-    [channel('Time', [0, 1, 2, 3, 4]), channel('Speed', [10, 20, 30, 40, 50])],
+    [channel('Time', [0, 1, 2, 3, 4], 'ms'), channel('Speed', [10, 20, 30, 40, 50], 'km/h')],
     { formatId: 'test', createdDate: null, headerInfo: {} },
   )
 }
@@ -72,6 +72,7 @@ describe('TimeSeriesChart — overlay fallback with no lap selected (B8)', () =>
     // Full session on the session-wide X (not a lap-relative grid).
     expect(data[0]).toEqual([0, 1, 2, 3, 4])
     expect(data[1]).toEqual([10, 20, 30, 40, 50])
+    expect((plot.props('series') as Array<{ scale?: string }>)[1].scale).toBe('unit:km/h')
     // No "select laps to see anything" hint any more — there's nothing to
     // show in its place since the fallback always renders.
     expect(wrapper.text()).not.toContain('疊比')
@@ -84,6 +85,7 @@ describe('TimeSeriesChart — overlay fallback with no lap selected (B8)', () =>
     const data = plot.props('data') as [number[], Array<number | null>]
     // The lap-relative grid starts at 0 regardless of the lap's absolute X.
     expect(data[0][0]).toBe(0)
+    expect((plot.props('series') as Array<{ scale?: string }>)[1].scale).toBe('unit:km/h')
   })
 
   it('forwards xZoom to the parent only while no lap is selected', () => {

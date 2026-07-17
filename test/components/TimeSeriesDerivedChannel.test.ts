@@ -68,7 +68,7 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
     expect(wrapper.find('.update-rate').exists()).toBe(false)
   })
 
-  it('adds a known unit to the y-axis and uPlot legend without changing the scale key', () => {
+  it('adds a known unit to the y-axis and uPlot legend while assigning its unit scale', () => {
     const unitSession = new LogSession([
       channel('Time', [0, 100, 200], 'ms'),
       channel('Boost', [1, 2, 3], 'bar'),
@@ -88,8 +88,8 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
     const plot = wrapper.findComponent(UPlotChart)
     const series = plot.props('series') as Array<{ label?: string; scale?: string }>
     const axes = plot.props('axes') as Array<{ label?: string; scale?: string }>
-    expect(series[1]).toMatchObject({ label: 'Primary · Boost (bar)', scale: 'Boost' })
-    expect(axes[1]).toMatchObject({ label: 'Boost (bar)', scale: 'Boost' })
+    expect(series[1]).toMatchObject({ label: 'Primary · Boost (bar)', scale: 'unit:bar' })
+    expect(axes[1]).toMatchObject({ label: 'Boost (bar)', scale: 'unit:bar' })
   })
 
   it('offers a translated picker label while emitting only the stable id', () => {
