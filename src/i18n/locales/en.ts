@@ -100,6 +100,7 @@ export default {
       gpsFormat: {
         nmea: 'previously exported NMEA/RC3 log',
         vbo: 'Racelogic VBOX (Circuit Tools 3 / RaceChrono)',
+        csv: 'general CSV telemetry (header row with Time or Timer)',
         rcz: 'RaceChrono log file',
         xrk: 'AiM Solo 2 DL / MyChron5',
         rcnx: 'Qstarz LT-Q6000 (QRacing)',
@@ -195,8 +196,8 @@ export default {
     trackChannel: 'Channel',
     trackColor: 'Track colour',
     mapBackground: {
-      title: 'Base map', layer: 'Layer', none: 'No base map', image: 'Uploaded image', osm: 'OpenStreetMap streets', satellite: 'Satellite (Mapbox)',
-      upload: 'Upload image (PNG/JPEG/WebP, max 10 MB)', uploadTypeError: 'Only PNG, JPEG, or WebP images are accepted.', uploadSizeError: 'The image must be larger than 0 and no more than 10 MB.',
+      title: 'Base map', layer: 'Layer', none: 'No base map', image: 'Custom image', osm: 'OpenStreetMap streets', satellite: 'Satellite (Mapbox)',
+      upload: 'Choose image (PNG/JPEG/WebP/SVG, max 10 MB)', uploadTypeError: 'Only PNG, JPEG, WebP, or SVG images are accepted.', uploadSizeError: 'The image must be larger than 0 and no more than 10 MB.',
       mapboxKey: 'Mapbox API key', dragAlign: 'Drag to align image',
       up: 'Move up', down: 'Move down', left: 'Move left', right: 'Move right', zoomIn: 'Zoom image in', zoomOut: 'Zoom image out', reset: 'Reset image alignment',
     },
@@ -302,7 +303,7 @@ export default {
       estimateApplied: 'Estimated circumference: {mm} mm ({n} samples) — applied to the field, fine-tune as needed.',
       estimateFailed: 'No stable estimate — not enough steady samples, or the whole log is in a single gear (set an approximate circumference as a reference and retry).',
       estimateNeedGears: 'Enter valid gear ratios and a final drive first (circumference not needed) to estimate from the log.',
-      estimateNotAvailableCvtHint: "A CVT has no discrete gear plateaus to solve for, so circumference can't be back-estimated from the log like MT can (an honest \"not available\" beats a made-up number). Measure the wheel circumference directly, or use the tire-spec converter above.",
+      estimateNotAvailableCvtHint: "A CVT changes ratio continuously and has no discrete gears to infer, so tire circumference can't be back-estimated from the log. Measure the wheel circumference directly, or use the tire-spec converter above.",
       redlineRpm: 'Redline / shift RPM',
       modeRatio: 'Ratio',
       modeTeeth: 'Teeth',
@@ -342,6 +343,8 @@ export default {
       noteValuePlaceholder: 'Value / notes',
       addNote: 'Add note field',
       removeNote: 'Remove this note field',
+      notesExportHint: 'Save a modified .loga to include these notes in the file.',
+      notesExportAction: 'Go to Save modified (.loga)',
     },
     gg: {
       xAxis: 'X-axis channel',
@@ -467,6 +470,8 @@ export default {
     statusEnabled: 'Enabled · source {channel} · {min}–{max} mm',
     statusDisabled: 'Disabled',
     statusChannelMissing: '(not present in the current log)',
+    importedCalibrationHint: 'This file contains suspension calibration; your current settings will not be changed automatically.',
+    applyImportedCalibration: 'Apply suspension calibration from file',
     save: {
       heading: 'Save updated .loga',
       intro: 'Write suspension calibration and CVT tuning notes to a new file without replacing the original.',
@@ -477,6 +482,7 @@ export default {
       replaced: 'replaced',
       appended: 'added',
       cvtNotesSaved: '{count} CVT notes',
+      calibrationSaved: 'Suspension calibration saved with the file',
     },
   },
   theme: {

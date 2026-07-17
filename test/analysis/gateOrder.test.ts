@@ -41,6 +41,17 @@ describe('gatePositionOnLap', () => {
     expect(posLate!).toBeGreaterThan(posEarly!)
   })
 
+  it('positions a gate at the middle sample when the track crosses through it', () => {
+    const sampledTrack = makeTrack([0, 0, 0], [-1, 0, 2])
+    const sampledLap = lap(0, 0, 2)
+    const atSample = gatePositionOnLap(sampledTrack, sampledLap, gateAt(0))
+    const beforeSample = gatePositionOnLap(sampledTrack, sampledLap, gateAt(-0.5))
+    const afterSample = gatePositionOnLap(sampledTrack, sampledLap, gateAt(0.5))
+    expect(atSample).not.toBeNull()
+    expect(atSample!).toBeGreaterThan(beforeSample!)
+    expect(atSample!).toBeLessThan(afterSample!)
+  })
+
   it('position increases monotonically with the gate along the direction of travel', () => {
     const stops = [1.5, 3.5, 5.5, 7.5, 9.5].map((x) => gatePositionOnLap(track, theLap, gateAt(x)))
     for (let i = 1; i < stops.length; i++) {

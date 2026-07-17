@@ -1,7 +1,16 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 export type LapExclusionReason = 'manual' | 'timeBand' | 'distBand' | 'sector'
 
-defineProps<{ reason: LapExclusionReason; sectorNumber?: number | null }>()
+const props = defineProps<{ reason: LapExclusionReason; sectorNumber?: number | null }>()
+
+const hasSectorNumber = computed(() =>
+  props.reason === 'sector' && Number.isInteger(props.sectorNumber) && (props.sectorNumber ?? 0) > 0,
+)
+const sectorLabel = computed(() => `S${props.sectorNumber}`)
+const sectorFontSize = computed(() => (props.sectorNumber! >= 10 ? 6.75 : 8))
+const sectorLetterSpacing = computed(() => (props.sectorNumber! >= 10 ? -0.45 : -0.15))
 </script>
 
 <template>
@@ -18,8 +27,26 @@ defineProps<{ reason: LapExclusionReason; sectorNumber?: number | null }>()
       <path d="m5 17 12-12 2 2L7 19l-3-3Z" />
       <path d="m9 13 2 2m1-5 2 2m1-5 2 2" />
     </template>
+    <template v-else-if="hasSectorNumber">
+      <text
+        class="sector-label"
+        x="12"
+        y="12"
+        text-anchor="middle"
+        dominant-baseline="central"
+        fill="currentColor"
+        stroke="none"
+        :font-size="sectorFontSize"
+        :letter-spacing="sectorLetterSpacing"
+        font-weight="700"
+      >{{ sectorLabel }}</text>
+    </template>
     <template v-else>
-      <text x="12" y="15" text-anchor="middle" fill="currentColor" stroke="none" :font-size="(sectorNumber ?? 0) >= 10 ? 7 : 8.5" font-weight="700">S{{ sectorNumber ?? '?' }}</text>
+      <!-- A legend describes the sector rule, not a particular failed gate. -->
+      <g class="sector-flag">
+        <path d="M7 21V4" />
+        <path d="M7 5h10l-2.2 3L17 11H7" />
+      </g>
     </template>
   </svg>
 </template>

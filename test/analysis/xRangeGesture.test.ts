@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { clampRange, panRange, zoomRange, pinchRange, type XRange } from '@/features/analyzer/xRangeGesture'
+import {
+  blankTickLabelsOutsideData,
+  clampCentreNeedleRange,
+  clampRange,
+  panCentreNeedleRange,
+  panRange,
+  pinchCentreNeedleRange,
+  pinchRange,
+  zoomCentreNeedleRange,
+  zoomRange,
+  type XRange,
+} from '@/features/analyzer/xRangeGesture'
 
 const BOUNDS: XRange = { min: 0, max: 100 }
 
@@ -129,5 +140,34 @@ describe('pinchRange', () => {
   it('pinch-out (zoom out) then re-clamps span to bounds', () => {
     const r = pinchRange({ min: 40, max: 60 }, 0.1, 50, 0, BOUNDS)
     expect(r).toEqual({ min: 0, max: 100 })
+  })
+})
+
+describe('B68 centre-needle virtual edge padding', () => {
+  it('allows a full-span view to place either endpoint under the centre needle', () => {
+    expect(clampCentreNeedleRange({ min: -80, max: 20 }, BOUNDS)).toEqual({ min: -50, max: 50 })
+    expect(clampCentreNeedleRange({ min: 80, max: 180 }, BOUNDS)).toEqual({ min: 50, max: 150 })
+  })
+
+  it('caps virtual padding at half the current visible span', () => {
+    expect(panCentreNeedleRange({ min: 20, max: 40 }, 100, BOUNDS)).toEqual({ min: -10, max: 10 })
+    expect(panCentreNeedleRange({ min: 60, max: 80 }, -100, BOUNDS)).toEqual({ min: 90, max: 110 })
+  })
+
+  it('does not allow zooming out beyond the real data span', () => {
+    expect(zoomCentreNeedleRange({ min: -10, max: 10 }, 0.01, 0, BOUNDS)).toEqual({ min: -50, max: 50 })
+  })
+
+  it('preserves a virtual endpoint position when zooming in', () => {
+    expect(zoomCentreNeedleRange({ min: -50, max: 50 }, 2, 0, BOUNDS)).toEqual({ min: -25, max: 25 })
+  })
+
+  it('keeps centre-mode pinch panning within the same endpoint allowance', () => {
+    expect(pinchCentreNeedleRange({ min: 0, max: 20 }, 1, 10, 100, BOUNDS)).toEqual({ min: -10, max: 10 })
+  })
+
+  it('hides labels outside the real data while preserving formatted labels inside it', () => {
+    expect(blankTickLabelsOutsideData([-10, 0, 25, 100, 110], ['-10', '0:00', '0:25', '1:40', '1:50'], BOUNDS))
+      .toEqual(['', '0:00', '0:25', '1:40', ''])
   })
 })

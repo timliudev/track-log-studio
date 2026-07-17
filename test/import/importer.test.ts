@@ -5,6 +5,7 @@ import {
 } from '@/domain/import/registry'
 import { logaImporter } from '@/domain/import/loga/LogaImporter'
 import { nmeaImporter } from '@/domain/import/nmea/NmeaImporter'
+import { csvImporter } from '@/domain/import/csv/CsvImporter'
 import { loadFixture } from '../fixtures'
 
 /** Build an ImportCandidate from a filename + headText (headBytes derived). */
@@ -31,6 +32,10 @@ describe('detectImporter', () => {
     expect(detectImporter(candidate('mystery.txt', headText))).toBe(nmeaImporter)
   })
 
+  it('picks csvImporter by .csv filename', () => {
+    expect(detectImporter(candidate('telemetry.csv', 'Time,RPM\n0,1000\n'))).toBe(csvImporter)
+  })
+
   it('returns undefined for unrecognised files', () => {
     expect(detectImporter(candidate('notes.txt', 'hello'))).toBeUndefined()
   })
@@ -38,7 +43,7 @@ describe('detectImporter', () => {
 
 describe('allImportExtensions', () => {
   it('lists every registered extension', () => {
-    expect(allImportExtensions()).toEqual(['loga', 'nmea', 'vbo', 'rcz', 'rcnx', 'xrk', 'xrz'])
+    expect(allImportExtensions()).toEqual(['loga', 'nmea', 'vbo', 'csv', 'rcz', 'rcnx', 'xrk', 'xrz'])
   })
 })
 
@@ -55,5 +60,11 @@ describe('importer.parse', () => {
     expect(session.meta.formatId).toBe('nmea')
     expect(session.has('GPS_Lat')).toBe(true)
     expect(session.rowCount).toBeGreaterThan(0)
+  })
+
+  it('csvImporter parses a generic telemetry CSV', async () => {
+    const session = await csvImporter.parse('Time,RPM\n0,1000\n')
+    expect(session.meta.formatId).toBe('csv')
+    expect(session.get('RPM')?.data[0]).toBe(1000)
   })
 })

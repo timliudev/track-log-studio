@@ -55,15 +55,15 @@ function choose(e: Event): void {
       <label>{{ t('analyzer.mapBackground.layer') }}
         <select :value="props.settings.kind" @change="emit('kind', ($event.target as HTMLSelectElement).value as MapBackgroundKind)">
           <option value="none">{{ t('analyzer.mapBackground.none') }}</option>
-          <option value="image" :disabled="!hasImage">{{ t('analyzer.mapBackground.image') }}</option>
+          <option value="image">{{ t('analyzer.mapBackground.image') }}</option>
           <option value="osm">{{ t('analyzer.mapBackground.osm') }}</option>
           <option value="satellite">{{ t('analyzer.mapBackground.satellite') }}</option>
         </select>
       </label>
-      <label>{{ t('analyzer.mapBackground.upload') }}
-        <input type="file" accept="image/jpeg,image/png,image/webp" @change="choose" />
+      <label v-if="props.settings.kind === 'image'">{{ t('analyzer.mapBackground.upload') }}
+        <input type="file" accept="image/jpeg,image/png,image/webp,image/svg+xml,.svg" @change="choose" />
       </label>
-      <template v-if="props.settings.kind === 'image'">
+      <template v-if="props.settings.kind === 'image' && props.hasImage">
         <div class="align-buttons">
           <button type="button" :aria-label="t('analyzer.mapBackground.up')" @click="emit('nudge', 0, -12)">↑</button><button type="button" :aria-label="t('analyzer.mapBackground.left')" @click="emit('nudge', -12, 0)">←</button>
           <button type="button" :aria-label="t('analyzer.mapBackground.right')" @click="emit('nudge', 12, 0)">→</button><button type="button" :aria-label="t('analyzer.mapBackground.down')" @click="emit('nudge', 0, 12)">↓</button>

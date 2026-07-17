@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import LapExclusionIcon, { type LapExclusionReason } from './LapExclusionIcon.vue'
+import type { LapExclusionReason } from './LapExclusionIcon.vue'
+import ExclusionToggle from './ExclusionToggle.vue'
 /**
  * The ⦸ manual-exclude toggle shared by every lap table's lead cell — the
  * primary LapTable.vue and every comparison recording's SessionLapComparison
@@ -30,68 +31,12 @@ const emit = defineEmits<{ toggle: [] }>()
 </script>
 
 <template>
-  <button
-    type="button"
-    class="exclude"
-    :class="{ on: excluded, 'auto-disabled': disabled }"
-    v-tooltip="label"
-    :aria-label="label"
-    :aria-pressed="excluded"
-    :aria-disabled="disabled"
-    @click.stop="!disabled && emit('toggle')"
-  >
-    <LapExclusionIcon :reason="reason ?? 'manual'" :sector-number="sectorNumber" />
-  </button>
+  <ExclusionToggle
+    :excluded="excluded"
+    :disabled="disabled"
+    :label="label"
+    :reason="reason"
+    :sector-number="sectorNumber"
+    @toggle="emit('toggle')"
+  />
 </template>
-
-<style scoped>
-.exclude {
-  background: transparent;
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  padding: 0;
-  line-height: 1;
-  cursor: pointer;
-}
-.exclude svg {
-  display: block;
-  width: 16px;
-  height: 16px;
-}
-.exclude:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-.exclude.on {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-bg);
-}
-/* Auto-excluded (band/sector rule) laps show the same "on" look so the ⦸
-   state reads consistently, but muted + non-interactive cursor since the
-   user can't toggle it off by hand while the rule still applies. */
-.exclude.auto-disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.exclude.auto-disabled:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-/* B35 — §8 layer 3: any coarse pointer present (useInputCapabilities.ts's
-   capability signal mirrored onto <html data-any-pointer-coarse> — NOT a
-   viewport-width guess, so a tablet running the full desktop layout gets
-   this too) grows the ⦸ toggle to a comfortable >=44px touch target. */
-:root[data-any-pointer-coarse] .exclude {
-  width: 44px;
-  height: 44px;
-}
-:root[data-any-pointer-coarse] .exclude svg {
-  width: 22px;
-  height: 22px;
-}
-</style>

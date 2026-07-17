@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -12,9 +13,10 @@ import { MEASURED_TOTAL_RATIO_CHANNEL } from '@/domain/analysis/analyzerChannels
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { channelColor } from '@/domain/analysis/channelPalette'
 
-function channel(name: string, values: number[]): Channel {
-  return { name, rawName: name, description: undefined, data: new Float32Array(values) }
+function channel(name: string, values: number[], unit?: string): Channel {
+  return { name, rawName: name, description: undefined, unit, data: new Float32Array(values) }
 }
 
 const session = new LogSession([
@@ -26,6 +28,7 @@ const session = new LogSession([
 beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
   setActivePinia(createPinia())
+  document.documentElement.dataset.theme = 'light'
 })
 
 function mountChart(channels: string[]) {
@@ -66,6 +69,50 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
   it('shows no chart update rate when every selected channel is constant', () => {
     const wrapper = mountChart(['GPS_Speed'])
     expect(wrapper.find('.update-rate').exists()).toBe(false)
+  })
+
+  it('uses stable per-channel strokes and matching chips, then reacts to the resolved dark theme', async () => {
+    const wrapper = mountChart(['RPM', 'GPS_Speed'])
+    const series = () => wrapper.findComponent(UPlotChart).props('series') as Array<{ stroke?: string }>
+    expect(series().slice(1).map((entry) => entry.stroke)).toEqual([
+      channelColor(0, 'light'),
+      channelColor(1, 'light'),
+    ])
+    const chipStyles = wrapper.findAll('.chip .dot').map((dot) => dot.attributes('style'))
+    expect(chipStyles[0]).toContain(channelColor(0, 'light'))
+    expect(chipStyles[1]).toContain(channelColor(1, 'light'))
+
+    document.documentElement.dataset.theme = 'dark'
+    await Promise.resolve()
+    await nextTick()
+    expect(series().slice(1).map((entry) => entry.stroke)).toEqual([
+      channelColor(0, 'dark'),
+      channelColor(1, 'dark'),
+    ])
+  })
+
+  it('adds a known unit to the y-axis and uPlot legend while assigning its unit scale', () => {
+    const unitSession = new LogSession([
+      channel('Time', [0, 100, 200], 'ms'),
+      channel('Boost', [1, 2, 3], 'bar'),
+    ], { formatId: 'test', createdDate: null, headerInfo: {} })
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        chart: { kind: 'timeseries', id: 1, channels: ['Boost'] },
+        session: unitSession,
+        xValues: new Float64Array([0, 0.1, 0.2]),
+        selectedLaps: [],
+      },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })],
+        stubs: { UPlotChart: true, SearchableSelect: true },
+      },
+    })
+    const plot = wrapper.findComponent(UPlotChart)
+    const series = plot.props('series') as Array<{ label?: string; scale?: string }>
+    const axes = plot.props('axes') as Array<{ label?: string; scale?: string }>
+    expect(series[1]).toMatchObject({ label: 'Primary · Boost (bar)', scale: 'unit:bar' })
+    expect(axes[1]).toMatchObject({ label: 'Boost (bar)', scale: 'unit:bar' })
   })
 
   it('offers a translated picker label while emitting only the stable id', () => {
@@ -116,7 +163,11 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
       },
     })
     const plot = wrapper.findComponent(UPlotChart)
-    const series = plot.props('series') as Array<{ label?: string }>
+    const series = plot.props('series') as Array<{ label?: string; stroke?: string }>
     expect(series.map((entry) => entry.label)).toEqual(['s', 'A · 總傳動比', 'B · 總傳動比'])
+    expect(series.slice(1).map((entry) => entry.stroke)).toEqual([
+      channelColor(0, 'light'),
+      channelColor(0, 'light'),
+    ])
   })
 })

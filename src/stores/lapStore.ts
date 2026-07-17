@@ -145,6 +145,11 @@ export const useLapStore = defineStore('lap', () => {
   // configuration and surfaced as a warning, not allowed to erase the entire
   // usable lap set. Once at least one lap passes, failing laps are excluded.
   const sectorAllFailed = computed(() => sectorValidity.value.allFailed)
+  // Raw diagnostic count stays visible even while the all-failed safety
+  // policy suppresses effective exclusions. Keeping this separate from
+  // `sectorInvalid` lets the UI report that a moved gate rejected every lap
+  // without feeding those failures into best-lap/delta calculations.
+  const sectorFailureCount = computed(() => sectorValidity.value.failures.length)
   const sectorInvalid = computed<number[]>(() =>
     sectorAllFailed.value ? [] : sectorValidity.value.failures.map((failure) => failure.lapIndex),
   )
@@ -561,6 +566,7 @@ export const useLapStore = defineStore('lap', () => {
     bandExcluded,
     distanceBandExcluded,
     sectorInvalid,
+    sectorFailureCount,
     sectorAllFailed,
     sectorFailureNumber,
     lapTimeBand,

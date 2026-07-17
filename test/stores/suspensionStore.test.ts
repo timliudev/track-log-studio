@@ -55,6 +55,18 @@ describe('suspensionStore', () => {
     expect(s.config.rear.sourceChannel).toBe('Analog_Channel_3')
   })
 
+  it('replaces the complete calibration only through the explicit replace action', () => {
+    const s = useSuspensionStore()
+    const imported = {
+      front: { enabled: true, sourceChannel: 'ImportedFront', minMv: 100, maxMv: 4900, zeroMv: 500, minMm: 0, maxMm: 120 },
+      rear: { enabled: true, sourceChannel: 'ImportedRear', minMv: 50, maxMv: 4950, zeroMv: 450, minMm: 0, maxMm: 110 },
+    }
+    expect(s.replaceConfig(imported)).toBe(true)
+    expect(s.config).toEqual(imported)
+    expect(s.replaceConfig({ front: {} })).toBe(false)
+    expect(s.config).toEqual(imported)
+  })
+
   it('reset restores defaults', () => {
     const s = useSuspensionStore()
     s.setChannel('front', { enabled: true })

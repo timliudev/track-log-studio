@@ -17,6 +17,8 @@ export interface Channel {
   readonly rawName: string
   /** Description part after '/', if any, e.g. '引擎轉速'. */
   readonly description: string | undefined
+  /** Physical unit supplied or unambiguously defined by the source format. */
+  readonly unit?: string
   /** One value per sample row. */
   readonly data: Float32Array
 }

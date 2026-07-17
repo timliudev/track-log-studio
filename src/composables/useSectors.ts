@@ -4,7 +4,8 @@ import type { LapLine } from '@/domain/analysis/laps'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
-import { detectCorners, cornerGateLine, pickReferenceLap } from '@/domain/analysis/cornerDetection'
+import { cornerGateLine, pickReferenceLap } from '@/domain/analysis/cornerDetection'
+import { detectSectorGates } from '@/domain/analysis/sectorAutoDetection'
 import { sortGatesByPosition } from '@/domain/analysis/gateOrder'
 
 /**
@@ -32,13 +33,9 @@ export function useSectors(laps: ComputedRef<Lap[]>): {
   }
 
   function runAutoDetect(): boolean {
-    const s = session.value
-    const tk = track.value
-    if (!s || !tk) return false
-    const lap = pickReferenceLap(tk, laps.value, lapStore.excluded)
-    if (!lap) return false
-    const { corners } = detectCorners(s, tk, lap.startIdx, lap.endIdx)
-    sectorStore.loadDetected(corners.map((corner) => cornerGateLine(tk, corner)))
+    const gates = detectSectorGates(session.value, track.value, laps.value, lapStore.excluded)
+    if (gates === null) return false
+    sectorStore.loadDetected(gates)
     return true
   }
 

@@ -108,6 +108,7 @@ export function mergeSessions(base: ChannelSource, gps: ChannelSource, opts: Mer
       name,
       rawName: source.rawName,
       description: source.description,
+      unit: source.unit,
       data: out,
     }
 

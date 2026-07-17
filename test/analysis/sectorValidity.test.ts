@@ -108,6 +108,22 @@ describe('invalidSectorLapIndices', () => {
     })
   })
 
+  it('reports every raw failure after a previously reachable gate moves off track', () => {
+    const laps = [lap(0, 0, 10), lap(1, 0, 5)]
+    expect(evaluateSectorValidity(laps, straightTrack, gates)).toEqual({
+      failures: [{ lapIndex: 1, missedSector: 2 }],
+      allFailed: false,
+    })
+
+    expect(evaluateSectorValidity(laps, straightTrack, [gateAt(3.5), gateAt(20)])).toEqual({
+      failures: [
+        { lapIndex: 0, missedSector: 2 },
+        { lapIndex: 1, missedSector: 2 },
+      ],
+      allFailed: true,
+    })
+  })
+
   it('single gate: a lap crossing it is valid, one that does not is invalid', () => {
     const oneGate = [gateAt(5.5)]
     const crossing = [lap(0, 0, 10)]

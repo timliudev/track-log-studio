@@ -37,6 +37,7 @@ import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import { useFileStore } from '@/stores/fileStore'
+import { useAppNavigationStore } from '@/stores/appNavigationStore'
 import {
   useDrivetrainStore,
   toMtDrivetrainSpec,
@@ -87,6 +88,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const store = useDrivetrainStore()
 const fileStore = useFileStore()
+const navigation = useAppNavigationStore()
 
 const isMt = computed(() => store.kind === 'mt')
 
@@ -255,6 +257,10 @@ function addSessionCvtNote(): void {
 function removeSessionCvtNote(index: number): void {
   store.removeCvtNote(index)
   syncCvtNotesToSession()
+}
+
+function openSaveModified(): void {
+  navigation.requestConverterSaveModified()
 }
 
 function runCircumferenceEstimate(): void {
@@ -970,6 +976,10 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         </div>
       </div>
       <button type="button" class="note-add" @click="addSessionCvtNote()">{{ t('analyzer.gear.addNote') }}</button>
+      <p class="notes-export-hint">{{ t('analyzer.gear.notesExportHint') }}</p>
+      <button type="button" class="notes-export-link" @click="openSaveModified">
+        {{ t('analyzer.gear.notesExportAction') }}
+      </button>
     </template>
   </div>
 </template>
@@ -1253,5 +1263,27 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 .note-add:hover {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.notes-export-hint {
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+.notes-export-link {
+  align-self: flex-start;
+  background: var(--color-surface);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius);
+  min-height: 32px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+@media (any-pointer: coarse) {
+  .notes-export-link {
+    min-height: 44px;
+  }
 }
 </style>

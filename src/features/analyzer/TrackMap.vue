@@ -1557,7 +1557,7 @@ watch(background.image, () => draw())
       @scale="background.scaleImage"
       @reset="background.resetImageAlignment"
     />
-    <label v-if="background.settings.value.kind === 'image'" class="align-background">
+    <label v-if="background.settings.value.kind === 'image' && background.image.value" class="align-background">
       <input v-model="alignBackground" type="checkbox" /> {{ t('analyzer.mapBackground.dragAlign') }}
     </label>
     <a v-if="background.settings.value.kind === 'osm'" class="osm-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a>

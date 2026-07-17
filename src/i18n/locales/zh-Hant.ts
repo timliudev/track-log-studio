@@ -97,6 +97,7 @@ export default {
       gpsFormat: {
         nmea: '先前已轉出的 NMEA/RC3 記錄',
         vbo: 'Racelogic VBOX（Circuit Tools 3 / RaceChrono）',
+        csv: '一般 CSV 遙測（標題列需有 Time 或 Timer）',
         rcz: 'RaceChrono 記錄檔',
         xrk: 'AiM Solo 2 DL / MyChron5',
         rcnx: 'Qstarz LT-Q6000（QRacing）',
@@ -192,8 +193,8 @@ export default {
     trackChannel: '通道',
     trackColor: '軌跡上色',
     mapBackground: {
-      title: '底圖', layer: '圖層', none: '無底圖', image: '上傳圖片', osm: 'OpenStreetMap 街道圖', satellite: '衛星圖（Mapbox）',
-      upload: '上傳底圖（PNG／JPEG／WebP，最多 10 MB）', uploadTypeError: '只接受 PNG、JPEG 或 WebP 圖片。', uploadSizeError: '圖片必須大於 0 且不超過 10 MB。',
+      title: '底圖', layer: '圖層', none: '無底圖', image: '自訂圖片', osm: 'OpenStreetMap 街道圖', satellite: '衛星圖（Mapbox）',
+      upload: '選擇圖片（PNG／JPEG／WebP／SVG，最多 10 MB）', uploadTypeError: '只接受 PNG、JPEG、WebP 或 SVG 圖片。', uploadSizeError: '圖片必須大於 0 且不超過 10 MB。',
       mapboxKey: 'Mapbox API key', dragAlign: '拖曳對齊圖片',
       up: '上移', down: '下移', left: '左移', right: '右移', zoomIn: '放大圖片', zoomOut: '縮小圖片', reset: '重設圖片對齊',
     },
@@ -296,7 +297,7 @@ export default {
       estimateApplied: '倒算周長：{mm} mm（{n} 筆樣本），已填入周長欄位，可再微調。',
       estimateFailed: '無法穩定倒算：穩定樣本不足，或整段記錄僅單一檔位無法判定檔位（可先填入概略周長作為參考再試一次）。',
       estimateNeedGears: '請先輸入有效的齒比與終傳（不需周長）才能從記錄倒算。',
-      estimateNotAvailableCvtHint: 'CVT 為連續變速、沒有離散檔位可判定，無法像手排一樣從記錄倒算周長（誠實拒絕優於亂給估計值）。請直接量測後輪周長，或使用上方的輪胎規格換算。',
+      estimateNotAvailableCvtHint: 'CVT 為連續變速，沒有可用來反推的離散檔位，因此無法從記錄倒算輪胎周長。請直接量測後輪周長，或使用上方的輪胎規格換算。',
       redlineRpm: '紅線／換檔轉速 (RPM)',
       modeRatio: '齒比',
       modeTeeth: '齒數',
@@ -336,6 +337,8 @@ export default {
       noteValuePlaceholder: '數值／說明',
       addNote: '新增備註欄位',
       removeNote: '刪除此備註欄位',
+      notesExportHint: '要把這些備註帶進檔案，請另存修改後的 .loga。',
+      notesExportAction: '前往另存修改 (.loga)',
     },
     gg: {
       xAxis: 'X 軸頻道',
@@ -461,6 +464,8 @@ export default {
     statusEnabled: '啟用 · 來源 {channel} · {min}–{max} mm',
     statusDisabled: '未啟用',
     statusChannelMissing: '（目前記錄無此通道）',
+    importedCalibrationHint: '此檔案包含避震校正設定；目前設定不會自動被覆蓋。',
+    applyImportedCalibration: '套用檔案內避震校正',
     save: {
       heading: '另存更新後的 .loga',
       intro: '把避震校正與 CVT 調教備註寫入新檔，不覆蓋原檔。',
@@ -471,6 +476,7 @@ export default {
       replaced: '替換',
       appended: '新增',
       cvtNotesSaved: 'CVT 備註 {count} 筆',
+      calibrationSaved: '避震校正設定已隨檔儲存',
     },
   },
   theme: {

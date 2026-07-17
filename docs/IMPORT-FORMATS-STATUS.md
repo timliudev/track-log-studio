@@ -10,6 +10,7 @@
 - **匯入格式**：
   - `loga`、`nmea`（既有，包裝進 registry）
   - `vbo`（RaceLogic）—— 新增 `parseVbo`，為 VBO 匯出的逆運算，round-trip 驗證通過；可在分析器開啟。
+  - `csv`（通用遙測）—— RFC 4180 逗號分隔資料；第一個非空白列為標題，需有 `Time` 或 `Timer`。支援引用欄位、空白/無效值、以及本工具輸出的 `TLS_Metadata` 註記 round-trip。
   - `rcz`（RaceChrono）—— 第一個二進位格式。ZIP + `session.json` + 逐通道二進位（int32/int64/float64）；channel id 解碼（`rc_analog_*`/`rc_digital_*`/具名表）；GPS lat/lon int32 配對、速度 mm/s、heading 毫度；GPS↔ECU 以各自時間戳最近鄰對齊。真檔驗證 17791 列／147 channels／座標正確。
   - `xrk`（AiM Solo 2 DL / MyChron5）—— 訊息流(H-訊息含 checksum + sample 訊息);CNF/CHS channel 表;decoder(int16/float16/int32/gear);各通道取樣率以 MCLK 主時鐘重採樣;GPS 為 ECEF X/Y/Z → Bowring 轉 WGS84 經緯度。真檔驗證 95890 列/座標正確/圈時合理。**`.xrz`（zlib 壓縮的 `.xrk`）已支援** —— `parseXrk` 偵測 RFC 1950 zlib magic 後用 `fflate` 的 `Unzlib` 串流 inflate（含解壓炸彈防護,512 MB 上限,同 `zip.ts` 的作法）,還原成 `.xrk` bytes 再走同一 parser。
   - `rcnx`（Qstarz LT-Q6000 / Q6000S，QRacing）—— ZIP 內含**標準 SQLite**（每場 `sess_N.db` 的 `WayPoints` 表）。用 `sql.js`（WASM，動態載入、PWA 預快取）讀取；一檔多 session 時取 `WayPoints` 列數最多者；lat/lon 為十進位度（無縮放）、speed km/h、Gx/Gy/Gz g。真檔驗證 22402 列／座標正確（TWN-ARK）／速度 ~84 km/h／model LT-Q6000。

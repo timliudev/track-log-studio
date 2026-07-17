@@ -1,7 +1,7 @@
 import type { GpsTrack } from './gpsTrack'
 import type { Lap } from '@/domain/model/Lap'
 import type { LapLine } from './laps'
-import { planarGate, project, segmentsIntersect } from './laps'
+import { planarGate, walkLapGates } from './laps'
 import { cumulativeDistanceM } from './distance'
 
 /**
@@ -12,12 +12,10 @@ import { cumulativeDistanceM } from './distance'
  * ones.
  *
  * Two strategies, in order:
- *  1. **Crossing**: walk the lap's consecutive valid fixes and find the FIRST
- *     segment that straddles the gate line (same planar-projection +
- *     segment-intersect test `sectorTiming.ts`/`sectorValidity.ts` use for
- *     timing/validity) — the gate's "real" position is where the track
- *     actually crosses it. Returns the (linearly interpolated) distance at
- *     that crossing.
+ *  1. **Crossing**: use the same shared gate walker as sector timing/validity
+ *     to find the FIRST proper straddle or sampled-point pass-through. The
+ *     gate's "real" position is where the track actually crosses it; ordinary
+ *     straddles are interpolated and sampled crossings use that exact fix.
  *  2. **Nearest point** fallback: a gate that doesn't cleanly cross the
  *     reference lap (e.g. just dropped at the map cursor before the user
  *     drags it onto the racing line, or a lap that takes a slightly different
@@ -36,12 +34,10 @@ export function gatePositionOnLap(track: GpsTrack, lap: Lap, gate: LapLine): num
   const fullDist = cumulativeDistanceM(lat, lon, valid)
   const lapStartM = fullDist[start]
 
-  // Planar frame centred on the gate's own midpoint (matches sectorTiming.ts /
-  // sectorValidity.ts's per-gate local frame, via the same {@link planarGate}
-  // precompute they use).
-  const { lat0, lon0, cosLat0, a: qa, b: qb } = planarGate(gate)
+  // The same shared gate walker used by sector timing and validity also owns
+  // sampled-point crossing semantics, so ordering cannot disagree with them.
+  const planar = planarGate(gate)
 
-  let prev = -1
   let nearestIdx = -1
   let nearestDistSq = Infinity
   const gmx = (gate.a.lat + gate.b.lat) / 2
@@ -59,25 +55,27 @@ export function gatePositionOnLap(track: GpsTrack, lap: Lap, gate: LapLine): num
       nearestIdx = i
     }
 
-    if (prev >= 0) {
-      const p1 = project(lat[prev], lon[prev], lat0, lon0, cosLat0)
-      const p2 = project(lat[i], lon[i], lat0, lon0, cosLat0)
-      if (segmentsIntersect(p1, p2, qa, qb)) {
-        // Interpolate the crossing distance within [prev, i] the same way
-        // sectorTiming.ts interpolates crossing TIME — solve for the segment
-        // parameter s at the intersection with the gate line.
-        const rx = p2.x - p1.x
-        const ry = p2.y - p1.y
-        const sx = qb.x - qa.x
-        const sy = qb.y - qa.y
-        const denom = rx * sy - ry * sx
-        const s = denom === 0 ? 1 : Math.min(1, Math.max(0, ((qa.x - p1.x) * sy - (qa.y - p1.y) * sx) / denom))
-        const dist = fullDist[prev] + s * (fullDist[i] - fullDist[prev])
-        return dist - lapStartM
-      }
-    }
-    prev = i
   }
+
+  let crossingDistanceM: number | null = null
+  walkLapGates(track, lap, [planar], ({ p1, p2, prevIdx, idx }) => {
+    if (prevIdx === idx) {
+      crossingDistanceM = fullDist[idx]
+      return
+    }
+    // Interpolate distance within the same proper-straddle segment the shared
+    // walker accepted, mirroring sectorTiming's time interpolation.
+    const rx = p2.x - p1.x
+    const ry = p2.y - p1.y
+    const sx = planar.b.x - planar.a.x
+    const sy = planar.b.y - planar.a.y
+    const denom = rx * sy - ry * sx
+    const fraction = denom === 0
+      ? 1
+      : Math.min(1, Math.max(0, ((planar.a.x - p1.x) * sy - (planar.a.y - p1.y) * sx) / denom))
+    crossingDistanceM = fullDist[prevIdx] + fraction * (fullDist[idx] - fullDist[prevIdx])
+  })
+  if (crossingDistanceM != null) return crossingDistanceM - lapStartM
 
   if (nearestIdx < 0) return null
   return fullDist[nearestIdx] - lapStartM

@@ -2,6 +2,7 @@
 import { parseLoga } from '@/domain/parsing/LogaParser'
 import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
 import { parseVbo } from '@/domain/import/vbo/parseVbo'
+import { parsePlainCsv } from '@/domain/import/csv/parsePlainCsv'
 import { parseRcz } from '@/domain/import/rcz/parseRcz'
 import { parseRcnx } from '@/domain/import/rcnx/parseRcnx'
 import { parseXrk } from '@/domain/import/xrk/parseXrk'
@@ -37,6 +38,7 @@ const WORKER_PARSERS: Record<string, WorkerParser> = {
   loga: { binary: false, parse: (input, onProgress) => parseLoga(input as string, onProgress) },
   nmea: { binary: false, parse: (input) => nmeaToSession(input as string) },
   vbo: { binary: false, parse: (input) => parseVbo(input as string) },
+  csv: { binary: false, parse: (input) => parsePlainCsv(input as string) },
   rcz: { binary: true, parse: (input) => parseRcz(input as Uint8Array) },
   rcnx: {
     binary: true,
@@ -76,6 +78,7 @@ ctx.onmessage = async (event: MessageEvent<ParseRequest>) => {
       name: c.name,
       rawName: c.rawName,
       description: c.description,
+      unit: c.unit,
       data: c.data,
     }))
     const transfer = channels.map((c) => c.data.buffer)

@@ -5,6 +5,7 @@ import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import GearPanel from '@/features/analyzer/GearPanel.vue'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { useAppNavigationStore } from '@/stores/appNavigationStore'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { vTooltip } from '@/directives/tooltip'
@@ -114,11 +115,23 @@ describe('GearPanel — CVT mode shows a disabled estimate button + explanation 
     const btn = wrapper.find('.apply-btn')
     expect(btn.exists()).toBe(true)
     expect((btn.element as HTMLButtonElement).disabled).toBe(true)
-    expect(wrapper.text()).toContain('CVT')
+    expect(wrapper.text()).toContain('CVT 為連續變速，沒有可用來反推的離散檔位')
+    expect(wrapper.text()).toContain('請直接量測後輪周長')
   })
 
   it('does not render the CVT-only hint text in MT mode (default)', () => {
     const wrapper = mountPanel(null)
     expect(wrapper.text()).not.toContain('沒有離散檔位可判定')
+  })
+
+  it('offers a visible route from CVT notes to save modified .loga', async () => {
+    const store = useDrivetrainStore()
+    store.setKind('cvt')
+    const wrapper = mountPanel(null)
+    const button = wrapper.get('.notes-export-link')
+    expect(button.text()).toContain('另存修改')
+
+    await button.trigger('click')
+    expect(useAppNavigationStore().target).toBe('converter-save-modified')
   })
 })

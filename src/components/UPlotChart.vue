@@ -132,7 +132,15 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { panRange, pinchRange, zoomRange, type XRange } from '@/features/analyzer/xRangeGesture'
+import {
+  blankTickLabelsOutsideData,
+  panCentreNeedleRange,
+  panRange,
+  pinchCentreNeedleRange,
+  pinchRange,
+  zoomCentreNeedleRange,
+  type XRange,
+} from '@/features/analyzer/xRangeGesture'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 import {
@@ -299,12 +307,28 @@ function buildOptions(width: number): uPlot.Options {
   const gridStroke = themeColor('--color-border', '#cccccc')
   // Apply theme to each axis; keep a per-axis stroke if the caller set one
   // (used to colour each value axis to match its series).
-  const themed = (a: uPlot.Axis): uPlot.Axis => ({
-    grid: { stroke: gridStroke, width: 1 },
-    ticks: { stroke: gridStroke, width: 1 },
-    ...a,
-    stroke: a.stroke ?? axisStroke,
-  })
+  const themed = (a: uPlot.Axis): uPlot.Axis => {
+    const axis: uPlot.Axis = {
+      grid: { stroke: gridStroke, width: 1 },
+      ticks: { stroke: gridStroke, width: 1 },
+      ...a,
+      stroke: a.stroke ?? axisStroke,
+    }
+    // B68 — only centre-needle mode may pan into virtual x padding. Preserve
+    // the caller's normal elapsed/distance/clock formatter, but suppress text
+    // where the split lies outside actual data. Grid marks remain useful for
+    // spatial context without inventing timestamps or distances that do not
+    // have a sample behind them.
+    if (props.centreCursorMode && (axis.scale ?? 'x') === 'x' && typeof axis.values === 'function') {
+      const values = axis.values
+      axis.values = (u, splits, axisIdx, foundSpace, foundIncr) =>
+        blankTickLabelsOutsideData(splits, values(u, splits, axisIdx, foundSpace, foundIncr), dataXBounds() ?? {
+          min: -Infinity,
+          max: Infinity,
+        })
+    }
+    return axis
+  }
   const axes = (props.axes ?? [{}, {}]).map(themed)
   return {
     width,
@@ -751,7 +775,11 @@ function moveTouchGesture(e: PointerEvent): void {
     const midValNow = plot.posToVal(mid.x, 'x')
     const midValPrev = plot.posToVal(pinchLast.midX, 'x')
     const deltaX = midValPrev - midValNow
-    emitXRange(pinchRange(range, factor, aboutVal, -deltaX, bounds))
+    emitXRange(
+      props.centreCursorMode
+        ? pinchCentreNeedleRange(range, factor, aboutVal, -deltaX, bounds)
+        : pinchRange(range, factor, aboutVal, -deltaX, bounds),
+    )
     pinchLast = { dist, midX: mid.x }
     e.preventDefault()
     return
@@ -760,7 +788,11 @@ function moveTouchGesture(e: PointerEvent): void {
   if (touchMode === 'pan') {
     const prevVal = plot.posToVal(panLastX, 'x')
     const curVal = plot.posToVal(pos.x, 'x')
-    emitXRange(panRange(range, curVal - prevVal, bounds))
+    emitXRange(
+      props.centreCursorMode
+        ? panCentreNeedleRange(range, curVal - prevVal, bounds)
+        : panRange(range, curVal - prevVal, bounds),
+    )
     panLastX = pos.x
     e.preventDefault()
   }
@@ -823,7 +855,7 @@ function onCentrePointerMove(e: PointerEvent): void {
   const deltaX = curVal - prevVal // > 0 when the pointer moves right
   // Content follows the pointer, same convention as the touch-pan gesture
   // above (drag right → window shifts left, i.e. -deltaX).
-  emitXRange(panRange(range, deltaX, bounds))
+  emitXRange(panCentreNeedleRange(range, deltaX, bounds))
   centreScrubLastX = pos.x
 }
 
@@ -885,7 +917,7 @@ function onCentreWheel(e: WheelEvent): void {
   const range = currentXRange() ?? bounds
   const about = (range.min + range.max) / 2
   const factor = Math.exp(-e.deltaY * 0.002)
-  emitXRange(zoomRange(range, factor, about, bounds))
+  emitXRange(zoomCentreNeedleRange(range, factor, about, bounds))
   e.preventDefault()
 }
 

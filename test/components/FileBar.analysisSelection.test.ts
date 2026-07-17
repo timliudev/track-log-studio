@@ -92,4 +92,15 @@ describe('FileBar analyzer selection', () => {
     })
     expect(wrapper.find('.analysis-check').exists()).toBe(false)
   })
+
+  it('derives the generic CSV picker accept value and support text from the importer registry', () => {
+    const wrapper = mount(FileBar, {
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', messages: { 'zh-Hant': zhHant } })],
+        directives: { tooltip: () => undefined },
+      },
+    })
+    expect(wrapper.find<HTMLInputElement>('input[name="logfile"]').attributes('accept')).toContain('.csv')
+    expect(wrapper.text()).toContain('一般 CSV 遙測')
+  })
 })

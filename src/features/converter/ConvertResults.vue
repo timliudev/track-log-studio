@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useConverterStore } from '@/stores/converterStore'
 import type { OutputFormat } from '@/stores/converterStore'
 import { downloadText, downloadZip } from './download'
 import SaveCalibratedLoga from './SaveCalibratedLoga.vue'
+import { useAppNavigationStore } from '@/stores/appNavigationStore'
 
 const { t } = useI18n()
 const store = useConverterStore()
+const navigation = useAppNavigationStore()
 const { results, isConverting, readyFiles, outputFormat, savableEntries } = storeToRefs(store)
+const saveModifiedRegion = ref<HTMLElement | null>(null)
 
 const FORMATS: { id: OutputFormat; label: string }[] = [
   { id: 'nmea', label: 'NMEA (.nmea)' },
@@ -33,6 +36,18 @@ function downloadAllZip(): void {
   const zipName = `loga-${outputFormat.value}.zip`
   downloadZip(zipName, results.value)
 }
+
+async function revealSaveModified(): Promise<void> {
+  if (navigation.target !== 'converter-save-modified') return
+  store.setOutputFormat('loga')
+  await nextTick()
+  saveModifiedRegion.value?.scrollIntoView({ block: 'start' })
+  saveModifiedRegion.value?.focus({ preventScroll: true })
+  navigation.consumeConverterSaveModified()
+}
+
+onMounted(revealSaveModified)
+watch(() => navigation.target, revealSaveModified, { flush: 'post' })
 </script>
 
 <template>
@@ -68,9 +83,9 @@ function downloadAllZip(): void {
     </div>
     <p class="format-hint muted">{{ t(`converter.format.hint.${outputFormat}`) }}</p>
 
-    <template v-if="outputFormat === 'loga'">
+    <div v-if="outputFormat === 'loga'" ref="saveModifiedRegion" class="save-modified-region" tabindex="-1">
       <SaveCalibratedLoga />
-    </template>
+    </div>
     <template v-else>
       <button
         type="button"
@@ -179,6 +194,10 @@ function downloadAllZip(): void {
 }
 .format-hint {
   margin: 0;
+}
+.save-modified-region:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
 }
 .row {
   display: flex;

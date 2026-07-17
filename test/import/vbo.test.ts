@@ -32,6 +32,29 @@ describe('parseVbo fixtures', () => {
     expect(session.meta.createdDate!.getMonth()).toBe(5) // June (0-based)
     expect(session.meta.createdDate!.getDate()).toBe(21)
   })
+
+  it('keeps positional channel units, including a blank entry before a later unit', () => {
+    const session = parseVbo([
+      '[header]',
+      'time',
+      'first',
+      'second',
+      '',
+      '[channel units]',
+      's',
+      '',
+      'bar',
+      '',
+      '[column names]',
+      'time first second',
+      '',
+      '[data]',
+      '120000.000 1 2',
+    ].join('\n'))
+    expect(session.get('Time')?.unit).toBe('ms')
+    expect(session.get('first')?.unit).toBeUndefined()
+    expect(session.get('second')?.unit).toBe('bar')
+  })
 })
 
 describe('VBO importer ⇄ exporter round-trip', () => {

@@ -4,9 +4,13 @@ import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import { useTrackLibraryStore } from '@/stores/trackLibraryStore'
 import { circuitKey } from '@/domain/persist/circuitKey'
-import { getCircuitSetup, putCircuitSetup, type CircuitSetup } from '@/domain/persist/circuitStore'
+import { getCircuitSetup, putCircuitSetup, toPlainSetup, type CircuitSetup } from '@/domain/persist/circuitStore'
 import { resolveMatch, trackDefinitionGeometry, type AppliedGeometry } from '@/domain/tracks/matching'
 import type { TrackDefinitionV1 } from '@/domain/tracks/schema'
+import {
+  circuitGeometryOriginForRestore,
+  type CircuitGeometryOrigin,
+} from '@/domain/analysis/sectorAutoDetection'
 
 /** Debounce (ms) between the last edit and the idb write, so dragging a gate
  *  or line handle doesn't fire an idb write per animation frame. */
@@ -65,6 +69,12 @@ export function useCircuitPersistence(): {
    *  following future SHARED-library updates and reverts to a plain personal
    *  setup — same effect as if the user had drawn it by hand. */
   detachFromSharedTrack: () => void
+  /** B75: settled geometry source for the current circuit. Automatic sector
+   *  detection is allowed only for `none`; all other values have precedence. */
+  circuitGeometryOrigin: Ref<CircuitGeometryOrigin>
+  /** Increments once whenever async restore/matching settles for a new
+   *  circuit, allowing one fallback attempt per load without watch loops. */
+  circuitRestoreEpoch: Ref<number>
 } {
   const { track } = useActiveSession()
   const lapStore = useLapStore()
@@ -73,6 +83,8 @@ export function useCircuitPersistence(): {
 
   const ambiguousMatches = ref<TrackDefinitionV1[] | null>(null)
   const appliedSharedTrack = ref<TrackDefinitionV1 | null>(null)
+  const circuitGeometryOrigin = ref<CircuitGeometryOrigin>('pending')
+  const circuitRestoreEpoch = ref(0)
 
   // The circuit key for the CURRENTLY ACTIVE track, recomputed whenever the
   // track identity changes (file switch). Null when there's no GPS to key by.
@@ -85,24 +97,32 @@ export function useCircuitPersistence(): {
   // the pre-restore defaults) while restore is still in flight.
   let restoreSettled = false
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  // One timer per circuit. A pending save for circuit A must neither be
+  // cancelled by an edit to circuit B nor read B's live Pinia state when it
+  // eventually fires.
+  const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
   function scheduleSave(): void {
     if (!activeKey || !restoreSettled) return
-    if (saveTimer) clearTimeout(saveTimer)
     const key = activeKey
     const trackId = activeTrackId
-    saveTimer = setTimeout(() => {
-      const setup: CircuitSetup = {
-        schemaVersion: 1,
-        key,
-        trackId,
-        localOverride: { line: lapStore.line, gates: sectorStore.gates },
-        columns: lapStore.columns,
-        updatedAt: Date.now(),
-      }
+    const previousTimer = saveTimers.get(key)
+    if (previousTimer) clearTimeout(previousTimer)
+    // Snapshot now, before a possible file switch. `toPlainSetup` also strips
+    // Vue proxies so the delayed IndexedDB write is structured-cloneable.
+    const setup = toPlainSetup({
+      schemaVersion: 1,
+      key,
+      trackId,
+      localOverride: { line: lapStore.line, gates: sectorStore.gates },
+      columns: lapStore.columns,
+      updatedAt: Date.now(),
+    })
+    const timer = setTimeout(() => {
+      saveTimers.delete(key)
       void putCircuitSetup(setup)
     }, SAVE_DEBOUNCE_MS)
+    saveTimers.set(key, timer)
   }
 
   function applyGeometry(geometry: AppliedGeometry | null): void {
@@ -129,6 +149,7 @@ export function useCircuitPersistence(): {
     if (activeKey !== key) return
 
     const match = resolveMatch(key, saved, trackLibrary.tracks)
+    const origin = circuitGeometryOriginForRestore(match.kind, saved !== null)
     switch (match.kind) {
       case 'localOverride':
         activeTrackId = saved?.trackId ?? null
@@ -149,6 +170,8 @@ export function useCircuitPersistence(): {
     }
     if (saved) applyColumns(saved.columns)
     restoreSettled = true
+    circuitGeometryOrigin.value = origin
+    circuitRestoreEpoch.value++
   }
 
   /** §4.2 "already applied once" bookkeeping: writes an overlay recording
@@ -171,6 +194,7 @@ export function useCircuitPersistence(): {
     ambiguousMatches.value = null
     appliedSharedTrack.value = chosen
     activeTrackId = chosen.id
+    circuitGeometryOrigin.value = 'shared'
     applyGeometry(trackDefinitionGeometry(chosen))
     rememberSharedChoice(activeKey, chosen.id)
   }
@@ -195,6 +219,7 @@ export function useCircuitPersistence(): {
     (next, prev) => {
       if (next === prev) return
       restoreSettled = false
+      circuitGeometryOrigin.value = 'pending'
       activeKey = next ? circuitKey(next) : null
       if (activeKey) {
         void restoreFor(activeKey)
@@ -220,5 +245,13 @@ export function useCircuitPersistence(): {
   watch(() => sectorStore.gates, scheduleSave, { deep: true })
   watch(() => lapStore.columns, scheduleSave, { deep: true })
 
-  return { ambiguousMatches, chooseTrack, dismissAmbiguous, appliedSharedTrack, detachFromSharedTrack }
+  return {
+    ambiguousMatches,
+    chooseTrack,
+    dismissAmbiguous,
+    appliedSharedTrack,
+    detachFromSharedTrack,
+    circuitGeometryOrigin,
+    circuitRestoreEpoch,
+  }
 }

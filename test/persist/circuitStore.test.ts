@@ -240,4 +240,30 @@ describe('toPlainSetup (DataCloneError regression, 2026-07-02)', () => {
       updatedAt: 123,
     })
   })
+
+  it('captures a value snapshot that is unaffected by a later circuit-state change', async () => {
+    const { reactive } = await import('vue')
+    const { toPlainSetup } = await import('@/domain/persist/circuitStore')
+    const live = reactive({
+      schemaVersion: 1 as const,
+      key: 'circuit-a',
+      trackId: null,
+      localOverride: {
+        line: { a: { lat: 1, lon: 2 }, b: { lat: 3, lon: 4 } },
+        gates: [{ a: { lat: 5, lon: 6 }, b: { lat: 7, lon: 8 } }],
+      },
+      columns: [],
+      updatedAt: 123,
+    })
+
+    const scheduled = toPlainSetup(live)
+    live.localOverride.gates[0].a.lat = 99
+
+    expect(scheduled.key).toBe('circuit-a')
+    expect(scheduled.localOverride?.line).toEqual({
+      a: { lat: 1, lon: 2 },
+      b: { lat: 3, lon: 4 },
+    })
+    expect(scheduled.localOverride?.gates[0].a.lat).toBe(5)
+  })
 })

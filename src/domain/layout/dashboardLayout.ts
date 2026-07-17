@@ -532,10 +532,12 @@ export function isChartItemId(id: string): boolean {
  * here — this is a fixed grid-unit array, not something that measures the
  * user's real viewport).
  *
- * B66 — these heights are deliberate defaults for a NEW layout, not a
- * runtime content measurement. They leave ordinary card content expanded and
- * readable on both desktop and the mobile one-column layout, while existing
- * persisted layouts remain exactly as the user sized them.
+ * B76 — these heights are deliberate defaults for a NEW layout, informed by
+ * a reset-layout rendering of the ordinary nine-lap log at a wide desktop
+ * viewport. They leave ordinary card content expanded and readable on both
+ * desktop and the mobile one-column layout, while existing persisted layouts
+ * remain exactly as the user sized them. Variable-length result lists still
+ * scroll inside their cards instead of making the dashboard unbounded.
  *
  * Column A (x:0..4): map + lap table + sectors — the "at a glance" cards.
  * Column B (x:4..8): the remaining control panels (channel/accel/gear/file).
@@ -548,22 +550,22 @@ export function defaultLayout(): DashboardLayoutItem[] {
   return [
     // Column A — the at-a-glance map/lap/sector stack.
     { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 12 },
-    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 12, w: 4, h: 16 },
-    { i: STATIC_CARD_IDS.sectors, x: 0, y: 28, w: 4, h: 20 },
+    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 12, w: 4, h: 21 },
+    { i: STATIC_CARD_IDS.sectors, x: 0, y: 33, w: 4, h: 20 },
     // Column B
     { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 7 },
-    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 7, w: 4, h: 12 },
-    { i: STATIC_CARD_IDS.gear, x: 4, y: 19, w: 4, h: 14 },
-    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 33, w: 4, h: 8 },
-    { i: STATIC_CARD_IDS.suspension, x: 4, y: 41, w: 4, h: 12 },
+    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 7, w: 4, h: 15 },
+    { i: STATIC_CARD_IDS.gear, x: 4, y: 22, w: 4, h: 18 },
+    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 40, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.suspension, x: 4, y: 48, w: 4, h: 12 },
     // Column C — first chart (the store's initial default chart) sits right
     // under session-merge; further charts are appended below by
     // reconcileLayout's "new item" path (see defaultChartItem).
     { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 10 },
     { i: chartItemId(1), x: 8, y: 10, w: 4, h: 14 },
-    { i: STATIC_CARD_IDS.currentValues, x: 8, y: 24, w: 4, h: 22 },
-    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 46, w: 4, h: 8 },
-    { i: STATIC_CARD_IDS.lapAlign, x: 0, y: 48, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.currentValues, x: 8, y: 24, w: 4, h: 26 },
+    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 50, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.lapAlign, x: 0, y: 53, w: 4, h: 8 },
   ]
 }
 

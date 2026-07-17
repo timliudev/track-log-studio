@@ -8,6 +8,7 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
+import { useSectorAutoPopulate } from '@/composables/useSectorAutoPopulate'
 import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
 import { useTrackOverlay } from '@/composables/useTrackOverlay'
@@ -80,8 +81,19 @@ const { laps, timeMs, resetLine } = useLaps()
 // actions) runs after — and overrides — useLaps()'s synchronous default-line
 // seeding on file change. The returned refs/actions feed TrackFilePanel's
 // §4.3 multi-match picker and §4.4 detach affordance.
-const { ambiguousMatches, chooseTrack, dismissAmbiguous, appliedSharedTrack, detachFromSharedTrack } =
-  useCircuitPersistence()
+const {
+  ambiguousMatches,
+  chooseTrack,
+  dismissAmbiguous,
+  appliedSharedTrack,
+  detachFromSharedTrack,
+  circuitGeometryOrigin,
+  circuitRestoreEpoch,
+} = useCircuitPersistence()
+// B75: persistence/library geometry settles first; only a genuinely fresh
+// circuit receives one automatic sector-detection fallback. Root ownership
+// keeps card collapse/remount state out of this data lifecycle.
+useSectorAutoPopulate(laps, circuitGeometryOrigin, circuitRestoreEpoch)
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
@@ -447,9 +459,10 @@ function onDistBandInput(which: 'min' | 'max', e: Event): void {
 // How many laps the distance band currently excludes (0 when no band).
 const distBandExcludedCount = computed(() => lapStore.distanceBandExcluded.length)
 
-// How many laps fail the sector-gate-crossing check (0 when no gates are
-// confirmed yet) — mirrors bandExcludedCount, shown next to the sector panel.
-const sectorInvalidCount = computed(() => lapStore.sectorInvalid.length)
+// Raw sector failures remain visible even when B67's all-failed safety policy
+// deliberately suppresses effective exclusions. This gives gate edits an
+// immediate, truthful result without removing every lap from the analysis.
+const sectorFailureCount = computed(() => lapStore.sectorFailureCount)
 const sectorAllFailed = computed(() => lapStore.sectorAllFailed)
 
 // --- 鎖定布局: a single global toggle disabling drag+resize for every card,
@@ -1113,7 +1126,7 @@ function titleForItemId(id: string): string {
             >
               <SectorPanel
                 :laps="laps"
-                :invalid-count="sectorInvalidCount"
+                :failed-count="sectorFailureCount"
                 :all-failed="sectorAllFailed"
                 :track="track"
                 :time-ms="timeMs"

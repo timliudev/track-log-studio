@@ -15,6 +15,7 @@ import {
 } from '@/domain/units/suspension'
 import { useSuspensionStore } from '@/stores/suspensionStore'
 import { useFileStore } from '@/stores/fileStore'
+import { withSuspensionCalibration } from '@/domain/export/metadata'
 
 export interface SavedPreset {
   name: string
@@ -216,7 +217,7 @@ export const useConverterStore = defineStore('converter', () => {
         const augmented = applyDerivedChannels(session, suspension.config)
         const stem = stemOf(f.name)
         const options: ExportOptions = {
-          metadata: fileStore.getExportMetadata(f.id),
+          metadata: withSuspensionCalibration(fileStore.getExportMetadata(f.id), suspension.config),
           ...(format.id === 'nmea' ? { mapping: mapping.value } : {}),
         }
         for (const art of format.exportSession(augmented, f.name, options)) {
