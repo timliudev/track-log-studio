@@ -865,6 +865,88 @@ J(x)=\sum_j w_j\left[n_{eq,j}(x)-n_{target,j}\right]^2
 
 ---
 
+## 7. 開放問題、研究限制與動工判定
+
+### 7.1 P0：Phase 1–3 動工前要確認
+
+| # | 開放問題 | 為何會改變結果 | 建議關閉方式 |
+|---|---|---|---|
+| Q1 | 現有 profile 的「齒輪組」「終傳」各涵蓋哪些軸？是否有人輸入齒數對而非比值？ | 式 (1-1) 重複除或漏除會讓所有純 CVT 比失真 | 以一台已知齒數車畫傳動路徑，手算一筆 RPM／輪速 golden case |
+| Q2 | 可取得的是 belt pitch length、有效長，還是外周長？製造商如何定義？ | `L` 基準錯誤會讓兩半徑一起偏移 | 至少一條新皮帶拆件量抗拉芯線位置；保存料號與量法 |
+| Q3 | 13.8° 與 14°是單側盤面角、完整夾角，還是皮帶切製角／熱態角？ | 若角度基準誤解，式 (1-8) 與摩擦楔緊都錯 | 取得圖面或用輪廓規實測；UI 強制選「單側／完整」 |
+| Q4 | 前後工作半徑的量測值落在皮帶哪一條線？ | 外緣、底部與抗拉芯線不是同一半徑 | 用盤面記號＋皮帶剖面，把量測換到 pitch radius |
+| Q5 | Phase 2 的 fixed-reduction fallback 用哪一段 log、如何證明高速端已到位且離合器鎖定？ | 若只是部分變速或有滑差，回推會把錯誤固定到整份 profile | 要求穩定 RPM／speed、盤面記號或已知 top ratio；顯示選段與 confidence |
+| Q6 | `200 rpm/g` 的 g 是整組總重，還是每顆名義重量增加 1 g？ | 六珠時兩者相差六倍 | UI 與試驗記錄同時保存單顆序列、顆數、總重 |
+| Q7 | Phase 2 對越界的產品用詞是否接受「疑似滑差／非幾何速度差」？ | 直接稱 belt slip 會超出 log 可辨識性 | 依 §3.5 確認 UI 文案與 tooltip |
+
+### 7.2 P1：Phase 4–5 力模型與校正前要確認
+
+| # | 開放問題 | 阻擋哪一項 | 建議試驗／決策 |
+|---|---|---|---|
+| Q8 | 珠道是圓珠、slider 或混用？能否取得 CAD／正投影照片？ | `r_j(x)`、`dr_j/dx`、式 (2-3) | 先選一組代表性前盤做完整數位化，建立量測 SOP |
+| Q9 | 大彈簧能否取得 N/mm 與實際安裝長？是否漸進、預扭或接近 coil-bind？ | 式 (2-6) | 低成本壓床／荷重元量 force–travel，冷熱各一次 |
+| Q10 | torque cam 的角度定義、接觸半徑與升降檔接觸側為何？ | 式 (2-7)–(2-10) | 拆件描兩側 pin-center path；不要只抄商品名「45°」 |
+| Q11 | 速可達後盤的 torque split `λ_T=0.5` 是否可接受為未校正起點？ | torque-cam force band | UI 預設 0.5 並給寬 band；若要縮窄需軸向力／扭矩台架 |
+| Q12 | log 是否有 throttle、longitudinal acceleration、坡度或可對應 dyno map？ | `T_r` estimate 與 `K_stat` 識別 | 先定最小 channel contract；沒有 torque proxy 時只做手動 torque sweep |
+| Q13 | 能否額外量前／後盤或 clutch bell 轉速、CVT case／belt 溫度？ | 分離皮帶／離合器 slip、熱態 map | 評估一次 instrumented test，而非要求每位使用者都有感測器 |
+| Q14 | calibration 的 accuracy goal 是多少（例如 WOT 平台 ±150 rpm、比值 ±2%）？ | 是否值得增加 map 維度與試驗數 | 先定產品容許誤差，再定模型複雜度；不可反過來 |
+| Q15 | 升／降檔要兩張 map，還是第一版只做升檔？ | 遲滯表達與 UI | 賽道調教建議至少分方向；資料不足時降級只做升檔並標示 |
+| Q16 | `μ` 的目的只是警示，還是要宣稱可預測 slip onset？ | 所需試驗差一個層級 | 建議第一版只作範圍警示；有 torque／shaft-speed 台架後再升級 |
+| Q17 | profile／calibration 應綁車輛還是可分享零件 catalog？ | 資料 schema 與錯套風險 | A/B 級幾何可分享；C 級 calibration 一律綁 §3.6 identity |
+
+### 7.3 P2：逆向調教前要確認
+
+| # | 開放問題 | 影響 | 建議決策 |
+|---|---|---|---|
+| Q18 | 「起步接合」是蹄片初碰、車開始動，還是近鎖定？ | 三者 rpm 與熱負荷不同 | UI 分成 initial contact／vehicle launch／lock-up；至少要 clutch bell speed 才能驗證 lock-up |
+| Q19 | 是否願意輸入離合器蹄塊、小彈簧與幾何？ | 沒有就不能解第一個目標 | 未提供時只做 CVT 平台，明確停用 clutch inverse |
+| Q20 | 「巡航最大馬力」是 WOT 加速 plateau 還是部分油門定速？ | target map 完全不同 | 建議產品改稱「全油門變速目標轉速」；部分油門另需 efficiency map |
+| Q21 | 可購零件 catalog 從哪裡來，公差與相容性是否可信？ | 離散最佳化只能推薦存在的零件 | 先從使用者自建 catalog；不爬未驗證商品文案當物理規格 |
+| Q22 | safety constraints 由誰提供？ | 逆解可能推薦過度夾持、過熱或超轉 | 需原廠／零件商極限＋實測熱負荷；沒有就只排相對候選，不標安全 |
+| Q23 | 最少幾組 hold-out 才開啟推薦？ | 防止用單一 setup 過度擬合 | 建議至少一組未參與 fitting 的珠重與一組負載／溫度場景 |
+| Q24 | 是否允許混珠；若允許，是否限制對稱排列？ | 不平衡與磨耗不是純總重問題 | catalog 層加入排列硬約束；不推薦非對稱質量配置 |
+
+### 7.4 研究限制
+
+- 本研究沒有指定車款的實體 CVT、尺寸、spring bench data、torque-cam profile 或配對馬力機／Track Log，因此所有數值例只作量級檢查，不是某台車的推薦。
+- [S2] 是 Baja SAE flyweight-arm CVT 的完整準靜態推導，不是速可達圓珠盤的逐零件模型；本文的式 (2-2)–(2-3) 以 [S3] 實際使用的 `m r ΔD_R/ΔD_A ω²` 機械利益式轉成速可達珠道曲線。
+- [S4][S6][S7][S10] 部分全文需訂閱；本文只採其公開摘要／段落可驗證的模型層級、實驗結果與限制，未重建付費全文中的未見公式。核心可實作公式取自可完整檢視的 [S1]–[S3]。
+- [S9] 的角度實驗使用 36°完整槽角的 automotive V-belt，不能直接把其最佳角度數字套到 13.8°／14°速可達；可移植的是「彎曲後角度與接觸順應性決定效率，名義角差不能單獨換算節圓」的結論。
+- `K_stat` 是把複雜 belt mechanics 降維的 engineering map，不是基本材料常數。不同皮帶、磨耗、盤面、溫度、方向與負載皆可能需要重校。
+- 天氣對負載的空阻路徑可計算；天氣對引擎輸出、belt temperature、rubber friction 與 spring 的淨效果沒有單一方向，必須實測。
+
+### 7.5 公式來源稽核摘要
+
+| 公式群 | 主要來源 | 本文做的改寫 |
+|---|---|---|
+| (1-1)–(1-2) | [S1] transmission ratio | 串聯固定減速、統一減速比方向 |
+| (1-3)–(1-8) | [S2] belt length／wrap／sheave displacement；[S1] 近似式 | 前後盤符號與精確／近似並列 |
+| (1-9)–(1-10) | 式 (1-8) 的三角幾何；失配物理由 [S9] | 13.8°／14°量級計算，不外推接觸修正 |
+| (2-1)–(2-5) | [S2] centrifugal flyweight；[S3] 式 (9.2) | 對數位化質心路徑用虛功、各珠加總 |
+| (2-6)–(2-11) | [S2] spring／helix force；負載分配限制 [S16] | 變角積分與 `λ_T` calibration |
+| (2-12)–(2-14) | [S2] 均勻壓力 equilibrium；[S13] stationary clamp-force ratio | 以 `K_stat` map 表示待校正 belt coupling |
+| (2-15)–(2-19) | [S3][S8] V-belt force／slip；[S10] speed／torque loss 分量 | 容量下限與 log speed residual |
+| (2-20) | 功率平衡＋式 (1-2) | 加入效率範圍的 torque conversion |
+| (4-1)–(4-4) | 對式 (2-14)、(2-3) 做隱函數／代數推導 | `rpm/g` 局部與有限變更基準 |
+| (4-5)–(4-7) | [S17] ideal gas、[S15] drag、[S18] 縱向動力學 | 串成 weather→load→torque-cam 路徑 |
+| (5-1)–(5-3) | [S19] clutch 參數結構；[S2][S12] CVT tuning／numerical design | 多工況、離散零件與 robust inverse objective |
+
+### 7.6 最終動工判定
+
+| 能力 | 判定 | 最小前置 |
+|---|---|---|
+| 實測總比拆純 CVT 比、解節圓與盤面位移 | **可實作** | 關閉 Q1–Q5；使用可靠 `L/C/α/fixed ratios/radius bounds` |
+| 幾何越界／疑似滑差與 SVG 動畫 | **可實作** | 明列輪周與離合器 caveat；不把越界全稱 belt slip |
+| 給定 RPM／torque 的準靜態平衡 | **需實測後可實作** | `r_j(x)`、spring force curve、cam profile、torque source、至少 baseline `K_stat` |
+| `±1 g → Δrpm`、套管與天氣敏感度 | **需實測後可實作** | 定義工況、總重單位、calibration band 與 hold-out |
+| 反推珠重／彈簧候選 | **需實測後可作受限建議** | 已驗證前向模型、零件 catalog、硬限制與 robust scenarios |
+| 只靠珠重／大彈簧反推離合器接合 rpm | **不可行** | 必須另加 clutch-shoe mass／spring／geometry model |
+| 無量測即精準預測摩擦、滑差、瞬態與熱負荷 | **不可行** | 需專用感測、材料試驗、台架與更高階 transient model |
+
+**收斂結論：可先完成 Phase 1–3；Phase 4–6 的數學骨架可實作，但實車可信度取決於珠道／彈簧／凸輪數位化與 `K_stat`、滑差、溫度校正；不做這些實測，就只能是方向比較工具，不能是精準調車答案。**
+
+---
+
 ## 引用文獻
 
 - **[S1]** Vincenzo La Battaglia, Alessandro Giorgetti, Stefano Marini, Gabriele Arcidiacono, Paolo Citti, “Kinematic Analysis of V-Belt CVT for Efficient System Development in Motorcycle Applications,” *Machines*, 10(1), 16, 2022. <https://doi.org/10.3390/machines10010016>
