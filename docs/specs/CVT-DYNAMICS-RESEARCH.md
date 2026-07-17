@@ -727,6 +727,144 @@ J(x)=\sum_j w_j\left[n_{eq,j}(x)-n_{target,j}\right]^2
 
 ---
 
+## 6. Track Log Studio 實作建議
+
+### 6.1 產品原則
+
+1. **實測曲線是事實層，模型是解釋層。**既有 `i_total`／`i_cvt,meas` 曲線永遠保留；模型失配時顯示 residual，不用模型覆蓋 log。
+2. **幾何、力平衡、校正、逆向建議逐級解鎖。**缺資料時停在上一級，畫面仍可用，不要求使用者為了通過表單而猜 `μ`。
+3. **所有 prediction 帶 confidence 與適用工況。**至少區分「純幾何」「理想未校正」「本車已校正」「hold-out 已驗證」。
+4. **不把自由文字調教備註自動當物理參數。**「大彈簧 1500 rpm」可保存與比較，但在沒有 N/mm／安裝預載前不能進式 (2-6)。
+5. **所有重計算預先完成／快取。**比值求根、force sweep、Monte Carlo 與 calibration 不在 cursor move 上執行；Phase 3 SVG 只讀樣本對齊的結果。
+
+### 6.2 已核准的純運動學 Phase 1–3（範圍不變）
+
+#### Phase 1 — CVT profile 與 belt-position solve
+
+- per-profile：皮帶節線長 `L`、軸距 `C`、前後盤面半角、前後工作半徑／套管行程、齒輪組、終傳與後輪有效周長。
+- derived：`i_cvt = i_total ÷ i_gear ÷ i_final`；以式 (1-4)＋式 (1-6) 解節圓，式 (1-8) 解盤面位移。
+- 建議以精確開帶式為正式值，式 (1-7) 保留為已核准近似式的 regression 對照。
+
+#### Phase 2 — 幾何界限與 slip suspicion
+
+- `i_cvt,meas` 導致無根或半徑越界時，顯示超額百分比、離合器未鎖定 gating 與候選原因。
+- fixed reduction 未知時，可用已確認「離合器鎖定、穩態、高速端到位」區段回推；結果必須標為 calibration fallback，並顯示所選區段。
+- 用詞建議「非幾何速度差／疑似滑差」，不可把所有越界直接定名為皮帶 slip（§3.5）。
+
+#### Phase 3 — cursor-synced SVG CVT animation
+
+- side view 前後盤、皮帶梯形、移動盤與 slipping state。
+- 盤面位置只由預算好的 `R_f/R_r/x_f/x_r` 驅動；若角度失配，只顯示接觸風險提示。
+- 同步顯示 measured total ratio、pure CVT ratio、幾何可達範圍與 confidence；輪周／固定減速不確定度常駐可見。
+
+### 6.3 Phase 4 — 準靜態 force-balance sandbox
+
+**目的：**讓進階使用者輸入可量得參數，看到每個機構的力曲線與平衡結構；此階段不先推出「推薦珠重」。
+
+#### 最小參數集
+
+| 群組 | 必填 | 可先採假設／缺省 | 缺少時的行為 |
+|---|---|---|---|
+| Phase 1 幾何 | `L/C/α/R bounds/x reference/fixed ratios` | 無 | 不開 force model |
+| 前盤 | 珠數、每顆重量；`r_j(x_f)` 數位化點 | `η_r=1`，清楚標理想 | 沒珠道曲線時只畫 `m r ω²`，不解 axial equilibrium |
+| 後盤彈簧 | force–travel curve，或 `k_r + installed preload` | 無；「rpm rating」不轉換 | 沒物理彈簧力時不解平衡 |
+| torque cam | `γ_c(x_r)`、`R_c(x_r)`、角度基準 | `λ_T=0.5` 附寬不確定帶；無扭轉彈簧則 0 | 無 cam 時可做 `T_r=0` 教學情境，負載預測停用 |
+| 操作工況 | `ω_f`、`T_r` 或可追溯的 torque estimate | `η_cvt` 只能是範圍 | 沒 torque 時只比較無負載／指定假設負載 |
+| 皮帶耦合 | `K_stat` calibration 或選擇 ideal `K_0` | `K_0=θ_f/θ_r`，confidence=理想未校正 | 可解示意根，不可稱實車預測 |
+
+摩擦係數 `μ` **不是求式 (2-14) 理想平衡根的必填欄位**；它是 slip-capacity 檢查必填或範圍輸入。這可避免使用者為了「跑得動」亂填一個看似精密的 0.4。若未填，只顯示「尚未評估 slip margin」。
+
+#### UI 表單
+
+1. **Profile／零件 identity**：車輛、前盤、珠型、後盤、大彈簧、cam、皮帶、套管／墊片；可複製 setup 做 A/B。
+2. **幾何**：沿用 Phase 1，額外顯示節線與外周長的差別、單側角／完整槽角切換。
+3. **前盤滾珠**：顆數、逐顆 g、總重自動加總、圓珠／slider、`(x_f,r_j)` 點表／CSV、輪廓預覽與導數預覽。
+4. **後盤彈簧**：自由長、安裝長、N/mm 或 force–travel 點表；表單即時顯示 `F_r0` 與剩餘 coil-bind margin。
+5. **Torque cam**：角度基準明選、接觸半徑、常角或曲線點表、是否有扭轉預載、`λ_T` 假設／校正狀態。
+6. **皮帶／摩擦**：料號、里程、冷態寬、楔角、`μ` 範圍、belt temperature；與盤角失配提示。
+7. **工況**：固定 torque sweep、從 dyno curve 估算或從 log 選區段；顯示 torque 的來源鏈與不確定度。
+
+#### 輸出
+
+- `F_f`、後盤大彈簧力、torque-cam force、`K_stat F_r` 對 `q` 的分解圖。
+- `Ψ(q)` 與根、機械端點、多根／不穩定根提示。
+- `rpm(q)` 的低中高 torque band，升／降檔分線。
+- 盤徑、珠道、凸輪、彈簧行程 margin。
+- 有 `μ` 時的 slip-capacity margin；沒有時顯示待量測，不補數字。
+
+### 6.4 Phase 5 — 本車校正與敏感度
+
+**進入條件：**至少有一個 baseline setup，log 具 RPM、speed、有效輪周、固定減速與可用的 throttle／torque proxy；最好另有從動軸速度、CVT 溫度與 dyno torque。
+
+- 使用者選「穩態、離合器已鎖、無明顯煞車／輪滑」的校正區段；app 應保存選段，不自動挑完便藏起來。
+- 先識別低維 `k_cal(q,T,dir)` 或幾個分段係數，不一開始就同時擬合 `μ/η_r/λ_T/L/wheel circumference`。
+- 顯示 fitted 與 hold-out residual、參數相關性與是否 underdetermined；hold-out 不合格則 confidence 不升級。
+- 開放 §4 的 total roller mass `±1 g`、spring preload、`k_r`、cam、sleeve、weather sweep；同時輸出 nominal line 與 uncertainty band。
+- calibration 要綁 §3.6 identity；零件變更後自動降級，不刪舊資料，方便 setup 比較。
+
+### 6.5 Phase 6 — 受限逆向調教助手
+
+**進入條件：**Phase 5 至少一個 hold-out 驗證通過，並建立實際可取得零件 catalog。
+
+- 目標分「離合器接合」「WOT 變速平台」「高速端／低速端」「slip／熱負荷 margin」；缺 clutch 參數時第一項停用並解釋原因。
+- 依 §5.4 枚舉離散零件＋微調珠重，輸出 Pareto 候選，不輸出單一神奇答案。
+- 每個候選列低中高負載、冷熱、升降檔最壞誤差，並產生「只改一項」的實車驗證卡。
+- 使用者回填實測結果後新增 calibration revision；不可直接改寫舊模型而失去可追溯性。
+
+### 6.6 Phase 7 — 暫不排程的瞬態研究
+
+若日後確實需要 `shift time`、belt temperature／loss 或 stick-slip，應另立研究：
+
+- 皮帶縱向、橫向與彎曲剛性、阻尼、線密度、熱態材料曲線。
+- 離散 belt element／ODE 或經實驗驗證的 1-D spring/contact model [S4][S5]。
+- 主從動盤慣量、離合器動態、局部接觸與摩擦模型。
+- 專用台架與高速量測。
+
+不要在 Phase 4–6 加一個任意 low-pass time constant，就把輸出命名為「真實變速時間」。若只為 UI 動畫平滑，可用視覺 easing，但必須與物理預測欄位隔離。
+
+### 6.7 資料通道與降級策略
+
+| 可用通道 | 能啟用的能力 | 缺少時 |
+|---|---|---|
+| Engine RPM + GPS／wheel speed | measured total ratio | 核心功能不可用 |
+| 有效輪周 + fixed ratios | pure CVT ratio | 只顯示 total ratio 或 calibration fallback |
+| Throttle | 區分 WOT／部分負載、升降檔區段 | torque 情境需手動選 |
+| Longitudinal acceleration + grade | 改善 road-load torque estimate | 以 torque range 代替 |
+| Dyno engine torque map | `T_e → T_r` estimate | 不反解實車 torque，只做指定 sweep |
+| Driven shaft RPM | 分離 CVT speed ratio 與後輪／終傳誤差 | 所有速度差仍是合併 residual |
+| Clutch bell／output RPM | clutch slip 與 lock-up gating | 只能用轉速／速度形狀推測 lock-up |
+| Belt／case temperature | 熱態 calibration | 冷／熱車標籤或時間 proxy |
+| Weather／wind | density、aero scenario | 使用標準環境並顯示未修正 |
+
+### 6.8 驗證計畫與完成定義
+
+#### 數學／幾何
+
+- `q=1` 時精確長度式回到 `2C+2πR`；前後包角均為 `π`。
+- 用 [S2] 附錄參數交叉核對 belt length、sheave displacement、spring／cam force 與單點平衡質量的量級。
+- 珠道為直線時，式 (2-2) 與有限位移機械利益一致；點表平滑後不得產生非物理負斜率。
+- 所有角度基準、g/kg、mm/m、rpm/rad·s⁻¹ 有明確轉換測試。
+
+#### 實車／台架
+
+- baseline：冷／熱、升／降檔、至少低中高三負載重複，報 repeatability。
+- sensitivity：至少一組未參與 fitting 的珠重與一組彈簧 setup；檢查方向、全行程誤差與 200 rpm/g 經驗點。
+- geometry：盤面記號／拆車量得節圓與 Phase 1 solve 對拍。
+- slip：至少一個已知不滑與刻意接近滑動的工況；沒有 shaft speed／torque 感測時只驗證警示一致性，不聲稱辨識 `μ`。
+
+#### 產品驗收
+
+- 任一假設值在 UI、匯出報告與圖例都帶「假設／未校正」。
+- 缺參數時功能可降級且理由具體，不顯示 NaN、假零或虛構建議。
+- 實測曲線、模型曲線與 residual 可同圖比較；使用者可追到每條曲線採用的 setup revision。
+- cursor 互動不觸發求根／Monte Carlo；長 log 的 derived series 可取消、可快取、換 profile 後正確失效。
+
+### 6.9 建議的誠實邊界文案
+
+> 此模型以量得的 CVT 幾何與準靜態力平衡估算。未校正時，摩擦、皮帶熱態變形、升降檔遲滯與離合器滑動可能造成顯著差異；結果適合比較改裝方向與規劃試車，不代表零件安全保證或馬力機實測。
+
+---
+
 ## 引用文獻
 
 - **[S1]** Vincenzo La Battaglia, Alessandro Giorgetti, Stefano Marini, Gabriele Arcidiacono, Paolo Citti, “Kinematic Analysis of V-Belt CVT for Efficient System Development in Motorcycle Applications,” *Machines*, 10(1), 16, 2022. <https://doi.org/10.3390/machines10010016>
