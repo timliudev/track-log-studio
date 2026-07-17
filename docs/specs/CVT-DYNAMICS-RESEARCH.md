@@ -802,7 +802,7 @@ J(x)=\sum_j w_j\left[n_{eq,j}(x)-n_{target,j}\right]^2
 - 開放 §4 的 total roller mass `±1 g`、spring preload、`k_r`、cam、sleeve、weather sweep；同時輸出 nominal line 與 uncertainty band。
 - calibration 要綁 §3.6 identity；零件變更後自動降級，不刪舊資料，方便 setup 比較。
 
-### 6.5 Phase 6 — 受限逆向調教助手
+### 6.5 Phase 6 — 受限逆向調教工具
 
 **進入條件：**Phase 5 至少一個 hold-out 驗證通過，並建立實際可取得零件 catalog。
 
@@ -964,7 +964,7 @@ J(x)=\sum_j w_j\left[n_{eq,j}(x)-n_{target,j}\right]^2
 - **[S13]** Altair Engineering, “CVT Model,” *MotionView / MotionSolve 2024 Help*, 2024. <https://help.altair.com/2024/hwdesktop/hwx/topics/motionview/cvt_scooter_cvt_model_r.htm>
 - **[S14]** Adrian Olmos Jr., Steven Griffin, Gary Price, Nathan Beilke, Scott Sajdowitz, “Investigating Humidity Effects on Small Offroad Engine SI Performance and Emissions,” SAE Technical Paper 2021-01-1224, 2021. <https://doi.org/10.4271/2021-01-1224>
 - **[S15]** NASA Glenn Research Center, “Drag of a Sphere” （空氣阻力方程與各變數定義）. <https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-of-a-sphere/>
-- **[S16]** Enrico Nino Manes, “Design and Modeling of a Novel Continuously Variable Transmission,” Ph.D. dissertation, Purdue University. <https://docs.lib.purdue.edu/dissertations/AAI3481098/>
+- **[S16]** Enrico Nino Manes, “Design and Modeling of a Novel Continuously Variable Transmission,” Ph.D. dissertation, Purdue University. <https://docs.lib.purdue.edu/dissertations/%41%41%493481098/>
 - **[S17]** NASA Glenn Research Center, “Equation of State (Ideal Gas).” <https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/equation-of-state-ideal-gas-2/>
 - **[S18]** Reza N. Jazar, *Vehicle Dynamics: Theory and Application*, 3rd ed., Springer, 2017. <https://doi.org/10.1007/978-3-319-53441-1>
 - **[S19]** Ki-Kap Kim, Yoon-Sik Jun, “A Study of Kinematic Analysis for Improvement of Transmitting Torque of Centrifugal Clutch,” *Journal of the Korean Society of Manufacturing Technology*, 12(4), 173–178, 2010. <https://doi.org/10.17958/ksmt.12.4.201012.173>
