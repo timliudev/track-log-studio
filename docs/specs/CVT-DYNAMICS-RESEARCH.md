@@ -160,6 +160,224 @@ L\approx 2C+\pi(R_f+R_r)+\frac{(R_r-R_f)^2}{C}
 
 ---
 
+## 2. 力平衡模型：給定轉速／扭矩，CVT 停在哪個比值
+
+### 2.1 一個自由度的準靜態問題
+
+以 `q = i_cvt = R_r/R_f` 為廣義座標。對任一候選 `q`，§1 的兩約束式會唯一給出 `R_f(q)`、`R_r(q)`，再由式 (1-8) 得 `x_f(q)`、`x_r(q)`。珠道位置、後盤彈簧壓縮量、扭力凸輪相對轉角與包角也因此都成為 `q` 的函數。
+
+這種降成一個自由度的做法符合 [S1]「先建立 belt／roller position kinematics，再做 dynamics」的研究路徑，也符合 [S2] 把前後致動器透過單一平衡式耦合的結構。第一版採**準靜態**：每個 log 樣本視為鄰近穩態，不預測變速所需時間。
+
+### 2.2 前盤：滾珠離心力經珠道轉成軸向力
+
+單顆滾珠質量 `m_j`、質心到旋轉軸半徑 `r_j`、前盤角速度 `ω_f` 時，徑向離心力大小為：
+
+\[
+F_c=m_j r_j\omega_f^2
+\tag{2-1}
+\]
+
+**來源：**旋轉座標的基本向心／離心力；[S2] §2.2 與 [S3] §9.4.1 均以此建立 flyweight force。
+
+真正需要的不是把某個固定「珠道角」乘上 `F_c`，而是滾珠質心路徑 `r_j(x_f)` 的局部機械利益。忽略滾動阻力，以虛功寫成：
+
+\[
+F_{j,x}^{ideal}\,dx_f=F_c\,dr_j
+\quad\Rightarrow\quad
+F_{j,x}^{ideal}=m_j\omega_f^2 r_j(x_f)\frac{dr_j}{dx_f}
+\tag{2-2}
+\]
+
+**來源：**[S3] 式 (9.2) 的 `m r (ΔD_R/ΔD_A) ω²` 在連續曲線極限下的寫法；`dr_j/dx_f` 即局部珠道斜率／機械利益。它也說明為什麼只輸入一個珠道角不足：曲線斜率隨行程改變時，調速特性也會改變 [S1]。
+
+`N_j` 顆沿同一路徑的總理想軸向力：
+
+\[
+F_{f,roller}^{ideal}
+=\omega_f^2 r_j(x_f)\frac{dr_j}{dx_f}\sum_{k=1}^{N_j}m_{j,k}
+\tag{2-3}
+\]
+
+**來源：**本文件將式 (2-2) 對各珠相加。混珠在「幾何相同、都保持接觸」的前提下只看總質量；若不同直徑／slider 形狀改變質心路徑，不能只加總克數。
+
+若前盤另有回位彈簧，其反力為：
+
+\[
+F_{f,spring}=F_{f0}+k_f x_f
+\tag{2-4}
+\]
+
+**來源：**線性壓縮彈簧的 Hooke 定律；[S2] 式 (5)。一般速可達前普利盤可把 `F_f0=k_f=0`。
+
+實際前盤可用軸向力先定義為：
+
+\[
+F_f=\eta_{r,dir}(x_f,\omega_f,T)F_{f,roller}^{ideal}-F_{f,spring}
+\tag{2-5}
+\]
+
+其中 `η_r,dir` 是升檔／降檔可不同的珠道效率。**這是半經驗假設，不是文獻常數。**理想版可先設 1；要吸收滾珠滾動／滑動阻力、導板摩擦與磨耗，必須由實測校正，且不可允許負夾持力（未接觸時截為 0）。
+
+### 2.3 後盤：大彈簧與扭力凸輪
+
+先將大彈簧的組裝預載與行程分開：
+
+\[
+F_{r,spring}=F_{r0}+k_r x_r
+=k_r(x_{r,pre}+x_r)
+\tag{2-6}
+\]
+
+**來源：**[S2] §2.3 的 `k_s(δ_s,pre+z_s)`。型錄若只寫「1000 rpm／1500 rpm 彈簧」而沒有 N/mm 與安裝長度，不能直接代入此式。
+
+令扭力凸輪接觸半徑為 `R_c`，凸輪角 `γ_c` 定義為溝槽切線相對**圓周方向**的角度，因此：
+
+\[
+\tan\gamma_c=\frac{dx_r}{R_c\,d\phi_c}
+\tag{2-7}
+\]
+
+若假設從動盤扭矩平均分到兩片盤面，且大彈簧另有扭轉預載／扭轉剛性，凸輪增加的軸向力為：
+
+\[
+F_{r,cam}=\frac{\cot\gamma_c}{R_c}
+\left[\frac{T_r}{2}+\kappa_r(\phi_{pre}+\phi_c)\right]
+\tag{2-8}
+\]
+
+\[
+\phi_c(x_r)=\int_0^{x_r}\frac{dx}{R_c(x)\tan\gamma_c(x)}
+\tag{2-9}
+\]
+
+**來源：**[S2] 式 (7)–(8)；式 (2-9) 是其常角度關係對變角／變半徑溝槽的積分化。若大彈簧沒有可辨識的扭轉作用，設 `κ_r=0`。若供應商的凸輪角是相對軸向量測，需先轉成 `γ_c = 90° - γ_axis`；否則 `cot`／`tan` 會整個用反。
+
+接觸 pin／roller 數量在「總扭矩平均分配」推導中會相消，不應再多乘一次。更重要的是，`T_r/2` 是簡化假設；Manes 的低功率 rubber-belt CVT 研究指出，螺旋約束兩盤面的扭矩分配會受盤面速度差、皮帶剪切剛性與摩擦係數強烈影響 [S16]。因此實作應把 `1/2` 泛化為可校正的負載分配 `λ_T`：
+
+\[
+F_{r,cam}=\frac{\cot\gamma_c}{R_c}
+\left[\lambda_T T_r+T_{spring,torsion}\right],
+\qquad 0<\lambda_T<1
+\tag{2-10}
+\]
+
+**來源：**式 (2-8) 的半經驗擴充；`λ_T=0.5` 是 [S2] 的起始假設，其他值必須實測識別。
+
+後盤總致動軸向力：
+
+\[
+F_r=F_{r,spring}+F_{r,cam}
+\tag{2-11}
+\]
+
+**來源：**[S2] 式 (7) 的彈簧項與凸輪項相加。扭矩越高時 `F_r` 越大，會抵抗前盤升檔並增加夾持；這就是 torque cam 的負載回饋路徑。
+
+### 2.4 前後盤如何透過皮帶耦合
+
+[S2] 的最低階「均勻壓力」耦合把兩盤的單位包角壓力視為相同，可得 stationary clamp-force ratio：
+
+\[
+\frac{F_f}{F_r}=K_0(q)
+=\frac{\theta_f(q)}{\theta_r(q)}
+\tag{2-12}
+\]
+
+**來源：**[S2] 式 (9) 整理；`θ_f/θ_r` 由式 (1-5) 取得。這是可跑的起始模型，但不是 rubber V-belt 接觸力的完整解。
+
+更可靠的工程結構是把皮帶、摩擦、扭矩與歷史效應濃縮成 stationary ratio map：
+
+\[
+K_{stat}=K_{stat}(q,T_r,\omega_f,T_{belt},dir,wear)
+\tag{2-13}
+\]
+
+\[
+\Psi(q;\omega_f,T_r,p)=F_f(q,\omega_f,p)
+-K_{stat}(q,T_r,\ldots)F_r(q,T_r,p)=0
+\tag{2-14}
+\]
+
+**來源：**[S13] 採用「實際夾持力比等於 stationary clamp force ratio 才停止變速」的 CMM 結構，且明示其中係數需實驗量測；式 (2-14) 是本文依該結構與式 (2-12) 的符號化。沒有台架資料時先令 `K_stat=K_0·k_cal`，以少量 log 校正無因次 `k_cal(q,T_r,dir)`，不可默認 `k_cal=1` 已達預測精度。
+
+### 2.5 皮帶楔緊、可傳扭矩與滑差條件
+
+最簡 V-belt capstan 上限為：
+
+\[
+\frac{T_{tight}-T_c}{T_{slack}-T_c}
+\leq
+\exp\!\left(\frac{\mu\theta}{\sin\alpha}\right),
+\qquad T_c=m'v_b^2
+\tag{2-15}
+\]
+
+**來源：**[S3] 式 (2.1)–(2.3)，彙整自 Gerbert [S8]；`T_c` 是皮帶線密度 `m'` 與皮帶速度 `v_b` 造成的離心張力。低速簡化可忽略 `T_c`，高速不應忽略。
+
+盤上傳遞扭矩與緊、鬆邊張力差：
+
+\[
+T_{pulley}=(T_{tight}-T_{slack})R
+\tag{2-16}
+\]
+
+**來源：**繞帶輪的力矩平衡；亦為 [S3] 接觸區模型的邊界量。若令 `E=exp(μθ/sinα)` 且恰在滑動極限、忽略 `T_c`，可由式 (2-15)–(2-16) 推得：
+
+\[
+T_{slack,min}=\frac{T_{pulley}/R}{E-1},
+\qquad
+T_{tight,min}=E\,T_{slack,min}
+\tag{2-17}
+\]
+
+**來源：**本文件由式 (2-15)–(2-16) 代數推導。它是容量下限，不是軸向夾持力的完整公式。
+
+若每片盤面對皮帶的局部法向壓力（每單位弧長）為 `p(s)`，移動盤承受的軸向反力為：
+
+\[
+F_{axial}=\int_{contact}p(s)\cos\alpha\,ds
+\tag{2-18}
+\]
+
+**來源：**[S3] §3.1 與 §6.1.2 的盤面壓力積分。`p(s)` 同時受張力、座入／退出、彎曲剛性與徑向摩擦控制，所以僅靠 `μ` 和式 (2-15) 不能唯一算出 `F_f/F_r`。這正是第一版需要 `K_stat` 校正，而不直接宣稱完成接觸力學的原因。
+
+log 可觀察的總速度滑差指標可定義為：
+
+\[
+s_{speed}=1-\frac{\omega_rR_r}{\omega_fR_f}
+\tag{2-19}
+\]
+
+**來源：**本文件將無滑差條件 `ω_fR_f=ω_rR_r` 正規化。它混合了前盤、後盤、離合器、輪胎有效周長誤差與訊號延遲，不能單憑此值反推出唯一摩擦係數；[S10] 也把 speed loss 與 torque loss 分開量測，而非用單一速度比代表全部損失。
+
+### 2.6 完整平衡方程與求解結構
+
+給定前盤轉速 `ω_f`、傳遞到後盤的扭矩 `T_r` 與參數集合 `p`，第一版的求解順序為：
+
+1. 在幾何允許區間 `[q_min,q_max]` 取候選 `q`，用式 (1-3)–(1-8) 解 `R_f/R_r/x_f/x_r/θ_f/θ_r`。
+2. 由數位化的 `r_j(x_f)` 與導數，使用式 (2-3)–(2-5) 算 `F_f`。
+3. 由大彈簧、凸輪曲線與 `T_r`，使用式 (2-6)–(2-11) 算 `F_r`。
+4. 用式 (2-14) 找所有 `Ψ=0` 的根；若沒有內部根，依殘差方向停在 `q_min` 或 `q_max` 的機械端點。
+5. 對每個根另外檢查式 (2-15)–(2-18) 的摩擦容量；容量不足時仍可回報幾何平衡根，但狀態必須是「預測會滑」，不能把它當有效穩態。
+6. 若出現多根，需以升檔／降檔方向、上一樣本 `q_prev` 與局部穩定性選根。作為數值選根的**啟發式假設**，可設 `dq/dt=-cΨ`、`c>0`；則 `∂Ψ/∂q>0` 的根局部穩定。此式只用於選根，不宣稱預測真實變速時間。
+
+若只有引擎輸出扭矩 `T_e`，可先用：
+
+\[
+T_r\approx\eta_{cvt}\,q\,T_e
+\tag{2-20}
+\]
+
+**來源：**本文件由功率平衡 `T_eω_f η_cvt=T_rω_r` 與 `q=ω_f/ω_r` 推導。因 `η_cvt` 本身隨比值、夾持與滑差改變 [S6][S10]，這會形成需迭代的耦合；沒有量測效率時應輸出效率範圍造成的 band，不給假精確單線。
+
+### 2.7 這個模型刻意不包含什麼
+
+- 不解皮帶每一小段的位移、彎曲、阻尼與 stick/slip；[S4] 的實驗驗證瞬態模型為離散皮帶 ODE，[S5] 另用經 FEM／實驗驗證的簡化彈簧模型。兩者都證明瞬態不是再加一個 `μ` 就完成。
+- 不假設升檔與降檔共用同一條曲線。橡膠遲滯、珠道摩擦、凸輪摩擦與皮帶溫度可造成方向依賴；第一版以 `dir` 分圖校正。
+- 不把 roller weight、slider weight、不同直徑滾珠視為完全等價。式 (2-3) 只有在質心路徑相同時才可只看總重。
+- 不以 capstan 式取代 `K_stat`。capstan 式是總滑動容量條件，無法描述接觸壓力沿包角的分布、徑向座入與局部微滑 [S3][S6][S8]。
+
+---
+
 ## 引用文獻
 
 - **[S1]** Vincenzo La Battaglia, Alessandro Giorgetti, Stefano Marini, Gabriele Arcidiacono, Paolo Citti, “Kinematic Analysis of V-Belt CVT for Efficient System Development in Motorcycle Applications,” *Machines*, 10(1), 16, 2022. <https://doi.org/10.3390/machines10010016>
@@ -177,3 +395,4 @@ L\approx 2C+\pi(R_f+R_r)+\frac{(R_r-R_f)^2}{C}
 - **[S13]** Altair Engineering, “CVT Model,” *MotionView / MotionSolve 2024 Help*, 2024. <https://help.altair.com/2024/hwdesktop/hwx/topics/motionview/cvt_scooter_cvt_model_r.htm>
 - **[S14]** Adrian Olmos Jr., Steven Griffin, Gary Price, Nathan Beilke, Scott Sajdowitz, “Investigating Humidity Effects on Small Offroad Engine SI Performance and Emissions,” SAE Technical Paper 2021-01-1224, 2021. <https://doi.org/10.4271/2021-01-1224>
 - **[S15]** NASA Glenn Research Center, “Drag of a Sphere” （空氣阻力方程與各變數定義）. <https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-of-a-sphere/>
+- **[S16]** Enrico Nino Manes, “Design and Modeling of a Novel Continuously Variable Transmission,” Ph.D. dissertation, Purdue University. <https://docs.lib.purdue.edu/dissertations/AAI3481098/>
