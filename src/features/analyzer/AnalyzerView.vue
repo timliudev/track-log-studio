@@ -8,6 +8,7 @@ import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
 import { useLaps } from '@/composables/useLaps'
 import { useCircuitPersistence } from '@/composables/useCircuitPersistence'
+import { useSectorAutoPopulate } from '@/composables/useSectorAutoPopulate'
 import { useTrackHeatmap } from '@/composables/useTrackHeatmap'
 import { useTrackExtrema } from '@/composables/useTrackExtrema'
 import { useTrackOverlay } from '@/composables/useTrackOverlay'
@@ -80,8 +81,19 @@ const { laps, timeMs, resetLine } = useLaps()
 // actions) runs after — and overrides — useLaps()'s synchronous default-line
 // seeding on file change. The returned refs/actions feed TrackFilePanel's
 // §4.3 multi-match picker and §4.4 detach affordance.
-const { ambiguousMatches, chooseTrack, dismissAmbiguous, appliedSharedTrack, detachFromSharedTrack } =
-  useCircuitPersistence()
+const {
+  ambiguousMatches,
+  chooseTrack,
+  dismissAmbiguous,
+  appliedSharedTrack,
+  detachFromSharedTrack,
+  circuitGeometryOrigin,
+  circuitRestoreEpoch,
+} = useCircuitPersistence()
+// B75: persistence/library geometry settles first; only a genuinely fresh
+// circuit receives one automatic sector-detection fallback. Root ownership
+// keeps card collapse/remount state out of this data lifecycle.
+useSectorAutoPopulate(laps, circuitGeometryOrigin, circuitRestoreEpoch)
 
 const readyFiles = computed(() => fileStore.files.filter((f) => f.status === 'ready'))
 
