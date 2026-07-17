@@ -128,6 +128,20 @@ function excludeDisabled(index: number): boolean {
   return reason === 'timeBand' || reason === 'distBand' || reason === 'sector'
 }
 
+/**
+ * B67 deliberately keeps every lap included when a bad gate configuration
+ * rejects them all. Show the first failed gate as a diagnostic beside the
+ * still-manual toggle, rather than making it look like an applied exclusion.
+ */
+function allFailedSectorNumber(index: number): number | null {
+  const number = lapStore.sectorFailureNumber(index)
+  return lapStore.sectorAllFailed && Number.isInteger(number) && number! > 0 ? number : null
+}
+
+function allFailedSectorLabel(number: number): string {
+  return t('analyzer.sectorFailureDiagnostic', { n: number }) as string
+}
+
 /** How many sector slots exist for the sector-column picker (gates + 1). */
 const sectorCount = computed(() => sectorStore.gates.length + 1)
 
@@ -276,6 +290,13 @@ const allLapsBandExcluded = computed(() => {
             :sector-number="lapStore.sectorFailureNumber(row.index)"
             @toggle="lapStore.toggleExcluded(row.index)"
           />
+          <span
+            v-if="allFailedSectorNumber(row.index) != null"
+            class="sector-failure-diagnostic"
+            role="img"
+            v-tooltip="allFailedSectorLabel(allFailedSectorNumber(row.index)!)"
+            :aria-label="allFailedSectorLabel(allFailedSectorNumber(row.index)!)"
+          >S{{ allFailedSectorNumber(row.index) }}</span>
           <span
             v-if="lapStore.isSelected(row.index)"
             class="swatch"
@@ -453,6 +474,21 @@ const allLapsBandExcluded = computed(() => {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.sector-failure-diagnostic {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border: 1px dashed var(--color-text-muted);
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
 }
 .band-excluded-hint {
   margin: 0;

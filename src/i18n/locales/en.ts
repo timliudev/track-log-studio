@@ -176,6 +176,7 @@ export default {
     excludedByDistanceBand: 'Auto-excluded by the valid lap-distance band',
     excludedBySector: 'Auto-excluded — failed sector check',
     excludedBySectorNumber: 'Auto-excluded — failed sector S{n}',
+    sectorFailureDiagnostic: 'Failed sector S{n}; automatic exclusion is not applied because every lap failed.',
     sectorAllFailedWarning: 'Every lap failed the sector check. Adjust the gates; automatic exclusion is not applied.',
     bestLap: 'Fastest lap',
     slowestLap: 'Slowest lap',
