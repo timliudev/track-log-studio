@@ -154,6 +154,23 @@ export function assessAccelSegmentQuality(
   return { speedIntegratedDistanceM: speedDistanceM, movingTimeRatio, autoExcludedReason }
 }
 
+/** Interpolate the fraction along (i-1 -> i) where `speedKmh` crosses
+ *  `target`, assuming speedKmh[i-1] and speedKmh[i] bracket it (one on
+ *  each side of the threshold, inclusive). Shared by both search functions
+ *  below — same trap-timer semantics either direction of crossing. */
+function crossingFrac(speedKmh: ArrayLike<number>, i: number, target: number): number {
+  const v0 = speedKmh[i - 1]
+  const v1 = speedKmh[i]
+  const span = v1 - v0
+  if (!Number.isFinite(span) || Math.abs(span) < 1e-9) return 0
+  return Math.min(1, Math.max(0, (target - v0) / span))
+}
+
+/** Linear-interpolate `arr` between i-1 and i at fraction `frac`. */
+function lerp(arr: Float64Array, i: number, frac: number): number {
+  return arr[i - 1] + frac * (arr[i] - arr[i - 1])
+}
+
 function finalizeSegments(
   segments: AccelSegment[],
   timeMs: ArrayLike<number>,
@@ -248,20 +265,6 @@ export function fastestDistanceFromLaunch(
     return []
   }
 
-  /** Interpolate the fraction along (i-1 -> i) where speed crosses `target`,
-   *  assuming speed[i-1] and speed[i] bracket it (one at/below, one above). */
-  function crossingFrac(i: number, target: number): number {
-    const v0 = speedKmh[i - 1]
-    const v1 = speedKmh[i]
-    const span = v1 - v0
-    if (!Number.isFinite(span) || Math.abs(span) < 1e-9) return 0
-    return Math.min(1, Math.max(0, (target - v0) / span))
-  }
-
-  function lerp(i: number, frac: number, arr: Float64Array): number {
-    return arr[i - 1] + frac * (arr[i] - arr[i - 1])
-  }
-
   const segments: AccelSegment[] = []
   // Most recent sample index seen at/below entrySpeedKmh — a candidate
   // launch base — or -1 when none has been seen yet. See fastestSpeedSegment
@@ -289,9 +292,9 @@ export function fastestDistanceFromLaunch(
     let startDistM: number
     let startSpeedKmh: number
     if (startI + 1 < n && Number.isFinite(speedKmh[startI + 1]) && (speedKmh[startI + 1] as number) > entrySpeedKmh) {
-      const f = crossingFrac(startI + 1, entrySpeedKmh)
-      startTimeMs = lerp(startI + 1, f, timeMs)
-      startDistM = lerp(startI + 1, f, cumDistM)
+      const f = crossingFrac(speedKmh, startI + 1, entrySpeedKmh)
+      startTimeMs = lerp(timeMs, startI + 1, f)
+      startDistM = lerp(cumDistM, startI + 1, f)
       startSpeedKmh = entrySpeedKmh
     } else {
       startTimeMs = timeMs[startI]
@@ -403,20 +406,6 @@ export function fastestSpeedSegment(
   const { fromKmh, toKmh } = opts
   if (n < 2 || n !== cumDistM.length || !(toKmh > fromKmh)) return []
 
-  /** Interpolate the fraction along (i-1 -> i) where speed crosses `target`,
-   *  assuming speed[i-1] and speed[i] bracket it (one below, one at/above). */
-  function crossingFrac(i: number, target: number): number {
-    const v0 = speedKmh[i - 1]
-    const v1 = speedKmh[i]
-    const span = v1 - v0
-    if (!Number.isFinite(span) || Math.abs(span) < 1e-9) return 0
-    return Math.min(1, Math.max(0, (target - v0) / span))
-  }
-
-  function lerp(i: number, frac: number, arr: Float64Array): number {
-    return arr[i - 1] + frac * (arr[i] - arr[i - 1])
-  }
-
   const segments: AccelSegment[] = []
   // The most recent sample index seen at/below fromKmh (a qualifying low
   // point a run could start from), or -1 when none has been seen yet. Kept
@@ -445,9 +434,9 @@ export function fastestSpeedSegment(
     let startDistM: number
     let entrySpeedKmh: number
     if (startI + 1 < n && Number.isFinite(speedKmh[startI + 1]) && speedKmh[startI + 1] > fromKmh) {
-      const f = crossingFrac(startI + 1, fromKmh)
-      startTimeMs = lerp(startI + 1, f, timeMs)
-      startDistM = lerp(startI + 1, f, cumDistM)
+      const f = crossingFrac(speedKmh, startI + 1, fromKmh)
+      startTimeMs = lerp(timeMs, startI + 1, f)
+      startDistM = lerp(cumDistM, startI + 1, f)
       entrySpeedKmh = fromKmh
     } else {
       startTimeMs = timeMs[startI]
@@ -459,9 +448,9 @@ export function fastestSpeedSegment(
     let endTimeMs: number
     let endDistM: number
     if (i > 0 && Number.isFinite(speedKmh[i - 1]) && speedKmh[i - 1] < toKmh) {
-      const f = crossingFrac(i, toKmh)
-      endTimeMs = lerp(i, f, timeMs)
-      endDistM = lerp(i, f, cumDistM)
+      const f = crossingFrac(speedKmh, i, toKmh)
+      endTimeMs = lerp(timeMs, i, f)
+      endDistM = lerp(cumDistM, i, f)
     } else {
       endTimeMs = timeMs[i]
       endDistM = cumDistM[i]
