@@ -261,7 +261,13 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
     expect(target.addEventListener).not.toHaveBeenCalled()
   })
 
-  it('lets a touch outside the explicit coarse grip keep native scrolling', () => {
+  // B93 — the always-visible circular grip B90 added is gone; the gutter
+  // strip itself (its hit box widened on coarse pointers by a `::before`
+  // hit-slop, purely in CSS — see AnalyzerView.vue's `.grid-gutter` styles)
+  // is now the only touch affordance, so a touch pointerdown reported
+  // against the gutter element starts the drag exactly like mouse/pen —
+  // there is no longer a narrower child target it must land on first.
+  it('starts a touch drag from a pointerdown on the gutter itself', () => {
     const items: DashboardLayoutItem[] = [
       { i: 'a', x: 0, y: 0, w: 4, h: 6 },
       { i: 'b', x: 4, y: 0, w: 4, h: 6 },
@@ -274,33 +280,7 @@ describe('useGridGutters — onGutterPointerDown drag', () => {
       {
         preventDefault,
         currentTarget: target,
-        target: document.createElement('span'),
-        pointerType: 'touch',
-        pointerId: 11,
-        clientX: 0,
-        clientY: 0,
-      } as unknown as PointerEvent,
-    )
-    expect(preventDefault).not.toHaveBeenCalled()
-    expect(target.setPointerCapture).not.toHaveBeenCalled()
-  })
-
-  it('starts a touch drag from the explicit coarse grip', () => {
-    const items: DashboardLayoutItem[] = [
-      { i: 'a', x: 0, y: 0, w: 4, h: 6 },
-      { i: 'b', x: 4, y: 0, w: 4, h: 6 },
-    ]
-    const { result } = mountHarness(items)
-    const target = fakeTarget()
-    const grip = document.createElement('span')
-    grip.className = 'grid-gutter-grip'
-    const preventDefault = vi.fn()
-    result.onGutterPointerDown(
-      { orientation: 'vertical', aId: 'a', bId: 'b', edge: 4, start: 0, end: 6 },
-      {
-        preventDefault,
-        currentTarget: target,
-        target: grip,
+        target: document.createElement('div'),
         pointerType: 'touch',
         pointerId: 12,
         clientX: 0,
