@@ -128,7 +128,7 @@ export function centreCursorIndex(
 </script>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
@@ -146,8 +146,10 @@ import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 import {
   centreNeedleGeometry,
   clampPlotPoint,
+  isPointInAxisBand,
   pendingTouchIntent,
   type CentreNeedleGeometry,
+  type Rect2D,
 } from '@/domain/analysis/chartPointerGesture'
 
 const { t } = useI18n()
@@ -237,6 +239,12 @@ const wrap = ref<HTMLDivElement | null>(null)
  *  for. `null` (hidden) whenever centre-needle mode is off or the plot/host
  *  aren't measurable yet. */
 const needleGeometry = ref<CentreNeedleGeometry | null>(null)
+// B94 — whether the pointer is currently over the draggable X-axis band (see
+// the axis-band pan gesture below), and whether a drag off it is in progress.
+// Both drive the `grab`/`grabbing` cursor affordance only; the band itself
+// behaves exactly like before whenever neither is true.
+const axisBandHover = ref(false)
+const axisBandDragging = ref(false)
 let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
@@ -547,6 +555,11 @@ function scheduleNeedlePos(): void {
 function destroy(): void {
   plot?.destroy()
   plot = null
+  // B94 — a recreate (theme change, centre-mode toggle, series-shape change)
+  // must not leave a stale axis-band drag "stuck" against the old instance.
+  axisPanPointerId = null
+  axisBandDragging.value = false
+  axisBandHover.value = false
 }
 
 // ── touch gestures (#8, B35) ─────────────────────────────────────────────────
@@ -911,6 +924,78 @@ function onCentrePointerUp(e: PointerEvent): void {
   if (centreScrubPointerId === e.pointerId) centreScrubPointerId = null
 }
 
+// ── B94 X-axis band pan (normal mode, while zoomed) ─────────────────────────
+// Normal mode leaves the plot area to uPlot's own native drag-to-zoom (see
+// buildOptions' cursor.drag, unset in this mode), which means a plain drag
+// there can never also mean "pan" without refighting that default. Instead,
+// dragging the X-AXIS TICK/LABEL BAND below the plot — a region uPlot's own
+// `.u-over` doesn't cover at all, see `isPointInAxisBand` — pans the visible
+// window, reusing the exact same dataXBounds/currentXRange/emitXRange
+// pipeline the Shift+drag and touch-pan gestures already use. Deliberately
+// reuses the STRICT `panRange` (no B68 virtual edge padding): that's a
+// centre-mode-only concept, and this gesture never runs in centre mode at all.
+let axisPanPointerId: number | null = null
+let axisPanLastX = 0
+
+/** Live geometry needed to hit-test the axis band, in the same viewport CSS-px
+ *  space as `isPointInAxisBand` expects: the plot's own interactive rect and
+ *  the full plot+axes canvas rect (uPlot draws every axis directly onto that
+ *  one canvas — see `isPointInAxisBand`'s doc). `null` before uPlot exists. */
+function axisBandGeometry(): { plotting: Rect2D; canvas: Rect2D } | null {
+  if (!plot) return null
+  return { plotting: plot.over.getBoundingClientRect(), canvas: plot.ctx.canvas.getBoundingClientRect() }
+}
+
+/** Axis-band panning only makes sense while there's something to pan: centre
+ *  mode has its own drag gesture (see onCentrePointerDown above), and an
+ *  unzoomed chart has no narrower window to shift within the full extent. */
+function isAxisPanEligible(): boolean {
+  return !props.centreCursorMode && zoomed.value
+}
+
+/** Keep the `grab` cursor affordance in sync with the live pointer position;
+ *  called on every pointermove regardless of which gesture (if any) is active. */
+function updateAxisBandHover(e: PointerEvent): void {
+  if (!isAxisPanEligible()) {
+    axisBandHover.value = false
+    return
+  }
+  const geo = axisBandGeometry()
+  axisBandHover.value = geo != null && isPointInAxisBand({ x: e.clientX, y: e.clientY }, geo.plotting, geo.canvas)
+}
+
+function startAxisBandPan(e: PointerEvent): void {
+  if (axisPanPointerId != null || !plot) return
+  axisPanPointerId = e.pointerId
+  axisPanLastX = e.clientX
+  axisBandDragging.value = true
+  ;(e.target as Element).setPointerCapture?.(e.pointerId)
+  e.preventDefault()
+}
+
+function moveAxisBandPan(e: PointerEvent): void {
+  if (axisPanPointerId !== e.pointerId || !plot) return
+  const bounds = dataXBounds()
+  if (!bounds) return
+  const range = currentXRange() ?? bounds
+  // Same pixel→value conversion as onMousePanMove/onCentrePointerMove: the
+  // axis band shares its horizontal alignment with `.u-over` (uPlot draws
+  // ticks directly under their data columns), so `over`'s left offset is
+  // still the correct reference even though the pointer itself sits below it.
+  const overRect = plot.over.getBoundingClientRect()
+  const prevVal = plot.posToVal(axisPanLastX - overRect.left, 'x')
+  const curVal = plot.posToVal(e.clientX - overRect.left, 'x')
+  emitXRange(panRange(range, curVal - prevVal, bounds))
+  axisPanLastX = e.clientX
+  e.preventDefault()
+}
+
+function endAxisBandPan(e: PointerEvent): void {
+  if (axisPanPointerId !== e.pointerId) return
+  axisPanPointerId = null
+  axisBandDragging.value = false
+}
+
 function onPointerDown(e: PointerEvent): void {
   // B36 — this chart now bleeds to the true viewport edge on mobile (see
   // `.uplot-wrap.fill`'s `--card-bleed-x` styling below), so a touch drag
@@ -923,6 +1008,16 @@ function onPointerDown(e: PointerEvent): void {
   // `setPointerCapture()`.
   if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
     return
+  }
+  // B94 — the axis band claims its own drag before anything else considers
+  // this pointerdown, for every pointer type (mouse/touch/pen): it's a region
+  // uPlot's native drag-zoom and this file's other gestures never reach.
+  if (isAxisPanEligible()) {
+    const geo = axisBandGeometry()
+    if (geo && isPointInAxisBand({ x: e.clientX, y: e.clientY }, geo.plotting, geo.canvas)) {
+      startAxisBandPan(e)
+      return
+    }
   }
   if (isTouchGesturePointer(e.pointerType)) {
     // Normal mode waits for long press vs horizontal pan vs vertical page
@@ -939,6 +1034,11 @@ function onPointerDown(e: PointerEvent): void {
 }
 
 function onPointerMove(e: PointerEvent): void {
+  updateAxisBandHover(e)
+  if (axisPanPointerId != null) {
+    moveAxisBandPan(e)
+    return
+  }
   if (isTouchGesturePointer(e.pointerType)) {
     moveTouchGesture(e)
     return
@@ -949,6 +1049,10 @@ function onPointerMove(e: PointerEvent): void {
 }
 
 function onPointerUp(e: PointerEvent): void {
+  if (axisPanPointerId != null) {
+    endAxisBandPan(e)
+    return
+  }
   if (isTouchGesturePointer(e.pointerType)) {
     endTouchGesture(e)
     return
@@ -1112,6 +1216,15 @@ watch(
   () => props.centreCursorMode,
   () => create(),
 )
+
+// B94 — `grab` while the axis band is draggable and idle, `grabbing` while
+// actually being dragged; unset (browser default) everywhere else, so the
+// band behaves exactly as before outside normal-mode zoom.
+const axisBandCursor = computed<string | undefined>(() => {
+  if (axisBandDragging.value) return 'grabbing'
+  if (axisBandHover.value) return 'grab'
+  return undefined
+})
 </script>
 
 <template>
@@ -1120,6 +1233,7 @@ watch(
       ref="host"
       class="uplot-host"
       :class="{ fill: fillHeight, 'touch-selecting': touchSelectionActive }"
+      :style="{ cursor: axisBandCursor }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
