@@ -1696,7 +1696,7 @@ function titleForItemId(id: string): string {
 /* Touch users get an always-visible 44px grip, not a hover-only hidden gap.
    Its local touch-action is intentionally none: choosing this handle is an
    explicit resize gesture, unlike a swipe that begins on card content. */
-:global(:root[data-any-pointer-coarse]) .grid-gutter-grip {
+:root[data-any-pointer-coarse] .grid-gutter-grip {
   position: absolute;
   left: 50%;
   top: 50%;
@@ -1711,12 +1711,12 @@ function titleForItemId(id: string): string {
   border-radius: 999px;
   box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
 }
-:global(:root[data-any-pointer-coarse]) .grid-gutter.vertical .grid-gutter-grip-mark {
+:root[data-any-pointer-coarse] .grid-gutter.vertical .grid-gutter-grip-mark {
   width: 4px;
   height: 18px;
   border-inline: 1px solid var(--color-text-muted);
 }
-:global(:root[data-any-pointer-coarse]) .grid-gutter.horizontal .grid-gutter-grip-mark {
+:root[data-any-pointer-coarse] .grid-gutter.horizontal .grid-gutter-grip-mark {
   width: 18px;
   height: 4px;
   border-block: 1px solid var(--color-text-muted);
