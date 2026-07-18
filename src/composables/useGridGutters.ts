@@ -161,11 +161,11 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
 
   function onGutterPointerDown(gutter: GridGutter, event: PointerEvent): void {
     if (!enabled.value) return
-    // A finger may only claim the intentionally exposed 44px grip. The thin
-    // desktop gap itself remains available to mouse/pen, while a touch that
-    // starts elsewhere keeps the browser's native page-scroll behaviour.
-    const targetElement = event.target instanceof Element ? event.target : null
-    if (event.pointerType === 'touch' && !targetElement?.closest('.grid-gutter-grip')) return
+    // B93 — the gutter strip itself is the only resize affordance now (the
+    // always-visible circular grip B90 added is gone); a touch pointerdown
+    // anywhere on the gutter's own hit box — including the coarse-pointer
+    // `::before` hit-slop widening its narrow axis to 44px, see this
+    // component's `.grid-gutter` CSS — starts the drag the same as mouse/pen.
     event.preventDefault()
     const target = event.currentTarget as HTMLElement
     target.setPointerCapture?.(event.pointerId)

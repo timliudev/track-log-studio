@@ -1336,17 +1336,11 @@ function titleForItemId(id: string): string {
         class="grid-gutter"
         :class="[g.orientation, { dragging: draggingKey === g.key }]"
         :style="{ left: `${g.rect.left}px`, top: `${g.rect.top}px`, width: `${g.rect.width}px`, height: `${g.rect.height}px` }"
+        role="separator"
+        :aria-orientation="g.orientation === 'vertical' ? 'vertical' : 'horizontal'"
+        :aria-label="t(g.orientation === 'vertical' ? 'analyzer.layout.resizeAdjacentWidth' : 'analyzer.layout.resizeAdjacentHeight')"
         @pointerdown="onGutterPointerDown(g, $event)"
-      >
-        <span
-          class="grid-gutter-grip"
-          role="separator"
-          :aria-orientation="g.orientation === 'vertical' ? 'vertical' : 'horizontal'"
-          :aria-label="t(g.orientation === 'vertical' ? 'analyzer.layout.resizeAdjacentWidth' : 'analyzer.layout.resizeAdjacentHeight')"
-        >
-          <span class="grid-gutter-grip-mark" aria-hidden="true" />
-        </span>
-      </div>
+      />
       </div>
     </template>
   </div>
@@ -1690,36 +1684,37 @@ function titleForItemId(id: string): string {
 .grid-gutter.dragging {
   background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
-.grid-gutter-grip {
-  display: none;
-}
-/* Touch users get an always-visible 44px grip, not a hover-only hidden gap.
-   Its local touch-action is intentionally none: choosing this handle is an
-   explicit resize gesture, unlike a swipe that begins on card content. */
-:root[data-any-pointer-coarse] .grid-gutter-grip {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  transform: translate(-50%, -50%);
+/* B93 — the pink strip itself IS the resize affordance; the always-visible
+   circular grip B90 added on top of it was redundant and got removed. Coarse
+   pointers still need a real ≥44px hit target though, so an invisible
+   `::before` overlay widens/heightens ONLY the narrow axis (the strip's own
+   length already spans the full shared edge) without touching the strip's
+   visible size. A horizontal gutter's drag is a VERTICAL gesture, so
+   `pan-y` (fine for the base rule, which fine pointers never read anyway)
+   would hand that exact motion to page scroll instead of the drag — coarse
+   pointers get `touch-action: none` on the gutter itself so its own drag
+   always wins; scrolling that starts on card content, outside the gutter's
+   hit box, is untouched. */
+:root[data-any-pointer-coarse] .grid-gutter {
   touch-action: none;
-  background: color-mix(in srgb, var(--color-surface) 82%, var(--color-accent));
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 18%);
 }
-:root[data-any-pointer-coarse] .grid-gutter.vertical .grid-gutter-grip-mark {
-  width: 4px;
-  height: 18px;
-  border-inline: 1px solid var(--color-text-muted);
+:root[data-any-pointer-coarse] .grid-gutter::before {
+  content: '';
+  position: absolute;
 }
-:root[data-any-pointer-coarse] .grid-gutter.horizontal .grid-gutter-grip-mark {
-  width: 18px;
-  height: 4px;
-  border-block: 1px solid var(--color-text-muted);
+:root[data-any-pointer-coarse] .grid-gutter.vertical::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 44px;
+  transform: translateX(-50%);
+}
+:root[data-any-pointer-coarse] .grid-gutter.horizontal::before {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 44px;
+  transform: translateY(-50%);
 }
 
 /* #8 — snap grid items to position instead of easing the library's default
