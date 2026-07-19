@@ -64,4 +64,29 @@ describe('parsePlainCsv', () => {
   ])('rejects %s', (_label, text) => {
     expect(() => parsePlainCsv(text)).toThrow(PlainCsvParseError)
   })
+
+  // Security regression: the cell cap must be enforced PER FIELD, not only
+  // once a row completes at a newline. Before this fix, a single line with
+  // no newline at all (a malicious header, or a data row that never
+  // terminates) fully materialized as an in-memory array before any cap
+  // check ever ran — a crafted file could exhaust memory despite the
+  // documented MAX_PLAIN_CSV_CELLS protection. `maxCells` lets the test
+  // exercise this at a tiny scale instead of building a 50-million-cell string.
+  it('rejects an over-wide header row even with no trailing newline (cap bypass via one long line)', () => {
+    const hugeHeader = ['Time', ...Array.from({ length: 10 }, (_, i) => `Ch${i}`)].join(',')
+    expect(() => parsePlainCsv(hugeHeader, 5)).toThrow(PlainCsvParseError)
+    expect(() => parsePlainCsv(hugeHeader, 5)).toThrow(/refusing more than 5 cells/)
+  })
+
+  it('rejects an over-wide unterminated data row before finishing that row', () => {
+    const text = `Time,RPM\n${Array.from({ length: 10 }, (_, i) => i).join(',')}`
+    expect(() => parsePlainCsv(text, 6)).toThrow(PlainCsvParseError)
+    expect(() => parsePlainCsv(text, 6)).toThrow(/refusing more than 6 cells/)
+  })
+
+  it('still accepts a well-formed file at the same reduced cap', () => {
+    // 6 total fields: 2-column header + two 2-column data rows.
+    const session = parsePlainCsv('Time,RPM\n0,1000\n1,1100\n', 6)
+    expect(session.get('RPM')?.data).toEqual(new Float32Array([1000, 1100]))
+  })
 })
