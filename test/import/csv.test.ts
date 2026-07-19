@@ -52,6 +52,24 @@ describe('parsePlainCsv', () => {
     expect(parsed.meta.exportMetadata?.cvtNotes).toEqual([{ label: 'Spring', value: '8 kg' }])
   })
 
+  // Security regression: a channel's `name` comes straight from whatever the
+  // SOURCE file called it — including a malicious file crafted to name a
+  // channel like a spreadsheet formula. If that session is re-exported to
+  // generic CSV, the header row must not let Excel/LibreOffice evaluate a
+  // leading '=', '+', '-', '@', or tab/CR as a formula on open.
+  it('neutralises a CSV-formula-injection channel name in the exported header', () => {
+    const channel = (name: string, values: number[]): Channel => ({
+      name, rawName: name, description: undefined, data: new Float32Array(values),
+    })
+    const source = new LogSession([
+      channel('Time', [0, 100]),
+      channel('=cmd|\'/c calc\'!A0', [1, 2]),
+    ], { formatId: 'test', createdDate: null, headerInfo: {} })
+    const text = convertToCsv(source)[0].content
+    const headerLine = text.split('\n')[0]
+    expect(headerLine).toBe(`Time,GPS_Lat,GPS_Lon,GPS_Speed,'=cmd|'/c calc'!A0`)
+  })
+
   it.each([
     ['missing time', 'RPM,TPS\n1000,50\n'],
     ['ambiguous time', 'Time,Timer\n0,0\n'],
@@ -63,5 +81,30 @@ describe('parsePlainCsv', () => {
     ['text after closing quote', 'Time,RPM\n0,"1000"oops\n'],
   ])('rejects %s', (_label, text) => {
     expect(() => parsePlainCsv(text)).toThrow(PlainCsvParseError)
+  })
+
+  // Security regression: the cell cap must be enforced PER FIELD, not only
+  // once a row completes at a newline. Before this fix, a single line with
+  // no newline at all (a malicious header, or a data row that never
+  // terminates) fully materialized as an in-memory array before any cap
+  // check ever ran — a crafted file could exhaust memory despite the
+  // documented MAX_PLAIN_CSV_CELLS protection. `maxCells` lets the test
+  // exercise this at a tiny scale instead of building a 50-million-cell string.
+  it('rejects an over-wide header row even with no trailing newline (cap bypass via one long line)', () => {
+    const hugeHeader = ['Time', ...Array.from({ length: 10 }, (_, i) => `Ch${i}`)].join(',')
+    expect(() => parsePlainCsv(hugeHeader, 5)).toThrow(PlainCsvParseError)
+    expect(() => parsePlainCsv(hugeHeader, 5)).toThrow(/refusing more than 5 cells/)
+  })
+
+  it('rejects an over-wide unterminated data row before finishing that row', () => {
+    const text = `Time,RPM\n${Array.from({ length: 10 }, (_, i) => i).join(',')}`
+    expect(() => parsePlainCsv(text, 6)).toThrow(PlainCsvParseError)
+    expect(() => parsePlainCsv(text, 6)).toThrow(/refusing more than 6 cells/)
+  })
+
+  it('still accepts a well-formed file at the same reduced cap', () => {
+    // 6 total fields: 2-column header + two 2-column data rows.
+    const session = parsePlainCsv('Time,RPM\n0,1000\n1,1100\n', 6)
+    expect(session.get('RPM')?.data).toEqual(new Float32Array([1000, 1100]))
   })
 })

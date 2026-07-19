@@ -26,16 +26,35 @@ function isBlankRow(row: readonly string[]): boolean {
   return row.every((field) => field.trim() === '')
 }
 
-/** Visit RFC 4180 comma-separated rows, including quoted CR/LF and quotes. */
-function visitCsvRows(text: string, visit: RowVisitor): void {
+/**
+ * Visit RFC 4180 comma-separated rows, including quoted CR/LF and quotes.
+ *
+ * `maxFields` bounds the TOTAL number of fields produced across the whole
+ * document (header included), enforced incrementally as each field is
+ * pushed rather than once a row finishes. A row only completes at a
+ * newline/EOF, so a pathological single-line input (millions of commas,
+ * no newline at all — e.g. a giant header row) would otherwise grow `row`
+ * without bound before any caller-side cap on completed rows ever runs,
+ * defeating the intent of a size cap. Checking per-field closes that gap.
+ */
+function visitCsvRows(text: string, visit: RowVisitor, maxFields = Infinity): void {
   let row: string[] = []
   let field = ''
   let quoted = false
   let afterQuote = false
+  let fieldCount = 0
   let i = text.charCodeAt(0) === 0xfeff ? 1 : 0
 
-  const finishRow = (): void => {
+  const pushField = (): void => {
+    fieldCount++
+    if (fieldCount > maxFields) {
+      throw new PlainCsvParseError(`refusing more than ${maxFields.toLocaleString()} cells`)
+    }
     row.push(field)
+  }
+
+  const finishRow = (): void => {
+    pushField()
     visit(row)
     row = []
     field = ''
@@ -63,7 +82,7 @@ function visitCsvRows(text: string, visit: RowVisitor): void {
 
     if (afterQuote) {
       if (ch === ',') {
-        row.push(field)
+        pushField()
         field = ''
         afterQuote = false
         i++
@@ -82,7 +101,7 @@ function visitCsvRows(text: string, visit: RowVisitor): void {
       quoted = true
       i++
     } else if (ch === ',') {
-      row.push(field)
+      pushField()
       field = ''
       i++
     } else if (isNewline(ch)) {
@@ -145,7 +164,7 @@ function parseSchema(header: readonly string[]): CsvSchema {
   return { width: header.length, columns, metadata }
 }
 
-function inspectCsv(text: string): { schema: CsvSchema; rowCount: number } {
+function inspectCsv(text: string, maxCells: number): { schema: CsvSchema; rowCount: number } {
   let schema: CsvSchema | null = null
   let rowCount = 0
   let cells = 0
@@ -163,12 +182,12 @@ function inspectCsv(text: string): { schema: CsvSchema; rowCount: number } {
     }
     rowCount++
     cells += row.length
-    if (cells > MAX_PLAIN_CSV_CELLS) {
+    if (cells > maxCells) {
       throw new PlainCsvParseError(
-        `refusing ${cells.toLocaleString()} cells (limit ${MAX_PLAIN_CSV_CELLS.toLocaleString()})`,
+        `refusing ${cells.toLocaleString()} cells (limit ${maxCells.toLocaleString()})`,
       )
     }
-  })
+  }, maxCells)
   if (!schema) throw new PlainCsvParseError('missing header row')
   if (rowCount === 0) throw new PlainCsvParseError('no data rows')
   return { schema, rowCount }
@@ -184,9 +203,14 @@ function numberOrNaN(field: string): number {
 /**
  * Parse a generic UTF-8 CSV log. The first nonblank row is the header, exactly
  * one Time/Timer column is required, and every other header becomes a channel.
+ *
+ * `maxCells` defaults to {@link MAX_PLAIN_CSV_CELLS} for every real caller;
+ * it is only exposed so tests can exercise the cap (including a single
+ * pathologically long line with no newline at all) without constructing a
+ * 50-million-cell string.
  */
-export function parsePlainCsv(text: string): LogSession {
-  const { schema, rowCount } = inspectCsv(text)
+export function parsePlainCsv(text: string, maxCells: number = MAX_PLAIN_CSV_CELLS): LogSession {
+  const { schema, rowCount } = inspectCsv(text, maxCells)
   const data = schema.columns.map(() => new Float32Array(rowCount))
   let headerSeen = false
   let targetRow = 0
@@ -205,7 +229,7 @@ export function parsePlainCsv(text: string): LogSession {
       data[index][targetRow] = numberOrNaN(row[column.sourceIndex])
     })
     targetRow++
-  })
+  }, maxCells)
   if (targetRow !== rowCount) throw new PlainCsvParseError('data changed while parsing')
 
   const channels: Channel[] = schema.columns.map((column, index) => ({
