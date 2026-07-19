@@ -8,15 +8,23 @@ import {
   decodeExportMetadata,
   encodeExportMetadata,
   exportMetadataFromHeader,
+  withSuspensionCalibration,
   type ExportMetadata,
 } from '@/domain/export/metadata'
+import type { SuspensionConfig } from '@/domain/units/suspension'
 import { loadFixture } from '../fixtures'
+
+const SUSPENSION: SuspensionConfig = {
+  front: { enabled: true, sourceChannel: 'FrontPot', minMv: 100, maxMv: 4900, zeroMv: 520, minMm: 0, maxMm: 120 },
+  rear: { enabled: false, sourceChannel: 'RearPot', minMv: 50, maxMv: 4950, zeroMv: 450, minMm: 0, maxMm: 110 },
+}
 
 const METADATA: ExportMetadata = {
   cvtNotes: [
     { label: '珠重', value: '12.5 g' },
     { label: '彈簧硬度', value: '黃彈簧，+15%' },
   ],
+  suspensionCalibration: SUSPENSION,
 }
 
 describe('portable CVT export metadata', () => {
@@ -25,6 +33,22 @@ describe('portable CVT export metadata', () => {
     expect(payload).not.toBeNull()
     expect(payload).toMatch(/^[\x20-\x7e]+$/)
     expect(decodeExportMetadata(payload)).toEqual(METADATA)
+  })
+
+  it('drops malformed embedded suspension calibration without losing valid notes', () => {
+    const malformed = encodeURIComponent(JSON.stringify({
+      v: 1,
+      cvtNotes: [{ label: '珠重', value: '12 g' }],
+      suspensionCalibration: { front: { enabled: true, sourceChannel: 'A', minMv: 'bad' } },
+    }))
+    expect(decodeExportMetadata(malformed)).toEqual({ cvtNotes: [{ label: '珠重', value: '12 g' }] })
+  })
+
+  it('adds the current suspension calibration without dropping file-owned CVT notes', () => {
+    expect(withSuspensionCalibration({ cvtNotes: [{ label: '珠重', value: '13 g' }] }, SUSPENSION)).toEqual({
+      cvtNotes: [{ label: '珠重', value: '13 g' }],
+      suspensionCalibration: SUSPENSION,
+    })
   })
 
   it('round-trips through a checksummed NMEA proprietary sentence', () => {

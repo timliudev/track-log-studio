@@ -524,7 +524,7 @@ export function parseXrk(bytes: Uint8Array): LogSession {
   // --- Time channel (ms, from 0) ---
   const time = new Float32Array(rowCount)
   for (let i = 0; i < rowCount; i++) time[i] = axis[i]
-  out.push({ name: uniqueName('Time'), rawName: 'Time', description: undefined, data: time })
+  out.push({ name: uniqueName('Time'), rawName: 'Time', description: undefined, unit: 'ms', data: time })
 
   // --- telemetry channels ---
   // Sort by channel index for stable output order.
@@ -547,9 +547,14 @@ export function parseXrk(bytes: Uint8Array): LogSession {
     const unit = UNIT_MAP[def.unitCode]
     const base = def.shortName || def.longName || `ch${idx}`
     const name = uniqueName(base)
-    const description =
-      [def.longName, unit && unit !== 'time?' ? unit : ''].filter(Boolean).join(' ') || undefined
-    out.push({ name, rawName: def.shortName || base, description, data })
+    const description = def.longName || undefined
+    out.push({
+      name,
+      rawName: def.shortName || base,
+      description,
+      unit: unit && unit !== 'time?' ? unit : undefined,
+      data,
+    })
   }
 
   // --- GPS channels (resampled onto the master axis) ---
@@ -608,16 +613,16 @@ function emitGps(
     const c = (Math.atan2(g.vx, g.vy) * 180) / Math.PI
     course.push(c < 0 ? c + 360 : c)
   }
-  const push = (name: string, vals: number[]): void => {
+  const push = (name: string, vals: number[], unit: string): void => {
     const data = new Float32Array(rowCount)
     resampleOnto(axis, tcs, vals, data)
-    out.push({ name: uniqueName(name), rawName: name, description: undefined, data })
+    out.push({ name: uniqueName(name), rawName: name, description: undefined, unit, data })
   }
-  push('GPS_Lat', lat)
-  push('GPS_Lon', lon)
-  push('GPS_Altitude', alt)
-  push('GPS_Speed', speed)
-  push('GPS_Course', course)
+  push('GPS_Lat', lat, '°')
+  push('GPS_Lon', lon, '°')
+  push('GPS_Altitude', alt, 'm')
+  push('GPS_Speed', speed, 'km/h')
+  push('GPS_Course', course, '°')
 }
 
 /** Build a Date from TMD (dd/mm/yyyy) + TMT (HH:MM:SS) metadata. */

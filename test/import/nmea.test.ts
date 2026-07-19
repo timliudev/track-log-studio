@@ -35,6 +35,8 @@ describe('nmeaToSession', () => {
     expect(session.get('GPS_Lon')).toBeDefined()
     expect(session.get('GPS_Speed')).toBeDefined()
     expect(session.get('Time')).toBeDefined()
+    expect(session.get('Time')?.unit).toBe('ms')
+    expect(session.get('GPS_Speed')?.unit).toBe('km/h')
     expect(session.rowCount).toBeGreaterThan(0)
   })
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
@@ -8,6 +8,8 @@ import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
 import GithubStarButton from '@/components/GithubStarButton.vue'
 import PwaUpdateToast from '@/components/PwaUpdateToast.vue'
+import { useAppNavigationStore } from '@/stores/appNavigationStore'
+import ConverterView from '@/features/converter/ConverterView.vue'
 
 // Lazy tab views: async imports keep each top-level view in its own chunk so
 // heavy per-tab dependencies (notably grid-layout-plus + interactjs pulled in
@@ -16,7 +18,6 @@ import PwaUpdateToast from '@/components/PwaUpdateToast.vue'
 // No loadingComponent on purpose: the <Transition mode="out-in"> below waits
 // for an async child to resolve before playing the enter animation, so a
 // loading placeholder would only add a flash mid-transition.
-const ConverterView = defineAsyncComponent(() => import('@/features/converter/ConverterView.vue'))
 const AnalyzerView = defineAsyncComponent(() => import('@/features/analyzer/AnalyzerView.vue'))
 const SettingsView = defineAsyncComponent(() => import('@/features/settings/SettingsView.vue'))
 
@@ -34,6 +35,7 @@ useInputCapabilities()
 type Tab = 'converter' | 'analyzer' | 'settings'
 const tabOrder: Tab[] = ['converter', 'analyzer', 'settings']
 const tab = ref<Tab>('converter')
+const navigation = useAppNavigationStore()
 
 // Direction-aware slide: figure out whether the newly selected tab sits to
 // the right or left of the previous one so the <Transition> can slide the
@@ -45,6 +47,13 @@ function selectTab(next: Tab) {
   transitionName.value = to >= from ? 'slide-left' : 'slide-right'
   tab.value = next
 }
+
+watch(
+  () => navigation.target,
+  (target) => {
+    if (target === 'converter-save-modified' && tab.value !== 'converter') selectTab('converter')
+  },
+)
 
 const activeView = computed(() => tab.value)
 

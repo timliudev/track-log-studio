@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   centreNeedleGeometry,
   clampPlotPoint,
+  isPointInAxisBand,
   pendingTouchIntent,
 } from '@/domain/analysis/chartPointerGesture'
 
@@ -47,5 +48,31 @@ describe('pendingTouchIntent', () => {
 describe('clampPlotPoint', () => {
   it('keeps a touch-selected cursor within the plot bounds', () => {
     expect(clampPlotPoint({ x: -20, y: 300 }, 500, 200)).toEqual({ x: 0, y: 200 })
+  })
+})
+
+describe('isPointInAxisBand', () => {
+  const plottingArea = { left: 40, top: 20, width: 560, height: 180 }
+  const canvasArea = { left: 0, top: 0, width: 600, height: 260 }
+
+  it('is true for a point between the plot bottom and the canvas bottom', () => {
+    expect(isPointInAxisBand({ x: 300, y: 220 }, plottingArea, canvasArea)).toBe(true)
+  })
+
+  it('is false for a point still inside the plotting area itself', () => {
+    expect(isPointInAxisBand({ x: 300, y: 100 }, plottingArea, canvasArea)).toBe(false)
+  })
+
+  it('is false for a point past the canvas bottom (e.g. the HTML legend below it)', () => {
+    expect(isPointInAxisBand({ x: 300, y: 261 }, plottingArea, canvasArea)).toBe(false)
+  })
+
+  it('is false for a point outside the plotting area horizontally, even at band height', () => {
+    expect(isPointInAxisBand({ x: 10, y: 220 }, plottingArea, canvasArea)).toBe(false)
+    expect(isPointInAxisBand({ x: 601, y: 220 }, plottingArea, canvasArea)).toBe(false)
+  })
+
+  it('is false when the canvas has no room below the plotting area (degenerate geometry)', () => {
+    expect(isPointInAxisBand({ x: 300, y: 200 }, plottingArea, { ...canvasArea, height: 200 })).toBe(false)
   })
 })

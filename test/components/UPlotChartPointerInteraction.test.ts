@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 import zhHant from '@/i18n/locales/zh-Hant'
@@ -16,8 +17,14 @@ class MockPlot {
   scales = { x: { min: 0 as number | null, max: 100 as number | null } }
   cursor = { idx: null as number | null }
   rect: RectState = { left: 40, top: 20, width: 560, height: 180 }
+  // B94 — the full plot+axes canvas rect; taller than `rect` (the interactive
+  // plotting-only area) by the X-axis tick/label band's own height, matching
+  // real uPlot (the axes are drawn ON the canvas, not as separate DOM).
+  canvasRect: RectState = { left: 0, top: 0, width: 600, height: 260 }
+  ctx: { canvas: { getBoundingClientRect(): DOMRect } }
   setCursorCalls: Array<{ left: number; top: number }> = []
   setScaleCalls: Array<{ min: number; max: number }> = []
+  setSizeCalls: Array<{ width: number; height: number }> = []
 
   constructor(
     private readonly options: { hooks?: Record<string, Array<(...args: never[]) => void>> },
@@ -36,10 +43,23 @@ class MockPlot {
       toJSON: () => ({}),
     })
     host.appendChild(this.over)
+    this.ctx = {
+      canvas: {
+        getBoundingClientRect: () => ({
+          ...this.canvasRect,
+          right: this.canvasRect.left + this.canvasRect.width,
+          bottom: this.canvasRect.top + this.canvasRect.height,
+          x: this.canvasRect.left,
+          y: this.canvasRect.top,
+          toJSON: () => ({}),
+        }),
+      },
+    }
     mockState.instances.push(this)
   }
 
   setScale(_key: string, range: { min: number; max: number }): void {
+    if (this.scales.x.min === range.min && this.scales.x.max === range.max) return
     this.scales.x = { ...range }
     this.setScaleCalls.push({ ...range })
     queueMicrotask(() => this.options.hooks?.setScale?.forEach((hook) => hook(this as never, 'x' as never)))
@@ -69,7 +89,7 @@ class MockPlot {
     return ((value - min) / (max - min)) * this.rect.width
   }
 
-  setSize(): void {}
+  setSize(size: { width: number; height: number }): void { this.setSizeCalls.push({ ...size }) }
   setData(data: number[][]): void { this.data = data }
   destroy(): void { this.over.remove() }
 }
@@ -106,6 +126,9 @@ function mountChart(centreCursorMode = false): VueWrapper {
       ],
     },
   })
+  const host = wrapper.get('.uplot-host').element as HTMLElement
+  Object.defineProperty(host, 'clientWidth', { configurable: true, value: 600 })
+  Object.defineProperty(host, 'clientHeight', { configurable: true, value: 260 })
   return wrapper
 }
 
@@ -133,6 +156,39 @@ afterEach(() => {
 })
 
 describe('UPlotChart fixed centre geometry', () => {
+  it('synchronizes the native legend cursor and shared cursor at initial full bounds', async () => {
+    const w = mountChart(true)
+    await Promise.resolve()
+
+    expect(w.emitted('cursor')).toEqual([[2]])
+    expect(mockState.instances[0].cursor.idx).toBe(2)
+    expect(mockState.instances[0].setCursorCalls).toEqual([{ left: 280, top: 0 }])
+  })
+
+  it('re-emits from replacement data when its x bounds stay unchanged', async () => {
+    const w = mountChart(true)
+    await Promise.resolve()
+    expect(w.emitted('cursor')).toEqual([[2]])
+
+    await w.setProps({ data: [[0, 60, 100], [1, 2, 3]] })
+    await Promise.resolve()
+
+    // The midpoint remains x=50, but its nearest sample is now index 1.
+    // MockPlot intentionally suppresses same-range setScale hooks above, so
+    // this proves the data-update lifecycle queues its own centre/legend sync.
+    expect(w.emitted('cursor')).toEqual([[2], [1]])
+    expect(mockState.instances[0].cursor.idx).toBe(1)
+    expect(mockState.instances[0].setCursorCalls.at(-1)).toEqual({ left: 336, top: 0 })
+  })
+
+  it('does not publish a fixed-centre cursor while centre mode is disabled', async () => {
+    const w = mountChart(false)
+    await Promise.resolve()
+
+    expect(w.emitted('cursor')).toBeUndefined()
+    expect(mockState.instances[0].setCursorCalls).toEqual([])
+  })
+
   it('tracks the live plot rectangle after resize and never spans axes/legend', async () => {
     const w = mountChart(true)
     const wrap = w.get('.uplot-wrap').element as HTMLElement
@@ -155,6 +211,71 @@ describe('UPlotChart fixed centre geometry', () => {
     expect(needle.attributes('style')).toContain('height: 120px')
   })
 
+  it('settles on the final mobile plot rectangle after a rapid breakpoint resize', async () => {
+    const w = mountChart(true)
+    const wrap = w.get('.uplot-wrap').element as HTMLElement
+    const host = w.get('.uplot-host').element as HTMLElement
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 720 })
+    wrap.getBoundingClientRect = () => rect(100, 50, 760, 320)
+    const plot = mockState.instances[0]
+    plot.rect = { left: 160, top: 80, width: 640, height: 220 }
+
+    // The window event sees desktop geometry first. The grid then reaches its
+    // mobile size before the scheduled resize/needle frames settle.
+    window.dispatchEvent(new Event('resize'))
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 320 })
+    wrap.getBoundingClientRect = () => rect(20, 60, 340, 280)
+    plot.rect = { left: 64, top: 96, width: 260, height: 150 }
+    resizeCallbacks[0]([], {} as ResizeObserver)
+    await vi.advanceTimersByTimeAsync(0)
+
+    const needle = w.get('.centre-needle')
+    expect(needle.attributes('style')).toContain('left: 174px')
+    expect(needle.attributes('style')).toContain('top: 36px')
+    expect(needle.attributes('style')).toContain('height: 150px')
+
+    // The reverse mobile→desktop transition must also replace the previous
+    // mobile geometry rather than retaining its last centre offset.
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 720 })
+    wrap.getBoundingClientRect = () => rect(100, 50, 760, 320)
+    plot.rect = { left: 160, top: 80, width: 640, height: 220 }
+    resizeCallbacks[0]([{ target: host } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+    await vi.runAllTimersAsync()
+    expect(needle.attributes('style')).toContain('left: 380px')
+    expect(needle.attributes('style')).toContain('top: 30px')
+    expect(needle.attributes('style')).toContain('height: 220px')
+  })
+
+  it('keeps the last valid needle through a zero-width transition and resizes once width returns', async () => {
+    const w = mountChart(true)
+    const wrap = w.get('.uplot-wrap').element as HTMLElement
+    const host = w.get('.uplot-host').element as HTMLElement
+    wrap.getBoundingClientRect = () => rect(100, 50, 700, 300)
+    const plot = mockState.instances[0]
+    plot.rect = { left: 160, top: 80, width: 600, height: 210 }
+    resizeCallbacks[0]([], {} as ResizeObserver)
+    await vi.advanceTimersByTimeAsync(0)
+    const needle = w.get('.centre-needle')
+    const before = needle.attributes('style')
+    const callsBefore = plot.setSizeCalls.length
+
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 0 })
+    window.dispatchEvent(new Event('resize'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(plot.setSizeCalls).toHaveLength(callsBefore)
+    expect(needle.attributes('style')).toBe(before)
+
+    Object.defineProperty(host, 'clientWidth', { configurable: true, value: 360 })
+    wrap.getBoundingClientRect = () => rect(40, 70, 380, 260)
+    plot.rect = { left: 84, top: 104, width: 280, height: 130 }
+    resizeCallbacks[0]([{ target: host } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+    await vi.runAllTimersAsync()
+    expect(plot.setSizeCalls.at(-1)).toMatchObject({ width: 360, height: 260 })
+    expect(needle.attributes('style')).toContain('left: 184px')
+    expect(needle.attributes('style')).toContain('top: 34px')
+    expect(needle.attributes('style')).toContain('height: 130px')
+  })
+
   it('keeps the centre value correct through wheel zoom and pointer pan', async () => {
     const w = mountChart(true)
     const host = w.get('.uplot-host').element
@@ -166,11 +287,13 @@ describe('UPlotChart fixed centre geometry', () => {
     expect(wheel.defaultPrevented).toBe(true)
     expect(zoom.max - zoom.min).toBeLessThan(100)
     expect(w.emitted('cursor')?.at(-1)).toEqual([2])
+    expect(mockState.instances[0].cursor.idx).toBe(2)
 
     host.dispatchEvent(pointer('pointerdown', { pointerId: 9, pointerType: 'mouse', clientX: 320, clientY: 100 }))
     host.dispatchEvent(pointer('pointermove', { pointerId: 9, pointerType: 'mouse', clientX: 460, clientY: 100 }))
     await vi.advanceTimersByTimeAsync(0)
     expect(w.emitted('cursor')?.at(-1)).toEqual([1])
+    expect(mockState.instances[0].cursor.idx).toBe(1)
   })
 
   it('preserves two-finger pinch zoom while centre mode is enabled', async () => {
@@ -181,6 +304,133 @@ describe('UPlotChart fixed centre geometry', () => {
     host.dispatchEvent(pointer('pointermove', { pointerId: 2, pointerType: 'touch', clientX: 450, clientY: 100 }))
     await vi.advanceTimersByTimeAsync(0)
     expect(w.emitted('xZoom')?.length).toBeGreaterThan(0)
+  })
+})
+
+// B94 — dragging the X-axis tick/label band pans a zoomed normal-mode chart.
+// MockPlot's `rect` (40,20,560,180) is the interactive plotting area; its
+// `canvasRect` (0,0,600,260) is the full plot+axes canvas — so the axis band
+// is the CSS-px strip y∈[200,260], x∈[40,600] (see `isPointInAxisBand`).
+describe('UPlotChart axis-band pan (B94)', () => {
+  async function zoomTo(plot: MockPlot, min: number, max: number): Promise<void> {
+    plot.setScale('x', { min, max })
+    await vi.advanceTimersByTimeAsync(0)
+  }
+
+  it('pans the visible window when dragging the axis band while zoomed in normal mode', async () => {
+    const w = mountChart(false)
+    await Promise.resolve()
+    const plot = mockState.instances[0]
+    await zoomTo(plot, 20, 80)
+
+    const host = w.get('.uplot-host').element
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 5, pointerType: 'mouse', clientX: 300, clientY: 230 }))
+    host.dispatchEvent(pointer('pointermove', { pointerId: 5, pointerType: 'mouse', clientX: 340, clientY: 230 }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Pixel delta (40px) → data-unit delta, at the CURRENT 60-unit/560px scale.
+    const deltaX = (60 / 560) * 40
+    const zoom = w.emitted('xZoom')?.at(-1)?.[0] as { min: number; max: number }
+    expect(zoom.min).toBeCloseTo(20 - deltaX, 5)
+    expect(zoom.max).toBeCloseTo(80 - deltaX, 5)
+    expect(plot.scales.x.min).toBeCloseTo(20 - deltaX, 5)
+  })
+
+  it('clamps the pan at the data edges instead of overscrolling', async () => {
+    const w = mountChart(false)
+    await Promise.resolve()
+    const plot = mockState.instances[0]
+    await zoomTo(plot, 20, 80)
+
+    const host = w.get('.uplot-host').element
+    // A large rightward drag would push min well below the data's real 0.
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 5, pointerType: 'mouse', clientX: 300, clientY: 230 }))
+    host.dispatchEvent(pointer('pointermove', { pointerId: 5, pointerType: 'mouse', clientX: 600, clientY: 230 }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    const zoom = w.emitted('xZoom')?.at(-1)?.[0] as { min: number; max: number }
+    expect(zoom.min).toBe(0)
+    expect(zoom.max).toBe(60) // span (60) preserved, clamped against the real data bounds
+  })
+
+  it('does not pan via the axis band when the chart is not zoomed', async () => {
+    const w = mountChart(false)
+    await Promise.resolve()
+    expect(w.emitted('xZoom')).toBeUndefined()
+
+    const host = w.get('.uplot-host').element
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 5, pointerType: 'mouse', clientX: 300, clientY: 230 }))
+    host.dispatchEvent(pointer('pointermove', { pointerId: 5, pointerType: 'mouse', clientX: 340, clientY: 230 }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(w.emitted('xZoom')).toBeUndefined()
+    expect(mockState.instances[0].scales.x).toEqual({ min: 0, max: 100 })
+  })
+
+  it('leaves centre-needle mode\'s own drag gesture untouched at the same position (B68)', async () => {
+    const w = mountChart(true)
+    await Promise.resolve()
+    const host = w.get('.uplot-host').element
+    const cursorsBefore = w.emitted('cursor')?.length ?? 0
+
+    // Same axis-band CLIENT-Y a normal-mode chart would treat specially —
+    // centre mode must keep handling it via its own scrub gesture (which
+    // ignores Y entirely), not silently swallow it as an axis-band pan.
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 5, pointerType: 'mouse', clientX: 300, clientY: 230 }))
+    host.dispatchEvent(pointer('pointermove', { pointerId: 5, pointerType: 'mouse', clientX: 340, clientY: 230 }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    // Only the centre-needle setScale hook emits `cursor` — proves the drag
+    // went through onCentrePointerMove, not the new axis-band pan (which never
+    // emits `cursor`).
+    expect((w.emitted('cursor')?.length ?? 0)).toBeGreaterThan(cursorsBefore)
+    expect(w.emitted('xZoom')?.length).toBeGreaterThan(0)
+  })
+
+  it('leaves plot-area drag-zoom alone (no axis-band pan fires outside the band)', async () => {
+    const w = mountChart(false)
+    await Promise.resolve()
+    const plot = mockState.instances[0]
+    await zoomTo(plot, 20, 80)
+    const zoomEventsBefore = w.emitted('xZoom')?.length ?? 0
+
+    const host = w.get('.uplot-host').element
+    // clientY 100 is inside the plotting rect (top 20..bottom 200), not the band.
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 5, pointerType: 'mouse', clientX: 300, clientY: 100 }))
+    host.dispatchEvent(pointer('pointermove', { pointerId: 5, pointerType: 'mouse', clientX: 340, clientY: 100 }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(w.emitted('xZoom')?.length ?? 0).toBe(zoomEventsBefore)
+    expect(plot.scales.x).toEqual({ min: 20, max: 80 })
+  })
+
+  it('shows a grab affordance only while hovering the band, and grabbing while dragging it', async () => {
+    const w = mountChart(false)
+    await Promise.resolve()
+    const plot = mockState.instances[0]
+    await zoomTo(plot, 20, 80)
+
+    const host = w.get('.uplot-host').element as HTMLElement
+    expect(host.style.cursor).toBe('')
+
+    host.dispatchEvent(pointer('pointermove', { pointerId: 6, pointerType: 'mouse', clientX: 300, clientY: 230 }))
+    await nextTick()
+    expect(host.style.cursor).toBe('grab')
+
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 6, pointerType: 'mouse', clientX: 300, clientY: 230 }))
+    await nextTick()
+    expect(host.style.cursor).toBe('grabbing')
+
+    // Releasing without moving away stays hovering — back to `grab`, not
+    // cleared entirely (the pointer hasn't left the band).
+    host.dispatchEvent(pointer('pointerup', { pointerId: 6, pointerType: 'mouse', clientX: 300, clientY: 230 }))
+    await nextTick()
+    expect(host.style.cursor).toBe('grab')
+
+    // Moving off the band clears the affordance.
+    host.dispatchEvent(pointer('pointermove', { pointerId: 6, pointerType: 'mouse', clientX: 300, clientY: 100 }))
+    await nextTick()
+    expect(host.style.cursor).toBe('')
   })
 })
 

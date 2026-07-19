@@ -114,7 +114,8 @@ export function planarGate(g: LapLine): PlanarGate {
 export interface GateCrossing {
   /** Index into `gates` (and the pointer position) of the gate just crossed. */
   gateIdx: number
-  /** Planar projection of the track segment's start point (sample `prevIdx`). */
+  /** Planar projection of the track segment's start point (sample `prevIdx`).
+   *  For an exact sampled-point crossing, p1 === p2 and prevIdx === idx. */
   p1: PlanarPoint
   /** Planar projection of the track segment's end point (sample `idx`). */
   p2: PlanarPoint
@@ -122,6 +123,35 @@ export interface GateCrossing {
   prevIdx: number
   /** Sample index of the segment's end point (the boundary sample). */
   idx: number
+}
+
+/** True when `point` lies strictly inside a gate segment. Collinearity alone
+ * is not enough: touching either gate endpoint remains a non-crossing, just
+ * like {@link segmentsIntersect}'s proper-straddle rule. */
+function pointInsideGate(point: PlanarPoint, gate: PlanarGate): boolean {
+  if (cross(gate.a, gate.b, point) !== 0) return false
+  const abX = gate.b.x - gate.a.x
+  const abY = gate.b.y - gate.a.y
+  const apX = point.x - gate.a.x
+  const apY = point.y - gate.a.y
+  const along = apX * abX + apY * abY
+  const lengthSq = abX * abX + abY * abY
+  return along > 0 && along < lengthSq
+}
+
+/** Detect a real crossing whose middle GPS sample lands exactly on the gate.
+ * The samples on either side must be strictly opposite, so approaching and
+ * leaving on the same side is only a touch and remains rejected. */
+function crossesThroughSample(
+  before: PlanarPoint,
+  middle: PlanarPoint,
+  after: PlanarPoint,
+  gate: PlanarGate,
+): boolean {
+  if (!pointInsideGate(middle, gate)) return false
+  const beforeSide = cross(gate.a, gate.b, before)
+  const afterSide = cross(gate.a, gate.b, after)
+  return (beforeSide > 0 && afterSide < 0) || (beforeSide < 0 && afterSide > 0)
 }
 
 /**
@@ -132,7 +162,9 @@ export interface GateCrossing {
  * shared "walk lap, find gate crossing" primitive behind sector validity,
  * sector timing, and gate ordering — same algorithm each callsite needs, only
  * what they DO with a crossing (mark invalid, interpolate a time, interpolate
- * a distance) differs.
+ * a distance) differs. A fix exactly inside the gate also counts when its
+ * adjacent valid fixes are on opposite sides; the three-point check rejects
+ * same-side grazes and gate-endpoint touches, and reports the crossing once.
  *
  * Returns the number of gates actually crossed (== `gates.length` iff every
  * gate was crossed in order before the lap's last sample).
@@ -148,10 +180,31 @@ export function walkLapGates(
   const end = Math.min(track.valid.length - 1, lap.endIdx)
 
   let gatePtr = 0
+  let before = -1
   let prev = -1
   for (let i = start; i <= end && gatePtr < gates.length; i++) {
     if (!valid[i]) continue
-    if (prev >= 0) {
+    let crossedAtSample = false
+
+    // A GPS fix can land exactly on the gate line. The two adjacent segments
+    // then only TOUCH the gate at their endpoint, so the strict pairwise test
+    // below rejects both. Looking at the valid fix on each side distinguishes
+    // a true pass-through from a same-side graze without double-counting it.
+    if (before >= 0 && prev >= 0) {
+      const g = gates[gatePtr]
+      const pBefore = project(lat[before], lon[before], g.lat0, g.lon0, g.cosLat0)
+      const pMiddle = project(lat[prev], lon[prev], g.lat0, g.lon0, g.cosLat0)
+      const pAfter = project(lat[i], lon[i], g.lat0, g.lon0, g.cosLat0)
+      if (crossesThroughSample(pBefore, pMiddle, pAfter, g)) {
+        // A zero-length crossing pins timing and distance to the exact logged
+        // sample instead of interpolating across its two neighbours.
+        onCrossing({ gateIdx: gatePtr, p1: pMiddle, p2: pMiddle, prevIdx: prev, idx: prev })
+        gatePtr++
+        crossedAtSample = true
+      }
+    }
+
+    if (!crossedAtSample && prev >= 0 && gatePtr < gates.length) {
       const g = gates[gatePtr]
       const p1 = project(lat[prev], lon[prev], g.lat0, g.lon0, g.cosLat0)
       const p2 = project(lat[i], lon[i], g.lat0, g.lon0, g.cosLat0)
@@ -160,6 +213,7 @@ export function walkLapGates(
         gatePtr++
       }
     }
+    before = prev
     prev = i
   }
 
@@ -275,8 +329,15 @@ export function detectLapsByLine(
 
 /**
  * Detect laps from the ECU's own lap channel when present. Uses IR_LapNumber
- * (a lap counter that increments) to find boundaries; lap duration comes from
- * the time axis between boundaries to stay consistent with the line method.
+ * (a lap counter that increments) to find boundaries; a boundary is the first
+ * logged sample after its value changes. Lap duration comes from the time axis
+ * between those boundaries to stay consistent with the line method.
+ *
+ * The boundary is therefore limited by the source Time sampling interval
+ * (commonly 31.25 ms). Do not mix or interpolate the undocumented IR_LapTime
+ * counter here: its clock and reset semantics are not verified. A vendor tool
+ * that timestamps another edge or clock can consequently differ by a fixed
+ * offset; this detector deliberately does not force a correction.
  * Returns [] if there is no IR_LapNumber channel or fewer than two boundaries.
  *
  * `timeMs` is the per-sample time axis; its units determine lapTimeMs units.

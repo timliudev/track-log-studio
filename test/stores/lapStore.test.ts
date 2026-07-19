@@ -651,6 +651,33 @@ describe('lapStore', () => {
     sectors.addGate(gateAt(3.5))
     sectors.addGate(gateAt(7.5))
     expect(s.sectorAllFailed).toBe(true)
+    expect(s.sectorFailureCount).toBe(1)
+    expect(s.sectorInvalid).toEqual([])
+    expect(s.excluded).toEqual([])
+  })
+
+  it('keeps the raw failure count reactive when a gate edit makes every lap fail', () => {
+    const s = useLapStore()
+    const sectors = useSectorStore()
+    const track = makeTrack(
+      Array.from({ length: 11 }, () => 0),
+      Array.from({ length: 11 }, (_, i) => i),
+    )
+    s.setTrack(track)
+    s.setLaps([
+      { index: 0, startIdx: 0, endIdx: 10, lapTimeMs: 50000 },
+      { index: 1, startIdx: 0, endIdx: 5, lapTimeMs: 25000 },
+    ])
+    sectors.addGate(gateAt(3.5))
+    sectors.addGate(gateAt(7.5))
+
+    expect(s.sectorFailureCount).toBe(1)
+    expect(s.sectorInvalid).toEqual([1])
+    expect(s.excluded).toEqual([1])
+
+    sectors.setGate(1, gateAt(20))
+    expect(s.sectorFailureCount).toBe(2)
+    expect(s.sectorAllFailed).toBe(true)
     expect(s.sectorInvalid).toEqual([])
     expect(s.excluded).toEqual([])
   })

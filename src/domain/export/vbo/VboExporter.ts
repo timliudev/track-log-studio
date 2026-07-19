@@ -131,10 +131,18 @@ function safeComment(s: string): string {
   return s.replace(/\[/g, '(').replace(/\]/g, ')')
 }
 
-/** CSV field with Python csv.writer (QUOTE_MINIMAL) quoting rules. */
+/**
+ * CSV field with Python csv.writer (QUOTE_MINIMAL) quoting rules, plus a
+ * leading `'` guard against spreadsheet formula injection: this CSV can
+ * carry attacker-controlled text round-tripped through an imported file's
+ * TLS-Metadata (e.g. a CVT tuning note's label/value — see
+ * domain/export/metadata.ts), and Excel/LibreOffice treat a cell starting
+ * with `=`, `+`, `-`, `@`, or a tab/CR as a formula to evaluate on open.
+ */
 function csvField(value: string): string {
-  if (/[",\r\n]/.test(value)) return '"' + value.replace(/"/g, '""') + '"'
-  return value
+  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
+  if (/[",\r\n]/.test(guarded)) return '"' + guarded.replace(/"/g, '""') + '"'
+  return guarded
 }
 
 function dd(v: number): string {

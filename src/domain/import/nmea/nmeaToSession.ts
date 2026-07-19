@@ -21,11 +21,11 @@ export function nmeaToSession(text: string): LogSession {
     }
   }
   const channels: Channel[] = [
-    { name: 'Time', rawName: 'Time', description: undefined, data: time },
-    { name: 'GPS_Lat', rawName: 'GPS_Lat', description: 'GPS Latitude (°)', data: lat },
-    { name: 'GPS_Lon', rawName: 'GPS_Lon', description: 'GPS Longitude (°)', data: lon },
-    { name: 'GPS_Speed', rawName: 'GPS_Speed', description: 'GPS Speed (km/h)', data: speed },
-    { name: 'GPS_Course', rawName: 'GPS_Course', description: 'GPS Course (°)', data: course },
+    { name: 'Time', rawName: 'Time', description: undefined, unit: 'ms', data: time },
+    { name: 'GPS_Lat', rawName: 'GPS_Lat', description: 'GPS Latitude (°)', unit: '°', data: lat },
+    { name: 'GPS_Lon', rawName: 'GPS_Lon', description: 'GPS Longitude (°)', unit: '°', data: lon },
+    { name: 'GPS_Speed', rawName: 'GPS_Speed', description: 'GPS Speed (km/h)', unit: 'km/h', data: speed },
+    { name: 'GPS_Course', rawName: 'GPS_Course', description: 'GPS Course (°)', unit: '°', data: course },
   ]
   return new LogSession(channels, {
     formatId: 'nmea',

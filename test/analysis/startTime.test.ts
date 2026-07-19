@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { sessionStartAnchor } from '@/domain/analysis/startTime'
+import { resolveClockTimezoneOffset, sessionStartAnchor } from '@/domain/analysis/startTime'
+import { formatClock } from '@/domain/analysis/axisFormat'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel, LogMeta } from '@/domain/model/types'
 
@@ -12,14 +13,18 @@ function meta(createdDate: Date | null): LogMeta {
 }
 
 describe('sessionStartAnchor', () => {
-  it('uses the created date (wall-clock reinterpreted as UTC) when no GPS UTC', () => {
-    const created = new Date(2024, 4, 17, 13, 45, 30, 250) // local components
+  it('retains the created-date instant when no GPS UTC', () => {
+    // The +08:00 suffix makes this regression independent of the test host's
+    // timezone: treating getFullYear()/getHours() as UTC would be eight hours
+    // wrong, while getTime() retains the parsed instant.
+    const created = new Date('2024-05-17T13:45:30.250+08:00')
     const session = new LogSession([ch('RPM', [1000, 2000, 3000])], meta(created))
 
     const anchor = sessionStartAnchor(session)
     expect(anchor).not.toBeNull()
     expect(anchor!.source).toBe('created')
-    expect(anchor!.startUtcMs).toBe(Date.UTC(2024, 4, 17, 13, 45, 30, 250))
+    expect(anchor!.startUtcMs).toBe(created.getTime())
+    expect(formatClock(anchor!.startUtcMs, resolveClockTimezoneOffset('auto', 480))).toBe('13:45:30')
   })
 
   it('uses the first finite GPS UTC fix, anchored to elapsed=0 via the Time channel', () => {
@@ -46,5 +51,20 @@ describe('sessionStartAnchor', () => {
   it('returns null with no created date and no GPS UTC', () => {
     const session = new LogSession([ch('RPM', [1000, 2000])], meta(null))
     expect(sessionStartAnchor(session)).toBeNull()
+  })
+})
+
+describe('resolveClockTimezoneOffset', () => {
+  it('uses the browser local offset for the app auto setting', () => {
+    expect(resolveClockTimezoneOffset('auto', 480)).toBe(480)
+  })
+
+  it('keeps an explicit timezone override for both created and GPS anchors', () => {
+    expect(resolveClockTimezoneOffset(-300, 480)).toBe(-300)
+    expect(resolveClockTimezoneOffset(0, 480)).toBe(0)
+  })
+
+  it('falls back safely if a browser offset is unavailable', () => {
+    expect(resolveClockTimezoneOffset('auto', NaN)).toBe(0)
   })
 })

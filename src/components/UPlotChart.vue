@@ -128,18 +128,28 @@ export function centreCursorIndex(
 </script>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { panRange, pinchRange, zoomRange, type XRange } from '@/features/analyzer/xRangeGesture'
+import {
+  blankTickLabelsOutsideData,
+  panCentreNeedleRange,
+  panRange,
+  pinchCentreNeedleRange,
+  pinchRange,
+  zoomCentreNeedleRange,
+  type XRange,
+} from '@/features/analyzer/xRangeGesture'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
 import {
   centreNeedleGeometry,
   clampPlotPoint,
+  isPointInAxisBand,
   pendingTouchIntent,
   type CentreNeedleGeometry,
+  type Rect2D,
 } from '@/domain/analysis/chartPointerGesture'
 
 const { t } = useI18n()
@@ -229,10 +239,19 @@ const wrap = ref<HTMLDivElement | null>(null)
  *  for. `null` (hidden) whenever centre-needle mode is off or the plot/host
  *  aren't measurable yet. */
 const needleGeometry = ref<CentreNeedleGeometry | null>(null)
+// B94 — whether the pointer is currently over the draggable X-axis band (see
+// the axis-band pan gesture below), and whether a drag off it is in progress.
+// Both drive the `grab`/`grabbing` cursor affordance only; the band itself
+// behaves exactly like before whenever neither is true.
+const axisBandHover = ref(false)
+const axisBandDragging = ref(false)
 let plot: uPlot | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
 let needleFrame: number | null = null
+let needleSettleFrame: number | null = null
+let resizeFrame: number | null = null
+let resizeEpoch = 0
 // Guard so programmatic setScale (from a synced xRange, or uPlot's own
 // auto-ranging on (re)create) doesn't echo back out as a user xZoom.
 //
@@ -255,6 +274,41 @@ function clearApplyingRangeSoon(): void {
   })
 }
 let applyingCursor = false
+
+/**
+ * Synchronize the sample under the fixed needle to both the shared cursor and
+ * uPlot's native legend cursor. The native crosshair remains hidden by the
+ * centre-mode cursor options; setCursor here only refreshes the legend values.
+ * The identity check prevents a deferred sync from a destroyed chart instance
+ * reaching either cursor after a recreate.
+ */
+function syncCentreCursor(instance: uPlot): void {
+  if (!props.centreCursorMode || plot !== instance) return
+  const { min, max } = instance.scales.x
+  if (min == null || max == null) return
+  const xs = instance.data[0] as number[]
+  const index = centreCursorIndex(xs, { min, max })
+  if (index != null) {
+    const left = instance.valToPos(xs[index], 'x')
+    if (Number.isFinite(left)) {
+      applyingCursor = true
+      instance.setCursor({ left, top: 0 })
+      applyingCursor = false
+    }
+  }
+  emit('cursor', index)
+  scheduleNeedlePos()
+}
+
+/**
+ * uPlot coalesces scale commits in a microtask. Schedule after that commit so
+ * an unchanged initial range and a same-range data replacement still publish
+ * the value under the fixed needle.
+ */
+function queueCentreCursor(instance: uPlot): void {
+  if (!props.centreCursorMode) return
+  queueMicrotask(() => syncCentreCursor(instance))
+}
 
 // B9 — whether the chart's CURRENT x scale is narrower than the full data
 // extent, i.e. "there's something to reset". Drives the reset-zoom button's
@@ -299,12 +353,28 @@ function buildOptions(width: number): uPlot.Options {
   const gridStroke = themeColor('--color-border', '#cccccc')
   // Apply theme to each axis; keep a per-axis stroke if the caller set one
   // (used to colour each value axis to match its series).
-  const themed = (a: uPlot.Axis): uPlot.Axis => ({
-    grid: { stroke: gridStroke, width: 1 },
-    ticks: { stroke: gridStroke, width: 1 },
-    ...a,
-    stroke: a.stroke ?? axisStroke,
-  })
+  const themed = (a: uPlot.Axis): uPlot.Axis => {
+    const axis: uPlot.Axis = {
+      grid: { stroke: gridStroke, width: 1 },
+      ticks: { stroke: gridStroke, width: 1 },
+      ...a,
+      stroke: a.stroke ?? axisStroke,
+    }
+    // B68 — only centre-needle mode may pan into virtual x padding. Preserve
+    // the caller's normal elapsed/distance/clock formatter, but suppress text
+    // where the split lies outside actual data. Grid marks remain useful for
+    // spatial context without inventing timestamps or distances that do not
+    // have a sample behind them.
+    if (props.centreCursorMode && (axis.scale ?? 'x') === 'x' && typeof axis.values === 'function') {
+      const values = axis.values
+      axis.values = (u, splits, axisIdx, foundSpace, foundIncr) =>
+        blankTickLabelsOutsideData(splits, values(u, splits, axisIdx, foundSpace, foundIncr), dataXBounds() ?? {
+          min: -Infinity,
+          max: Infinity,
+        })
+    }
+    return axis
+  }
   const axes = (props.axes ?? [{}, {}]).map(themed)
   return {
     width,
@@ -346,7 +416,7 @@ function buildOptions(width: number): uPlot.Options {
       setCursor: [
         (u: uPlot) => {
           // B31 — in centre-needle mode the emitted cursor comes from the
-          // FIXED centre (see the `setScale` hook below + `emitCentreCursor`),
+          // FIXED centre (see the `setScale` hook below + `syncCentreCursor`),
           // never from wherever the pointer happens to be hovering — so the
           // native hover-driven emit is suppressed here entirely.
           if (props.centreCursorMode) return
@@ -370,9 +440,7 @@ function buildOptions(width: number): uPlot.Options {
           // instance's data. `u.data[0]` is assumed finite/ascending X — same
           // assumption the `externalCursor` watcher below already makes.
           if (props.centreCursorMode) {
-            const xs = u.data[0] as number[]
-            emit('cursor', centreCursorIndex(xs, { min, max }))
-            scheduleNeedlePos()
+            syncCentreCursor(u)
           }
         },
       ],
@@ -420,16 +488,19 @@ function create(): void {
   // see clearApplyingRangeSoon's comment for why a synchronous reset can't
   // guard an async hook fire.
   applyingRange = true
-  plot = new uPlot(buildOptions(width), props.data, host.value)
+  const instance = new uPlot(buildOptions(width), props.data, host.value)
+  plot = instance
+  observeChartGeometry()
   applyXRange(false) // adopt the shared zoom on (re)create, e.g. a newly added chart
   clearApplyingRangeSoon()
+  queueCentreCursor(instance)
   // T1 — the legend only exists AFTER construction, so the height baked into
   // buildOptions() couldn't subtract it yet; re-measure once now that it's in
   // the DOM so canvas + legend fit the host exactly (fillHeight mode only —
   // fixed-height callers size the canvas to the `height` prop and let the
   // page flow around the legend, unchanged).
   if (props.fillHeight) {
-    resize()
+    scheduleResize()
     // #4 fix — a channel add/remove changes the series shape, which forces
     // THIS create() to run again (see the `[data, series]` watcher below).
     // That recreate happens inside the same reactive flush that may still be
@@ -445,9 +516,8 @@ function create(): void {
     // update (not just this component's own), self-healing without requiring
     // a manual drag. See uplotChartFillHeightResize.test.ts for the
     // regression this closes.
-    void nextTick(resize)
+    scheduleResize()
   }
-  updateNeedlePos()
   scheduleNeedlePos()
 }
 
@@ -463,18 +533,33 @@ function updateNeedlePos(): void {
   needleGeometry.value = centreNeedleGeometry(wrapRect, overRect)
 }
 
-/** uPlot commits setSize/setScale geometry asynchronously; measure after it. */
+/**
+ * uPlot and the responsive grid both commit geometry asynchronously. Measure
+ * in two frames: the first follows uPlot's own commit, the second follows a
+ * breakpoint reflow that lands in that first frame. Coalescing means a rapid
+ * resize can never leave an older frame to overwrite the newest rectangle.
+ */
 function scheduleNeedlePos(): void {
   if (needleFrame != null) cancelAnimationFrame(needleFrame)
+  if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
   needleFrame = requestAnimationFrame(() => {
     needleFrame = null
     updateNeedlePos()
+    needleSettleFrame = requestAnimationFrame(() => {
+      needleSettleFrame = null
+      updateNeedlePos()
+    })
   })
 }
 
 function destroy(): void {
   plot?.destroy()
   plot = null
+  // B94 — a recreate (theme change, centre-mode toggle, series-shape change)
+  // must not leave a stale axis-band drag "stuck" against the old instance.
+  axisPanPointerId = null
+  axisBandDragging.value = false
+  axisBandHover.value = false
 }
 
 // ── touch gestures (#8, B35) ─────────────────────────────────────────────────
@@ -751,7 +836,11 @@ function moveTouchGesture(e: PointerEvent): void {
     const midValNow = plot.posToVal(mid.x, 'x')
     const midValPrev = plot.posToVal(pinchLast.midX, 'x')
     const deltaX = midValPrev - midValNow
-    emitXRange(pinchRange(range, factor, aboutVal, -deltaX, bounds))
+    emitXRange(
+      props.centreCursorMode
+        ? pinchCentreNeedleRange(range, factor, aboutVal, -deltaX, bounds)
+        : pinchRange(range, factor, aboutVal, -deltaX, bounds),
+    )
     pinchLast = { dist, midX: mid.x }
     e.preventDefault()
     return
@@ -760,7 +849,11 @@ function moveTouchGesture(e: PointerEvent): void {
   if (touchMode === 'pan') {
     const prevVal = plot.posToVal(panLastX, 'x')
     const curVal = plot.posToVal(pos.x, 'x')
-    emitXRange(panRange(range, curVal - prevVal, bounds))
+    emitXRange(
+      props.centreCursorMode
+        ? panCentreNeedleRange(range, curVal - prevVal, bounds)
+        : panRange(range, curVal - prevVal, bounds),
+    )
     panLastX = pos.x
     e.preventDefault()
   }
@@ -823,12 +916,84 @@ function onCentrePointerMove(e: PointerEvent): void {
   const deltaX = curVal - prevVal // > 0 when the pointer moves right
   // Content follows the pointer, same convention as the touch-pan gesture
   // above (drag right → window shifts left, i.e. -deltaX).
-  emitXRange(panRange(range, deltaX, bounds))
+  emitXRange(panCentreNeedleRange(range, deltaX, bounds))
   centreScrubLastX = pos.x
 }
 
 function onCentrePointerUp(e: PointerEvent): void {
   if (centreScrubPointerId === e.pointerId) centreScrubPointerId = null
+}
+
+// ── B94 X-axis band pan (normal mode, while zoomed) ─────────────────────────
+// Normal mode leaves the plot area to uPlot's own native drag-to-zoom (see
+// buildOptions' cursor.drag, unset in this mode), which means a plain drag
+// there can never also mean "pan" without refighting that default. Instead,
+// dragging the X-AXIS TICK/LABEL BAND below the plot — a region uPlot's own
+// `.u-over` doesn't cover at all, see `isPointInAxisBand` — pans the visible
+// window, reusing the exact same dataXBounds/currentXRange/emitXRange
+// pipeline the Shift+drag and touch-pan gestures already use. Deliberately
+// reuses the STRICT `panRange` (no B68 virtual edge padding): that's a
+// centre-mode-only concept, and this gesture never runs in centre mode at all.
+let axisPanPointerId: number | null = null
+let axisPanLastX = 0
+
+/** Live geometry needed to hit-test the axis band, in the same viewport CSS-px
+ *  space as `isPointInAxisBand` expects: the plot's own interactive rect and
+ *  the full plot+axes canvas rect (uPlot draws every axis directly onto that
+ *  one canvas — see `isPointInAxisBand`'s doc). `null` before uPlot exists. */
+function axisBandGeometry(): { plotting: Rect2D; canvas: Rect2D } | null {
+  if (!plot) return null
+  return { plotting: plot.over.getBoundingClientRect(), canvas: plot.ctx.canvas.getBoundingClientRect() }
+}
+
+/** Axis-band panning only makes sense while there's something to pan: centre
+ *  mode has its own drag gesture (see onCentrePointerDown above), and an
+ *  unzoomed chart has no narrower window to shift within the full extent. */
+function isAxisPanEligible(): boolean {
+  return !props.centreCursorMode && zoomed.value
+}
+
+/** Keep the `grab` cursor affordance in sync with the live pointer position;
+ *  called on every pointermove regardless of which gesture (if any) is active. */
+function updateAxisBandHover(e: PointerEvent): void {
+  if (!isAxisPanEligible()) {
+    axisBandHover.value = false
+    return
+  }
+  const geo = axisBandGeometry()
+  axisBandHover.value = geo != null && isPointInAxisBand({ x: e.clientX, y: e.clientY }, geo.plotting, geo.canvas)
+}
+
+function startAxisBandPan(e: PointerEvent): void {
+  if (axisPanPointerId != null || !plot) return
+  axisPanPointerId = e.pointerId
+  axisPanLastX = e.clientX
+  axisBandDragging.value = true
+  ;(e.target as Element).setPointerCapture?.(e.pointerId)
+  e.preventDefault()
+}
+
+function moveAxisBandPan(e: PointerEvent): void {
+  if (axisPanPointerId !== e.pointerId || !plot) return
+  const bounds = dataXBounds()
+  if (!bounds) return
+  const range = currentXRange() ?? bounds
+  // Same pixel→value conversion as onMousePanMove/onCentrePointerMove: the
+  // axis band shares its horizontal alignment with `.u-over` (uPlot draws
+  // ticks directly under their data columns), so `over`'s left offset is
+  // still the correct reference even though the pointer itself sits below it.
+  const overRect = plot.over.getBoundingClientRect()
+  const prevVal = plot.posToVal(axisPanLastX - overRect.left, 'x')
+  const curVal = plot.posToVal(e.clientX - overRect.left, 'x')
+  emitXRange(panRange(range, curVal - prevVal, bounds))
+  axisPanLastX = e.clientX
+  e.preventDefault()
+}
+
+function endAxisBandPan(e: PointerEvent): void {
+  if (axisPanPointerId !== e.pointerId) return
+  axisPanPointerId = null
+  axisBandDragging.value = false
 }
 
 function onPointerDown(e: PointerEvent): void {
@@ -843,6 +1008,16 @@ function onPointerDown(e: PointerEvent): void {
   // `setPointerCapture()`.
   if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
     return
+  }
+  // B94 — the axis band claims its own drag before anything else considers
+  // this pointerdown, for every pointer type (mouse/touch/pen): it's a region
+  // uPlot's native drag-zoom and this file's other gestures never reach.
+  if (isAxisPanEligible()) {
+    const geo = axisBandGeometry()
+    if (geo && isPointInAxisBand({ x: e.clientX, y: e.clientY }, geo.plotting, geo.canvas)) {
+      startAxisBandPan(e)
+      return
+    }
   }
   if (isTouchGesturePointer(e.pointerType)) {
     // Normal mode waits for long press vs horizontal pan vs vertical page
@@ -859,6 +1034,11 @@ function onPointerDown(e: PointerEvent): void {
 }
 
 function onPointerMove(e: PointerEvent): void {
+  updateAxisBandHover(e)
+  if (axisPanPointerId != null) {
+    moveAxisBandPan(e)
+    return
+  }
   if (isTouchGesturePointer(e.pointerType)) {
     moveTouchGesture(e)
     return
@@ -869,6 +1049,10 @@ function onPointerMove(e: PointerEvent): void {
 }
 
 function onPointerUp(e: PointerEvent): void {
+  if (axisPanPointerId != null) {
+    endAxisBandPan(e)
+    return
+  }
   if (isTouchGesturePointer(e.pointerType)) {
     endTouchGesture(e)
     return
@@ -885,7 +1069,7 @@ function onCentreWheel(e: WheelEvent): void {
   const range = currentXRange() ?? bounds
   const about = (range.min + range.max) / 2
   const factor = Math.exp(-e.deltaY * 0.002)
-  emitXRange(zoomRange(range, factor, about, bounds))
+  emitXRange(zoomCentreNeedleRange(range, factor, about, bounds))
   e.preventDefault()
 }
 
@@ -894,13 +1078,47 @@ function seriesKey(): string {
   return props.series.map((s) => s.label ?? '').join('|')
 }
 
-function resize(): void {
-  if (plot && host.value) {
-    emit('plotWidth', host.value.clientWidth)
-    plot.setSize({ width: host.value.clientWidth, height: targetHeight() })
-    updateNeedlePos()
-    scheduleNeedlePos()
-  }
+/** Resize only after Vue and the browser have settled the latest grid layout. */
+function scheduleResize(): void {
+  const epoch = ++resizeEpoch
+  void nextTick(() => {
+    if (epoch !== resizeEpoch) return
+    if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null
+      if (epoch !== resizeEpoch) return
+      resizeNow()
+    })
+  })
+}
+
+/** Apply a settled, non-transitional size to uPlot. */
+function resizeNow(): void {
+  if (!plot || !host.value) return
+  const width = host.value.clientWidth
+  const height = targetHeight()
+  // A breakpoint can transiently detach/collapse a grid item. Do not teach
+  // uPlot that zero is a real size and do not erase the last valid needle.
+  if (!(width > 0) || !(height > 0)) return
+  emit('plotWidth', width)
+  plot.setSize({ width, height })
+  scheduleNeedlePos()
+}
+
+/** Keep host/wrapper size changes separate from uPlot's own plot-area change. */
+function onChartGeometryResize(entries: ResizeObserverEntry[]): void {
+  const needsSize = entries.some((entry) => entry.target === host.value || entry.target === wrap.value)
+  if (needsSize) scheduleResize()
+  else scheduleNeedlePos()
+}
+
+/** Re-observe the live uPlot overlay after every create() replacement. */
+function observeChartGeometry(): void {
+  if (!ro) return
+  ro.disconnect()
+  if (host.value) ro.observe(host.value)
+  if (wrap.value) ro.observe(wrap.value)
+  if (plot) ro.observe(plot.over)
 }
 
 // Data-only change → fast setData. Series structure change → recreate. Seeded
@@ -913,11 +1131,11 @@ let lastKey = ''
 onMounted(() => {
   create()
   lastKey = seriesKey()
-  ro = new ResizeObserver(() => resize())
-  if (host.value) ro.observe(host.value)
+  ro = new ResizeObserver(onChartGeometryResize)
+  observeChartGeometry()
   // dpr / viewport changes (e.g. devtools device-mode toggle) don't trigger the
   // element ResizeObserver — also redraw on window resize.
-  window.addEventListener('resize', resize)
+  window.addEventListener('resize', scheduleResize)
   // Recreate with new colours when the theme (data-theme) changes.
   themeObs = new MutationObserver(() => create())
   themeObs.observe(document.documentElement, {
@@ -932,13 +1150,16 @@ onMounted(() => {
 onBeforeUnmount(() => {
   ro?.disconnect()
   themeObs?.disconnect()
-  window.removeEventListener('resize', resize)
+  window.removeEventListener('resize', scheduleResize)
   host.value?.removeEventListener('mousedown', onHostMouseDown, true)
   window.removeEventListener('mousemove', onMousePanMove)
   window.removeEventListener('mouseup', onMousePanUp)
   clearLongPress()
   if (contextMenuResetTimer != null) clearTimeout(contextMenuResetTimer)
   if (needleFrame != null) cancelAnimationFrame(needleFrame)
+  if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
+  if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
+  resizeEpoch++
   destroy()
 })
 
@@ -950,8 +1171,10 @@ watch(
       lastKey = key
       create()
     } else {
-      plot.setData(props.data)
+      const instance = plot
+      instance.setData(props.data)
       applyXRange()
+      queueCentreCursor(instance)
     }
   },
   { deep: false },
@@ -993,6 +1216,15 @@ watch(
   () => props.centreCursorMode,
   () => create(),
 )
+
+// B94 — `grab` while the axis band is draggable and idle, `grabbing` while
+// actually being dragged; unset (browser default) everywhere else, so the
+// band behaves exactly as before outside normal-mode zoom.
+const axisBandCursor = computed<string | undefined>(() => {
+  if (axisBandDragging.value) return 'grabbing'
+  if (axisBandHover.value) return 'grab'
+  return undefined
+})
 </script>
 
 <template>
@@ -1001,6 +1233,7 @@ watch(
       ref="host"
       class="uplot-host"
       :class="{ fill: fillHeight, 'touch-selecting': touchSelectionActive }"
+      :style="{ cursor: axisBandCursor }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"

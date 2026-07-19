@@ -56,6 +56,19 @@ describe('computeSectorTimes', () => {
     expect(sum).toBeCloseTo(10000, 0)
   })
 
+  it('uses the exact timestamp of a sampled point that crosses through a gate', () => {
+    const sampledTrack = makeTrack([0, 0, 0], [-1, 0, 1])
+    const sampledTime = new Float64Array([0, 1000, 3000])
+    const [result] = computeSectorTimes(
+      [lap(0, 0, 2)],
+      sampledTrack,
+      sampledTime,
+      [gateAt(0)],
+    )
+    expect(result.complete).toBe(true)
+    expect(result.sectorTimesMs).toEqual([1000, 2000])
+  })
+
   it('a lap missing a gate is incomplete, with NaN for the un-timed trailing sector(s)', () => {
     // Lap only spans lon 0..5: crosses gate@3.5 but never reaches gate@7.5.
     const laps = [lap(0, 0, 5)]

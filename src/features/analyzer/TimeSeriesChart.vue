@@ -12,21 +12,30 @@ import { buildLapOverlay } from '@/domain/analysis/lapOverlay'
 import { buildCrossSessionLapOverlay, type CrossSessionLapSource } from '@/domain/analysis/crossSessionLapOverlay'
 import { sampleIndexAtGridX, gridIndexAtSampleIndex, lapContaining } from '@/domain/analysis/overlayCursor'
 import { formatElapsed, formatDistance, formatClock } from '@/domain/analysis/axisFormat'
-import { sessionStartAnchor } from '@/domain/analysis/startTime'
-import { lapColor } from './lapColors'
+import { resolveClockTimezoneOffset, sessionStartAnchor } from '@/domain/analysis/startTime'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import { buildTimelineData, nearestXIndex, type TimelineSource } from '@/domain/analysis/timelineData'
+import { planTimeSeriesAxes } from '@/domain/analysis/timeSeriesAxes'
+import { channelColor, channelSeriesColor } from '@/domain/analysis/channelPalette'
 import {
   availableDerivedAnalyzerChannels,
   isDerivedAnalyzerChannel,
   MEASURED_TOTAL_RATIO_CHANNEL,
   resolveAnalyzerChannel,
 } from '@/domain/analysis/analyzerChannels'
+import {
+  CVT_FRONT_DISPLACEMENT_CHANNEL,
+  CVT_FRONT_RADIUS_CHANNEL,
+  CVT_REAR_DISPLACEMENT_CHANNEL,
+  CVT_REAR_RADIUS_CHANNEL,
+  PURE_CVT_RATIO_CHANNEL,
+} from '@/domain/analysis/cvtTrace'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
-import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { toCvtTraceConfig, useDrivetrainStore } from '@/stores/drivetrainStore'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import { cachedChannelUpdateRateHz } from '@/composables/channelUpdateRateCache'
+import { useDocumentTheme } from '@/composables/useDocumentTheme'
 
 const props = defineProps<{
   /** Persisted dashboard config for a user-added ordinary time-series card.
@@ -48,7 +57,7 @@ const props = defineProps<{
   selectedLaps?: Lap[]
   /** Fixed derived series (e.g. drivetrain ratio). When supplied, the chart
    *  uses the same plot/overlay/cursor pipeline but hides the channel picker. */
-  fixedSeries?: readonly { name: string; data: ArrayLike<number> }[]
+  fixedSeries?: readonly { name: string; data: ArrayLike<number>; unit?: string }[]
   /** Empty-state copy for a fixed derived chart whose prerequisites failed. */
   emptyMessage?: string
   /** #8 — forwarded to UPlotChart: fill the dashboard grid item's height
@@ -68,26 +77,41 @@ const lapStore = useLapStore()
 const settings = useSettingsStore()
 const drivetrain = useDrivetrainStore()
 const { tzOverride, centreCursorMode } = storeToRefs(settings)
+const documentTheme = useDocumentTheme()
 
-const PALETTE = ['#e23b3b', '#3b82e2', '#2ea043', '#e2a33b', '#9b3be2', '#3bd6e2']
-const color = (i: number): string => PALETTE[i % PALETTE.length]
-// Line-dash patterns for overlay mode: style encodes the channel ([] = solid).
-const DASHES: number[][] = [[], [6, 4], [2, 3], [8, 3, 2, 3], [12, 4]]
-const dash = (i: number): number[] => DASHES[i % DASHES.length]
+const channelStroke = (channelIndex: number): string => channelColor(channelIndex, documentTheme.value)
+const traceStroke = (channelIndex: number, traceOrder: number): string =>
+  channelSeriesColor(channelIndex, traceOrder, documentTheme.value)
 
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
-const comparisonActive = computed(() => (props.comparisonSessions?.length ?? 0) > 0)
-const derivedContext = computed(() => ({
-  wheelCircumferenceMm: drivetrain.kind === 'mt'
-    ? drivetrain.inversionWheelCircumferenceMm
-    : drivetrain.cvt.wheelCircumferenceMm,
-}))
+function derivedContextFor(fileId?: number | null) {
+  return {
+    wheelCircumferenceMm: drivetrain.kind === 'mt'
+      ? drivetrain.inversionWheelCircumferenceMm
+      : drivetrain.activeCvtProfile.wheelCircumferenceMm,
+    fileId: fileId ?? 'unassigned',
+    cvtConfig: drivetrain.kind === 'cvt' ? toCvtTraceConfig(drivetrain.activeCvtProfile) : null,
+  }
+}
+const derivedContext = computed(() => derivedContextFor(props.primaryFileId))
 
 function channelLabel(id: string): string {
+  const keys: Record<string, string> = {
+    [MEASURED_TOTAL_RATIO_CHANNEL]: 'analyzer.gear.ratioSeriesLabel',
+    [PURE_CVT_RATIO_CHANNEL]: 'analyzer.gear.pureCvtRatioSeriesLabel',
+    [CVT_FRONT_RADIUS_CHANNEL]: 'analyzer.gear.frontPitchRadiusSeriesLabel',
+    [CVT_REAR_RADIUS_CHANNEL]: 'analyzer.gear.rearPitchRadiusSeriesLabel',
+    [CVT_FRONT_DISPLACEMENT_CHANNEL]: 'analyzer.gear.frontSheaveDisplacementSeriesLabel',
+    [CVT_REAR_DISPLACEMENT_CHANNEL]: 'analyzer.gear.rearSheaveDisplacementSeriesLabel',
+  }
+  return keys[id] ? t(keys[id]) as string : id
+}
+
+function channelDescription(id: string): string {
   return id === MEASURED_TOTAL_RATIO_CHANNEL
-    ? t('analyzer.gear.ratioSeriesLabel') as string
-    : id
+    ? t('analyzer.gear.measuredRatioChannelDescription') as string
+    : t('analyzer.gear.cvtDerivedChannelDescription') as string
 }
 
 const selectedChannelIds = computed<readonly string[]>(() => {
@@ -102,7 +126,7 @@ const allChannels = computed<Array<{ name: string; value?: string; description?:
     ...availableDerivedAnalyzerChannels(props.session, derivedContext.value).map((id) => ({
       name: channelLabel(id),
       value: id,
-      description: t('analyzer.gear.measuredRatioChannelDescription') as string,
+      description: channelDescription(id),
     })),
   ]
     .sort((a, b) => a.name.localeCompare(b.name)),
@@ -112,17 +136,35 @@ const pickerOptions = computed(() =>
     (c) => !selectedChannelIds.value.includes(c.value ?? c.name),
   ),
 )
-const presentSources = computed<Array<{ name: string; data: ArrayLike<number> }>>(() => {
+const presentSources = computed<Array<{ name: string; data: ArrayLike<number>; unit?: string }>>(() => {
   if (props.fixedSeries) return [...props.fixedSeries]
   if (selectedChannelIds.value.length === 0) return []
-  const sources: Array<{ name: string; data: ArrayLike<number> }> = []
+  const sources: Array<{ name: string; data: ArrayLike<number>; unit?: string }> = []
   for (const name of selectedChannelIds.value) {
-    const data = resolveAnalyzerChannel(props.session, name, derivedContext.value).data
-    if (data) sources.push({ name, data })
+    const resolution = resolveAnalyzerChannel(props.session, name, derivedContext.value)
+    if (resolution.data) sources.push({ name, data: resolution.data, unit: resolution.unit })
   }
   return sources
 })
 const present = computed(() => presentSources.value.map((source) => source.name))
+// Source units are resolved with the selected channels/session, never while a
+// cursor moves. The raw channel id remains the scale key below; B81 can use
+// this map to group compatible units without changing persisted channel ids.
+const unitsByChannel = computed(() => new Map(
+  presentSources.value.flatMap((source) => source.unit ? [[source.name, source.unit] as const] : []),
+))
+function channelDisplayLabel(id: string): string {
+  const unit = unitsByChannel.value.get(id)
+  const label = channelLabel(id)
+  return unit ? `${label} (${unit})` : label
+}
+const valueAxes = computed(() => planTimeSeriesAxes(
+  present.value.map((id) => ({
+    id,
+    label: channelDisplayLabel(id),
+    unit: unitsByChannel.value.get(id),
+  })),
+))
 const updateRateHz = computed<number | null>(() => {
   let highest: number | null = null
   for (const source of presentSources.value) {
@@ -141,6 +183,11 @@ const unavailableDerivedMessage = computed<string | null>(() => {
     if (resolution.error === 'rpm') return t('analyzer.gear.noRpmChannel') as string
     if (resolution.error === 'speed') return t('analyzer.gear.noSpeedChannel') as string
     if (resolution.error === 'circumference') return t('analyzer.gear.invalidCircumference') as string
+    if (resolution.error === 'fixed-reduction') return t('analyzer.gear.cvtMissingFixedReduction') as string
+    if (resolution.error === 'belt-length') return t('analyzer.gear.cvtMissingBeltLength') as string
+    if (resolution.error === 'center-distance') return t('analyzer.gear.cvtMissingCenterDistance') as string
+    if (resolution.error === 'sheave-angle') return t('analyzer.gear.cvtMissingSheaveAngle') as string
+    if (resolution.error === 'radius-bounds') return t('analyzer.gear.cvtMissingRadiusBounds') as string
     if (resolution.data) {
       let finite = false
       for (let i = 0; i < resolution.data.length; i++) {
@@ -178,7 +225,7 @@ const timelineSources = computed<TimelineSource[]>(() => {
       primary: false,
       xValues: comparison.xValues,
       channels: new Map(present.value.flatMap((id) => {
-        const data = resolveAnalyzerChannel(comparison.session, id, derivedContext.value).data
+        const data = resolveAnalyzerChannel(comparison.session, id, derivedContextFor(comparison.id)).data
         return data ? [[id, data] as const] : []
       })),
     })
@@ -200,18 +247,17 @@ const timelineData = computed<uPlot.AlignedData>(
 const timelineSeries = computed<uPlot.Series[]>(() => [
   { label: xUnit.value },
   ...timeline.value.series.map((entry) => ({
-    label: `${entry.sourceLabel} · ${channelLabel(entry.channel)}`,
-    stroke: entry.color,
-    dash: dash(entry.channelIndex),
+    label: `${entry.sourceLabel} · ${channelDisplayLabel(entry.channel)}`,
+    stroke: traceStroke(entry.channelIndex, entry.sourceOrder),
     width: entry.primary ? 1.5 : 1,
-    scale: entry.channel,
+    scale: valueAxes.value.scaleFor(entry.channel),
     spanGaps: true,
   })),
 ])
 
 // --- Overlay: selected laps re-based to a lap-relative X (from 0). ---
-// Colour encodes the lap, line style encodes the channel; same-channel laps
-// share a scale (= channel name) so they're directly comparable.
+// Channel hue identifies the signal; repeated laps vary only its brightness so
+// the traces remain directly comparable without dashed strokes.
 const overlay = computed(() =>
   buildLapOverlay({
     xValues: props.xValues,
@@ -245,7 +291,7 @@ const crossLapSources = computed<CrossSessionLapSource[]>(() => {
     const lap = comparison?.laps.find((entry) => entry.index === ref.index)
     if (!comparison || !lap) continue
     const channels = present.value.map((name) => {
-      const data = resolveAnalyzerChannel(comparison.session, name, derivedContext.value).data
+      const data = resolveAnalyzerChannel(comparison.session, name, derivedContextFor(comparison.id)).data
       return { name, data: data ?? new Float32Array(comparison.session.rowCount).fill(NaN) }
     })
     sources.push({
@@ -294,22 +340,20 @@ const overlaySeries = computed<uPlot.Series[]>(() => {
     return [
       { label: xUnit.value },
       ...crossOverlay.value.series.map((s) => ({
-        label: `${s.sessionName} · #${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
-        stroke: s.color,
-        dash: dash(s.channelIndex),
+        label: `${s.sessionName} · #${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
+        stroke: traceStroke(s.channelIndex, s.lapOrder),
         width: 1 + (s.lapOrder % 3) * 0.35,
-        scale: present.value[s.channelIndex],
+        scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
       })),
     ]
   }
   return [
     { label: xUnit.value },
     ...overlay.value.series.map((s) => ({
-      label: `#${s.lap.index + 1} · ${channelLabel(present.value[s.channelIndex])}`,
-      stroke: lapColor(s.lapOrder),
-      dash: dash(s.channelIndex),
+      label: `#${s.lap.index + 1} · ${channelDisplayLabel(present.value[s.channelIndex])}`,
+      stroke: traceStroke(s.channelIndex, s.lapOrder),
       width: 1,
-      scale: present.value[s.channelIndex],
+      scale: valueAxes.value.scaleFor(present.value[s.channelIndex]),
     })),
   ]
 })
@@ -324,14 +368,13 @@ const series = computed<uPlot.Series[]>(() =>
 // Absolute start instant (elapsed=0) of this session, for the clock-time axis.
 const anchor = computed(() => sessionStartAnchor(props.session))
 
-// Effective timezone offset (minutes east of UTC) for clock labels. 'auto' uses
-// the browser zone for GPS-derived anchors, but 0 for created-date anchors (whose
-// wall-clock components were reinterpreted as UTC). Reading the browser offset here
-// is display-only — it never becomes stored state.
+// Effective timezone offset (minutes east of UTC) for the absolute clock axis.
+// `auto` always follows the app's established local-time policy, irrespective of
+// whether the absolute anchor came from GPS UTC or a header created date. The
+// primary axis, uPlot legend, and cursor readout remain elapsed time/distance and
+// therefore deliberately have no timezone conversion to apply.
 const effectiveOffset = computed<number>(() => {
-  if (tzOverride.value !== 'auto') return tzOverride.value
-  if (anchor.value?.source === 'gpsUtc') return -new Date().getTimezoneOffset()
-  return 0
+  return resolveClockTimezoneOffset(tzOverride.value, -new Date().getTimezoneOffset())
 })
 
 // Label for the clock axis, e.g. 'UTC+8', 'UTC-3:30', 'UTC'.
@@ -391,11 +434,11 @@ const axes = computed<uPlot.Axis[]>(() => {
   }
   return [
     ...xAxes,
-    ...present.value.map((n, i) => ({
-      scale: n,
-      side: i % 2 === 0 ? 3 : 1,
-      label: channelLabel(n),
-      ...(hasSelection.value || comparisonActive.value ? {} : { stroke: color(i) }),
+    ...valueAxes.value.axes.map((axis) => ({
+      scale: axis.scale,
+      side: axis.side,
+      label: axis.label,
+      show: axis.show,
     })),
   ]
 })
@@ -499,10 +542,9 @@ function removeChannel(name: string): void {
       <span v-for="(name, i) in present" :key="name" class="chip">
         <span
           class="dot"
-          :class="{ line: hasSelection || comparisonActive }"
-          :style="hasSelection || comparisonActive ? {} : { background: color(i) }"
+          :style="{ background: channelStroke(i) }"
         />
-        {{ channelLabel(name) }}
+        {{ channelDisplayLabel(name) }}
         <button v-if="canEditChannels && !lockedChannels?.includes(name)" type="button" class="x" @click="removeChannel(name)">×</button>
       </span>
       <span v-if="present.length === 0" class="muted">{{ unavailableDerivedMessage ?? emptyMessage ?? t('analyzer.pickChannel') }}</span>
@@ -637,14 +679,6 @@ function removeChannel(name: string): void {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-}
-/* In overlay mode colour means "lap", so the chip shows the channel's line
-   STYLE (a neutral dash sample) instead of a colour. */
-.dot.line {
-  width: 16px;
-  height: 0;
-  border-radius: 0;
-  border-top: 2px dashed var(--color-text-muted);
 }
 .chip .x {
   background: none;

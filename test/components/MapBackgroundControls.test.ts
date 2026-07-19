@@ -59,3 +59,39 @@ describe('MapBackgroundControls collapse toggle (B60)', () => {
     expect(wrapper.find('.background-controls').exists()).toBe(false)
   })
 })
+
+describe('MapBackgroundControls custom-image flow (B69)', () => {
+  async function expand(wrapper: ReturnType<typeof mountControls>) {
+    await wrapper.get('button.toggle').trigger('click')
+  }
+
+  it('keeps the custom-image option selectable before an image exists', async () => {
+    const wrapper = mountControls()
+    await expand(wrapper)
+    const option = wrapper.get('option[value="image"]')
+    expect(option.attributes('disabled')).toBeUndefined()
+    await wrapper.get('select').setValue('image')
+    expect(wrapper.emitted('kind')).toEqual([['image']])
+  })
+
+  it('shows only the chooser for an image layer with no stored image', async () => {
+    const settings = { ...defaultMapBackgroundSettings(), kind: 'image' as const }
+    const i18n = createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })
+    const wrapper = mount(MapBackgroundControls, {
+      props: { settings, hasImage: false },
+      global: { plugins: [i18n] },
+    })
+    await expand(wrapper)
+    const chooser = wrapper.get('input[type="file"]')
+    expect(chooser.attributes('accept')).toContain('image/svg+xml')
+    expect(chooser.attributes('accept')).toContain('.svg')
+    expect(wrapper.find('.align-buttons').exists()).toBe(false)
+  })
+
+  it('hides the chooser and alignment controls for non-image layers', async () => {
+    const wrapper = mountControls()
+    await expand(wrapper)
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    expect(wrapper.find('.align-buttons').exists()).toBe(false)
+  })
+})

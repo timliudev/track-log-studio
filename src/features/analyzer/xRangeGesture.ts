@@ -74,3 +74,83 @@ export function pinchRange(range: XRange, factor: number, about: number, deltaX:
   const zoomed = zoomRange(range, factor, about, bounds)
   return panRange(zoomed, deltaX, bounds)
 }
+
+/**
+ * B68 — Clamp a centre-needle range without stranding the first or last
+ * sample at the edge of the plot. The virtual padding follows the CURRENT
+ * visible span: each side may extend by at most half that span. Consequently
+ * either data edge can sit under the fixed centre needle, but the user never
+ * scrolls into an unbounded empty timeline.
+ *
+ * The normal range helpers deliberately keep their original strict data
+ * bounds. Centre-needle mode opts into this separate helper so every other
+ * chart gesture retains its existing behaviour.
+ */
+export function clampCentreNeedleRange(range: XRange, dataBounds: XRange): XRange {
+  const dataSpan = dataBounds.max - dataBounds.min
+  if (!(dataSpan > 0)) return { ...dataBounds }
+
+  let span = range.max - range.min
+  if (!(span > 0)) span = dataSpan
+  // A zoomed-out chart must not gain extra data span merely because it has
+  // virtual edge room. Its extra space is only for centring an endpoint.
+  span = Math.min(span, dataSpan)
+
+  const padding = span / 2
+  const minStart = dataBounds.min - padding
+  const maxStart = dataBounds.max + padding - span
+  const start = Math.min(maxStart, Math.max(minStart, range.min))
+  return { min: start, max: start + span }
+}
+
+/** Pan with B68's span-relative virtual edge padding. */
+export function panCentreNeedleRange(range: XRange, deltaX: number, dataBounds: XRange): XRange {
+  return clampCentreNeedleRange({ min: range.min - deltaX, max: range.max - deltaX }, dataBounds)
+}
+
+/** Zoom with B68's virtual edge padding while retaining the normal minimum
+ * pinch span and maximum real-data span. */
+export function zoomCentreNeedleRange(
+  range: XRange,
+  factor: number,
+  about: number,
+  dataBounds: XRange,
+): XRange {
+  if (!(factor > 0) || !Number.isFinite(factor)) return { ...range }
+  const dataSpan = dataBounds.max - dataBounds.min
+  if (!(dataSpan > 0)) return { ...dataBounds }
+  const span = range.max - range.min
+  const minSpan = dataSpan * MIN_SPAN_FRACTION
+  const newSpan = Math.min(dataSpan, Math.max(minSpan, span / factor))
+  const t = span > 0 ? (about - range.min) / span : 0.5
+  const min = about - t * newSpan
+  return clampCentreNeedleRange({ min, max: min + newSpan }, dataBounds)
+}
+
+/** Combined centre-needle pinch zoom and pan. */
+export function pinchCentreNeedleRange(
+  range: XRange,
+  factor: number,
+  about: number,
+  deltaX: number,
+  dataBounds: XRange,
+): XRange {
+  const zoomed = zoomCentreNeedleRange(range, factor, about, dataBounds)
+  return panCentreNeedleRange(zoomed, deltaX, dataBounds)
+}
+
+/**
+ * Keep uPlot's grid ticks but hide their labels in B68's virtual padding.
+ * Matching `splits` and `labels` by index preserves uPlot's own formatter
+ * (elapsed time, distance, and optional clock) for values inside the data.
+ */
+export function blankTickLabelsOutsideData(
+  splits: readonly number[],
+  labels: readonly (string | number | null)[],
+  dataBounds: XRange,
+): (string | number | null)[] {
+  return labels.map((label, index) => {
+    const value = splits[index]
+    return value == null || value < dataBounds.min || value > dataBounds.max ? '' : label
+  })
+}

@@ -5,15 +5,11 @@ import { computeSmoothedCourses } from './heading'
 import { SLOT_IDS, LEGACY_PY_MAPPING, type Rc3Mapping } from './mapping'
 import { makeFixResolver, type GpsFix } from '@/domain/gps/gpsFix'
 import { encodeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
+import { padInt } from '@/domain/export/vbo/format'
 
 /** Format a number with fixed decimals (matches Python f"{v:.Nf}"). */
 function fmt(v: number, decimals = 3): string {
   return v.toFixed(decimals)
-}
-
-/** Zero-padded integer of given width (truncates toward zero, like int()). */
-function padInt(v: number, width: number): string {
-  return Math.trunc(v).toString().padStart(width, '0')
 }
 
 /** GPS minutes as Python f"{v:07.4f}" — 4 decimals, zero-padded to width 7. */

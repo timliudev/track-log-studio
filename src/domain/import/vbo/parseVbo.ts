@@ -75,9 +75,10 @@ function splitSections(text: string): Sections {
         if (trimmed) out.header.push(trimmed)
         break
       case '[channel units]':
-        // Units may legitimately be blank, but the section never has gaps in
-        // practice; keep non-empty lines parallel to the header.
-        if (trimmed) out.units.push(trimmed)
+        // Keep blank entries too: this section is positional (parallel to
+        // [header]/[column names]), so discarding one would shift every later
+        // channel's unit onto the wrong column.
+        out.units.push(trimmed)
         break
       case '[column names]':
         // NB: assign/iterate rather than `push(...split)` — spreading a huge
@@ -167,8 +168,17 @@ export function parseVbo(text: string): LogSession {
   const idxOf = (token: string): number => columns.indexOf(token)
 
   const channels: Channel[] = []
-  const push = (name: string, rawName: string, description: string | undefined, data: Float32Array) =>
-    channels.push({ name, rawName, description, data })
+  const unitAt = (columnIndex: number): string | undefined => {
+    const unit = units[columnIndex]?.trim()
+    return unit ? unit : undefined
+  }
+  const push = (
+    name: string,
+    rawName: string,
+    description: string | undefined,
+    data: Float32Array,
+    unit?: string,
+  ) => channels.push({ name, rawName, description, unit, data })
 
   // --- Time column → elapsed Time (ms) + GPS_UTC_hh/mm/ss/ms ---
   const timeIdx = idxOf('time')
@@ -204,11 +214,11 @@ export function parseVbo(text: string): LogSession {
       if (e < 0) e += 86400_000 // wrap past midnight
       elapsed[i] = e
     }
-    push('Time', 'Time', 'Elapsed time (ms)', elapsed)
-    push('GPS_UTC_hh', 'GPS_UTC_hh', 'GPS UTC hours', utcHh)
-    push('GPS_UTC_mm', 'GPS_UTC_mm', 'GPS UTC minutes', utcMm)
-    push('GPS_UTC_ss', 'GPS_UTC_ss', 'GPS UTC seconds', utcSs)
-    push('GPS_UTC_ms', 'GPS_UTC_ms', 'GPS UTC milliseconds', utcMs)
+    push('Time', 'Time', 'Elapsed time (ms)', elapsed, 'ms')
+    push('GPS_UTC_hh', 'GPS_UTC_hh', 'GPS UTC hours', utcHh, 'h')
+    push('GPS_UTC_mm', 'GPS_UTC_mm', 'GPS UTC minutes', utcMm, 'min')
+    push('GPS_UTC_ss', 'GPS_UTC_ss', 'GPS UTC seconds', utcSs, 's')
+    push('GPS_UTC_ms', 'GPS_UTC_ms', 'GPS UTC milliseconds', utcMs, 'ms')
   }
 
   // --- lat/long (GPS minutes) → decimal degrees ---
@@ -221,19 +231,19 @@ export function parseVbo(text: string): LogSession {
       lat[i] = colData[latIdx][i] / 60 // exporter wrote lat * 60
       lon[i] = -colData[lonIdx][i] / 60 // exporter wrote lon * -60 (West positive)
     }
-    push('GPS_Lat', 'GPS_Lat', 'GPS Latitude (°)', lat)
-    push('GPS_Lon', 'GPS_Lon', 'GPS Longitude (°)', lon)
+    push('GPS_Lat', 'GPS_Lat', 'GPS Latitude (°)', lat, '°')
+    push('GPS_Lon', 'GPS_Lon', 'GPS Longitude (°)', lon, '°')
   }
 
   // --- velocity / heading / height / satellites ---
   const velIdx = idxOf('velocity')
-  if (velIdx >= 0) push('GPS_Speed', 'GPS_Speed', 'GPS Speed (km/h)', colData[velIdx])
+  if (velIdx >= 0) push('GPS_Speed', 'GPS_Speed', 'GPS Speed (km/h)', colData[velIdx], 'km/h')
   const headIdx = idxOf('heading')
-  if (headIdx >= 0) push('GPS_Course', 'GPS_Course', 'GPS Course (°)', colData[headIdx])
+  if (headIdx >= 0) push('GPS_Course', 'GPS_Course', 'GPS Course (°)', colData[headIdx], '°')
   const heightIdx = idxOf('height')
-  if (heightIdx >= 0) push('GPS_Altitude', 'GPS_Altitude', 'GPS Altitude (m)', colData[heightIdx])
+  if (heightIdx >= 0) push('GPS_Altitude', 'GPS_Altitude', 'GPS Altitude (m)', colData[heightIdx], 'm')
   const satsIdx = idxOf('sats')
-  if (satsIdx >= 0) push('Satellites', 'Satellites', 'Satellites in fix', colData[satsIdx])
+  if (satsIdx >= 0) push('Satellites', 'Satellites', 'Satellites in fix', colData[satsIdx], 'count')
 
   // --- Remaining (non-base) columns → telemetry channels ---
   const baseSet = new Set<string>(BASE_TOKENS)
@@ -245,7 +255,7 @@ export function parseVbo(text: string): LogSession {
     const rawName = header[c] ?? token
     const name = canonicalName(rawName)
     if (name === '') continue
-    push(name, rawName, descriptionOf(rawName), colData[c])
+    push(name, rawName, descriptionOf(rawName), colData[c], unitAt(c))
   }
 
   const headerInfo: Record<string, string> = {}
@@ -266,9 +276,5 @@ export function parseVbo(text: string): LogSession {
     headerInfo,
     exportMetadata,
   }
-  // Reference `units` to keep it available for future unit-aware mapping; it is
-  // parallel to `header` but not currently surfaced on Channel.
-  void units
-
   return new LogSession(channels, meta)
 }

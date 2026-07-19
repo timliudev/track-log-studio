@@ -1,10 +1,13 @@
 import { setActivePinia, createPinia } from 'pinia'
 import { beforeEach, describe, it, expect } from 'vitest'
-import { computed } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useSectorStore } from '@/stores/sectorStore'
+import { useLapStore } from '@/stores/lapStore'
 import { useSectors } from '@/composables/useSectors'
+import { useSectorAutoPopulate } from '@/composables/useSectorAutoPopulate'
+import type { CircuitGeometryOrigin } from '@/domain/analysis/sectorAutoDetection'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import type { Lap } from '@/domain/model/Lap'
@@ -175,6 +178,80 @@ describe('useSectors', () => {
     analyzer.activeFileId = id2
 
     await Promise.resolve() // let the watcher's flush run
+    expect(sectorStore.gates).toEqual([])
+  })
+})
+
+describe('useSectorAutoPopulate', () => {
+  function installAutoPopulate(initialOrigin: CircuitGeometryOrigin, initialLaps: Lap[]) {
+    const lapStore = useLapStore()
+    const geometryOrigin = ref<CircuitGeometryOrigin>(initialOrigin)
+    const restoreEpoch = ref(1)
+    const lapList = ref(initialLaps)
+    const laps = computed(() => lapList.value)
+    lapStore.setLine({ a: { lat: 22.99, lon: 120 }, b: { lat: 23.01, lon: 120 } })
+    useSectorAutoPopulate(laps, geometryOrigin, restoreEpoch)
+    return { geometryOrigin, restoreEpoch, lapList }
+  }
+
+  it('auto-detects once after a fresh circuit restore settles', async () => {
+    const session = sessionWithOneCorner()
+    const rowCount = activateSession(session)
+    const sectorStore = useSectorStore()
+    const { restoreEpoch } = installAutoPopulate('none', [wholeTrackLap(rowCount)])
+
+    await nextTick()
+    expect(sectorStore.gates.length).toBeGreaterThan(0)
+    expect(sectorStore.edited).toBe(false)
+
+    // A same-epoch reactive clear must not accidentally retrigger the fallback.
+    sectorStore.clearAll()
+    await nextTick()
+    expect(sectorStore.gates).toEqual([])
+
+    // A genuinely new restore epoch is independently eligible.
+    restoreEpoch.value++
+    await nextTick()
+    expect(sectorStore.gates.length).toBeGreaterThan(0)
+  })
+
+  it('waits until a plausible lap is available, then detects in the same epoch', async () => {
+    const session = sessionWithOneCorner()
+    const rowCount = activateSession(session)
+    const sectorStore = useSectorStore()
+    const { lapList } = installAutoPopulate('none', [])
+
+    await nextTick()
+    expect(sectorStore.gates).toEqual([])
+
+    lapList.value = [wholeTrackLap(rowCount)]
+    await nextTick()
+    expect(sectorStore.gates.length).toBeGreaterThan(0)
+  })
+
+  it.each<CircuitGeometryOrigin>(['saved', 'shared', 'ambiguous'])(
+    'does not replace an empty %s gate list',
+    async (origin) => {
+      const session = sessionWithOneCorner()
+      const rowCount = activateSession(session)
+      const sectorStore = useSectorStore()
+      installAutoPopulate(origin, [wholeTrackLap(rowCount)])
+
+      await nextTick()
+      expect(sectorStore.gates).toEqual([])
+    },
+  )
+
+  it('does not repopulate after the user intentionally clears gates', async () => {
+    const session = sessionWithOneCorner()
+    const rowCount = activateSession(session)
+    const sectorStore = useSectorStore()
+    sectorStore.clearGates()
+    const { geometryOrigin } = installAutoPopulate('pending', [wholeTrackLap(rowCount)])
+
+    geometryOrigin.value = 'none'
+    await nextTick()
+    expect(sectorStore.edited).toBe(true)
     expect(sectorStore.gates).toEqual([])
   })
 })

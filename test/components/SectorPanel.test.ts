@@ -6,11 +6,12 @@ import { createI18n } from 'vue-i18n'
 import SectorPanel from '@/features/analyzer/SectorPanel.vue'
 import zhHant from '@/i18n/locales/zh-Hant'
 
-function mountPanel() {
+function mountPanel(props: { failedCount?: number; allFailed?: boolean } = {}) {
   return mount(SectorPanel, {
     props: {
       laps: [],
-      invalidCount: 0,
+      failedCount: props.failedCount ?? 0,
+      allFailed: props.allFailed ?? false,
       track: null,
       timeMs: null,
       cursorIdx: null,
@@ -33,5 +34,12 @@ describe('SectorPanel', () => {
     const wrapper = mountPanel()
     expect(wrapper.find('.session-summary').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('比較記錄圈次')
+  })
+
+  it('shows the raw failure count and all-failed policy warning together', () => {
+    const wrapper = mountPanel({ failedCount: 9, allFailed: true })
+    expect(wrapper.text()).toContain('9 圈未通過 sector 檢查')
+    expect(wrapper.text()).toContain('所有圈次皆未通過 sector 檢查')
+    expect(wrapper.text()).toContain('目前不套用自動排除')
   })
 })

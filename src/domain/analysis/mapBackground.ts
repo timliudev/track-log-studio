@@ -16,7 +16,7 @@ export interface MapBackgroundSettings {
 }
 
 export const MAX_BACKGROUND_IMAGE_BYTES = 10 * 1024 * 1024
-export const BACKGROUND_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
+export const BACKGROUND_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'] as const
 
 export function defaultMapBackgroundSettings(): MapBackgroundSettings {
   return { kind: 'none', imageId: null, alignment: { x: 0, y: 0, scale: 1 }, satelliteApiKey: '' }

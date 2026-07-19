@@ -44,6 +44,17 @@ const susp = useSuspensionStore()
 
 const reverseMsg = reactive<Record<SuspensionPart, string>>({ front: '', rear: '' })
 
+/** Use only an unambiguous embedded calibration; multi-file imports with
+ * different settings must not make an arbitrary file win. */
+const importedCalibration = computed(() => {
+  const found = props.sessions
+    .map((session) => session.meta.exportMetadata?.suspensionCalibration)
+    .filter((config): config is NonNullable<typeof config> => config != null)
+  if (found.length === 0) return null
+  const first = JSON.stringify(found[0])
+  return found.every((config) => JSON.stringify(config) === first) ? found[0] : null
+})
+
 const num = (e: Event): number => Number((e.target as HTMLInputElement).value)
 const checked = (e: Event): boolean => (e.target as HTMLInputElement).checked
 
@@ -95,12 +106,22 @@ function preview(part: SuspensionPart): string {
   }
   return `${c.minMv}mv→${at(c.minMv)}mm · ${c.maxMv}mv→${at(c.maxMv)}mm · ${c.zeroMv}mv→${at(c.zeroMv)}mm`
 }
+
+function applyImportedCalibration(): void {
+  if (importedCalibration.value) susp.replaceConfig(importedCalibration.value)
+}
 </script>
 
 <template>
   <section class="suspension">
     <h3>{{ t('suspension.heading') }}</h3>
     <p class="intro">{{ t('suspension.intro') }}</p>
+    <div v-if="importedCalibration" class="imported-calibration">
+      <span>{{ t('suspension.importedCalibrationHint') }}</span>
+      <button type="button" class="btn-secondary apply-imported-calibration" @click="applyImportedCalibration">
+        {{ t('suspension.applyImportedCalibration') }}
+      </button>
+    </div>
 
     <div v-for="part in PARTS" :key="part" class="part">
       <header class="part-head">
@@ -184,6 +205,18 @@ h3 {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
 }
+.imported-calibration {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
 .part-head {
   display: flex;
   flex-wrap: wrap;
@@ -252,6 +285,11 @@ code {
 .btn-secondary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+@media (any-pointer: coarse) {
+  .apply-imported-calibration {
+    min-height: 44px;
+  }
 }
 .hint,
 .msg {

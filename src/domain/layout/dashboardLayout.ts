@@ -47,6 +47,7 @@ export const STATIC_CARD_IDS = {
   trackChannel: 'trackchannel',
   accelTest: 'acceltest',
   gear: 'gear',
+  cvtDynamics: 'cvtdynamics',
   trackFile: 'trackfile',
   mapAlign: 'mapalign',
   lapAlign: 'lapalign',
@@ -78,6 +79,7 @@ const STATIC_MIN_SIZE: Partial<Record<string, { minW: number; minH: number }>> =
   [STATIC_CARD_IDS.trackChannel]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.accelTest]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.gear]: { minW: 3, minH: 4 },
+  [STATIC_CARD_IDS.cvtDynamics]: { minW: 3, minH: 7 },
   [STATIC_CARD_IDS.trackFile]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.mapAlign]: { minW: 2, minH: 3 },
   [STATIC_CARD_IDS.lapAlign]: { minW: 2, minH: 3 },
@@ -196,6 +198,7 @@ export const STATIC_CARD_TITLE_KEYS: Record<string, string> = {
   [STATIC_CARD_IDS.trackChannel]: 'analyzer.layout.cardTrackChannel',
   [STATIC_CARD_IDS.accelTest]: 'analyzer.layout.cardAccelTest',
   [STATIC_CARD_IDS.gear]: 'analyzer.layout.cardGear',
+  [STATIC_CARD_IDS.cvtDynamics]: 'analyzer.layout.cardCvtDynamics',
   [STATIC_CARD_IDS.trackFile]: 'analyzer.layout.cardTrackFile',
   [STATIC_CARD_IDS.mapAlign]: 'analyzer.layout.cardMapAlign',
   [STATIC_CARD_IDS.lapAlign]: 'analyzer.layout.cardLapAlign',
@@ -532,10 +535,12 @@ export function isChartItemId(id: string): boolean {
  * here — this is a fixed grid-unit array, not something that measures the
  * user's real viewport).
  *
- * B66 — these heights are deliberate defaults for a NEW layout, not a
- * runtime content measurement. They leave ordinary card content expanded and
- * readable on both desktop and the mobile one-column layout, while existing
- * persisted layouts remain exactly as the user sized them.
+ * B76 — these heights are deliberate defaults for a NEW layout, informed by
+ * a reset-layout rendering of the ordinary nine-lap log at a wide desktop
+ * viewport. They leave ordinary card content expanded and readable on both
+ * desktop and the mobile one-column layout, while existing persisted layouts
+ * remain exactly as the user sized them. Variable-length result lists still
+ * scroll inside their cards instead of making the dashboard unbounded.
  *
  * Column A (x:0..4): map + lap table + sectors — the "at a glance" cards.
  * Column B (x:4..8): the remaining control panels (channel/accel/gear/file).
@@ -548,22 +553,27 @@ export function defaultLayout(): DashboardLayoutItem[] {
   return [
     // Column A — the at-a-glance map/lap/sector stack.
     { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 12 },
-    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 12, w: 4, h: 16 },
-    { i: STATIC_CARD_IDS.sectors, x: 0, y: 28, w: 4, h: 20 },
+    { i: STATIC_CARD_IDS.lapTable, x: 0, y: 12, w: 4, h: 21 },
+    { i: STATIC_CARD_IDS.sectors, x: 0, y: 33, w: 4, h: 20 },
     // Column B
     { i: STATIC_CARD_IDS.trackChannel, x: 4, y: 0, w: 4, h: 7 },
-    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 7, w: 4, h: 12 },
-    { i: STATIC_CARD_IDS.gear, x: 4, y: 19, w: 4, h: 14 },
-    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 33, w: 4, h: 8 },
-    { i: STATIC_CARD_IDS.suspension, x: 4, y: 41, w: 4, h: 12 },
+    { i: STATIC_CARD_IDS.accelTest, x: 4, y: 7, w: 4, h: 15 },
+    { i: STATIC_CARD_IDS.gear, x: 4, y: 22, w: 4, h: 18 },
+    { i: STATIC_CARD_IDS.trackFile, x: 4, y: 40, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.suspension, x: 4, y: 48, w: 4, h: 12 },
     // Column C — first chart (the store's initial default chart) sits right
     // under session-merge; further charts are appended below by
     // reconcileLayout's "new item" path (see defaultChartItem).
     { i: STATIC_CARD_IDS.sessionMerge, x: 8, y: 0, w: 4, h: 10 },
     { i: chartItemId(1), x: 8, y: 10, w: 4, h: 14 },
-    { i: STATIC_CARD_IDS.currentValues, x: 8, y: 24, w: 4, h: 22 },
-    { i: STATIC_CARD_IDS.mapAlign, x: 8, y: 46, w: 4, h: 8 },
-    { i: STATIC_CARD_IDS.lapAlign, x: 0, y: 48, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.currentValues, x: 8, y: 24, w: 4, h: 26 },
+    { i: STATIC_CARD_IDS.cvtDynamics, x: 8, y: 50, w: 4, h: 12 },
+    // The align panels are hidden until ≥2 laps are selected, so they sit at
+    // the very bottom of their columns; mapAlign lives under column B (its
+    // top pinned by suspension, its left slide blocked by lapAlign) so the
+    // default arrangement stays a compactLayoutTopLeft fixed point.
+    { i: STATIC_CARD_IDS.mapAlign, x: 4, y: 60, w: 4, h: 8 },
+    { i: STATIC_CARD_IDS.lapAlign, x: 0, y: 53, w: 4, h: 8 },
   ]
 }
 

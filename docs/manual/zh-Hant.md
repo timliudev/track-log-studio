@@ -54,12 +54,15 @@
 | `.loga` | aRacer ECU 原始記錄檔（Super2 / SuperX / RaceAMP / aRacer X tune App 等檔頭皆自動相容） |
 | `.nmea` | 先前已轉出的 NMEA/RC3 記錄 |
 | `.vbo` | Racelogic VBOX 格式（含本站匯出的、或其他來源的 VBO） |
+| `.csv` | 一般遙測 CSV；第一個非空白列需為標題列，且包含 `Time` 或 `Timer` 欄位 |
 | `.rcz` | RaceChrono 記錄檔（ZIP 內含 session.json + 二進位通道資料） |
 | `.xrk` | AiM Solo 2 DL / MyChron5 記錄檔 |
 | `.rcnx` | Qstarz LT-Q6000 / Q6000S（QRacing）記錄檔 |
 | `.zip` | aRacer x Tune App 分享輸出的壓縮檔，上傳後會自動解壓並辨識內容 |
 
 上傳時系統會依副檔名與檔案內容自動判斷格式，不需要自己選擇「匯入哪種格式」。
+
+一般 CSV 請使用逗號分隔、每列一筆取樣資料。欄位名稱會成為通道名稱；空白或非數字資料會顯示為缺值。若由本工具匯出的 CSV 再載入，原有的調校備註與避震校正資料也會一併保留。
 
 #### RCNX 多 session
 

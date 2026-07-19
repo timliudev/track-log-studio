@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import {
   defaultSuspensionConfig,
   legacyAdChannelName,
+  normalizeSuspensionConfig,
   type LegacyAdSource,
   type SuspensionChannelConfig,
   type SuspensionConfig,
@@ -117,5 +118,13 @@ export const useSuspensionStore = defineStore('suspension', () => {
     config.value = defaultSuspensionConfig()
   }
 
-  return { config, setChannel, reset }
+  /** Apply a full calibration only after an explicit user action. */
+  function replaceConfig(imported: unknown): boolean {
+    const normalized = normalizeSuspensionConfig(imported)
+    if (!normalized) return false
+    config.value = normalized
+    return true
+  }
+
+  return { config, setChannel, reset, replaceConfig }
 })

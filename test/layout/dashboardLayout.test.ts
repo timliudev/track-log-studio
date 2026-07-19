@@ -185,12 +185,24 @@ describe('defaultLayout', () => {
     }
   })
 
-  it('gives a fresh layout content-sized defaults instead of minimum-height cards (B66)', () => {
+  it('gives a fresh layout rendered-content defaults instead of minimum-height cards (B76)', () => {
     const byId = new Map(defaultLayout().map((item) => [item.i, item]))
     expect(byId.get(STATIC_CARD_IDS.lapTable)?.h).toBeGreaterThan(minSizeFor(STATIC_CARD_IDS.lapTable).minH)
     expect(byId.get(STATIC_CARD_IDS.currentValues)?.h).toBeGreaterThan(minSizeFor(STATIC_CARD_IDS.currentValues).minH)
     expect(byId.get(STATIC_CARD_IDS.sectors)?.h).toBeGreaterThan(minSizeFor(STATIC_CARD_IDS.sectors).minH)
     expect(byId.get(chartItemId(1))?.h).toBeGreaterThan(minSizeFor(chartItemId(1)).minH)
+  })
+
+  it('gives the reset layout enough rows for the ordinary nine-lap table and useful result lists (B76)', () => {
+    const byId = new Map(defaultLayout().map((item) => [item.i, item]))
+    // Grid pixels are `36 * h - 12`; h:21 gives the table a 699px card body
+    // after its header, which fits the measured nine-lap table without its
+    // outer scrollbar. The other values intentionally show a useful slice of
+    // variable-length results while retaining an inner scrollbar for extremes.
+    expect(byId.get(STATIC_CARD_IDS.lapTable)?.h).toBe(21)
+    expect(byId.get(STATIC_CARD_IDS.accelTest)?.h).toBe(15)
+    expect(byId.get(STATIC_CARD_IDS.gear)?.h).toBe(18)
+    expect(byId.get(STATIC_CARD_IDS.currentValues)?.h).toBe(26)
   })
 
   it('balances column heights so no column leaves a large blank gap versus the others (T3 — fills the page)', () => {

@@ -64,3 +64,23 @@ export function clampPlotPoint(point: Point2D, width: number, height: number): P
     y: Math.min(Math.max(0, height), Math.max(0, point.y)),
   }
 }
+
+/**
+ * B94 — whether pointer position `point` (CSS px, e.g. a `PointerEvent`'s own
+ * `clientX`/`clientY`) sits in the X-AXIS tick/label band: below uPlot's own
+ * interactive plotting rect (`plottingArea`, i.e. `u.over`'s bounding rect —
+ * narrower than the full canvas by the y-axis label gutter) but still within
+ * the canvas that draws the axes (`canvasArea`, i.e. `u.ctx.canvas`'s
+ * bounding rect). uPlot draws every axis directly on that one canvas rather
+ * than as separate DOM per axis, so "below the plot, above the canvas' own
+ * bottom edge" is the only reliable hit-test — and it naturally covers a
+ * second (e.g. clock-time) bottom axis too, since that's drawn further down
+ * the SAME canvas rather than in its own element.
+ */
+export function isPointInAxisBand(point: Point2D, plottingArea: Rect2D, canvasArea: Rect2D): boolean {
+  const bandTop = plottingArea.top + plottingArea.height
+  const bandBottom = canvasArea.top + canvasArea.height
+  if (!(bandBottom > bandTop)) return false
+  if (point.y < bandTop || point.y > bandBottom) return false
+  return point.x >= plottingArea.left && point.x <= plottingArea.left + plottingArea.width
+}

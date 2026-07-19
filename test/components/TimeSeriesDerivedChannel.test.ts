@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -9,12 +10,20 @@ import SearchableSelect from '@/components/SearchableSelect.vue'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { MEASURED_TOTAL_RATIO_CHANNEL } from '@/domain/analysis/analyzerChannels'
+import {
+  CVT_FRONT_RADIUS_CHANNEL,
+  PURE_CVT_RATIO_CHANNEL,
+} from '@/domain/analysis/cvtTrace'
 import zhHant from '@/i18n/locales/zh-Hant'
 import en from '@/i18n/locales/en'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
+import { useLapStore } from '@/stores/lapStore'
+import { channelColor, channelSeriesColor } from '@/domain/analysis/channelPalette'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import type { Lap } from '@/domain/model/Lap'
 
-function channel(name: string, values: number[]): Channel {
-  return { name, rawName: name, description: undefined, data: new Float32Array(values) }
+function channel(name: string, values: number[], unit?: string): Channel {
+  return { name, rawName: name, description: undefined, unit, data: new Float32Array(values) }
 }
 
 const session = new LogSession([
@@ -23,9 +32,12 @@ const session = new LogSession([
   channel('GPS_Speed', [60, 60, 60]),
 ], { formatId: 'test', createdDate: null, headerInfo: {} })
 
+const lap = (index: number): Lap => ({ index, startIdx: 0, endIdx: 2, lapTimeMs: 200 })
+
 beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
   setActivePinia(createPinia())
+  document.documentElement.dataset.theme = 'light'
 })
 
 function mountChart(channels: string[]) {
@@ -68,6 +80,52 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
     expect(wrapper.find('.update-rate').exists()).toBe(false)
   })
 
+  it('uses stable per-channel strokes and matching chips, then reacts to the resolved dark theme', async () => {
+    const wrapper = mountChart(['RPM', 'GPS_Speed'])
+    const series = () => wrapper.findComponent(UPlotChart).props('series') as Array<{ stroke?: string; dash?: number[] }>
+    expect(series().slice(1).map((entry) => entry.stroke)).toEqual([
+      channelColor(0, 'light'),
+      channelColor(1, 'light'),
+    ])
+    expect(series().every((entry) => entry.dash == null)).toBe(true)
+    const chipStyles = wrapper.findAll('.chip .dot').map((dot) => dot.attributes('style'))
+    expect(chipStyles[0]).toContain(channelColor(0, 'light'))
+    expect(chipStyles[1]).toContain(channelColor(1, 'light'))
+
+    document.documentElement.dataset.theme = 'dark'
+    await Promise.resolve()
+    await nextTick()
+    expect(series().slice(1).map((entry) => entry.stroke)).toEqual([
+      channelColor(0, 'dark'),
+      channelColor(1, 'dark'),
+    ])
+    expect(series().every((entry) => entry.dash == null)).toBe(true)
+  })
+
+  it('adds a known unit to the y-axis and uPlot legend while assigning its unit scale', () => {
+    const unitSession = new LogSession([
+      channel('Time', [0, 100, 200], 'ms'),
+      channel('Boost', [1, 2, 3], 'bar'),
+    ], { formatId: 'test', createdDate: null, headerInfo: {} })
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        chart: { kind: 'timeseries', id: 1, channels: ['Boost'] },
+        session: unitSession,
+        xValues: new Float64Array([0, 0.1, 0.2]),
+        selectedLaps: [],
+      },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })],
+        stubs: { UPlotChart: true, SearchableSelect: true },
+      },
+    })
+    const plot = wrapper.findComponent(UPlotChart)
+    const series = plot.props('series') as Array<{ label?: string; scale?: string }>
+    const axes = plot.props('axes') as Array<{ label?: string; scale?: string }>
+    expect(series[1]).toMatchObject({ label: 'Primary · Boost (bar)', scale: 'unit:bar' })
+    expect(axes[1]).toMatchObject({ label: 'Boost (bar)', scale: 'unit:bar' })
+  })
+
   it('offers a translated picker label while emitting only the stable id', () => {
     const wrapper = mountChart([])
     const picker = wrapper.findComponent(SearchableSelect)
@@ -83,6 +141,36 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
       id: 1,
       channels: [MEASURED_TOTAL_RATIO_CHANNEL],
     })
+  })
+
+  it('offers pure CVT ratio before geometry and unlocks belt position only with complete measurements', () => {
+    const drivetrain = useDrivetrainStore()
+    drivetrain.setKind('cvt')
+    drivetrain.setCvtWheelCircumferenceMm(1000)
+    drivetrain.updateCvtProfile(drivetrain.activeCvtProfile.id, {
+      gearReduction: { mode: 'ratio', ratio: 1 },
+      finalReduction: { mode: 'ratio', ratio: 2 },
+    })
+
+    const ratioWrapper = mountChart([PURE_CVT_RATIO_CHANNEL])
+    const ratioData = ratioWrapper.findComponent(UPlotChart).props('data') as [number[], Array<number | null>]
+    expect(ratioData[1]).toEqual([1.5, 2, 2.5])
+    const initialOptions = ratioWrapper.findComponent(SearchableSelect).props('options') as Array<{ value?: string }>
+    expect(initialOptions.some((option) => option.value === CVT_FRONT_RADIUS_CHANNEL)).toBe(false)
+
+    drivetrain.updateCvtProfile(drivetrain.activeCvtProfile.id, {
+      belt: { lengthSource: 'pitch', pitchLengthMm: 650 },
+      geometry: {
+        centerDistanceMm: 190,
+        frontSheaveAngle: { valueDeg: 14, basis: 'half' },
+        rearSheaveAngle: { valueDeg: 14, basis: 'half' },
+        frontRadiusBoundsMm: { min: 25, max: 90 },
+        rearRadiusBoundsMm: { min: 25, max: 100 },
+      },
+    })
+    const geometryWrapper = mountChart([])
+    const completeOptions = geometryWrapper.findComponent(SearchableSelect).props('options') as Array<{ value?: string }>
+    expect(completeOptions.some((option) => option.value === CVT_FRONT_RADIUS_CHANNEL)).toBe(true)
   })
 
   it('derives the channel independently for every compared session', () => {
@@ -116,7 +204,72 @@ describe('TimeSeriesChart virtual drivetrain channel', () => {
       },
     })
     const plot = wrapper.findComponent(UPlotChart)
-    const series = plot.props('series') as Array<{ label?: string }>
+    const series = plot.props('series') as Array<{ label?: string; stroke?: string; dash?: number[] }>
     expect(series.map((entry) => entry.label)).toEqual(['s', 'A · 總傳動比', 'B · 總傳動比'])
+    expect(series.slice(1).map((entry) => entry.stroke)).toEqual([
+      channelSeriesColor(0, 0, 'light'),
+      channelSeriesColor(0, 1, 'light'),
+    ])
+    expect(series.slice(1).every((entry) => entry.dash == null)).toBe(true)
+  })
+
+  it('uses distinct solid brightness variants for the same channel across selected laps', () => {
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        chart: { kind: 'timeseries', id: 1, channels: ['RPM'] },
+        session,
+        xValues: new Float64Array([0, 0.1, 0.2]),
+        selectedLaps: [lap(0), lap(1)],
+      },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })],
+        stubs: { UPlotChart: true, SearchableSelect: true },
+      },
+    })
+    const series = wrapper.findComponent(UPlotChart).props('series') as Array<{ stroke?: string; dash?: number[] }>
+    expect(series.slice(1).map((entry) => entry.stroke)).toEqual([
+      channelSeriesColor(0, 0, 'light'),
+      channelSeriesColor(0, 1, 'light'),
+    ])
+    expect(series.every((entry) => entry.dash == null)).toBe(true)
+  })
+
+  it('uses lap order for solid cross-session overlay variants', async () => {
+    const comparison = new LogSession([
+      channel('Time', [0, 100, 200]),
+      channel('RPM', [6000, 7000, 8000]),
+    ], { formatId: 'test', createdDate: null, headerInfo: {} })
+    useLapStore().toggleSessionLap(2, 0)
+    const wrapper = mount(TimeSeriesChart, {
+      props: {
+        chart: { kind: 'timeseries', id: 1, channels: ['RPM'] },
+        session,
+        xValues: new Float64Array([0, 0.1, 0.2]),
+        selectedLaps: [lap(0)],
+        primaryFileId: 1,
+        primaryFileName: 'A',
+        comparisonSessions: [{
+          id: 2,
+          name: 'B',
+          color: '#123456',
+          session: comparison,
+          xValues: new Float64Array([0, 0.1, 0.2]),
+          track: { lat: new Float64Array(3), lon: new Float64Array(3), valid: new Uint8Array(3) },
+          timeMs: new Float64Array([0, 100, 200]),
+          laps: [lap(0)],
+        }],
+      },
+      global: {
+        plugins: [createI18n({ legacy: false, locale: 'zh-Hant', fallbackLocale: 'en', messages: { 'zh-Hant': zhHant, en } })],
+        stubs: { UPlotChart: true, SearchableSelect: true },
+      },
+    })
+    await nextTick()
+    const series = wrapper.findComponent(UPlotChart).props('series') as Array<{ stroke?: string; dash?: number[] }>
+    expect(series.slice(1).map((entry) => entry.stroke)).toEqual([
+      channelSeriesColor(0, 0, 'light'),
+      channelSeriesColor(0, 1, 'light'),
+    ])
+    expect(series.every((entry) => entry.dash == null)).toBe(true)
   })
 })

@@ -13,7 +13,8 @@ import CardFillScroll from '@/components/CardFillScroll.vue'
 
 const props = withDefaults(defineProps<{
   laps: Lap[]
-  invalidCount: number
+  /** Raw failed-lap count, before the all-failed exclusion safety policy. */
+  failedCount: number
   allFailed?: boolean
   track: GpsTrack | null
   timeMs: Float64Array | null
@@ -80,10 +81,10 @@ const hasOptimalData = computed(
         <button v-if="gates.length > 0" type="button" class="clear" @click="sectorStore.clearGates()">
           {{ t('analyzer.sectorClearGates') }}
         </button>
-        <span v-if="invalidCount > 0" class="invalid-count">
-          {{ t('analyzer.sectorInvalidCount', { x: invalidCount }) }}
+        <span v-if="failedCount > 0" class="invalid-count">
+          {{ t('analyzer.sectorInvalidCount', { x: failedCount }) }}
         </span>
-        <span v-else-if="allFailed" class="invalid-count" role="status">
+        <span v-if="allFailed" class="invalid-count" role="status">
           {{ t('analyzer.sectorAllFailedWarning') }}
         </span>
         <span v-if="autoDetectHint" class="detect-hint" role="status">

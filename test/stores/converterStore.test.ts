@@ -6,6 +6,7 @@ import { DEFAULT_PRESET } from '@/domain/export/rc3Nmea/mapping'
 import { loadFixture } from '../fixtures'
 import { useFileStore } from '@/stores/fileStore'
 import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
+import { useSuspensionStore } from '@/stores/suspensionStore'
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -60,6 +61,7 @@ describe('converterStore', () => {
     s.completeImport(first, session)
     s.completeImport(second, session)
     const fileStore = useFileStore()
+    useSuspensionStore().setChannel('front', { enabled: true, sourceChannel: 'FrontPot', maxMm: 125 })
     fileStore.setExportMetadata(first, { cvtNotes: [{ label: '珠重', value: '12 g' }] })
     fileStore.setExportMetadata(second, { cvtNotes: [{ label: '珠重', value: '14 g' }] })
 
@@ -67,6 +69,9 @@ describe('converterStore', () => {
     expect(results).toHaveLength(2)
     expect(nmeaToSession(results[0].content).meta.exportMetadata?.cvtNotes?.[0].value).toBe('12 g')
     expect(nmeaToSession(results[1].content).meta.exportMetadata?.cvtNotes?.[0].value).toBe('14 g')
+    expect(nmeaToSession(results[0].content).meta.exportMetadata?.suspensionCalibration?.front).toMatchObject({
+      enabled: true, sourceChannel: 'FrontPot', maxMm: 125,
+    })
   })
 
   it('convertAll in .vbo mode emits _ct, _rc and _channels.csv per log', () => {

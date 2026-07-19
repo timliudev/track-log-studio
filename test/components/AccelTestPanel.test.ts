@@ -183,20 +183,20 @@ describe('AccelTestPanel result exclusion', () => {
       seg(0, 1, false, 1000, 2, 'gpsJump'),
       seg(10, 20, true, 4000),
     ])
-    await wrapper.findAll('.exclude-btn')[0].trigger('click')
+    await wrapper.findAll('.exclude')[0].trigger('click')
     const rows = wrapper.findAll('.result')
     expect(rows[0].classes()).not.toContain('excluded')
     expect(rows[0].classes()).toContain('fastest')
-    expect(rows[0].find('.exclude-btn').text()).toBe('排除此區段')
+    expect(rows[0].find('.exclude').attributes('aria-label')).toBe('排除此區段')
     expect(rows[1].classes()).not.toContain('fastest')
   })
 
   it('can manually exclude and restore an otherwise valid result', async () => {
     const wrapper = mountPanel([seg(0, 10, true, 1000), seg(20, 30, false, 2000)])
-    const firstButton = wrapper.findAll('.exclude-btn')[0]
+    const firstButton = wrapper.findAll('.exclude')[0]
     await firstButton.trigger('click')
     expect(wrapper.findAll('.result')[0].classes()).toContain('excluded')
-    expect(firstButton.text()).toBe('恢復此區段')
+    expect(firstButton.attributes('aria-label')).toBe('恢復此區段')
     expect(wrapper.findAll('.result')[1].classes()).toContain('fastest')
 
     await firstButton.trigger('click')
