@@ -1,6 +1,26 @@
 import { nmeaChecksum } from '@/domain/export/nmeaChecksum'
 import { decodeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
 
+/**
+ * M9 P2: unlike the CSV importer (`MAX_PLAIN_CSV_CELLS`) and VBO importer
+ * (`MAX_GRID_CELLS`), this legacy text importer never bounded its input at
+ * all — an arbitrarily large `.nmea` file would run `text.split(/\r?\n/)`
+ * and accumulate an unbounded `fixes` array with no cap, an easy DoS vector
+ * for anything that lets a user pick an untrusted file. Real NMEA logs are
+ * at most a few hundred thousand $GxRMC lines (hours at 10 Hz); 200M
+ * characters is a very generous ceiling (comparable in scale to the
+ * 512 MB byte caps `zip.ts`/`inflateXrz.ts` already use for binary formats)
+ * that no genuine log will ever approach.
+ */
+export const MAX_NMEA_TEXT_CHARS = 200_000_000
+
+export class NmeaParseError extends Error {
+  constructor(message: string) {
+    super(`NMEA: ${message}`)
+    this.name = 'NmeaParseError'
+  }
+}
+
 /** One GPS fix parsed from an NMEA stream. */
 export interface NmeaFix {
   /** Milliseconds within the UTC day (from the time field). */
@@ -51,7 +71,12 @@ function parseTimeMs(t: string): number {
  * counterpart to Rc3NmeaExporter and the GPS source for the merge feature
  * (Phase 5) and multi-format analyzer input.
  */
-export function parseNmea(text: string): NmeaData {
+export function parseNmea(text: string, maxTextChars: number = MAX_NMEA_TEXT_CHARS): NmeaData {
+  if (text.length > maxTextChars) {
+    throw new NmeaParseError(
+      `refusing a ${text.length.toLocaleString()}-character file (limit ${maxTextChars.toLocaleString()})`,
+    )
+  }
   const fixes: NmeaFix[] = []
   let exportMetadata: ExportMetadata = {}
   const metadataChunks = new Map<number, string>()

@@ -44,6 +44,21 @@ describe('format detection', () => {
       expect(session.sampleIntervalMs).toBeCloseTo(c.interval, 5)
     })
   }
+
+  // M9 P2 — this, the project's own primary format, previously had no upper
+  // bound on input size at all (unlike CSV's MAX_PLAIN_CSV_CELLS / VBO's
+  // MAX_GRID_CELLS). The optional `maxTextChars` third argument lets the
+  // test exercise the cap at a tiny scale instead of building a 200 MB string.
+  it('rejects an oversized file before either parsing pass runs (file-size cap)', () => {
+    const text = loadFixture('super2.loga')
+    expect(() => parseLoga(text, undefined, 10)).toThrow(/refusing a [\d,]+-character file/)
+  })
+
+  it('still accepts a well-formed file at a reduced but sufficient cap', () => {
+    const text = loadFixture('super2.loga')
+    const session = parseLoga(text, undefined, text.length)
+    expect(session.rowCount).toBe(200)
+  })
 })
 
 describe('channel resolution', () => {
