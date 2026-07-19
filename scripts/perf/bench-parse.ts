@@ -5,13 +5,13 @@
  * export path (LogSession -> RaceChrono .nmea text) for a small and a large
  * real-world log. Rerun with:
  *
- *   npx vite-node scripts/perf/bench-parse.ts
+ *   npm run bench:parse
  *
  * To reproduce the report's exact numbers, point at real logs (never commit
  * them — they're read-only user data):
  *
  *   BENCH_SMALL_LOGA=/path/small.loga BENCH_LARGE_LOGA=/path/large.loga \
- *     npx vite-node scripts/perf/bench-parse.ts
+ *     npm run bench:parse
  */
 import { parseLoga } from '../../src/domain/parsing/LogaParser'
 import { Rc3NmeaExporter } from '../../src/domain/export/rc3Nmea/Rc3NmeaExporter'
