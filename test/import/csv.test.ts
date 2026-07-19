@@ -52,6 +52,24 @@ describe('parsePlainCsv', () => {
     expect(parsed.meta.exportMetadata?.cvtNotes).toEqual([{ label: 'Spring', value: '8 kg' }])
   })
 
+  // Security regression: a channel's `name` comes straight from whatever the
+  // SOURCE file called it — including a malicious file crafted to name a
+  // channel like a spreadsheet formula. If that session is re-exported to
+  // generic CSV, the header row must not let Excel/LibreOffice evaluate a
+  // leading '=', '+', '-', '@', or tab/CR as a formula on open.
+  it('neutralises a CSV-formula-injection channel name in the exported header', () => {
+    const channel = (name: string, values: number[]): Channel => ({
+      name, rawName: name, description: undefined, data: new Float32Array(values),
+    })
+    const source = new LogSession([
+      channel('Time', [0, 100]),
+      channel('=cmd|\'/c calc\'!A0', [1, 2]),
+    ], { formatId: 'test', createdDate: null, headerInfo: {} })
+    const text = convertToCsv(source)[0].content
+    const headerLine = text.split('\n')[0]
+    expect(headerLine).toBe(`Time,GPS_Lat,GPS_Lon,GPS_Speed,'=cmd|'/c calc'!A0`)
+  })
+
   it.each([
     ['missing time', 'RPM,TPS\n1000,50\n'],
     ['ambiguous time', 'Time,Timer\n0,0\n'],

@@ -118,6 +118,31 @@ describe('convertToVbo vs loga2vbo.py golden', () => {
   })
 })
 
+describe('convertToVbo _channels.csv CSV-formula-injection guard', () => {
+  // Security regression: a CVT tuning note round-tripped from an imported
+  // file's TLS-Metadata is attacker-controllable text (see
+  // domain/export/metadata.ts). _channels.csv writes note label/value as raw
+  // cells (RFC 4180 quoted only) — a leading '=', '+', '-', '@', tab, or CR
+  // must be neutralised with a leading `'`, or opening the file in Excel/
+  // LibreOffice could evaluate it as a formula.
+  const session = parseLoga(loadFixture('vbo.loga'))
+
+  it('prefixes a leading formula-trigger character in a CVT note label/value', () => {
+    const artifacts = convertToVbo(session, 'vbo.loga', new Date(), {
+      cvtNotes: [
+        { label: '=cmd|"/c calc"!A0', value: '+1+1' },
+        { label: '-2+3', value: '@SUM(A1:A2)' },
+        { label: 'Roller', value: 'plain text, unaffected' },
+      ],
+    })
+    const csv = artifacts.find((a) => a.suffix === '_channels')!.content
+    const noteLines = csv.split('\r\n').filter((l) => l.includes('cmd') || l.includes('SUM') || l.includes('Roller'))
+    expect(noteLines).toContain(`"'=cmd|""/c calc""!A0",'+1+1`)
+    expect(noteLines).toContain(`'-2+3,'@SUM(A1:A2)`)
+    expect(noteLines).toContain('Roller,"plain text, unaffected"')
+  })
+})
+
 describe('convertToVbo time source', () => {
   /** First data row's time field (HHMMSS.sss) from a _ct.vbo. */
   function firstTime(content: string): string {

@@ -67,10 +67,17 @@ function fmtCoord(v: number | undefined): string {
  * quotes if the field contains a comma, double quote, or newline. Channel
  * names in this codebase never contain these characters today, but the
  * numeric cells are always plain decimals so this only ever fires for names.
+ *
+ * Also guards against spreadsheet formula injection: a channel's `name`
+ * originates from whatever header/label text the SOURCE file (any importer,
+ * including a hand-crafted malicious one) used, so a leading `=`, `+`, `-`,
+ * `@`, or tab/CR is neutralised with a leading `'` before Excel/LibreOffice
+ * ever gets a chance to evaluate it as a formula on open.
  */
 function csvField(value: string): string {
-  if (/[",\n\r]/.test(value)) return '"' + value.replace(/"/g, '""') + '"'
-  return value
+  const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
+  if (/[",\n\r]/.test(guarded)) return '"' + guarded.replace(/"/g, '""') + '"'
+  return guarded
 }
 
 /**
