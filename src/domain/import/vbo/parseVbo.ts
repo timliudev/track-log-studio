@@ -36,6 +36,17 @@ const BASE_TOKENS = ['sats', 'time', 'lat', 'long', 'velocity', 'heading', 'heig
  */
 const MAX_GRID_CELLS = 500_000_000 // 500M floats ≈ 2 GB of Float32
 
+/**
+ * M9 P2: `MAX_GRID_CELLS` only catches the ncol×n allocation AFTER
+ * `splitSections` has already turned the whole file into a `lines` array and
+ * a per-line token array — a raw file that is simply huge (no clever
+ * quadratic shape, just enormous) still pays that cost before the grid
+ * guard ever runs. Reject on raw character count first; 200M characters is
+ * far beyond the largest real VBO logs (a few hundred columns × a few
+ * hundred-thousand rows is at most a few tens of MB of text).
+ */
+const MAX_VBO_TEXT_CHARS = 200_000_000
+
 interface Sections {
   header: string[]
   units: string[]
@@ -135,7 +146,12 @@ function decodeVboTime(v: number): { hh: number; mm: number; ss: number; ms: num
 }
 
 /** Parse a `.vbo` file into a LogSession with formatId 'vbo'. */
-export function parseVbo(text: string): LogSession {
+export function parseVbo(text: string, maxTextChars: number = MAX_VBO_TEXT_CHARS): LogSession {
+  if (text.length > maxTextChars) {
+    throw new Error(
+      `VBO: refusing a ${text.length.toLocaleString()}-character file (limit ${maxTextChars.toLocaleString()})`,
+    )
+  }
   const { header, units, columns, dataLines, createdLine, comments } = splitSections(text)
 
   if (columns.length === 0) {

@@ -60,6 +60,21 @@ describe('parseVbo robustness — structural failures throw a clear Error', () =
     const text = ['[column names]', bigColLine, '[data]', ...data].join('\n')
     expect(() => parseVbo(text)).toThrow(/safety limit|grid/i)
   })
+
+  // M9 P2 — a plain "simply huge" file (no quadratic column×row shape) still
+  // paid the cost of `splitSections` fully materializing every line before
+  // MAX_GRID_CELLS ever ran. `maxTextChars` lets the test exercise the new
+  // raw-size cap at a tiny scale instead of building a 200 MB string.
+  it('rejects an oversized file before splitting into sections (file-size cap)', () => {
+    const text = vbo({ data: ['8 162524.00 1350.000 -7290.000'] })
+    expect(() => parseVbo(text, 10)).toThrow(/refusing a [\d,]+-character file/)
+  })
+
+  it('still accepts a well-formed file at a reduced but sufficient cap', () => {
+    const text = vbo({ data: ['8 162524.00 1350.000 -7290.000'] })
+    const session = parseVbo(text, text.length)
+    expect(session.rowCount).toBe(1)
+  })
 })
 
 describe('parseVbo robustness — dirty data degrades to NaN, never throws', () => {

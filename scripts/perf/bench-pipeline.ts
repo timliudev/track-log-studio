@@ -10,7 +10,7 @@
  * §4 for the render-side discussion, which isn't node-benchable).
  *
  * Rerun with:
- *   npx vite-node scripts/perf/bench-pipeline.ts
+ *   npm run bench:pipeline
  * Point at real logs (never committed) via env vars — see _util.ts's
  * `loadFixture` doc for BENCH_SMALL_LOGA / BENCH_LARGE_LOGA.
  */
@@ -189,6 +189,6 @@ for (const label of ['small', 'large'] as const) {
     global.gc()
     console.log(`memory after forced GC: ${fmtMem()}`)
   } else {
-    console.log('(run with `node --expose-gc` via vite-node to see post-GC memory)')
+    console.log('(run with `node --expose-gc scripts/perf/run-with-vite.mjs scripts/perf/bench-pipeline.ts` to see post-GC memory)')
   }
 }

@@ -710,6 +710,100 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
     expect(merged.finalReduction.stages).toEqual([{ driveTeeth: 13, drivenTeeth: 41 }])
   })
 
+  it('mergeCvtProfile truncates oversized measurement arrays instead of keeping them unbounded (M9 P2)', () => {
+    const oversizedMasses = Array.from({ length: 10000 }, () => 10)
+    const oversizedTrack = Array.from({ length: 10000 }, () => ({ travelMm: 10, radiusMm: 10 }))
+    const oversizedForceCurve = Array.from({ length: 10000 }, () => ({ travelMm: 10, value: 1 }))
+    const oversizedCamPoints = Array.from({ length: 10000 }, () => ({ travelMm: 10, angleDeg: 10, effectiveRadiusMm: 10 }))
+    const oversizedCalibrationMap = Array.from({ length: 10000 }, () => ({ ratio: 1, scale: 1 }))
+    const oversizedStages = Array.from({ length: 10000 }, () => ({ driveTeeth: 13, drivenTeeth: 41 }))
+
+    const merged = mergeCvtProfile({
+      id: 'test',
+      gearReduction: { mode: 'stages', ratio: 0, stages: oversizedStages },
+      force: {
+        roller: { kind: 'roller', massesG: oversizedMasses, track: oversizedTrack, efficiency: null },
+        spring: {
+          catalogLabel: '',
+          mode: 'curve',
+          freeLengthMm: null,
+          installedLengthMm: null,
+          coilBindLengthMm: null,
+          rateNPerMm: null,
+          installedPreloadMm: null,
+          forceCurve: oversizedForceCurve,
+        },
+        torqueCam: {
+          mode: 'profile',
+          angleBasis: 'circumferential',
+          points: oversizedCamPoints,
+          torqueShare: null,
+          equalSplitAssumption: false,
+          torsionTorqueNm: null,
+        },
+      } as never,
+      calibration: {
+        upshiftMap: oversizedCalibrationMap,
+        downshiftMap: oversizedCalibrationMap,
+      } as never,
+    })
+
+    expect(merged.gearReduction.stages.length).toBe(4096)
+    expect(merged.force.roller.massesG.length).toBe(4096)
+    expect(merged.force.roller.track.length).toBe(4096)
+    expect(merged.force.spring.forceCurve.length).toBe(4096)
+    expect(merged.force.torqueCam.points.length).toBe(4096)
+    expect(merged.calibration.upshiftMap.length).toBe(4096)
+    expect(merged.calibration.downshiftMap.length).toBe(4096)
+  })
+
+  it('mergeCvtProfile rejects physically-implausible out-of-range measurements (M9 P2)', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      wheelCircumferenceMm: 1e9,
+      gearReduction: { mode: 'ratio', ratio: 1e6, stages: [] },
+      belt: {
+        outsideLengthMm: 1e9,
+        wedgeAngle: { valueDeg: 500, basis: 'half' },
+      } as never,
+      geometry: {
+        centerDistanceMm: 1e9,
+        frontSheaveAngle: { valueDeg: 179, basis: 'included' },
+        frontRadiusBoundsMm: { min: 1e9, max: 1e9 + 1 },
+      } as never,
+      force: {
+        roller: { kind: 'roller', massesG: [1e9], track: [], efficiency: null },
+        operatingFrontRpm: 1e9,
+        frictionCoefficientMin: 1e9,
+      } as never,
+    })
+    expect(merged.wheelCircumferenceMm).not.toBe(1e9)
+    expect(merged.gearReduction.ratio).toBe(0)
+    expect(merged.belt.outsideLengthMm).toBeNull()
+    expect(merged.belt.wedgeAngle.valueDeg).toBeNull()
+    expect(merged.geometry.centerDistanceMm).toBeNull()
+    expect(merged.geometry.frontSheaveAngle.valueDeg).toBeNull()
+    expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
+    expect(merged.force.roller.massesG).toEqual([])
+    expect(merged.force.operatingFrontRpm).toBeNull()
+    expect(merged.force.frictionCoefficientMin).toBeNull()
+  })
+
+  it('mergeCvtProfile accepts realistic in-range measurements unchanged (M9 P2)', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      wheelCircumferenceMm: 1560,
+      belt: { wedgeAngle: { valueDeg: 15, basis: 'half' } } as never,
+      geometry: { frontSheaveAngle: { valueDeg: 26, basis: 'included' } } as never,
+      force: { operatingFrontRpm: 7500, frictionCoefficientMin: 0.4 } as never,
+    })
+    expect(merged.wheelCircumferenceMm).toBe(1560)
+    expect(merged.belt.wedgeAngle.valueDeg).toBe(15)
+    expect(merged.geometry.frontSheaveAngle.valueDeg).toBe(26)
+    expect(merged.force.operatingFrontRpm).toBe(7500)
+    expect(merged.force.frictionCoefficientMin).toBe(0.4)
+  })
+
   it('mergeCvtFormState rejects a v1-shaped (ratioLow/ratioHigh) payload and falls back to defaults', () => {
     const merged = mergeCvtFormState({ ratioLow: 2.4, ratioHigh: 0.9 } as never)
     expect(merged.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))

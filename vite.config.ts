@@ -164,6 +164,16 @@ export default defineConfig(({ mode }) => {
     worker: {
       format: 'es',
     },
+    build: {
+      // B95: the service worker (Workbox precache) answers module requests
+      // from CacheStorage, so the browser can never match a `modulepreload`
+      // response to it — those preloads are dead weight under SW control
+      // (a duplicate download of each entry-adjacent chunk + a "cross-world
+      // service worker resource mismatch" console warning), not a real
+      // performance win. Disabling emission removes the warning and the
+      // wasted fetch; the SW's own precache still warms these chunks.
+      modulePreload: false,
+    },
     server: {
       // Vite blocks unrecognised Host headers by default (DNS-rebinding guard).
       // When testing from a phone over LAN by hostname (mDNS/Windows computer
