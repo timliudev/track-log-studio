@@ -863,6 +863,42 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
     expect(merged.force.frictionCoefficientMin).toBe(0.4)
   })
 
+  it('updateCvtProfile keeps a partially-filled radius-bounds pair instead of wiping it out (B97)', () => {
+    // Regression for "節圓半徑4個欄位輸入後焦點離開值會消失": each <input>
+    // fires @change (blur) independently and CvtProfileEditor.patchBounds
+    // always re-sends the *whole* {min, max} pair, defaulting whichever
+    // field hasn't been touched yet to 0 (patchBounds' own "current ??
+    // {min:0, max:0}" fallback). The sanitizer must not treat that blank
+    // sibling as invalid and collapse the entire object to null the moment
+    // the user's just-typed value round-trips through the store.
+    const s = useDrivetrainStore()
+    const profileId = s.activeCvtProfile.id
+
+    // User types "20" into the "min" field first, then blurs — "max" is
+    // still the untouched-field default of 0.
+    s.updateCvtProfile(profileId, { geometry: { frontRadiusBoundsMm: { min: 20, max: 0 } } })
+    const afterMin = s.activeCvtProfile.geometry.frontRadiusBoundsMm
+    expect(afterMin).not.toBeNull()
+    expect(afterMin?.min).toBe(20)
+    expect(Number.isNaN(afterMin?.max)).toBe(true)
+
+    // User now fills in "max" — patchBounds spreads the previous (now
+    // non-null) bounds object, so this arrives as a complete, valid pair.
+    s.updateCvtProfile(profileId, { geometry: { frontRadiusBoundsMm: { min: 20, max: 45 } } })
+    expect(s.activeCvtProfile.geometry.frontRadiusBoundsMm).toEqual({ min: 20, max: 45 })
+  })
+
+  it('mergeCvtProfile rejects a genuinely-invalid radius-bounds edge instead of keeping the other value (B97 not regressed)', () => {
+    // A negative min isn't the "blank" 0 sentinel — it's actual garbage, so
+    // the M9 P2 rule (reject the whole pair) still applies; the valid `max`
+    // must NOT be kept on its own.
+    const merged = mergeCvtProfile({
+      id: 'test',
+      geometry: { frontRadiusBoundsMm: { min: -5, max: 40 } },
+    } as never)
+    expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
+  })
+
   it('mergeCvtFormState rejects a v1-shaped (ratioLow/ratioHigh) payload and falls back to defaults', () => {
     const merged = mergeCvtFormState({ ratioLow: 2.4, ratioHigh: 0.9 } as never)
     expect(merged.wheelCircumferenceMm).toBe(Math.round(Math.PI * 496.8))

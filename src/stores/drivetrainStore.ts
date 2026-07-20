@@ -608,12 +608,41 @@ function sanitizeAngle(value: unknown, fallback: CvtAngleInput): CvtAngleInput {
   }
 }
 
+/** Resolves one edge (`min`/`max`) of a radius-bounds pair to either a valid
+ *  positive number (within `MAX_RADIUS_MM`), the `'blank'` sentinel, or
+ *  `'invalid'`.
+ *
+ *  `'blank'` means "not filled in yet". `CvtProfileEditor.patchBounds` fires
+ *  per-field on `@change` (blur), but always re-sends the *whole* `{min,
+ *  max}` pair — defaulting whichever edge hasn't been touched yet to `0`
+ *  (radii can never legitimately be 0, so it doubles as "unset"). Treating
+ *  that `0` as genuinely invalid used to reject the *entire* bounds object
+ *  the instant either field's `@change` fired, wiping out the value the
+ *  user just typed into the OTHER field the moment focus left it (B97).
+ *  `'invalid'` is reserved for values that are wrong for reasons other than
+ *  being blank (negative, NaN, Infinity, or exceeding `MAX_RADIUS_MM`) —
+ *  those must still reject the whole object, same as before (M9 P2
+ *  import-safety hardening; see the array-length/range-clamp commit this
+ *  mirrors). */
+function resolveRadiusBoundEdge(value: unknown): number | 'blank' | 'invalid' {
+  if (value === 0) return 'blank'
+  const n = positiveNumberOrNull(value, MAX_RADIUS_MM)
+  return n != null ? n : 'invalid'
+}
+
 function sanitizeBounds(value: unknown): RadiusBoundsMm | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Partial<RadiusBoundsMm>
-  const min = positiveNumberOrNull(raw.min, MAX_RADIUS_MM)
-  const max = positiveNumberOrNull(raw.max, MAX_RADIUS_MM)
-  return min != null && max != null && max >= min ? { min, max } : null
+  const min = resolveRadiusBoundEdge(raw.min)
+  const max = resolveRadiusBoundEdge(raw.max)
+  if (min === 'invalid' || max === 'invalid') return null
+  if (min === 'blank' && max === 'blank') return null
+  const minVal = min === 'blank' ? Number.NaN : min
+  const maxVal = max === 'blank' ? Number.NaN : max
+  // Only enforce max >= min once BOTH edges are real (filled-in) numbers —
+  // a still-blank sibling can't be "out of order" with anything.
+  if (!Number.isNaN(minVal) && !Number.isNaN(maxVal) && maxVal < minVal) return null
+  return { min: minVal, max: maxVal }
 }
 
 // A freshly-added stage from the UI's "新增一軸" button starts blank
