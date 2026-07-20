@@ -616,11 +616,23 @@ function sanitizeBounds(value: unknown): RadiusBoundsMm | null {
   return min != null && max != null && max >= min ? { min, max } : null
 }
 
+// A freshly-added stage from the UI's "新增一軸" button starts blank
+// (`{ driveTeeth: 0, drivenTeeth: 0 }`) — the user is expected to type real
+// tooth counts in afterward. Using `positiveNumberOrNull` here rejected that
+// blank stage outright, so the store's own sanitizer deleted the row the
+// instant it was added, making the button look like a no-op. `resolveFixedReduction`
+// (cvtDynamics.ts) already treats a non-positive stage as "not yet
+// computable" (returns NaN) without crashing, so it's safe to keep a
+// 0/0 stage around as a normal in-progress editing state. Missing
+// (`undefined`) teeth counts — e.g. from older/partial import payloads —
+// default to 0 for the same reason, rather than dropping the stage.
+// Genuinely invalid values (negative, NaN, Infinity, or beyond MAX_TEETH)
+// still null out and drop the stage, per the M9 P2 hardening above.
 function sanitizeReductionStage(value: unknown): ReductionStageInput | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Partial<ReductionStageInput>
-  const driveTeeth = positiveNumberOrNull(raw.driveTeeth, MAX_TEETH)
-  const drivenTeeth = positiveNumberOrNull(raw.drivenTeeth, MAX_TEETH)
+  const driveTeeth = raw.driveTeeth === undefined ? 0 : nonNegativeNumberOrNull(raw.driveTeeth, MAX_TEETH)
+  const drivenTeeth = raw.drivenTeeth === undefined ? 0 : nonNegativeNumberOrNull(raw.drivenTeeth, MAX_TEETH)
   return driveTeeth != null && drivenTeeth != null ? { driveTeeth, drivenTeeth } : null
 }
 
