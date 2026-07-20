@@ -699,7 +699,7 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
       finalReduction: {
         mode: 'stages',
         ratio: 999,
-        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: 0, drivenTeeth: 20 }],
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: -5, drivenTeeth: 20 }],
       },
     })
     expect(merged.actuationKind).toBe('electronic')
@@ -708,6 +708,65 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
     expect(merged.geometry.centerDistanceMm).toBeNull()
     expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
     expect(merged.finalReduction.stages).toEqual([{ driveTeeth: 13, drivenTeeth: 41 }])
+  })
+
+  it('mergeCvtProfile keeps a blank (driveTeeth/drivenTeeth: 0) stage instead of discarding it (B96)', () => {
+    // Regression for the "新增一軸" (add stage) button appearing to do
+    // nothing: CvtReductionEditor.addStage() emits a placeholder
+    // `{ driveTeeth: 0, drivenTeeth: 0 }` row for the user to fill in, and the
+    // sanitizer must not silently delete that row before it can be edited.
+    const merged = mergeCvtProfile({
+      id: 'test',
+      gearReduction: {
+        mode: 'stages',
+        ratio: 0,
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: 0, drivenTeeth: 0 }],
+      },
+    })
+    expect(merged.gearReduction.stages).toEqual([
+      { driveTeeth: 13, drivenTeeth: 41 },
+      { driveTeeth: 0, drivenTeeth: 0 },
+    ])
+  })
+
+  it('updateCvtProfile grows the stage array by one when appending a blank stage like addStage() does (B96)', () => {
+    const s = useDrivetrainStore()
+    const profileId = s.activeCvtProfile.id
+    s.updateCvtProfile(profileId, {
+      gearReduction: {
+        mode: 'stages',
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }],
+      },
+    })
+    expect(s.activeCvtProfile.gearReduction.stages).toHaveLength(1)
+
+    // Mimic CvtReductionEditor.addStage(): append a blank placeholder stage.
+    s.updateCvtProfile(profileId, {
+      gearReduction: {
+        mode: 'stages',
+        stages: [...s.activeCvtProfile.gearReduction.stages, { driveTeeth: 0, drivenTeeth: 0 }],
+      },
+    })
+    expect(s.activeCvtProfile.gearReduction.stages).toHaveLength(2)
+    expect(s.activeCvtProfile.gearReduction.stages[1]).toEqual({ driveTeeth: 0, drivenTeeth: 0 })
+  })
+
+  it('mergeCvtProfile still rejects out-of-range or non-finite teeth counts (M9 P2 not regressed)', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      gearReduction: {
+        mode: 'stages',
+        ratio: 0,
+        stages: [
+          { driveTeeth: 13, drivenTeeth: 41 },
+          { driveTeeth: -5, drivenTeeth: 20 },
+          { driveTeeth: Number.POSITIVE_INFINITY, drivenTeeth: 20 },
+          { driveTeeth: Number.NaN, drivenTeeth: 20 },
+          { driveTeeth: 100000, drivenTeeth: 20 },
+        ],
+      },
+    })
+    expect(merged.gearReduction.stages).toEqual([{ driveTeeth: 13, drivenTeeth: 41 }])
   })
 
   it('mergeCvtProfile truncates oversized measurement arrays instead of keeping them unbounded (M9 P2)', () => {
