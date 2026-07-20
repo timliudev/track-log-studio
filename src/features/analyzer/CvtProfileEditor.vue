@@ -129,14 +129,19 @@ function onBackdropPointer(event: PointerEvent): void {
 </script>
 
 <template>
-  <div
-    v-if="open"
-    class="editor-backdrop"
-    role="presentation"
-    @pointerdown="onBackdropPointer"
-    @pointerup.self="emit('close')"
-  >
-    <section class="profile-editor" role="dialog" aria-modal="true" :aria-label="t('analyzer.cvt.settingsTitle')">
+  <!-- The dashboard grid uses transforms, which would otherwise make a
+       descendant position:fixed element relative to the card. Teleporting
+       the editor to body gives the settings surface the viewport as its
+       containing block. -->
+  <Teleport to="body">
+    <div
+      v-if="open"
+      class="editor-backdrop"
+      role="presentation"
+      @pointerdown="onBackdropPointer"
+      @pointerup.self="emit('close')"
+    >
+      <section class="profile-editor" role="dialog" aria-modal="true" :aria-label="t('analyzer.cvt.settingsTitle')">
       <header>
         <div>
           <h2>{{ t('analyzer.cvt.settingsTitle') }}</h2>
@@ -307,13 +312,14 @@ function onBackdropPointer(event: PointerEvent): void {
           <p>{{ t('analyzer.cvt.honestyBoundary') }}</p>
         </aside>
       </div>
-    </section>
-  </div>
+      </section>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
-.editor-backdrop { position: fixed; inset: 0; z-index: 1200; display: flex; justify-content: flex-end; background: rgb(0 0 0 / 0.48); }
-.profile-editor { width: min(760px, 92vw); height: 100%; display: flex; flex-direction: column; color: var(--color-text); background: var(--color-bg); box-shadow: -10px 0 35px rgb(0 0 0 / 0.28); }
+.editor-backdrop { position: fixed; inset: 0; z-index: 1200; background: var(--color-bg); }
+.profile-editor { width: 100vw; max-width: none; height: 100vh; height: 100dvh; display: flex; flex-direction: column; color: var(--color-text); background: var(--color-bg); }
 header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 18px 20px; border-bottom: 1px solid var(--color-border); }
 h2, h3, p { margin: 0; }
 header p, .field-note { margin-top: 5px; color: var(--color-text-muted); font-size: 0.8rem; line-height: 1.45; }
@@ -323,7 +329,7 @@ header p, .field-note { margin-top: 5px; color: var(--color-text-muted); font-si
 button, select, input { min-height: 36px; padding: 6px 9px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); }
 button { cursor: pointer; background: var(--color-surface-raised); }
 button:disabled { opacity: 0.45; cursor: default; }
-.editor-scroll { min-height: 0; overflow: auto; padding: 16px 20px 28px; display: grid; gap: 16px; }
+.editor-scroll { width: 100%; min-height: 0; overflow: auto; padding: 16px max(20px, calc((100vw - 1440px) / 2)) max(28px, env(safe-area-inset-bottom)); display: grid; gap: 16px; }
 .form-section { padding: 14px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: calc(var(--radius) * 1.25); }
 .form-section h3 { margin-bottom: 12px; }
 .form-section h4 { margin: 18px 0 10px; }
@@ -343,7 +349,6 @@ button:disabled { opacity: 0.45; cursor: default; }
 :root[data-any-pointer-coarse='true'] select,
 :root[data-any-pointer-coarse='true'] input { min-height: 44px; }
 @media (max-width: 720px) {
-  .profile-editor { width: 100vw; }
   .profile-toolbar { grid-template-columns: 1fr 1fr; }
   .form-grid, .reduction-grid { grid-template-columns: 1fr; }
 }

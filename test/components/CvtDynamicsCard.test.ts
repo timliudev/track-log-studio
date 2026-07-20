@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
@@ -33,6 +33,10 @@ function mountCard(cursorIdx = 0, extraProps: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} })
   setActivePinia(createPinia())
+})
+
+afterEach(() => {
+  document.querySelectorAll('.editor-backdrop').forEach((element) => element.remove())
 })
 
 describe('CvtDynamicsCard', () => {
@@ -89,16 +93,19 @@ describe('CvtDynamicsCard', () => {
     expect(wrapper.find('path.belt').element).toBe(belt)
   })
 
-  it('keeps the compact card small and moves the full bilingual boundary into a settings sheet', async () => {
+  it('keeps the compact card small and opens settings as a viewport-level dialog', async () => {
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0)
       return 1
     })
     const wrapper = mountCard()
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
     await wrapper.find('.settings-button').trigger('click')
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('不代表零件安全保證或馬力機實測')
+    const dialog = document.querySelector('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.parentElement?.parentElement).toBe(document.body)
+    expect(wrapper.element.contains(dialog)).toBe(false)
+    expect(dialog?.textContent).toContain('不代表零件安全保證或馬力機實測')
   })
 
   it('labels electronic actuation as observation-only instead of applying roller force', async () => {
@@ -168,7 +175,9 @@ describe('CvtDynamicsCard', () => {
       xRange: { min: 0, max: 2.1 },
     })
     await wrapper.find('.settings-button').trigger('click')
-    await wrapper.find('.calibration-action button').trigger('click')
+    const calibrationButton = document.querySelector<HTMLButtonElement>('.calibration-action button')
+    expect(calibrationButton).not.toBeNull()
+    calibrationButton?.click()
     await nextTick()
     expect(drivetrain.activeCvtProfile.calibration.combinedFixedReduction).toBeGreaterThan(0)
     expect(drivetrain.activeCvtProfile.calibration.fixedReductionSegment?.sampleCount).toBe(3)
