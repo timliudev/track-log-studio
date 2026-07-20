@@ -163,6 +163,7 @@ Test assets: user placed `bbbb(22).loga` + `bbbb(22)set.json` (his manual gates 
 
 ## User report 2026-07-20 evening
 - [x] **B96** CVT 齒輪組多軸齒數「新增一軸」按鈕沒有反應。根因：`CvtReductionEditor.addStage()` 新增的空白列 `{driveTeeth:0, drivenTeeth:0}` 被 `drivetrainStore.ts` 的 M9 P2 sanitizer（`sanitizeReductionStage` 用 `positiveNumberOrNull` 要求 `>0`）當場濾除，按鈕看似無反應。改用 `nonNegativeNumberOrNull` 允許 0 值暫存列（缺失欄位預設為 0），負值/NaN/Infinity/超過 `MAX_TEETH` 仍照舊拒絕（M9 P2 未退化）；`resolveFixedReduction` 本就對非正齒數回傳 NaN，無崩潰風險。獨立驗證 drivetrainStore 62/62、全套 1898/1898 綠、typecheck 乾淨。 — `d2ce850`/merge `5855c7c`
+- [x] **B97** 節圓半徑 4 個欄位（前/後盤最小/最大節圓半徑）輸入後焦點離開值會消失。根因：`CvtProfileEditor.patchBounds()` 每次 `@change`(blur) 都重送整個 `{min,max}` 物件，未碰過的欄位預設為 0；`drivetrainStore.sanitizeBounds()` 要求兩者皆 `>0`，單一欄位失焦時整組被判定無效、歸零消失。新增 `resolveRadiusBoundEdge` 區分「blank(0/未填，不牽連整組，轉為 NaN 保留另一欄位)」與「invalid(負值/NaN/Infinity/超過 MAX_RADIUS_MM，仍整組拒絕)」；`max<min` 排序錯誤僅在兩欄位皆為實數時才檢查。M9 P2 未退化(既有 3 個 pinned 測試不變)。獨立驗證 drivetrainStore 64/64、全套 1900/1900 綠、typecheck 乾淨。 — `d3e95f3`/merge `26b6a9d`
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
