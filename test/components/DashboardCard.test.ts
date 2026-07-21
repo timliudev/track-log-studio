@@ -457,6 +457,65 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
   })
 
+  describe('B64 — mini (compact) pinned card drops body-sizing styles like collapse', () => {
+    function stubRect(el: HTMLElement, width: number, height: number): void {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return this
+        },
+      } as DOMRect)
+    }
+
+    it('does NOT apply aspect-ratio once toggled to mini, so CSS `.pinned` auto-height can shrink it to the header', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('re-applies aspect-ratio once toggled back out of mini', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toBeUndefined()
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
+    })
+
+    it('drops the explicit height (but keeps the user-dragged width) while mini, and restores the height when un-mini-ed', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+
+      // Toggle mini — the dragged HEIGHT must no longer be forced inline
+      // (that's what used to keep the floating container occupying its full
+      // pre-mini footprint), but the WIDTH stays so only the vertical
+      // footprint shrinks, same as collapse.
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).not.toContain('height:')
+
+      // Toggle mini off again — the user's dragged size is remembered, not lost.
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+    })
+  })
+
   describe('B61 — touch long-press gate before drag-reorder starts', () => {
     // grid-layout-plus's own interactjs listens for pointerdown on
     // `document`, in the bubble phase (verified by reading its source — see
