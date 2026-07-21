@@ -494,6 +494,11 @@ const collapsedIds = computed(() => new Set(panelState.value.collapsed))
 // leave a draggable blank box on the dashboard. `isVisibleId` is the single
 // visibility predicate shared by both the desktop and mobile layout builders.
 function isVisibleId(id: string): boolean {
+  // CVT dynamics card temporarily hidden for release — feature is complete
+  // but not yet field-testable; flip this to re-enable (a future card
+  // add/remove UI will surface it, marked unavailable). Everything else
+  // (component, domain math, tests, i18n, layout entry) stays intact.
+  if (id === STATIC_CARD_IDS.cvtDynamics) return false
   if (id === STATIC_CARD_IDS.mapAlign) return showMapAlign.value
   if (id === STATIC_CARD_IDS.lapAlign) return showAlign.value
   return true
