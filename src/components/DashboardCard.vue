@@ -388,10 +388,20 @@ function onPinResizeReset(): void {
 // `pinnedSize`, when the user has dragged one) so collapsing only shrinks
 // the card vertically, matching grid-card collapse's own "slot width stays,
 // only height react to the header" behaviour.
+// B64 — `pinnedMini` (the phone-only compact toggle above) hides the SAME
+// `.body` via the identical `v-if="!collapsed && !pinnedMini"` condition, so
+// it is exactly as much a "no body" state as `collapsed` from this
+// computed's point of view — both guards below therefore check
+// `props.collapsed || pinnedMini.value`, not `props.collapsed` alone, so
+// toggling mini shrinks the floating card's footprint the same way
+// collapsing it does (and un-mini-ing restores it the same way expanding
+// does), without needing any dedicated `.pinned-mini` CSS rule — `.pinned`'s
+// own `height: auto` already does the work once the inline style stops
+// forcing a height.
 const cardStyle = computed(() => {
   if (!props.pinned) return undefined
   if (pinnedSize.value) {
-    if (props.collapsed) {
+    if (props.collapsed || pinnedMini.value) {
       return { width: `${pinnedSize.value.w}px`, maxWidth: 'none' }
     }
     // A user-dragged size overrides both the aspect-ratio default AND the
@@ -405,7 +415,7 @@ const cardStyle = computed(() => {
       maxHeight: 'none',
     }
   }
-  if (props.collapsed) return undefined
+  if (props.collapsed || pinnedMini.value) return undefined
   if (props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0) {
     return { aspectRatio: String(props.aspectRatio) }
   }
