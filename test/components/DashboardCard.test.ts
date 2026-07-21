@@ -385,6 +385,78 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
   })
 
+  describe('B100 — collapsed pinned card shrinks to header height (drops body-sizing styles)', () => {
+    function stubRect(el: HTMLElement, width: number, height: number): void {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return this
+        },
+      } as DOMRect)
+    }
+
+    it('does NOT apply aspect-ratio while collapsed, so CSS `.pinned.collapsed` auto-height can shrink it to the header', () => {
+      const wrapper = mountCard({ pinned: true, collapsed: true, aspectRatio: 4 / 5 })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('re-applies aspect-ratio once expanded again', async () => {
+      const wrapper = mountCard({ pinned: true, collapsed: true, aspectRatio: 4 / 5 })
+      expect(wrapper.attributes('style')).toBeUndefined()
+      await wrapper.setProps({ collapsed: false })
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
+    })
+
+    it('drops the explicit height (but keeps the user-dragged width) while collapsed, and restores the height on expand', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+
+      // Collapse — the dragged HEIGHT must no longer be forced inline (that's
+      // what used to keep the floating container occupying its full
+      // pre-collapse footprint), but the WIDTH stays so only the vertical
+      // footprint shrinks, same as a grid card's collapse.
+      await wrapper.setProps({ collapsed: true })
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).not.toContain('height:')
+
+      // Expand again — the user's dragged size is remembered, not lost.
+      await wrapper.setProps({ collapsed: false })
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+    })
+
+    it('the pinned-card resize handle stays hidden while collapsed, even with a dragged pinnedSize in memory', async () => {
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+      window.dispatchEvent(new PointerEvent('pointerup'))
+
+      await wrapper.setProps({ collapsed: true })
+      expect(wrapper.find('.pin-resize-handle').exists()).toBe(false)
+    })
+  })
+
   describe('B61 — touch long-press gate before drag-reorder starts', () => {
     // grid-layout-plus's own interactjs listens for pointerdown on
     // `document`, in the bubble phase (verified by reading its source — see
