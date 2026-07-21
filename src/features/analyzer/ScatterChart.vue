@@ -91,7 +91,7 @@ function setY(name: string | null): void {
 }
 
 // XY-aspect feature — persisted per chart card alongside the X/Y picks
-// (chartConfigs.ts / aracer-loga.analyzerCharts.v1); ON by default for both
+// (chartConfigs.ts / tracklogstudio.analyzerCharts.v1); ON by default for both
 // new and pre-feature persisted charts (parseCharts backfills true).
 const equalAspect = computed(() => props.chart.equalAspect)
 function setEqualAspect(on: boolean): void {

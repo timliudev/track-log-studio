@@ -7,7 +7,7 @@ import {
   defaultAppearanceSettings,
 } from '@/stores/settingsStore'
 
-const STORAGE_KEY = 'aracer-loga.settings.v1'
+const STORAGE_KEY = 'tracklogstudio.settings.v1'
 
 /** Node's test environment has no real localStorage — same in-memory stub
  *  pattern other persistence tests in this repo use. */

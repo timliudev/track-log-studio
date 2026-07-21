@@ -9,7 +9,7 @@
  * dropped the (correctly saved!) layout entries of every other chart card, so
  * dynamically added charts silently vanished across reloads.
  *
- * Deliberately a THIRD sibling storage key (same `aracer-loga.*.v1`
+ * Deliberately a THIRD sibling storage key (same `tracklogstudio.*.v1`
  * global-slot pattern as dashboardLayout.ts / panelState.ts, and the same
  * "device/UI preference, not per-circuit" rationale): chart configs are keyed
  * by the same stable chart id that `chartItemId()` derives card ids from, so
@@ -81,7 +81,7 @@ export interface ScatterChartConfig {
 /** One chart on the analyzer dashboard, discriminated on `kind`. */
 export type ChartConfig = TimeSeriesChartConfig | ScatterChartConfig
 
-export const STORAGE_KEY = 'aracer-loga.analyzerCharts.v1'
+export const STORAGE_KEY = 'tracklogstudio.analyzerCharts.v1'
 
 /** The pristine dashboard: one empty timeseries chart (id 1) — same default
  *  the store hardcoded before charts were persisted. */

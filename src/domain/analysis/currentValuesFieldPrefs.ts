@@ -15,7 +15,7 @@ import type { CurrentValueField } from './currentValues'
  * the dashboard grid.
  *
  * Persisted to localStorage under its own global-slot key
- * (`aracer-loga.currentValuesFieldPrefs.v1`), same pattern as
+ * (`tracklogstudio.currentValuesFieldPrefs.v1`), same pattern as
  * `domain/layout/panelState.ts` — a plain JSON blob, tolerant of missing/
  * garbage fields on load (see {@link parseCurrentValuesFieldPrefs}), and also
  * folded into the B19 settings export/import bundle (see
@@ -44,7 +44,7 @@ export interface CurrentValuesFieldPrefs {
   order: string[]
 }
 
-export const STORAGE_KEY = 'aracer-loga.currentValuesFieldPrefs.v1'
+export const STORAGE_KEY = 'tracklogstudio.currentValuesFieldPrefs.v1'
 
 /** The empty/default prefs — original channel order, nothing hidden, no
  *  custom order recorded yet. Exported so other callers needing a

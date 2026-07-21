@@ -46,7 +46,7 @@ export type PresetId = 'default' | 'custom' | `user${number}`
  */
 export type OutputFormat = 'nmea' | 'vbo' | 'csv' | 'loga'
 
-const STORAGE_KEY = 'aracer-loga.converter.v1'
+const STORAGE_KEY = 'tracklogstudio.converter.v1'
 const USER_PRESET_COUNT = 5
 
 interface Persisted {

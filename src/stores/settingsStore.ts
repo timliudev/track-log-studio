@@ -12,7 +12,7 @@ export type TzOverride = 'auto' | number
  *  for the rare case the automatic read gets it wrong. */
 export type InputModePref = 'auto' | 'touch' | 'pointer'
 
-const STORAGE_KEY = 'aracer-loga.settings.v1'
+const STORAGE_KEY = 'tracklogstudio.settings.v1'
 
 /** The "appearance / general" preference slice — theme, language, timezone,
  *  input mode. Pulled out as its own named type (rather than an inline

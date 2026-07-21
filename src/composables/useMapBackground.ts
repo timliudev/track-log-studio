@@ -7,7 +7,7 @@ import {
   type MapBackgroundSettings,
 } from '@/domain/analysis/mapBackground'
 
-const STORAGE_KEY = 'aracer-loga.mapBackground.v1'
+const STORAGE_KEY = 'tracklogstudio.mapBackground.v1'
 const DB_NAME = 'track-log-studio-map-backgrounds'
 const STORE = 'images'
 interface MapBackgroundDb extends DBSchema { images: { key: string; value: Blob } }
