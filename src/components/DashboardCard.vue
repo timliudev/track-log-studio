@@ -173,6 +173,20 @@ const dragHandleEl = ref<HTMLElement | null>(null)
 const touchArmed = ref(false)
 const TOUCH_ARMED_VISUAL_MS = 400
 
+// B64/B99 — same 768px cutover useDashboardLayout.ts's MOBILE_BREAKPOINT_PX
+// uses for the JS-side desktop↔mobile switch (kept as a plain `window.innerWidth`
+// read here, matching this component's existing convention — see
+// resetPinnedMiniOutsideMobile below, already written this way before B99 —
+// rather than threading an `isMobile` prop through from AnalyzerView, since
+// this component has no other need to react continuously to the breakpoint,
+// only to read it at specific pointer-event moments). `<=` (not `<`) so this
+// agrees with every `@media (max-width: 768px)` rule in this same file at the
+// boundary width itself, same reasoning as useDashboardLayout's own doc.
+const MOBILE_BREAKPOINT_PX = 768
+function isMobileWidth(): boolean {
+  return window.innerWidth <= MOBILE_BREAKPOINT_PX
+}
+
 // B64 — a phone-only, session-scoped compact state for the floating pinned
 // card. It intentionally is not written to panel/layout persistence: it is a
 // quick reading-mode choice, not a rearrangement of the user's dashboard.
@@ -181,7 +195,7 @@ function togglePinnedMini(): void {
   pinnedMini.value = !pinnedMini.value
 }
 function resetPinnedMiniOutsideMobile(): void {
-  if (window.innerWidth > 768) pinnedMini.value = false
+  if (!isMobileWidth()) pinnedMini.value = false
 }
 onMounted(() => window.addEventListener('resize', resetPinnedMiniOutsideMobile))
 watch(() => props.pinned, (isPinned) => {
@@ -350,9 +364,25 @@ function onPinResizePointerDown(e: PointerEvent): void {
   window.addEventListener('pointermove', onPinResizePointerMove)
   window.addEventListener('pointerup', onPinResizePointerUp)
 }
+// B99 — on mobile the floating pinned card is full-bleed (B64/B36: the
+// anchor's `width: 100%` media-query override, AnalyzerView.vue), so a
+// user-draggable WIDTH is both pointless (there's no room to grow into) and
+// visually broken (an explicit inline pixel width — set the moment this
+// handle produces a non-null `pinnedSize`, see `cardStyle` above — overrides
+// that `100%` and desyncs from the viewport on rotate/resize). Mirrors B59's
+// grid-side fix for the identical problem one layer down (see
+// dashboardLayout.ts's `VERTICAL_ONLY_RESIZE_OPTION` doc): rather than
+// special-casing `cardStyle` to omit width, the horizontal delta is zeroed
+// right here so `pinResizeStart.w` (the rect width measured at
+// `onPinResizePointerDown` — already the current full-bleed width, since no
+// inline width was applied before this gesture started) is what
+// `pinnedSize.value.w` gets pinned to for the whole gesture, same as B59's
+// `lastW` being re-pinned to the current x every move so `deltaX` is always
+// zero. Desktop (`!isMobileWidth()`) is completely untouched — full free
+// width+height resize, byte-for-byte the same as before this fix.
 function onPinResizePointerMove(e: PointerEvent): void {
   if (!pinResizeStart) return
-  const dx = e.clientX - pinResizeStart.x
+  const dx = isMobileWidth() ? 0 : e.clientX - pinResizeStart.x
   const dy = e.clientY - pinResizeStart.y
   pinnedSize.value = clampPinnedSize(pinResizeStart.w + dx, pinResizeStart.h + dy)
 }
@@ -957,6 +987,20 @@ onBeforeUnmount(() => {
   height: var(--vgl-resizer-size, 10px);
   cursor: se-resize;
   touch-action: none;
+}
+/* B99 — the drag gesture itself only changes height on mobile (see
+   `onPinResizePointerMove`'s doc above `isMobileWidth`), so the diagonal
+   `se-resize` cursor (implies "both axes move") would misrepresent what
+   dragging actually does here — swapped for `ns-resize` (vertical-only,
+   the same cursor a plain top/bottom edge drag handle would use) at the same
+   768px cutover the gesture logic itself checks. Purely a hint cursor; the
+   handle's position/size/hit target are unchanged, still governed by
+   `--vgl-resizer-size` (see AnalyzerView.vue's own mobile 30px bump for that
+   var, a separate touch-target concern from this cursor swap). */
+@media (max-width: 768px) {
+  .pin-resize-handle {
+    cursor: ns-resize;
+  }
 }
 .pin-resize-handle::before {
   position: absolute;
