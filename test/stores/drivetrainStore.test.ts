@@ -699,7 +699,7 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
       finalReduction: {
         mode: 'stages',
         ratio: 999,
-        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: 0, drivenTeeth: 20 }],
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: -5, drivenTeeth: 20 }],
       },
     })
     expect(merged.actuationKind).toBe('electronic')
@@ -708,6 +708,195 @@ describe('mergeMtFormState / mergeCvtFormState (B19 shared sanitizer)', () => {
     expect(merged.geometry.centerDistanceMm).toBeNull()
     expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
     expect(merged.finalReduction.stages).toEqual([{ driveTeeth: 13, drivenTeeth: 41 }])
+  })
+
+  it('mergeCvtProfile keeps a blank (driveTeeth/drivenTeeth: 0) stage instead of discarding it (B96)', () => {
+    // Regression for the "新增一軸" (add stage) button appearing to do
+    // nothing: CvtReductionEditor.addStage() emits a placeholder
+    // `{ driveTeeth: 0, drivenTeeth: 0 }` row for the user to fill in, and the
+    // sanitizer must not silently delete that row before it can be edited.
+    const merged = mergeCvtProfile({
+      id: 'test',
+      gearReduction: {
+        mode: 'stages',
+        ratio: 0,
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }, { driveTeeth: 0, drivenTeeth: 0 }],
+      },
+    })
+    expect(merged.gearReduction.stages).toEqual([
+      { driveTeeth: 13, drivenTeeth: 41 },
+      { driveTeeth: 0, drivenTeeth: 0 },
+    ])
+  })
+
+  it('updateCvtProfile grows the stage array by one when appending a blank stage like addStage() does (B96)', () => {
+    const s = useDrivetrainStore()
+    const profileId = s.activeCvtProfile.id
+    s.updateCvtProfile(profileId, {
+      gearReduction: {
+        mode: 'stages',
+        stages: [{ driveTeeth: 13, drivenTeeth: 41 }],
+      },
+    })
+    expect(s.activeCvtProfile.gearReduction.stages).toHaveLength(1)
+
+    // Mimic CvtReductionEditor.addStage(): append a blank placeholder stage.
+    s.updateCvtProfile(profileId, {
+      gearReduction: {
+        mode: 'stages',
+        stages: [...s.activeCvtProfile.gearReduction.stages, { driveTeeth: 0, drivenTeeth: 0 }],
+      },
+    })
+    expect(s.activeCvtProfile.gearReduction.stages).toHaveLength(2)
+    expect(s.activeCvtProfile.gearReduction.stages[1]).toEqual({ driveTeeth: 0, drivenTeeth: 0 })
+  })
+
+  it('mergeCvtProfile still rejects out-of-range or non-finite teeth counts (M9 P2 not regressed)', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      gearReduction: {
+        mode: 'stages',
+        ratio: 0,
+        stages: [
+          { driveTeeth: 13, drivenTeeth: 41 },
+          { driveTeeth: -5, drivenTeeth: 20 },
+          { driveTeeth: Number.POSITIVE_INFINITY, drivenTeeth: 20 },
+          { driveTeeth: Number.NaN, drivenTeeth: 20 },
+          { driveTeeth: 100000, drivenTeeth: 20 },
+        ],
+      },
+    })
+    expect(merged.gearReduction.stages).toEqual([{ driveTeeth: 13, drivenTeeth: 41 }])
+  })
+
+  it('mergeCvtProfile truncates oversized measurement arrays instead of keeping them unbounded (M9 P2)', () => {
+    const oversizedMasses = Array.from({ length: 10000 }, () => 10)
+    const oversizedTrack = Array.from({ length: 10000 }, () => ({ travelMm: 10, radiusMm: 10 }))
+    const oversizedForceCurve = Array.from({ length: 10000 }, () => ({ travelMm: 10, value: 1 }))
+    const oversizedCamPoints = Array.from({ length: 10000 }, () => ({ travelMm: 10, angleDeg: 10, effectiveRadiusMm: 10 }))
+    const oversizedCalibrationMap = Array.from({ length: 10000 }, () => ({ ratio: 1, scale: 1 }))
+    const oversizedStages = Array.from({ length: 10000 }, () => ({ driveTeeth: 13, drivenTeeth: 41 }))
+
+    const merged = mergeCvtProfile({
+      id: 'test',
+      gearReduction: { mode: 'stages', ratio: 0, stages: oversizedStages },
+      force: {
+        roller: { kind: 'roller', massesG: oversizedMasses, track: oversizedTrack, efficiency: null },
+        spring: {
+          catalogLabel: '',
+          mode: 'curve',
+          freeLengthMm: null,
+          installedLengthMm: null,
+          coilBindLengthMm: null,
+          rateNPerMm: null,
+          installedPreloadMm: null,
+          forceCurve: oversizedForceCurve,
+        },
+        torqueCam: {
+          mode: 'profile',
+          angleBasis: 'circumferential',
+          points: oversizedCamPoints,
+          torqueShare: null,
+          equalSplitAssumption: false,
+          torsionTorqueNm: null,
+        },
+      } as never,
+      calibration: {
+        upshiftMap: oversizedCalibrationMap,
+        downshiftMap: oversizedCalibrationMap,
+      } as never,
+    })
+
+    expect(merged.gearReduction.stages.length).toBe(4096)
+    expect(merged.force.roller.massesG.length).toBe(4096)
+    expect(merged.force.roller.track.length).toBe(4096)
+    expect(merged.force.spring.forceCurve.length).toBe(4096)
+    expect(merged.force.torqueCam.points.length).toBe(4096)
+    expect(merged.calibration.upshiftMap.length).toBe(4096)
+    expect(merged.calibration.downshiftMap.length).toBe(4096)
+  })
+
+  it('mergeCvtProfile rejects physically-implausible out-of-range measurements (M9 P2)', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      wheelCircumferenceMm: 1e9,
+      gearReduction: { mode: 'ratio', ratio: 1e6, stages: [] },
+      belt: {
+        outsideLengthMm: 1e9,
+        wedgeAngle: { valueDeg: 500, basis: 'half' },
+      } as never,
+      geometry: {
+        centerDistanceMm: 1e9,
+        frontSheaveAngle: { valueDeg: 179, basis: 'included' },
+        frontRadiusBoundsMm: { min: 1e9, max: 1e9 + 1 },
+      } as never,
+      force: {
+        roller: { kind: 'roller', massesG: [1e9], track: [], efficiency: null },
+        operatingFrontRpm: 1e9,
+        frictionCoefficientMin: 1e9,
+      } as never,
+    })
+    expect(merged.wheelCircumferenceMm).not.toBe(1e9)
+    expect(merged.gearReduction.ratio).toBe(0)
+    expect(merged.belt.outsideLengthMm).toBeNull()
+    expect(merged.belt.wedgeAngle.valueDeg).toBeNull()
+    expect(merged.geometry.centerDistanceMm).toBeNull()
+    expect(merged.geometry.frontSheaveAngle.valueDeg).toBeNull()
+    expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
+    expect(merged.force.roller.massesG).toEqual([])
+    expect(merged.force.operatingFrontRpm).toBeNull()
+    expect(merged.force.frictionCoefficientMin).toBeNull()
+  })
+
+  it('mergeCvtProfile accepts realistic in-range measurements unchanged (M9 P2)', () => {
+    const merged = mergeCvtProfile({
+      id: 'test',
+      wheelCircumferenceMm: 1560,
+      belt: { wedgeAngle: { valueDeg: 15, basis: 'half' } } as never,
+      geometry: { frontSheaveAngle: { valueDeg: 26, basis: 'included' } } as never,
+      force: { operatingFrontRpm: 7500, frictionCoefficientMin: 0.4 } as never,
+    })
+    expect(merged.wheelCircumferenceMm).toBe(1560)
+    expect(merged.belt.wedgeAngle.valueDeg).toBe(15)
+    expect(merged.geometry.frontSheaveAngle.valueDeg).toBe(26)
+    expect(merged.force.operatingFrontRpm).toBe(7500)
+    expect(merged.force.frictionCoefficientMin).toBe(0.4)
+  })
+
+  it('updateCvtProfile keeps a partially-filled radius-bounds pair instead of wiping it out (B97)', () => {
+    // Regression for "節圓半徑4個欄位輸入後焦點離開值會消失": each <input>
+    // fires @change (blur) independently and CvtProfileEditor.patchBounds
+    // always re-sends the *whole* {min, max} pair, defaulting whichever
+    // field hasn't been touched yet to 0 (patchBounds' own "current ??
+    // {min:0, max:0}" fallback). The sanitizer must not treat that blank
+    // sibling as invalid and collapse the entire object to null the moment
+    // the user's just-typed value round-trips through the store.
+    const s = useDrivetrainStore()
+    const profileId = s.activeCvtProfile.id
+
+    // User types "20" into the "min" field first, then blurs — "max" is
+    // still the untouched-field default of 0.
+    s.updateCvtProfile(profileId, { geometry: { frontRadiusBoundsMm: { min: 20, max: 0 } } })
+    const afterMin = s.activeCvtProfile.geometry.frontRadiusBoundsMm
+    expect(afterMin).not.toBeNull()
+    expect(afterMin?.min).toBe(20)
+    expect(Number.isNaN(afterMin?.max)).toBe(true)
+
+    // User now fills in "max" — patchBounds spreads the previous (now
+    // non-null) bounds object, so this arrives as a complete, valid pair.
+    s.updateCvtProfile(profileId, { geometry: { frontRadiusBoundsMm: { min: 20, max: 45 } } })
+    expect(s.activeCvtProfile.geometry.frontRadiusBoundsMm).toEqual({ min: 20, max: 45 })
+  })
+
+  it('mergeCvtProfile rejects a genuinely-invalid radius-bounds edge instead of keeping the other value (B97 not regressed)', () => {
+    // A negative min isn't the "blank" 0 sentinel — it's actual garbage, so
+    // the M9 P2 rule (reject the whole pair) still applies; the valid `max`
+    // must NOT be kept on its own.
+    const merged = mergeCvtProfile({
+      id: 'test',
+      geometry: { frontRadiusBoundsMm: { min: -5, max: 40 } },
+    } as never)
+    expect(merged.geometry.frontRadiusBoundsMm).toBeNull()
   })
 
   it('mergeCvtFormState rejects a v1-shaped (ratioLow/ratioHigh) payload and falls back to defaults', () => {

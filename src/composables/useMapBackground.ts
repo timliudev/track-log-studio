@@ -51,12 +51,21 @@ export function useMapBackground(): {
   async function upload(file: File): Promise<string | null> {
     const invalid = validateBackgroundImage(file)
     if (invalid) return invalid
+    // M9 P2: re-uploading previously left the OLD blob behind in IndexedDB
+    // under its old id — nothing ever referenced it again (settings.imageId
+    // gets overwritten below), so every re-upload silently grew the store by
+    // one orphaned image forever. Remember the outgoing id and delete it
+    // once the new blob is safely stored, so a failed upload never loses the
+    // still-in-use image.
+    const previousId = settings.value.imageId
     const id = crypto.randomUUID()
-    await (await database()).put(STORE, file, id)
+    const store = await database()
+    await store.put(STORE, file, id)
     settings.value.imageId = id
     settings.value.kind = 'image'
     settings.value.alignment = { x: 0, y: 0, scale: 1 }
     await loadImage()
+    if (previousId && previousId !== id) await store.delete(STORE, previousId)
     return null
   }
   const setKind = (kind: MapBackgroundKind) => { settings.value.kind = kind }

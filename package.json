@@ -12,7 +12,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "vue-tsc --noEmit",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "icons:generate": "node scripts/generate-pwa-icons.mjs",
+    "fixtures:make": "node scripts/make-fixtures.mjs",
+    "bench:parse": "node scripts/perf/run-with-vite.mjs scripts/perf/bench-parse.ts",
+    "bench:pipeline": "node scripts/perf/run-with-vite.mjs scripts/perf/bench-pipeline.ts"
   },
   "dependencies": {
     "echarts": "^6.1.0",

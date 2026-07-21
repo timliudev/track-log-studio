@@ -20,6 +20,16 @@ export class UnknownLogaFormatError extends Error {
 }
 
 /**
+ * M9 P2: this — the project's own primary log format — had no upper bound on
+ * input size at all, unlike the CSV importer's cell cap or VBO's grid-size
+ * cap. This docstring already notes real samples run "up to ~54 MB"; 200M
+ * characters (~200 MB) is a generous multiple of that, so no genuine log is
+ * ever rejected while a pathological/adversarial file is refused before the
+ * two full-file passes below run.
+ */
+export const MAX_LOGA_TEXT_CHARS = 200_000_000
+
+/**
  * Parse raw .loga text into a LogSession (column-store of Float32 channels).
  *
  * Strategy for large files (samples up to ~54 MB): a single split into lines,
@@ -27,7 +37,16 @@ export class UnknownLogaFormatError extends Error {
  * no per-row object allocation. Blank/unparseable cells become NaN; ragged
  * rows (extra trailing fields) are tolerated.
  */
-export function parseLoga(text: string, onProgress?: ParseProgress): LogSession {
+export function parseLoga(
+  text: string,
+  onProgress?: ParseProgress,
+  maxTextChars: number = MAX_LOGA_TEXT_CHARS,
+): LogSession {
+  if (text.length > maxTextChars) {
+    throw new Error(
+      `.loga: refusing a ${text.length.toLocaleString()}-character file (limit ${maxTextChars.toLocaleString()})`,
+    )
+  }
   const lines = text.split(/\r?\n/)
   const firstLine = lines[0] ?? ''
   const format = detectFormat(firstLine)

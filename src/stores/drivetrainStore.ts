@@ -555,86 +555,170 @@ function looksLikeV2Cvt(v: unknown): v is Partial<CvtFormState> {
   return true
 }
 
-function positiveNumberOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null
+// M9 P2: array-shaped CVT profile fields (measurement curves/tables) had no
+// length cap — a malicious/corrupted settings-import bundle could smuggle in
+// an arbitrarily large array (e.g. millions of entries) that then gets
+// sorted/mapped/rendered on every profile touch. 4096 comfortably covers any
+// real hand-entered or logged measurement table (roller tracks, force
+// curves, calibration maps are all well under a few hundred points in
+// practice) while bounding the worst case; excess entries are silently
+// truncated (dropped from the tail, same "best effort, no throw" spirit as
+// the rest of this sanitizer) rather than rejecting the whole array.
+const MAX_CVT_ARRAY_LENGTH = 4096
+
+/** M9 P2: `positiveNumberOrNull`/`nonNegativeNumberOrNull` originally only
+ *  checked finiteness — a corrupt/malicious payload could set a field to
+ *  e.g. `1e308`, which stays "finite" but is physically nonsensical for any
+ *  of these mm/deg/rpm/N measurements and can blow up downstream arithmetic
+ *  (bisection bounds, trig, etc. in `cvtDynamics.ts`/`cvtForceBalance.ts`).
+ *  `max` is optional (defaults to no cap) so fields whose reasonable range
+ *  isn't obvious (indices, sample counts, free-form ratios/scale factors)
+ *  can keep the old finite-only behaviour unchanged. */
+function positiveNumberOrNull(value: unknown, max = Number.POSITIVE_INFINITY): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max ? value : null
 }
 
-function nonNegativeNumberOrNull(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+function nonNegativeNumberOrNull(value: unknown, max = Number.POSITIVE_INFINITY): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : null
 }
+
+// Generous (loosely physical, not tightly "realistic") upper bounds for
+// fields where the unit has an obvious real-world ceiling. Picked to be well
+// beyond any plausible vehicle/CVT measurement so legitimate data is never
+// rejected, while still ruling out garbage/adversarial magnitudes.
+const MAX_HALF_ANGLE_DEG = 89 // tan() asymptotes at 90; sheave/wedge half-angles are physically < 30
+const MAX_INCLUDED_ANGLE_DEG = 178 // = 2 * MAX_HALF_ANGLE_DEG
+const MAX_LENGTH_MM = 5000 // belt/geometry lengths, center distance, sleeve/pulley diameters (5 m)
+const MAX_RADIUS_MM = 1000 // CVT sheave/roller-track radii (1 m)
+const MAX_TRAVEL_MM = 500 // variator travel range
+const MAX_MASS_G = 2000 // roller mass (2 kg per roller)
+const MAX_FORCE_N = 5000 // spring/force-curve force
+const MAX_TORQUE_NM = 2000 // engine/CVT torque
+const MAX_RATIO = 50 // gear/CVT ratio, calibration scale factors
+const MAX_TEETH = 500 // sprocket/gear tooth counts
+const MAX_RPM = 30000
+const MAX_FRICTION_COEFFICIENT = 5
 
 function sanitizeAngle(value: unknown, fallback: CvtAngleInput): CvtAngleInput {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<CvtAngleInput>) : {}
+  const basis = raw.basis === 'included' ? 'included' : raw.basis === 'half' ? 'half' : fallback.basis
   return {
-    valueDeg: positiveNumberOrNull(raw.valueDeg),
-    basis: raw.basis === 'included' ? 'included' : raw.basis === 'half' ? 'half' : fallback.basis,
+    valueDeg: positiveNumberOrNull(raw.valueDeg, basis === 'included' ? MAX_INCLUDED_ANGLE_DEG : MAX_HALF_ANGLE_DEG),
+    basis,
   }
+}
+
+/** Resolves one edge (`min`/`max`) of a radius-bounds pair to either a valid
+ *  positive number (within `MAX_RADIUS_MM`), the `'blank'` sentinel, or
+ *  `'invalid'`.
+ *
+ *  `'blank'` means "not filled in yet". `CvtProfileEditor.patchBounds` fires
+ *  per-field on `@change` (blur), but always re-sends the *whole* `{min,
+ *  max}` pair — defaulting whichever edge hasn't been touched yet to `0`
+ *  (radii can never legitimately be 0, so it doubles as "unset"). Treating
+ *  that `0` as genuinely invalid used to reject the *entire* bounds object
+ *  the instant either field's `@change` fired, wiping out the value the
+ *  user just typed into the OTHER field the moment focus left it (B97).
+ *  `'invalid'` is reserved for values that are wrong for reasons other than
+ *  being blank (negative, NaN, Infinity, or exceeding `MAX_RADIUS_MM`) —
+ *  those must still reject the whole object, same as before (M9 P2
+ *  import-safety hardening; see the array-length/range-clamp commit this
+ *  mirrors). */
+function resolveRadiusBoundEdge(value: unknown): number | 'blank' | 'invalid' {
+  if (value === 0) return 'blank'
+  const n = positiveNumberOrNull(value, MAX_RADIUS_MM)
+  return n != null ? n : 'invalid'
 }
 
 function sanitizeBounds(value: unknown): RadiusBoundsMm | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Partial<RadiusBoundsMm>
-  const min = positiveNumberOrNull(raw.min)
-  const max = positiveNumberOrNull(raw.max)
-  return min != null && max != null && max >= min ? { min, max } : null
+  const min = resolveRadiusBoundEdge(raw.min)
+  const max = resolveRadiusBoundEdge(raw.max)
+  if (min === 'invalid' || max === 'invalid') return null
+  if (min === 'blank' && max === 'blank') return null
+  const minVal = min === 'blank' ? Number.NaN : min
+  const maxVal = max === 'blank' ? Number.NaN : max
+  // Only enforce max >= min once BOTH edges are real (filled-in) numbers —
+  // a still-blank sibling can't be "out of order" with anything.
+  if (!Number.isNaN(minVal) && !Number.isNaN(maxVal) && maxVal < minVal) return null
+  return { min: minVal, max: maxVal }
 }
 
+// A freshly-added stage from the UI's "新增一軸" button starts blank
+// (`{ driveTeeth: 0, drivenTeeth: 0 }`) — the user is expected to type real
+// tooth counts in afterward. Using `positiveNumberOrNull` here rejected that
+// blank stage outright, so the store's own sanitizer deleted the row the
+// instant it was added, making the button look like a no-op. `resolveFixedReduction`
+// (cvtDynamics.ts) already treats a non-positive stage as "not yet
+// computable" (returns NaN) without crashing, so it's safe to keep a
+// 0/0 stage around as a normal in-progress editing state. Missing
+// (`undefined`) teeth counts — e.g. from older/partial import payloads —
+// default to 0 for the same reason, rather than dropping the stage.
+// Genuinely invalid values (negative, NaN, Infinity, or beyond MAX_TEETH)
+// still null out and drop the stage, per the M9 P2 hardening above.
 function sanitizeReductionStage(value: unknown): ReductionStageInput | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Partial<ReductionStageInput>
-  const driveTeeth = positiveNumberOrNull(raw.driveTeeth)
-  const drivenTeeth = positiveNumberOrNull(raw.drivenTeeth)
+  const driveTeeth = raw.driveTeeth === undefined ? 0 : nonNegativeNumberOrNull(raw.driveTeeth, MAX_TEETH)
+  const drivenTeeth = raw.drivenTeeth === undefined ? 0 : nonNegativeNumberOrNull(raw.drivenTeeth, MAX_TEETH)
   return driveTeeth != null && drivenTeeth != null ? { driveTeeth, drivenTeeth } : null
 }
 
 function sanitizeReduction(value: unknown, fallback: FixedReductionInput): FixedReductionInput {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<FixedReductionInput>) : {}
   const stages = Array.isArray(raw.stages)
-    ? raw.stages.map(sanitizeReductionStage).filter((stage): stage is ReductionStageInput => stage != null)
+    ? raw.stages
+        .slice(0, MAX_CVT_ARRAY_LENGTH)
+        .map(sanitizeReductionStage)
+        .filter((stage): stage is ReductionStageInput => stage != null)
     : fallback.stages.map((stage) => ({ ...stage }))
   return {
     mode: raw.mode === 'stages' ? 'stages' : 'ratio',
-    ratio: positiveNumberOrNull(raw.ratio) ?? 0,
+    ratio: positiveNumberOrNull(raw.ratio, MAX_RATIO) ?? 0,
     stages,
   }
 }
 
 function sanitizeMasses(value: unknown): number[] {
   return Array.isArray(value)
-    ? value.map(positiveNumberOrNull).filter((mass): mass is number => mass != null)
+    ? value
+        .slice(0, MAX_CVT_ARRAY_LENGTH)
+        .map((mass) => positiveNumberOrNull(mass, MAX_MASS_G))
+        .filter((mass): mass is number => mass != null)
     : []
 }
 
 function sanitizeRollerTrack(value: unknown): RollerTrackPoint[] {
   if (!Array.isArray(value)) return []
-  return value.flatMap((entry) => {
+  return value.slice(0, MAX_CVT_ARRAY_LENGTH).flatMap((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
     const raw = entry as Partial<RollerTrackPoint>
-    const travelMm = nonNegativeNumberOrNull(raw.travelMm)
-    const radiusMm = positiveNumberOrNull(raw.radiusMm)
+    const travelMm = nonNegativeNumberOrNull(raw.travelMm, MAX_TRAVEL_MM)
+    const radiusMm = positiveNumberOrNull(raw.radiusMm, MAX_RADIUS_MM)
     return travelMm != null && radiusMm != null ? [{ travelMm, radiusMm }] : []
   }).sort((a, b) => a.travelMm - b.travelMm)
 }
 
 function sanitizeForceCurve(value: unknown): ForceCurvePoint[] {
   if (!Array.isArray(value)) return []
-  return value.flatMap((entry) => {
+  return value.slice(0, MAX_CVT_ARRAY_LENGTH).flatMap((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
     const raw = entry as Partial<ForceCurvePoint>
-    const travelMm = nonNegativeNumberOrNull(raw.travelMm)
-    const pointValue = nonNegativeNumberOrNull(raw.value)
+    const travelMm = nonNegativeNumberOrNull(raw.travelMm, MAX_TRAVEL_MM)
+    const pointValue = nonNegativeNumberOrNull(raw.value, MAX_FORCE_N)
     return travelMm != null && pointValue != null ? [{ travelMm, value: pointValue }] : []
   }).sort((a, b) => a.travelMm - b.travelMm)
 }
 
 function sanitizeCamPoints(value: unknown): TorqueCamPoint[] {
   if (!Array.isArray(value)) return []
-  return value.flatMap((entry) => {
+  return value.slice(0, MAX_CVT_ARRAY_LENGTH).flatMap((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
     const raw = entry as Partial<TorqueCamPoint>
-    const travelMm = nonNegativeNumberOrNull(raw.travelMm)
+    const travelMm = nonNegativeNumberOrNull(raw.travelMm, MAX_TRAVEL_MM)
     const angleDeg = positiveNumberOrNull(raw.angleDeg)
-    const effectiveRadiusMm = positiveNumberOrNull(raw.effectiveRadiusMm)
+    const effectiveRadiusMm = positiveNumberOrNull(raw.effectiveRadiusMm, MAX_RADIUS_MM)
     return travelMm != null && angleDeg != null && angleDeg < 90 && effectiveRadiusMm != null
       ? [{ travelMm, angleDeg, effectiveRadiusMm }]
       : []
@@ -643,11 +727,11 @@ function sanitizeCamPoints(value: unknown): TorqueCamPoint[] {
 
 function sanitizeCalibrationMap(value: unknown): Array<{ ratio: number; scale: number }> {
   if (!Array.isArray(value)) return []
-  return value.flatMap((entry) => {
+  return value.slice(0, MAX_CVT_ARRAY_LENGTH).flatMap((entry) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
     const raw = entry as { ratio?: unknown; scale?: unknown }
-    const ratio = positiveNumberOrNull(raw.ratio)
-    const scale = positiveNumberOrNull(raw.scale)
+    const ratio = positiveNumberOrNull(raw.ratio, MAX_RATIO)
+    const scale = positiveNumberOrNull(raw.scale, MAX_RATIO)
     return ratio != null && scale != null ? [{ ratio, scale }] : []
   }).sort((a, b) => a.ratio - b.ratio)
 }
@@ -655,10 +739,13 @@ function sanitizeCalibrationMap(value: unknown): Array<{ ratio: number; scale: n
 function sanitizeCalibrationSegment(value: unknown): CvtCalibrationSegment | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Partial<CvtCalibrationSegment>
+  // startX/endX index into whatever x-axis the analyzer chart happened to be
+  // showing when the segment was captured (time, distance, ...) — no fixed
+  // unit/ceiling, so (unlike the fields below) only finiteness is enforced.
   const startX = nonNegativeNumberOrNull(raw.startX)
   const endX = nonNegativeNumberOrNull(raw.endX)
   const sampleCount = positiveNumberOrNull(raw.sampleCount)
-  const referencePureRatio = positiveNumberOrNull(raw.referencePureRatio)
+  const referencePureRatio = positiveNumberOrNull(raw.referencePureRatio, MAX_RATIO)
   const relativeMad = nonNegativeNumberOrNull(raw.relativeMad)
   return startX != null && endX != null && endX >= startX && sampleCount != null && referencePureRatio != null && relativeMad != null
     ? { startX, endX, sampleCount: Math.round(sampleCount), referencePureRatio, relativeMad }
@@ -688,31 +775,31 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
     name: typeof raw.name === 'string' ? raw.name : base.name,
     vehicleId: typeof raw.vehicleId === 'string' ? raw.vehicleId : base.vehicleId,
     actuationKind: raw.actuationKind === 'electronic' ? 'electronic' : 'mechanical',
-    wheelCircumferenceMm: positiveNumberOrNull(raw.wheelCircumferenceMm) ?? base.wheelCircumferenceMm,
+    wheelCircumferenceMm: positiveNumberOrNull(raw.wheelCircumferenceMm, 10000) ?? base.wheelCircumferenceMm,
     tireSpec: typeof raw.tireSpec === 'string' ? raw.tireSpec : base.tireSpec,
     gearReduction: sanitizeReduction(raw.gearReduction, base.gearReduction),
     finalReduction: sanitizeReduction(raw.finalReduction, base.finalReduction),
     belt: {
       partNumber: typeof rawBelt.partNumber === 'string' ? rawBelt.partNumber : base.belt.partNumber,
       lengthSource: rawBelt.lengthSource === 'pitch' ? 'pitch' : 'outside',
-      pitchLengthMm: positiveNumberOrNull(rawBelt.pitchLengthMm),
-      outsideLengthMm: positiveNumberOrNull(rawBelt.outsideLengthMm),
-      cordOffsetFromOutsideMm: positiveNumberOrNull(rawBelt.cordOffsetFromOutsideMm),
-      widthMm: positiveNumberOrNull(rawBelt.widthMm),
-      heightMm: positiveNumberOrNull(rawBelt.heightMm),
+      pitchLengthMm: positiveNumberOrNull(rawBelt.pitchLengthMm, MAX_LENGTH_MM),
+      outsideLengthMm: positiveNumberOrNull(rawBelt.outsideLengthMm, MAX_LENGTH_MM),
+      cordOffsetFromOutsideMm: positiveNumberOrNull(rawBelt.cordOffsetFromOutsideMm, MAX_LENGTH_MM),
+      widthMm: positiveNumberOrNull(rawBelt.widthMm, MAX_LENGTH_MM),
+      heightMm: positiveNumberOrNull(rawBelt.heightMm, MAX_LENGTH_MM),
       wedgeAngle: sanitizeAngle(rawBelt.wedgeAngle, base.belt.wedgeAngle),
     },
     geometry: {
-      centerDistanceMm: positiveNumberOrNull(rawGeometry.centerDistanceMm),
+      centerDistanceMm: positiveNumberOrNull(rawGeometry.centerDistanceMm, MAX_LENGTH_MM),
       frontSheaveAngle: sanitizeAngle(rawGeometry.frontSheaveAngle, base.geometry.frontSheaveAngle),
       rearSheaveAngle: sanitizeAngle(rawGeometry.rearSheaveAngle, base.geometry.rearSheaveAngle),
       frontRadiusBoundsMm: sanitizeBounds(rawGeometry.frontRadiusBoundsMm),
       rearRadiusBoundsMm: sanitizeBounds(rawGeometry.rearRadiusBoundsMm),
-      frontReferenceRadiusMm: positiveNumberOrNull(rawGeometry.frontReferenceRadiusMm),
-      rearReferenceRadiusMm: positiveNumberOrNull(rawGeometry.rearReferenceRadiusMm),
-      frontBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.frontBarePulleyDiameterMm),
-      rearBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.rearBarePulleyDiameterMm),
-      sleeveLengthMm: positiveNumberOrNull(rawGeometry.sleeveLengthMm),
+      frontReferenceRadiusMm: positiveNumberOrNull(rawGeometry.frontReferenceRadiusMm, MAX_RADIUS_MM),
+      rearReferenceRadiusMm: positiveNumberOrNull(rawGeometry.rearReferenceRadiusMm, MAX_RADIUS_MM),
+      frontBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.frontBarePulleyDiameterMm, MAX_LENGTH_MM),
+      rearBarePulleyDiameterMm: positiveNumberOrNull(rawGeometry.rearBarePulleyDiameterMm, MAX_LENGTH_MM),
+      sleeveLengthMm: positiveNumberOrNull(rawGeometry.sleeveLengthMm, MAX_LENGTH_MM),
     },
     force: {
       roller: {
@@ -727,11 +814,11 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
       spring: {
         catalogLabel: typeof rawSpring.catalogLabel === 'string' ? rawSpring.catalogLabel : base.force.spring.catalogLabel,
         mode: rawSpring.mode === 'linear' || rawSpring.mode === 'curve' ? rawSpring.mode : 'disabled',
-        freeLengthMm: positiveNumberOrNull(rawSpring.freeLengthMm),
-        installedLengthMm: positiveNumberOrNull(rawSpring.installedLengthMm),
-        coilBindLengthMm: positiveNumberOrNull(rawSpring.coilBindLengthMm),
-        rateNPerMm: positiveNumberOrNull(rawSpring.rateNPerMm),
-        installedPreloadMm: nonNegativeNumberOrNull(rawSpring.installedPreloadMm),
+        freeLengthMm: positiveNumberOrNull(rawSpring.freeLengthMm, MAX_LENGTH_MM),
+        installedLengthMm: positiveNumberOrNull(rawSpring.installedLengthMm, MAX_LENGTH_MM),
+        coilBindLengthMm: positiveNumberOrNull(rawSpring.coilBindLengthMm, MAX_LENGTH_MM),
+        rateNPerMm: positiveNumberOrNull(rawSpring.rateNPerMm, MAX_FORCE_N),
+        installedPreloadMm: nonNegativeNumberOrNull(rawSpring.installedPreloadMm, MAX_TRAVEL_MM),
         forceCurve: sanitizeForceCurve(rawSpring.forceCurve),
       },
       torqueCam: {
@@ -743,29 +830,29 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
           return share != null && share < 1 ? share : null
         })(),
         equalSplitAssumption: rawCam.equalSplitAssumption === true && rawCam.torqueShare === 0.5,
-        torsionTorqueNm: nonNegativeNumberOrNull(rawCam.torsionTorqueNm),
+        torsionTorqueNm: nonNegativeNumberOrNull(rawCam.torsionTorqueNm, MAX_TORQUE_NM),
       },
       couplingMode: rawForce.couplingMode === 'ideal' || rawForce.couplingMode === 'calibrated'
         ? rawForce.couplingMode
         : 'disabled',
-      couplingScale: positiveNumberOrNull(rawForce.couplingScale),
-      operatingFrontRpm: positiveNumberOrNull(rawForce.operatingFrontRpm),
-      operatingRearTorqueNm: nonNegativeNumberOrNull(rawForce.operatingRearTorqueNm),
-      frictionCoefficientMin: positiveNumberOrNull(rawForce.frictionCoefficientMin),
-      frictionCoefficientMax: positiveNumberOrNull(rawForce.frictionCoefficientMax),
+      couplingScale: positiveNumberOrNull(rawForce.couplingScale, MAX_RATIO),
+      operatingFrontRpm: positiveNumberOrNull(rawForce.operatingFrontRpm, MAX_RPM),
+      operatingRearTorqueNm: nonNegativeNumberOrNull(rawForce.operatingRearTorqueNm, MAX_TORQUE_NM),
+      frictionCoefficientMin: positiveNumberOrNull(rawForce.frictionCoefficientMin, MAX_FRICTION_COEFFICIENT),
+      frictionCoefficientMax: positiveNumberOrNull(rawForce.frictionCoefficientMax, MAX_FRICTION_COEFFICIENT),
     },
     calibration: {
       setupIdentity: typeof rawCalibration.setupIdentity === 'string' ? rawCalibration.setupIdentity : base.calibration.setupIdentity,
       revision: nonNegativeNumberOrNull(rawCalibration.revision) == null ? 0 : Math.round(rawCalibration.revision!),
       activeDirection: rawCalibration.activeDirection === 'downshift' ? 'downshift' : 'upshift',
-      referencePureRatio: positiveNumberOrNull(rawCalibration.referencePureRatio),
-      combinedFixedReduction: positiveNumberOrNull(rawCalibration.combinedFixedReduction),
+      referencePureRatio: positiveNumberOrNull(rawCalibration.referencePureRatio, MAX_RATIO),
+      combinedFixedReduction: positiveNumberOrNull(rawCalibration.combinedFixedReduction, MAX_RATIO),
       fixedReductionSegment: sanitizeCalibrationSegment(rawCalibration.fixedReductionSegment),
       upshiftMap: sanitizeCalibrationMap(rawCalibration.upshiftMap),
       downshiftMap: sanitizeCalibrationMap(rawCalibration.downshiftMap),
-      accuracyTargetRpm: positiveNumberOrNull(rawCalibration.accuracyTargetRpm),
-      holdoutResidualRpm: nonNegativeNumberOrNull(rawCalibration.holdoutResidualRpm),
-      sensitivityDeltaTotalMassG: positiveNumberOrNull(rawCalibration.sensitivityDeltaTotalMassG) ?? 1,
+      accuracyTargetRpm: positiveNumberOrNull(rawCalibration.accuracyTargetRpm, MAX_RPM),
+      holdoutResidualRpm: nonNegativeNumberOrNull(rawCalibration.holdoutResidualRpm, MAX_RPM),
+      sensitivityDeltaTotalMassG: positiveNumberOrNull(rawCalibration.sensitivityDeltaTotalMassG, MAX_MASS_G) ?? 1,
     },
   }
 }

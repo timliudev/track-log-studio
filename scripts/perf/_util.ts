@@ -1,8 +1,11 @@
 /**
  * Shared helpers for the perf-audit bench scripts (docs/journal/PERF-AUDIT-2026-07-08.md).
- * Not part of the app build — run standalone via `npx vite-node scripts/perf/<name>.ts`
- * (vite-node resolves the `@/` alias from vite.config.ts, so these scripts can
- * import straight from `src/domain/...` exactly like the app / vitest do).
+ * Not part of the app build — run standalone via `npm run bench:parse` /
+ * `npm run bench:pipeline` (these shell out to `scripts/perf/run-with-vite.mjs`,
+ * a tiny loader that boots Vite's own dev server in middleware mode so the
+ * `@/` alias from vite.config.ts resolves, letting these scripts import
+ * straight from `src/domain/...` exactly like the app / vitest do — no
+ * separate TS-execution dependency needed).
  */
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -20,7 +23,7 @@ export interface LogaFixture {
  * vars at your own copies to reproduce the exact numbers in the report:
  *
  *   BENCH_SMALL_LOGA=/path/to/small.loga BENCH_LARGE_LOGA=/path/to/large.loga \
- *     npx vite-node scripts/perf/bench-parse.ts
+ *     npm run bench:parse
  *
  * Without the env vars, falls back to the repo's own `test/fixtures/*.loga`
  * (small, synthetic-ish samples) so the script still runs for anyone — just
