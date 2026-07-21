@@ -50,6 +50,10 @@ LogaExample/
 .dev.vars*
 !.dev.vars.example
 
+# Obsidian vault config (generated when opening docs/ as a vault) — machine-local
+# UI state (workspace layout, plugin toggles, recently-open files), not project content.
+.obsidian/
+
 # Dev journal (per-session work logs) — reveals working hours/patterns,
 # kept local-only, never committed.
 /docs/journal/
