@@ -1,5 +1,9 @@
 # 匯入／匯出格式支援狀態
 
+> **本檔 = 進度／已知限制／待完成的唯一真實來源**（✅／🔧／🛠️／📋）。
+> 每個格式 ↔ importer/exporter/formatId/decoder 的**架構對應**不在此重列，見
+> [ARCHITECTURE-FORMATS.md §4](ARCHITECTURE-FORMATS.md#4-目前支援矩陣)。
+
 本檔追蹤多格式匯入／匯出的進度。詳細架構見
 [ARCHITECTURE-FORMATS.md](ARCHITECTURE-FORMATS.md)；格式研究與接入評估見
 [FORMAT-SUPPORT-RESEARCH.md](specs/FORMAT-SUPPORT-RESEARCH.md)；AiM XRK 二進位規格見

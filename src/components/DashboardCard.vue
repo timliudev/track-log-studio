@@ -371,9 +371,29 @@ function onPinResizeReset(): void {
 // Only feed a POSITIVE finite ratio through to CSS — an unset/zero/NaN
 // aspectRatio (e.g. a card whose layout entry momentarily has h:0) must not
 // produce an invalid `aspect-ratio: NaN` or a divide-by-zero shape.
+//
+// B100 fix — while `collapsed`, neither of the two height-forcing branches
+// below (`pinnedSize`'s explicit pixel height, or the `aspectRatio`-derived
+// CSS `aspect-ratio`) may apply: both are body-sizing rules, and a collapsed
+// card has no body (`v-if="!collapsed && !pinnedMini"` on `.body` below,
+// same as a grid card's collapse). Left unguarded, the floating Teleported
+// card kept its full pre-collapse footprint — `.pinned.collapsed`'s CSS
+// `height: auto` (see that rule's own doc) never got a chance to size the
+// card down to its header, because an INLINE `style` height/aspect-ratio
+// always wins the cascade over any class rule regardless of specificity.
+// `pinnedSize.value` itself is left completely untouched here (only this
+// computed's OUTPUT while collapsed changes) — expanding again re-reads it
+// and restores the exact user-dragged size, mirroring how a grid card's
+// collapse never forgets its own pre-collapse `h`. WIDTH is kept (via
+// `pinnedSize`, when the user has dragged one) so collapsing only shrinks
+// the card vertically, matching grid-card collapse's own "slot width stays,
+// only height react to the header" behaviour.
 const cardStyle = computed(() => {
   if (!props.pinned) return undefined
   if (pinnedSize.value) {
+    if (props.collapsed) {
+      return { width: `${pinnedSize.value.w}px`, maxWidth: 'none' }
+    }
     // A user-dragged size overrides both the aspect-ratio default AND the
     // `.pinned` CSS rule's `max-height: 45vh` / the anchor's `width:
     // min(560px, 100%)` cap — clampPinnedSize already bounds it sensibly, so
@@ -385,6 +405,7 @@ const cardStyle = computed(() => {
       maxHeight: 'none',
     }
   }
+  if (props.collapsed) return undefined
   if (props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0) {
     return { aspectRatio: String(props.aspectRatio) }
   }
@@ -859,7 +880,17 @@ onBeforeUnmount(() => {
    tall/narrow card's aspect-ratio-derived height could otherwise still push
    past a comfortable viewport share) rather than the primary sizing rule;
    when `aspectRatio` isn't supplied, this falls back to the old behaviour
-   unchanged. */
+   unchanged.
+   B100 fix — this rule's `height: auto` also has to WIN while `.collapsed`
+   is ALSO present (a pinned card can be collapsed, same header-only chevron
+   as a grid card): both classes carry equal (two-class) specificity, and
+   this rule is declared AFTER `.dashboard-card.collapsed`'s own `height:
+   100%` (the `@media (min-width: 769px)` one, near that class's doc above),
+   so source order alone already made `auto` win here — the part that
+   ACTUALLY needed fixing was `cardStyle`'s own inline `height`/`aspect-ratio`
+   (see its computed's B100 doc), since an inline style always beats any
+   class rule regardless of specificity or order, and used to keep forcing
+   the pre-collapse footprint even with this rule correctly saying `auto`. */
 .dashboard-card.pinned {
   /* Override the base rule's `height: 100%` — that fills the (100%-height)
      GRID slot the un-pinned card normally lives in, but the pinned anchor

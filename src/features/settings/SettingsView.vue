@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { TzOverride } from '@/stores/settingsStore'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { detectLocale, type LocaleCode } from '@/i18n'
 import { thirdPartyLicenses } from '@/data/licenses'
 import { loadLayout, saveLayout } from '@/domain/layout/dashboardLayout'
@@ -99,6 +100,18 @@ const effectiveTimezoneLabel = computed(() => {
   const offset = formatOffsetMinutes(systemTzOffsetMinutes)
   return systemTzName ? `${offset} (${systemTzName})` : offset
 })
+
+// B101: effective input mode. Reuses the SAME §8 layer-3 signal every other
+// consumer (UPlotChart.vue, TrackMap.vue, etc.) keys touch-target sizing off
+// — `anyPointerCoarse` from useInputCapabilities.ts — rather than inventing a
+// separate heuristic here. When inputModePref is 'auto' this already resolves
+// through the live matchMedia reads; when it's an explicit 'touch'/'pointer'
+// override the composable pins it accordingly (though this indicator only
+// renders in the 'auto' case, mirroring theme/language/timezone above).
+const { anyPointerCoarse } = useInputCapabilities()
+const effectiveInputMode = computed<'touch' | 'pointer'>(() =>
+  anyPointerCoarse.value ? 'touch' : 'pointer',
+)
 
 // --- B19: settings export / import ---
 
@@ -257,6 +270,9 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
           <option value="touch">{{ t('inputMode.touch') }}</option>
           <option value="pointer">{{ t('inputMode.pointer') }}</option>
         </select>
+        <span v-if="inputModePref === 'auto'" class="current-value">
+          {{ t('settings.current', { value: t(`inputMode.${effectiveInputMode}`) }) }}
+        </span>
       </label>
       <!-- B31 — global toggle (not per-chart, see UPlotChart.vue's
            centreCursorMode prop doc) for the RaceChrono-style fixed

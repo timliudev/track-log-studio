@@ -5,7 +5,7 @@
 1. **轉檔器** — 把記錄檔轉成 [RaceChrono](https://racechrono.com/) DIY `.nmea`（NMEA 0183 `$GPRMC` + `$RC3`）、`.loga`、RaceLogic `.vbo` 或 `.csv` 供下載。
 2. **分析器** — 在賽道底圖上顯示軌跡、切圈、分段（sector），繪製遙測圖表與 G-G 圖，並可用可拖曳的儀表板同時比對多個圖表與多場次。
 
-可匯入格式：**`.loga`、`.nmea`、`.vbo`、`.rcz`、`.rcnx`、`.xrk`**（外加 aRacer x Tune App 分享出的 `.zip`，自動解壓）；
+可匯入格式：**`.loga`、`.nmea`、`.vbo`、`.rcz`、`.rcnx`、`.xrk`、`.csv`**（外加 aRacer x Tune App 分享出的 `.zip`，自動解壓）；
 可匯出格式：**RaceChrono `.nmea`、`.loga`、`.vbo`、`.csv`**。匯入採**可插拔的 Importer 架構**——每種格式是一個註冊在
 registry 的 Importer（副檔名 + 內容嗅探偵測，解析在 Web Worker），新增文字格式只需註冊一個 Importer。
 詳見 [`docs/ARCHITECTURE-FORMATS.md`](docs/ARCHITECTURE-FORMATS.md)。
@@ -14,7 +14,7 @@ registry 的 Importer（副檔名 + 內容嗅探偵測，解析在 Web Worker）
 
 **Track Log Studio** is a browser-based, **fully client-side** tool to convert
 and analyse racing data logs — from ECU logs (aRacer `.loga`) as well as several
-GPS data loggers. It **imports `.loga` / `.nmea` / `.vbo` / `.rcz` / `.rcnx` / `.xrk`** (plus aRacer x Tune
+GPS data loggers. It **imports `.loga` / `.nmea` / `.vbo` / `.rcz` / `.rcnx` / `.xrk` / `.csv`** (plus aRacer x Tune
 `.zip`) and **exports RaceChrono `.nmea`, `.loga`, `.vbo` and `.csv`**, then analyses laps,
 sectors, telemetry and a G-G diagram on a drag-and-drop dashboard that can compare
 multiple charts and sessions. Import uses a pluggable Importer architecture (one
@@ -29,7 +29,7 @@ your browser. Installable as a PWA on iOS / Android.
 - 🌗 **日夜模式**：跟隨系統或手動
 - 🌐 **多語系**：繁體中文 / English（自動偵測 + 手動）
 - 🧩 自動相容多種 `.loga` 檔頭（Super2 / SuperX / RaceAMP / aRacer X tune App）
-- 📥 匯入 `.loga`、`.nmea`、`.vbo`、`.rcz`、`.rcnx`、`.xrk`，或 aRacer x Tune App 分享出的 `.zip`（自動解壓）
+- 📥 匯入 `.loga`、`.nmea`、`.vbo`、`.rcz`、`.rcnx`、`.xrk`、`.csv`，或 aRacer x Tune App 分享出的 `.zip`（自動解壓）
 - 🔄 可匯出 RaceChrono `.nmea`、`.loga`、RaceLogic `.vbo`、`.csv`
 - 📊 分析器：軌跡底圖、切圈與分段（sector）、遙測圖表、G-G 圖、可拖曳的多圖表儀表板
 - 🧵 多場次載入、合併與比較（RaceChrono GPS ＋ ECU log 對齊）
@@ -55,6 +55,7 @@ your browser. Installable as a PWA on iOS / Android.
 | `.rcz` | RaceChrono | ZIP + `session.json` + 逐通道二進位 |
 | `.xrk` | AiM Solo 2 DL / MyChron5 | 訊息流二進位，GPS 為 ECEF→WGS84 |
 | `.rcnx` | Qstarz LT-Q6000 / Q6000S（QRacing） | ZIP 內含 SQLite（`sql.js` 讀取） |
+| `.csv` | 通用遙測 Generic telemetry | RFC 4180；標題列含 `Time`/`Timer`（亦為本工具匯出格式） |
 
 各格式接入細節見 [`docs/IMPORT-FORMATS-STATUS.md`](docs/IMPORT-FORMATS-STATUS.md) 與 [`docs/specs/`](docs/specs/)。
 
@@ -66,7 +67,7 @@ your browser. Installable as a PWA on iOS / Android.
 |---|---|
 | 轉檔器（欄位對應 + preset + 批次，輸出 `.nmea` / `.loga` / `.vbo` / `.csv`） | ✅ |
 | 衍生通道與避震校正（5 參數，全格式通用） | ✅ |
-| 多格式匯入（`.loga` / `.nmea` / `.vbo` / `.rcz` / `.xrk` / `.rcnx`，可插拔 Importer） | ✅ |
+| 多格式匯入（`.loga` / `.nmea` / `.vbo` / `.rcz` / `.xrk` / `.rcnx` / `.csv`，可插拔 Importer） | ✅ |
 | 分析器：軌跡底圖、切圈、遙測圖表、圈速時間帶／距離帶過濾 | ✅ |
 | 賽道分段（sector）自動偵測與分段計時、最佳理論圈 | ✅ |
 | G-G 圖、可拖曳／縮放的多圖表儀表板（手機摺疊／釘選／布局鎖定） | ✅ |

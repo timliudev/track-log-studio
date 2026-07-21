@@ -1,6 +1,7 @@
 # 雲端賽道機制設計文件（A2 自動套用 + A3 公開賽道庫）
 
-> 狀態：**第一、二階段已實作**（`feature/cloud-track` 分支，未合併 develop）。
+> 狀態：**第一、二階段已實作並合併 develop**（`domain/tracks/*`：schema / matching /
+> seedLibrary / contribute，接在 `trackLibraryStore` + `TrackFilePanel.vue`；已無獨立分支）。
 > [`docs/DESIGN.md`](./DESIGN.md) §11b「Track 獨立匯入檔 + 雲端同步（分流儲存）」點子的具體化。
 >
 > **實作進度**（§7 分期對照，細節見分支上的 commit 訊息）：

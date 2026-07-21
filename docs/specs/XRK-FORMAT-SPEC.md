@@ -1,6 +1,6 @@
 # AiM `.xrk` 二進位格式逆向規格（供 `parseXrk` 實作）
 
-> 狀態：**INVESTIGATION + DOC ONLY**。本文件僅為規格，尚未實作 importer。
+> 狀態：**已實作**——`parseXrk`（含 `.xrz` zlib 解壓）已落地並以真檔驗證（95890 列／座標正確／圈時合理）。本文件為其實作依據的逆向規格。
 > 範圍：AiM Solo 2 DL / MyChron5 logger 產生的 `.xrk`（本專案樣本來自台灣 A.R.K. 賽道機車場次）。
 > 信心：**高，可實作**。核心結構（chunk 框架、checksum、channel table、S/M/c sample message、GPS、LAP、metadata）已用真實樣本逐位元組驗證；少數欄位語意（部分 unit code、decoder 邊角型別）標記為不確定。
 
