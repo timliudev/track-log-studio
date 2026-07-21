@@ -1,8 +1,11 @@
 # 格式支援研究：AiM XRK / RaceChrono RCZ / Qstarz LT-8000GT
 
-> 狀態：**研究 / 架構評估**（無樣本檔，尚未實作 parser）
-> 撰寫日期：2026-06-24
-> 對應分支：`docs/format-research`
+> 狀態：**三格式皆已實作並落地**（本文件為 2026-06-24 的實作前研究，保留為決策脈絡）。
+> `.xrk`/`.xrz`（`parseXrk`）、`.rcz`（`parseRcz`）、Qstarz `.rcnx`（`parseRcnx`，實測機種為
+> LT-Q6000/Q6000S，非本文原標的 LT-8000GT）皆以真檔驗證；規格見
+> [`XRK-FORMAT-SPEC.md`](./XRK-FORMAT-SPEC.md) / [`RCNX-FORMAT-SPEC.md`](./RCNX-FORMAT-SPEC.md)，
+> 當前進度見 [`../IMPORT-FORMATS-STATUS.md`](../IMPORT-FORMATS-STATUS.md)。
+> 撰寫日期：2026-06-24 · 對應分支：`docs/format-research`
 
 ## 目的
 
