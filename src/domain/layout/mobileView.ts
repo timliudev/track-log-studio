@@ -184,3 +184,16 @@ export function weightFor(state: MobileViewState, id: string, fallback = 1): num
   const weight = state.splitWeights[id]
   return typeof weight === 'number' && Number.isFinite(weight) && weight > 0 ? weight : fallback
 }
+
+/** F1 phase 2 — returns a NEW state with `splitWeights[id]` set to `weight`,
+ *  the draggable-divider persistence path {@link weightFor} reads back.
+ *  Sanitizes the same way {@link sanitizeMobileView}'s `toSplitWeights` does:
+ *  a `weight` that isn't a finite, `> 0` number is ignored — same-reference
+ *  no-op, nothing is written. Also a same-reference no-op when the stored
+ *  weight for `id` already equals `weight` (same convention as the other
+ *  setters). */
+export function setSplitWeight(state: MobileViewState, id: string, weight: number): MobileViewState {
+  if (typeof weight !== 'number' || !Number.isFinite(weight) || weight <= 0) return state
+  if (state.splitWeights[id] === weight) return state
+  return { ...state, splitWeights: { ...state.splitWeights, [id]: weight } }
+}
