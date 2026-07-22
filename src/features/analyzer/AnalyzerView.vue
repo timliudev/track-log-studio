@@ -56,22 +56,9 @@ import {
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import DashboardCard from '@/components/DashboardCard.vue'
-import TrackMap from './TrackMap.vue'
-import TimeSeriesChart from './TimeSeriesChart.vue'
-import LapTable from './LapTable.vue'
-import LapAlignPanel from './LapAlignPanel.vue'
-import MapAlignPanel from './MapAlignPanel.vue'
-import SectorPanel from './SectorPanel.vue'
-import TrackChannelPanel from './TrackChannelPanel.vue'
-import AccelTestPanel from './AccelTestPanel.vue'
-import GearPanel from './GearPanel.vue'
-import CvtDynamicsCard from './CvtDynamicsCard.vue'
-import TrackFilePanel from './TrackFilePanel.vue'
-import SessionMergePanel from './SessionMergePanel.vue'
-import SuspensionCard from './SuspensionCard.vue'
-import ScatterChart from './ScatterChart.vue'
-import CurrentValuesPanel from './CurrentValuesPanel.vue'
 import CardMenu from './CardMenu.vue'
+import AnalyzerCardBody from './AnalyzerCardBody.vue'
+import type { AnalyzerCardContext } from './analyzerCardContext'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
@@ -901,6 +888,89 @@ function locateCard(id: string): void {
   el.classList.add('card-locate-pulse')
   window.setTimeout(() => el.classList.remove('card-locate-pulse'), 1000)
 }
+
+// --- F1: the shared card context, assembled ONCE from every ref/computed/
+// store-action/handler an extracted card body reads. The dispatcher
+// (AnalyzerCardBody) — and, on mobile, MobileFocusStack — pass this straight
+// down so a card's content (now a standalone component under cards/) renders
+// identically whether it's inside the desktop grid's DashboardCard or the
+// mobile Focus Stack. A plain object of refs + functions: the reactivity is
+// deliberately NOT cloned away (see analyzerCardContext.ts). ---
+const primaryFileId = computed(() => activeFile.value?.id ?? null)
+const primaryFileName = computed(() => activeFile.value?.name ?? '')
+const line = computed(() => lapStore.line)
+const excludedCount = computed(() => lapStore.excluded.length)
+const hasLapTimeBand = computed(() => lapStore.lapTimeBand != null)
+const hasLapDistanceBand = computed(() => lapStore.lapDistanceBand != null)
+
+const cardCtx: AnalyzerCardContext = {
+  session,
+  track,
+  xValues,
+  xRange,
+  cursorIdx,
+  laps,
+  timeMs,
+  selectedLaps,
+  hasEcuLaps,
+  comparisonSessions,
+  primaryFileId,
+  primaryFileName,
+  charts,
+  mapMaximized,
+  line,
+  highlightLaps,
+  comparisonLapHighlights,
+  focusRange,
+  colorValues,
+  trackColormap,
+  mapGates,
+  allExtremaMarkers,
+  overlayTracks,
+  heatNorm,
+  legendGradient,
+  trackChannel,
+  excludedCount,
+  hasLapTimeBand,
+  hasLapDistanceBand,
+  bandMin,
+  bandMax,
+  distBandMin,
+  distBandMax,
+  bandExcludedCount,
+  distBandExcludedCount,
+  sectorFailureCount,
+  sectorAllFailed,
+  channelOptions,
+  trackExtrema,
+  trackChannelChosen,
+  accelResults,
+  speedAvailable,
+  ambiguousMatches,
+  appliedSharedTrack,
+  setCursor: (index) => analyzer.setCursor(index),
+  setLine: (nextLine) => lapStore.setLine(nextLine),
+  onUpdateGate,
+  setMapMaximized: (value) => {
+    mapMaximized.value = value
+  },
+  sessionOffsetOf: (id) => analyzer.sessionOffsetOf(id),
+  setComparisonMapOffset,
+  resetSessionOffset: (id, axis) => analyzer.resetSessionOffset(id, axis),
+  fmtVal,
+  resetLine,
+  onBandInput,
+  clearLapTimeBand: () => lapStore.clearLapTimeBand(),
+  onDistBandInput,
+  clearLapDistanceBand: () => lapStore.clearLapDistanceBand(),
+  onLapSelect,
+  onAccelFocus,
+  onAccelClear,
+  onXZoom,
+  chooseTrack,
+  dismissAmbiguous,
+  detachFromSharedTrack,
+}
 </script>
 
 <template>
@@ -1036,406 +1106,17 @@ function locateCard(id: string): void {
 
           <Teleport to="#dashboard-pinned-anchor" :disabled="!isPinned(String(item.i))" defer>
           <DashboardCard
-              v-if="item.i === 'map'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardMap')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <TrackMap
-                fill-height
-                :maximized="mapMaximized"
-                :track="track"
-                :cursor-idx="cursorIdx"
-                :line="lapStore.line"
-                :highlight-laps="highlightLaps"
-                :comparison-lap-highlights="comparisonLapHighlights"
-                :focus-range="focusRange"
-                :color-values="colorValues"
-                :colormap="trackColormap"
-                :gates="mapGates"
-                :extrema-markers="allExtremaMarkers"
-                :overlay-tracks="overlayTracks"
-                @cursor="analyzer.setCursor"
-                @update:line="lapStore.setLine($event)"
-                @update:gate="onUpdateGate"
-                @update:maximized="mapMaximized = $event"
-              />
-              <details v-if="!mapMaximized && overlayTracks.length" class="map-comparison-align">
-                <summary>{{ t('analyzer.comparisonMapAlign') }}</summary>
-                <div v-for="entry in overlayTracks" :key="entry.id" class="map-offset-row">
-                  <span class="comparison-swatch" :style="{ background: entry.color }" />
-                  <span class="comparison-name" :title="entry.label">{{ entry.label }}</span>
-                  <label>
-                    {{ t('analyzer.comparisonMapEast') }}
-                    <input
-                      type="number"
-                      step="0.5"
-                      :value="analyzer.sessionOffsetOf(entry.id).mapX"
-                      @change="setComparisonMapOffset(entry.id, 'mapX', $event)"
-                    />
-                  </label>
-                  <label>
-                    {{ t('analyzer.comparisonMapNorth') }}
-                    <input
-                      type="number"
-                      step="0.5"
-                      :value="analyzer.sessionOffsetOf(entry.id).mapY"
-                      @change="setComparisonMapOffset(entry.id, 'mapY', $event)"
-                    />
-                  </label>
-                  <span>m</span>
-                  <button
-                    type="button"
-                    @click="analyzer.resetSessionOffset(entry.id, 'mapX'); analyzer.resetSessionOffset(entry.id, 'mapY')"
-                  >
-                    {{ t('analyzer.comparisonReset') }}
-                  </button>
-                </div>
-              </details>
-              <div v-if="!mapMaximized && heatNorm" class="tc-legend">
-                <span class="tc-end">{{ fmtVal(heatNorm.min) }}</span>
-                <span class="tc-bar" :style="{ background: legendGradient }" />
-                <span class="tc-end">{{ fmtVal(heatNorm.max) }}</span>
-                <span class="tc-name">{{ trackChannel }}</span>
-              </div>
-              <p v-if="!mapMaximized" class="line-hint">{{ t('analyzer.lineHint') }}</p>
-              <div v-if="!mapMaximized" class="laps">
-                <span class="lap-count">{{
-                  lapStore.excluded.length > 0
-                    ? t('analyzer.lapCountExcluded', { n: laps.length, x: lapStore.excluded.length })
-                    : t('analyzer.lapCount', { n: laps.length })
-                }}</span>
-                <button type="button" class="reset" @click="resetLine">
-                  {{ t('analyzer.resetLine') }}
-                </button>
-              </div>
-              <div v-if="!mapMaximized" class="band" role="group" :aria-label="t('analyzer.lapBand')">
-                <span class="band-label">{{ t('analyzer.lapBand') }}</span>
-                <input
-                  type="number"
-                  inputmode="decimal"
-                  min="0"
-                  step="0.1"
-                  class="band-input"
-                  :value="bandMin ?? ''"
-                  :placeholder="t('analyzer.lapBandMin')"
-                  :aria-label="t('analyzer.lapBandMin')"
-                  @input="onBandInput('min', $event)"
-                />
-                <span class="band-sep">–</span>
-                <input
-                  type="number"
-                  inputmode="decimal"
-                  min="0"
-                  step="0.1"
-                  class="band-input"
-                  :value="bandMax ?? ''"
-                  :placeholder="t('analyzer.lapBandMax')"
-                  :aria-label="t('analyzer.lapBandMax')"
-                  @input="onBandInput('max', $event)"
-                />
-                <button
-                  v-if="lapStore.lapTimeBand"
-                  type="button"
-                  class="band-clear"
-                  @click="lapStore.clearLapTimeBand()"
-                >
-                  {{ t('analyzer.lapBandClear') }}
-                </button>
-                <span v-if="bandExcludedCount > 0" class="band-count">
-                  {{ t('analyzer.lapBandExcluded', { x: bandExcludedCount }) }}
-                </span>
-              </div>
-              <div v-if="!mapMaximized" class="band" role="group" :aria-label="t('analyzer.lapDistanceBand')">
-                <span class="band-label">{{ t('analyzer.lapDistanceBand') }}</span>
-                <input
-                  type="number"
-                  inputmode="decimal"
-                  min="0"
-                  step="0.001"
-                  class="band-input"
-                  :value="distBandMin ?? ''"
-                  :placeholder="t('analyzer.lapDistanceBandMin')"
-                  :aria-label="t('analyzer.lapDistanceBandMin')"
-                  @input="onDistBandInput('min', $event)"
-                />
-                <span class="band-sep">–</span>
-                <input
-                  type="number"
-                  inputmode="decimal"
-                  min="0"
-                  step="0.001"
-                  class="band-input"
-                  :value="distBandMax ?? ''"
-                  :placeholder="t('analyzer.lapDistanceBandMax')"
-                  :aria-label="t('analyzer.lapDistanceBandMax')"
-                  @input="onDistBandInput('max', $event)"
-                />
-                <button
-                  v-if="lapStore.lapDistanceBand"
-                  type="button"
-                  class="band-clear"
-                  @click="lapStore.clearLapDistanceBand()"
-                >
-                  {{ t('analyzer.lapDistanceBandClear') }}
-                </button>
-                <span v-if="distBandExcludedCount > 0" class="band-count">
-                  {{ t('analyzer.lapDistanceBandExcluded', { x: distBandExcludedCount }) }}
-                </span>
-              </div>
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'laptable'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardLapTable')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <LapTable
-                :laps="laps"
-                :track="track"
-                :time-ms="timeMs"
-                :session="session"
-                :has-ecu-laps="hasEcuLaps"
-                :comparison-sessions="comparisonSessions"
-                :primary-file-id="activeFile?.id ?? null"
-                :primary-file-name="activeFile?.name ?? ''"
-                @select="onLapSelect"
-              />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'sectors'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardSectors')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <SectorPanel
-                :laps="laps"
-                :failed-count="sectorFailureCount"
-                :all-failed="sectorAllFailed"
-                :track="track"
-                :time-ms="timeMs"
-                :cursor-idx="cursorIdx"
-              />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'trackchannel'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardTrackChannel')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <TrackChannelPanel
-                :options="channelOptions"
-                :extrema="trackExtrema"
-                :channel-chosen="trackChannelChosen"
-              />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'acceltest'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardAccelTest')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <AccelTestPanel
-                :results="accelResults"
-                :speed-available="speedAvailable"
-                @focus="onAccelFocus"
-                @clear="onAccelClear"
-              />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'gear'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardGear')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <GearPanel
-                :session="session"
-                :x-values="xValues"
-                :x-range="xRange"
-                :external-cursor="cursorIdx"
-                :selected-laps="selectedLaps"
-                :comparison-sessions="comparisonSessions"
-                :primary-file-id="activeFile?.id"
-                :primary-file-name="activeFile?.name"
-                @cursor="analyzer.setCursor"
-                @x-zoom="onXZoom"
-              />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'cvtdynamics'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardCvtDynamics')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <CvtDynamicsCard
-                :session="session"
-                :file-id="activeFile?.id"
-                :cursor-idx="cursorIdx"
-                :x-values="xValues"
-                :x-range="xRange"
-              />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'trackfile'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardTrackFile')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <TrackFilePanel
-                :track="track"
-                :ambiguous-matches="ambiguousMatches"
-                :applied-shared-track="appliedSharedTrack"
-                @choose-track="chooseTrack"
-                @dismiss-ambiguous="dismissAmbiguous"
-                @detach="detachFromSharedTrack"
-              />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'sessionmerge'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardSessionMerge')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <SessionMergePanel />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'suspension'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardSuspension')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              :show-pin="isMobile"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <SuspensionCard :session="session" />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'currentvalues'"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardCurrentValues')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <CurrentValuesPanel :session="session" :cursor-idx="cursorIdx" />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'mapalign' && showMapAlign"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardMapAlign')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <MapAlignPanel :selected-laps="selectedLaps" />
-            </DashboardCard>
-
-            <DashboardCard
-              v-else-if="item.i === 'lapalign' && showAlign"
-              :data-card-id="item.i"
-              :title="t('analyzer.layout.cardLapAlign')"
-              :collapsed="isCollapsed(item.i)"
-              :pinned="isPinned(item.i)"
-              :aspect-ratio="item.w / item.h"
-              @update:collapsed="toggleCollapsed(item.i)"
-              @update:pinned="togglePinned(item.i)"
-            >
-              <LapAlignPanel :selected-laps="selectedLaps" />
-            </DashboardCard>
-
-            <template v-else>
-              <template v-for="c in charts" :key="c.id">
-                <DashboardCard
-                  v-if="item.i === chartItemId(c.id)"
-                  :data-card-id="item.i"
-                  :title="chartTitle(c)"
-                  :collapsed="isCollapsed(item.i)"
-                  :pinned="isPinned(item.i)"
-                  :aspect-ratio="item.w / item.h"
-                  @update:collapsed="toggleCollapsed(item.i)"
-                  @update:pinned="togglePinned(item.i)"
-                >
-                  <TimeSeriesChart
-                    v-if="c.kind === 'timeseries' && session && xValues"
-                    fill-height
-                    :chart="c"
-                    :session="session"
-                    :x-values="xValues"
-                    :x-range="xRange"
-                    :external-cursor="cursorIdx"
-                    :selected-laps="selectedLaps"
-                    :comparison-sessions="comparisonSessions"
-                    :primary-file-id="activeFile?.id"
-                    :primary-file-name="activeFile?.name"
-                    @cursor="analyzer.setCursor"
-                    @x-zoom="onXZoom"
-                  />
-                  <ScatterChart
-                    v-else-if="c.kind === 'scatter'"
-                    fill-height
-                    :chart="c"
-                    :session="session"
-                    :selected-laps="selectedLaps"
-                    :comparison-sessions="comparisonSessions"
-                    :primary-file-id="activeFile?.id"
-                    :primary-file-name="activeFile?.name"
-                  />
-                </DashboardCard>
-              </template>
-            </template>
+            :data-card-id="String(item.i)"
+            :title="titleForItemId(String(item.i))"
+            :collapsed="isCollapsed(String(item.i))"
+            :pinned="isPinned(String(item.i))"
+            :aspect-ratio="item.w / item.h"
+            :show-pin="String(item.i) === 'suspension' ? isMobile : undefined"
+            @update:collapsed="toggleCollapsed(String(item.i))"
+            @update:pinned="togglePinned(String(item.i))"
+          >
+            <AnalyzerCardBody :id="String(item.i)" :ctx="cardCtx" />
+          </DashboardCard>
           </Teleport>
         </template>
       </GridLayout>
@@ -1581,150 +1262,6 @@ function locateCard(id: string): void {
   color: var(--color-accent-text);
   border-color: var(--color-accent);
 }
-.tc-legend {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: var(--space);
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-.tc-bar {
-  flex: 0 1 200px;
-  height: 10px;
-  border-radius: 5px;
-  border: 1px solid var(--color-border);
-}
-.tc-name {
-  color: var(--color-text);
-}
-.line-hint {
-  margin: calc(var(--space) * 1.5) 0 0;
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-.comparison-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  flex: none;
-  box-shadow: 0 0 0 1px var(--color-surface);
-}
-.comparison-name {
-  max-width: 16em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.map-comparison-align {
-  margin-top: var(--space);
-  padding: 7px 9px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-bg);
-  font-size: 0.8rem;
-}
-.map-comparison-align summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.map-offset-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px 8px;
-  padding-top: 7px;
-  color: var(--color-text-muted);
-}
-.map-offset-row label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.map-offset-row input {
-  width: 68px;
-  padding: 3px 5px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: var(--color-surface);
-  color: var(--color-text);
-}
-.map-offset-row button {
-  background: var(--color-bg);
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 3px 8px;
-  font: inherit;
-  cursor: pointer;
-}
-.map-offset-row button:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-.laps {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: var(--space);
-  font-size: 0.9rem;
-  color: var(--color-text-muted);
-}
-.reset {
-  background: var(--color-bg);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 5px 10px;
-  font: inherit;
-  cursor: pointer;
-}
-.reset:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-.band {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: var(--space);
-  font-size: 0.9rem;
-  color: var(--color-text-muted);
-}
-.band-label {
-  flex: 0 0 auto;
-}
-.band-input {
-  width: 64px;
-  background: var(--color-bg);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 5px 8px;
-  font: inherit;
-}
-.band-sep {
-  color: var(--color-text-muted);
-}
-.band-clear {
-  background: var(--color-bg);
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  padding: 5px 10px;
-  font: inherit;
-  cursor: pointer;
-}
-.band-clear:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
-.band-count {
-  color: var(--color-text-muted);
-}
-
 /* #2 縫隙拖動 — the positioning context the gutter overlay's absolutely-
    positioned hit-boxes are placed relative to (see the template's doc on
    gridWrapRef). Must wrap `<GridLayout>` with zero extra box (no padding/
