@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createApp, h, nextTick, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -385,6 +385,103 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
   })
 
+  describe('B99 — pinned-card resize handle locks WIDTH on mobile (full-bleed, only height resizes)', () => {
+    function stubRect(el: HTMLElement, width: number, height: number): void {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return this
+        },
+      } as DOMRect)
+    }
+    // happy-dom's default innerWidth is 1024 (desktop) — every OTHER test in
+    // this file relies on that default, so a test here that switches to a
+    // mobile width must restore it, or later tests (run in the same happy-dom
+    // window) would silently start seeing a mobile viewport too.
+    afterEach(() => {
+      window.innerWidth = 1024
+    })
+
+    it('dragging horizontally on mobile (<=768px) does NOT change width — only height moves', async () => {
+      window.innerWidth = 400
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      // The card's current full-bleed width at gesture start (e.g. the
+      // viewport-derived rendered width on a phone) — kept under
+      // clampPinnedSize's 96vw ceiling (384px at this viewport) so the
+      // assertion below is testing the dx-zeroing, not the pre-existing
+      // clamp.
+      stubRect(el, 350, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 350, clientY: 200, pointerId: 1 })
+      // +150 horizontal, +60 vertical — only the vertical delta should apply.
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+      window.dispatchEvent(new PointerEvent('pointerup'))
+    })
+
+    it('dragging horizontally on desktop (>768px) still resizes width — unchanged behaviour', async () => {
+      window.innerWidth = 1280
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+      window.dispatchEvent(new PointerEvent('pointerup'))
+    })
+
+    it('treats EXACTLY 768px as mobile (matches the app-wide `max-width: 768px` breakpoint)', async () => {
+      window.innerWidth = 768
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 400, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 400, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.attributes('style')).toContain('width: 400px')
+      window.dispatchEvent(new PointerEvent('pointerup'))
+    })
+
+    it('double-click reset still works on mobile — drops back to automatic (no forced width/height)', async () => {
+      window.innerWidth = 400
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 400, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 400, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 550, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+
+      await handle.trigger('dblclick')
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
+      expect(wrapper.attributes('style')).not.toContain('width:')
+      expect(wrapper.attributes('style')).not.toContain('height:')
+    })
+  })
+
   describe('B100 — collapsed pinned card shrinks to header height (drops body-sizing styles)', () => {
     function stubRect(el: HTMLElement, width: number, height: number): void {
       vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
@@ -454,6 +551,65 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
       await wrapper.setProps({ collapsed: true })
       expect(wrapper.find('.pin-resize-handle').exists()).toBe(false)
+    })
+  })
+
+  describe('B64 — mini (compact) pinned card drops body-sizing styles like collapse', () => {
+    function stubRect(el: HTMLElement, width: number, height: number): void {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return this
+        },
+      } as DOMRect)
+    }
+
+    it('does NOT apply aspect-ratio once toggled to mini, so CSS `.pinned` auto-height can shrink it to the header', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('re-applies aspect-ratio once toggled back out of mini', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toBeUndefined()
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
+    })
+
+    it('drops the explicit height (but keeps the user-dragged width) while mini, and restores the height when un-mini-ed', async () => {
+      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+      window.dispatchEvent(new PointerEvent('pointerup'))
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+
+      // Toggle mini — the dragged HEIGHT must no longer be forced inline
+      // (that's what used to keep the floating container occupying its full
+      // pre-mini footprint), but the WIDTH stays so only the vertical
+      // footprint shrinks, same as collapse.
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).not.toContain('height:')
+
+      // Toggle mini off again — the user's dragged size is remembered, not lost.
+      await wrapper.find('.mini-btn').trigger('click')
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
     })
   })
 

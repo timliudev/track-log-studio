@@ -55,7 +55,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   const activeFileId = ref<number | null>(null)
   const xAxis = ref<XAxis>('time')
   // T5 — the chart cards (existence + per-chart config) are PERSISTED
-  // (aracer-loga.analyzerCharts.v1), unlike the transient view state below
+  // (tracklogstudio.analyzerCharts.v1), unlike the transient view state below
   // (cursor/zoom/toggles): without this, a reload reset `charts` to the
   // single default chart and reconcileLayout then dropped every other chart
   // card's saved grid position — dynamically added charts silently vanished.

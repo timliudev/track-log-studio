@@ -348,7 +348,7 @@ describe('analyzerStore — chart persistence (T5)', () => {
   })
 
   it('falls back to the single default chart when storage is corrupt', () => {
-    localStorage.setItem('aracer-loga.analyzerCharts.v1', '{corrupt')
+    localStorage.setItem('tracklogstudio.analyzerCharts.v1', '{corrupt')
     setActivePinia(createPinia())
     const s = useAnalyzerStore()
     expect(s.charts).toEqual([{ kind: 'timeseries', id: 1, channels: [] }])

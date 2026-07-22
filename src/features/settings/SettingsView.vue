@@ -21,6 +21,19 @@ import {
   parseImportBundle,
   type ImportError,
 } from '@/domain/settings/settingsTransfer'
+import {
+  REVEAL_TAP_COUNT,
+  REVEAL_HINT_THRESHOLD,
+  loadDevOptionsRevealed,
+  saveDevOptionsRevealed,
+} from '@/domain/settings/devOptionsReveal'
+import {
+  FEATURE_FLAGS,
+  useFeatureFlags,
+  getLocalFlagOverride,
+  setLocalFlagOverride,
+  type FeatureFlagName,
+} from '@/config/featureFlags'
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
@@ -226,6 +239,57 @@ const siteUrl = 'https://tracklogstudio.timliudev.com/'
 const repoUrl = 'https://github.com/timliudev/track-log-studio'
 const authorUrl = 'https://github.com/timliudev'
 const licenseUrl = `${repoUrl}/blob/main/LICENSE`
+
+// --- F2: hidden "開發者選項" (dev options) section, revealed by tapping the
+// version number REVEAL_TAP_COUNT times (the familiar Android pattern) —
+// see devOptionsReveal.ts's module doc. Once revealed it stays revealed on
+// this device (no UI to re-hide it), so the tap counter only matters before
+// that point. ---
+const devOptionsRevealed = ref(loadDevOptionsRevealed())
+const versionTapCount = ref(0)
+let versionTapResetTimer: ReturnType<typeof setTimeout> | undefined
+
+function onVersionTap(): void {
+  if (devOptionsRevealed.value) return
+  versionTapCount.value += 1
+  // A pause between taps resets the count — a handful of stray clicks spread
+  // across unrelated visits to this page shouldn't accidentally accumulate
+  // toward the reveal.
+  if (versionTapResetTimer) clearTimeout(versionTapResetTimer)
+  if (versionTapCount.value >= REVEAL_TAP_COUNT) {
+    devOptionsRevealed.value = true
+    saveDevOptionsRevealed(true)
+    versionTapCount.value = 0
+    return
+  }
+  versionTapResetTimer = setTimeout(() => {
+    versionTapCount.value = 0
+  }, 2000)
+}
+onBeforeUnmount(() => {
+  if (versionTapResetTimer) clearTimeout(versionTapResetTimer)
+})
+const tapsRemaining = computed(() => Math.max(0, REVEAL_TAP_COUNT - versionTapCount.value))
+const showTapHint = computed(
+  () => !devOptionsRevealed.value && versionTapCount.value >= REVEAL_HINT_THRESHOLD,
+)
+
+// Every registered flag, listed as a labeled toggle. The toggle itself
+// writes/reads the PERSISTED localStorage override (falling back to the
+// registry default when the user hasn't touched it yet); the B20-style
+// "目前套用" readout next to it always shows the fully-RESOLVED value
+// (`useFeatureFlags`'s reactive `flags`), since a `?ff=` link or a
+// `window.__flags` console override can outrank this toggle without this
+// page knowing — see featureFlags.ts's precedence doc.
+const featureFlagNames = Object.keys(FEATURE_FLAGS) as FeatureFlagName[]
+const { flags: effectiveFlags } = useFeatureFlags()
+
+function localFlagChecked(name: FeatureFlagName): boolean {
+  return getLocalFlagOverride(name) ?? FEATURE_FLAGS[name].default
+}
+function onFlagToggle(name: FeatureFlagName, e: Event): void {
+  setLocalFlagOverride(name, (e.target as HTMLInputElement).checked)
+}
 </script>
 
 <template>
@@ -342,7 +406,14 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
         </div>
         <div class="info-row">
           <dt>{{ t('about.project.version') }}</dt>
-          <dd>{{ t('about.project.versionValue', { sha: buildSha, date: buildDate }) }}</dd>
+          <dd>
+            <button type="button" class="version-tap" @click="onVersionTap">
+              {{ t('about.project.versionValue', { sha: buildSha, date: buildDate }) }}
+            </button>
+            <span v-if="showTapHint" class="tap-hint">{{
+              t('settings.devOptions.tapHint', { n: tapsRemaining })
+            }}</span>
+          </dd>
         </div>
         <div class="info-row">
           <dt>{{ t('about.project.license') }}</dt>
@@ -389,6 +460,35 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
           </tbody>
         </table>
       </div>
+    </div>
+
+    <!-- F2 — hidden until the version number (above) is tapped
+         REVEAL_TAP_COUNT times; lists every registered feature flag
+         (featureFlags.ts) as a toggle. -->
+    <div v-if="devOptionsRevealed" class="card">
+      <h2 class="card-heading">{{ t('settings.devOptions.heading') }}</h2>
+      <p class="transfer-description">{{ t('settings.devOptions.description') }}</p>
+      <div v-for="name in featureFlagNames" :key="name" class="flag-row">
+        <label class="control checkbox-control">
+          <input
+            type="checkbox"
+            :checked="localFlagChecked(name)"
+            @change="onFlagToggle(name, $event)"
+          />
+          <span>{{ t(FEATURE_FLAGS[name].labelKey) }}</span>
+          <span class="current-value">
+            {{
+              t('settings.current', {
+                value: t(`settings.devOptions.${effectiveFlags[name] ? 'on' : 'off'}`),
+              })
+            }}
+          </span>
+        </label>
+        <p v-if="FEATURE_FLAGS[name].descriptionKey" class="transfer-description flag-description">
+          {{ t(FEATURE_FLAGS[name].descriptionKey!) }}
+        </p>
+      </div>
+      <p class="transfer-description">{{ t('settings.devOptions.overrideNote') }}</p>
     </div>
   </div>
 </template>
@@ -547,6 +647,34 @@ const licenseUrl = `${repoUrl}/blob/main/LICENSE`
 }
 .info-row a {
   color: var(--color-accent);
+}
+/* F2 — the version number doubles as the dev-options reveal tap target;
+   styled as plain inline text (not an obvious button) so it doesn't look
+   like a normal interactive control to ordinary users. */
+.version-tap {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+.tap-hint {
+  margin-left: 8px;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+.flag-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.flag-description {
+  margin: 0 0 0 24px;
 }
 .licenses-intro {
   margin: 0;

@@ -100,7 +100,7 @@ describe('useDashboardLayout — gridMargin (B36 mobile full-bleed)', () => {
 describe('useDashboardLayout — reset to content-sized defaults (B66 follow-up)', () => {
   it('replaces a cramped persisted desktop layout with the current larger defaults', () => {
     window.innerWidth = 1280
-    localStorage.setItem('aracer-loga.dashboardLayout.v1', JSON.stringify([
+    localStorage.setItem('tracklogstudio.dashboardLayout.v1', JSON.stringify([
       { i: STATIC_CARD_IDS.map, x: 0, y: 0, w: 4, h: 5 },
       { i: STATIC_CARD_IDS.currentValues, x: 4, y: 0, w: 4, h: 3 },
     ]))

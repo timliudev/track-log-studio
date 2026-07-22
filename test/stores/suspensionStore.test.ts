@@ -3,8 +3,8 @@ import { nextTick } from 'vue'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { useSuspensionStore } from '@/stores/suspensionStore'
 
-const V2_KEY = 'aracer-loga.suspension.v2'
-const V1_KEY = 'aracer-loga.suspension.v1'
+const V2_KEY = 'tracklogstudio.suspension.v2'
+const V1_KEY = 'tracklogstudio.suspension.v1'
 
 /** Node's test environment has no real localStorage (Vitest runs with
  *  `environment: 'node'`), so stub an in-memory implementation — same
