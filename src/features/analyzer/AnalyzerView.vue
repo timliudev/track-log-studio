@@ -17,8 +17,15 @@ import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
 import { useGridGutters } from '@/composables/useGridGutters'
+import { useCardVisibility } from '@/composables/useCardVisibility'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
+import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { useSuspensionStore } from '@/stores/suspensionStore'
+import { PARTS } from '@/domain/units/suspension'
+import { isFlagEnabled } from '@/config/featureFlags'
+import { CARD_GROUPS, STATIC_CARD_GROUP } from '@/domain/layout/cardGroups'
+import type { CardDataContext } from '@/domain/layout/cardDataAvailability'
 import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
@@ -64,12 +71,15 @@ import SessionMergePanel from './SessionMergePanel.vue'
 import SuspensionCard from './SuspensionCard.vue'
 import ScatterChart from './ScatterChart.vue'
 import CurrentValuesPanel from './CurrentValuesPanel.vue'
+import CardMenu from './CardMenu.vue'
 
 const { t } = useI18n()
 const fileStore = useFileStore()
 const analyzer = useAnalyzerStore()
 const lapStore = useLapStore()
 const sectorStore = useSectorStore()
+const drivetrainStore = useDrivetrainStore()
+const suspensionStore = useSuspensionStore()
 const { charts, xAxis, xRange, cursorIdx, mapMaximized, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
   storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
@@ -488,20 +498,48 @@ const { state: panelState, isCollapsed, isPinned, toggleCollapsed, togglePinned,
 // heights stay in `layout` untouched — expanding just drops the id from here.
 const collapsedIds = computed(() => new Set(panelState.value.collapsed))
 
+// F2 — cheap, already-computed "does this card have data worth showing"
+// signals, folded into one snapshot for cardDataAvailability.ts's
+// cardHasData (see useCardVisibility below). Suspension: mirrors
+// SuspensionCard.vue's own channelPresent check (an enabled part whose
+// source channel actually exists in this session).
+const hasSuspensionChannel = computed(() =>
+  PARTS.some((part) => {
+    const cfg = suspensionStore.config[part]
+    return cfg.enabled && !!cfg.sourceChannel && (session.value?.has(cfg.sourceChannel) ?? false)
+  }),
+)
+const cardDataContext = computed<CardDataContext>(() => ({
+  hasSectorGates: sectorStore.gates.length > 0,
+  hasAccelSegment: accelResults.value.length > 0,
+  hasSuspensionChannel: hasSuspensionChannel.value,
+  drivetrainKind: drivetrainStore.kind,
+}))
+
+// F2 — per-card visibility DEVICE preference (tracklogstudio.cardVisibility.v1),
+// replacing B98's hard "always false" for the CVT card with a real show/hide
+// store the card menu (CardMenu.vue) writes to. See useCardVisibility.ts.
+const cardVisibility = useCardVisibility(chartIds, cardDataContext)
+
 // The align panels (mapalign/lapalign) only render when their "≥2 laps
 // selected" condition holds (showMapAlign/showAlign, unchanged rules from
 // before the grid) — an empty GridItem for a hidden card would otherwise
 // leave a draggable blank box on the dashboard. `isVisibleId` is the single
 // visibility predicate shared by both the desktop and mobile layout builders.
+//
+// F2 — B98's hard `if (id === STATIC_CARD_IDS.cvtDynamics) return false` is
+// now the cvtDynamics FEATURE FLAG (featureFlags.ts): completely absent
+// until a tester enables it via Settings' dev-options, `?ff=cvtDynamics`, or
+// the console. Every other card additionally respects the F2 visibility
+// store (cardVisibility above) — a normal device show/hide preference that
+// layers UNDER these structural/flag gates (a hidden mapAlign panel stays
+// hidden even if the user "shows" it in the menu; it just means the card
+// reappears once ≥2 laps are selected).
 function isVisibleId(id: string): boolean {
-  // CVT dynamics card temporarily hidden for release — feature is complete
-  // but not yet field-testable; flip this to re-enable (a future card
-  // add/remove UI will surface it, marked unavailable). Everything else
-  // (component, domain math, tests, i18n, layout entry) stays intact.
-  if (id === STATIC_CARD_IDS.cvtDynamics) return false
-  if (id === STATIC_CARD_IDS.mapAlign) return showMapAlign.value
-  if (id === STATIC_CARD_IDS.lapAlign) return showAlign.value
-  return true
+  if (id === STATIC_CARD_IDS.mapAlign && !showMapAlign.value) return false
+  if (id === STATIC_CARD_IDS.lapAlign && !showAlign.value) return false
+  if (id === STATIC_CARD_IDS.cvtDynamics && !isFlagEnabled('cvtDynamics')) return false
+  return cardVisibility.isVisible(id)
 }
 
 // --- Desktop layout (2-D, persisted to dashboardLayout.v1) ---
@@ -810,6 +848,59 @@ function titleForItemId(id: string): string {
   const chart = charts.value.find((c) => chartItemId(c.id) === id)
   return chart ? chartTitle(chart) : ''
 }
+
+// --- F2: the grouped card menu (CardMenu.vue) — presentation-only data built
+// from cardVisibility/isVisibleId above plus cardGroups.ts's static grouping
+// table. cvtDynamics is filtered OUT entirely (not just unchecked) when its
+// feature flag is off, matching B98's "completely absent" intent. ---
+const cardMenuGroups = computed(() =>
+  CARD_GROUPS.map((group) => ({
+    id: group.id,
+    label: t(group.labelKey),
+    items: Object.values(STATIC_CARD_IDS)
+      .filter((id) => STATIC_CARD_GROUP[id] === group.id)
+      .filter((id) => id !== STATIC_CARD_IDS.cvtDynamics || isFlagEnabled('cvtDynamics'))
+      .map((id) => ({
+        id,
+        title: titleForItemId(id),
+        checked: cardVisibility.isVisible(id),
+        locatable: isVisibleId(id),
+      })),
+  })),
+)
+
+const chartMenuEntries = computed(() =>
+  charts.value.map((c) => {
+    const itemId = chartItemId(c.id)
+    return {
+      id: c.id,
+      itemId,
+      title: chartTitle(c),
+      checked: cardVisibility.isVisible(itemId),
+      locatable: isVisibleId(itemId),
+    }
+  }),
+)
+
+function onCardMenuToggle(id: string, value: boolean): void {
+  cardVisibility.setVisible(id, value)
+}
+
+/** 定位 — scroll a card's DOM element (tagged `data-card-id`, see the
+ *  template) into view and briefly pulse-highlight it. A pinned card's real
+ *  content lives in `#dashboard-pinned-anchor` (Teleported — see that div's
+ *  doc), so this query finds it there too, same `data-card-id` attribute. */
+function locateCard(id: string): void {
+  const el = document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(id)}"]`)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  // Restart the pulse animation even if the same card was just located
+  // (forces a reflow between removing and re-adding the class).
+  el.classList.remove('card-locate-pulse')
+  void el.offsetWidth
+  el.classList.add('card-locate-pulse')
+  window.setTimeout(() => el.classList.remove('card-locate-pulse'), 1000)
+}
 </script>
 
 <template>
@@ -826,18 +917,23 @@ function titleForItemId(id: string): string {
             {{ t('analyzer.distance') }}
           </button>
         </div>
-        <!-- T4 — the add-chart buttons live HERE, grouped with the reset-layout
-             button, so every dashboard-level layout action (add cards / reset
-             arrangement) sits in one toolbar cluster instead of the add
-             buttons floating below the grid. -->
+        <!-- F2 — the card menu (add/remove/show-hide/locate every card) lives
+             HERE, grouped with the reset-layout button, so every dashboard-
+             level layout action sits in one toolbar cluster. The old
+             standalone 新增圖表/新增散佈圖 buttons (T4) moved INTO the menu's
+             圖表 section — see CardMenu.vue. -->
         <div class="layout-tools">
           <span class="drag-hint">{{ isMobile ? t('analyzer.layout.dragHintMobile') : t('analyzer.layout.dragHint') }}</span>
-          <button type="button" class="add" @click="onAddTimeseries">
-            ＋ {{ t('analyzer.addChart') }}
-          </button>
-          <button type="button" class="add" @click="onAddScatter">
-            ＋ {{ t('analyzer.addScatterChart') }}
-          </button>
+          <CardMenu
+            :groups="cardMenuGroups"
+            :charts="chartMenuEntries"
+            :charts-group-label="t('analyzer.cardMenu.groupCharts')"
+            @toggle="onCardMenuToggle"
+            @locate="locateCard"
+            @add-timeseries="onAddTimeseries"
+            @add-scatter="onAddScatter"
+            @remove-chart="analyzer.removeChart"
+          />
           <!-- 鎖定布局: global drag+resize toggle for every card — distinct
                icon (padlock) and wording from the per-card 📌 pin button so
                the two features never read as "the same thing". -->
@@ -941,6 +1037,7 @@ function titleForItemId(id: string): string {
           <Teleport to="#dashboard-pinned-anchor" :disabled="!isPinned(String(item.i))" defer>
           <DashboardCard
               v-if="item.i === 'map'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardMap')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1094,6 +1191,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'laptable'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardLapTable')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1116,6 +1214,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'sectors'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardSectors')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1135,6 +1234,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'trackchannel'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardTrackChannel')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1151,6 +1251,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'acceltest'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardAccelTest')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1168,6 +1269,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'gear'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardGear')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1191,6 +1293,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'cvtdynamics'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardCvtDynamics')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1209,6 +1312,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'trackfile'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardTrackFile')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1228,6 +1332,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'sessionmerge'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardSessionMerge')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1240,6 +1345,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'suspension'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardSuspension')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1253,6 +1359,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'currentvalues'"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardCurrentValues')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1265,6 +1372,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'mapalign' && showMapAlign"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardMapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1277,6 +1385,7 @@ function titleForItemId(id: string): string {
 
             <DashboardCard
               v-else-if="item.i === 'lapalign' && showAlign"
+              :data-card-id="item.i"
               :title="t('analyzer.layout.cardLapAlign')"
               :collapsed="isCollapsed(item.i)"
               :pinned="isPinned(item.i)"
@@ -1291,6 +1400,7 @@ function titleForItemId(id: string): string {
               <template v-for="c in charts" :key="c.id">
                 <DashboardCard
                   v-if="item.i === chartItemId(c.id)"
+                  :data-card-id="item.i"
                   :title="chartTitle(c)"
                   :collapsed="isCollapsed(item.i)"
                   :pinned="isPinned(item.i)"
@@ -1614,22 +1724,6 @@ function titleForItemId(id: string): string {
 .band-count {
   color: var(--color-text-muted);
 }
-/* T4 — add-chart buttons live in the toolbar's .layout-tools cluster next to
-   reset-layout; sized to match its neighbours (the dashed border keeps their
-   established "add" affordance). */
-.add {
-  background: var(--color-bg);
-  color: var(--color-text);
-  border: 1px dashed var(--color-border);
-  border-radius: var(--radius);
-  padding: 5px 10px;
-  font: inherit;
-  cursor: pointer;
-}
-.add:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-}
 
 /* #2 縫隙拖動 — the positioning context the gutter overlay's absolutely-
    positioned hit-boxes are placed relative to (see the template's doc on
@@ -1860,6 +1954,39 @@ function titleForItemId(id: string): string {
   }
   .analyzer :deep(.vgl-item__resizer) {
     touch-action: none;
+  }
+}
+
+/* F2 — card-menu 定位 (locate): a brief outline pulse on the card the user
+   just jumped to via scrollIntoView (see `locateCard`). Applied imperatively
+   (classList.add/remove, not a template binding) since it's a one-shot,
+   timer-driven effect rather than persistent state — but this selector still
+   lives in AnalyzerView's OWN scoped style block because a parent's scoped
+   CSS reaches a directly-instantiated child component's ROOT element (every
+   DashboardCard tag here IS such a child), same reasoning as this file's
+   other `:deep`-free rules that theme DashboardCard/grid-layout-plus
+   elements. `prefers-reduced-motion: reduce` swaps the animated fade for a
+   static outline shown for the same duration (see `locateCard`'s timeout) —
+   matches this app's existing reduced-motion convention (useFlipAnimation.ts,
+   App.vue, CurrentValuesPanel.vue). */
+.analyzer :deep(.card-locate-pulse) {
+  animation: card-locate-pulse 1s ease-out;
+}
+@keyframes card-locate-pulse {
+  0% {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  100% {
+    outline: 3px solid transparent;
+    outline-offset: 2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .analyzer :deep(.card-locate-pulse) {
+    animation: none;
+    outline: 3px solid var(--color-accent);
+    outline-offset: 2px;
   }
 }
 </style>

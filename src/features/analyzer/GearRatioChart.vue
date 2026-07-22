@@ -34,7 +34,7 @@ const circumferenceMm = computed(() =>
     : drivetrain.cvt.wheelCircumferenceMm,
 )
 const trace = computed(() => cachedGearRatioTrace(props.session, circumferenceMm.value))
-const STORAGE_KEY = 'aracer-loga.gearChartChannels.v1'
+const STORAGE_KEY = 'tracklogstudio.gearChartChannels.v1'
 function loadExtraChannels(): string[] {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]')

@@ -1,7 +1,7 @@
 /**
  * Dashboard-lock (鎖定布局): a single global boolean, persisted to
  * localStorage alongside dashboardLayout.v1/panelState.v1 (same
- * `aracer-loga.*.v1` slot pattern — see dashboardLayout.ts's module doc).
+ * `tracklogstudio.*.v1` slot pattern — see dashboardLayout.ts's module doc).
  *
  * Deliberately its OWN tiny storage key rather than a field bolted onto
  * DashboardLayoutItem[] or PanelState: it's a single scalar toggle, not
@@ -16,7 +16,7 @@
  * AnalyzerView's per-item decoration) regardless of this global flag.
  */
 
-export const STORAGE_KEY = 'aracer-loga.layoutLocked.v1'
+export const STORAGE_KEY = 'tracklogstudio.layoutLocked.v1'
 
 /** Parse persisted JSON into a boolean, or null if missing/invalid (caller
  *  falls back to the default, unlocked, state). */

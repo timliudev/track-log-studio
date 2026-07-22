@@ -514,7 +514,7 @@ const MAX_GEARS = 8
 // numbers under new field names, v2 simply starts fresh from defaults when
 // the persisted payload doesn't look like v2 shape — the old v1 key is left
 // alone (not deleted) rather than overwritten, in case that's useful later.
-const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
+const STORAGE_KEY = 'tracklogstudio.drivetrain.v2'
 let profileSequence = 0
 
 export interface PersistedDrivetrain {

@@ -13,8 +13,8 @@ import {
   usesCvtCalibrationFixedReduction,
 } from '@/stores/drivetrainStore'
 
-const STORAGE_KEY = 'aracer-loga.drivetrain.v2'
-const OLD_V1_STORAGE_KEY = 'aracer-loga.drivetrain.v1'
+const STORAGE_KEY = 'tracklogstudio.drivetrain.v2'
+const OLD_V1_STORAGE_KEY = 'tracklogstudio.drivetrain.v1'
 
 /** Node's test environment has no real localStorage (Vitest runs with
  *  `environment: 'node'`), so stub an in-memory implementation — same

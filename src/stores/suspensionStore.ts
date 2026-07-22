@@ -10,7 +10,7 @@ import {
   type SuspensionPart,
 } from '@/domain/units/suspension'
 
-const STORAGE_KEY = 'aracer-loga.suspension.v2'
+const STORAGE_KEY = 'tracklogstudio.suspension.v2'
 
 // v1 -> v2: the per-channel `source: 'AD1'|'AD2'` field (hardcoded to the
 // .loga RaceAmp channel names) was replaced by a free-form `sourceChannel`
@@ -23,7 +23,7 @@ const STORAGE_KEY = 'aracer-loga.suspension.v2'
 // minMm/maxMm) carries over unchanged. So a user who already calibrated their
 // suspension keeps that calibration after upgrading — nothing is lost, no
 // re-entry needed.
-const LEGACY_STORAGE_KEY = 'aracer-loga.suspension.v1'
+const LEGACY_STORAGE_KEY = 'tracklogstudio.suspension.v1'
 
 interface LegacyChannelConfig {
   enabled?: boolean

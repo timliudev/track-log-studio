@@ -82,7 +82,7 @@ function installMemoryLocalStorage(seed?: Record<string, string>): void {
  *  recording 2D context + fixed canvas size, and forces one real draw. */
 async function mountOsmMap(track: GpsTrack, w = 400, h = 300) {
   installMemoryLocalStorage({
-    'aracer-loga.mapBackground.v1': JSON.stringify({
+    'tracklogstudio.mapBackground.v1': JSON.stringify({
       kind: 'osm',
       imageId: null,
       alignment: { x: 0, y: 0, scale: 1 },

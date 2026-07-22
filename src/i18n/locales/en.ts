@@ -41,6 +41,23 @@ export default {
       importErrorInvalidShape: 'Import failed: the file content is malformed.',
       importErrorRead: 'Import failed: could not read the file, please try again.',
     },
+    devOptions: {
+      tapHint: 'Tap the version number {n} more time(s) to unlock developer options',
+      heading: 'Developer options',
+      description:
+        'Feature flags control whether still-in-testing features show up. They can also be overridden via the ?ff=flagName URL parameter (e.g. ?ff=cvtDynamics, or ?ff=-cvtDynamics to disable), or window.__flags in the browser console — both apply only to this tab/page load and outrank the toggles below.',
+      overrideNote:
+        'Precedence (highest to lowest): console window.__flags → ?ff= URL param → the toggles below → the default.',
+      on: 'On',
+      off: 'Off',
+      flags: {
+        cvtDynamics: {
+          label: 'CVT dynamics card',
+          description:
+            'Shows the CVT dynamics card on the analyzer page; feature-complete but not yet fully field-tested.',
+        },
+      },
+    },
   },
   about: {
     project: {
@@ -622,6 +639,18 @@ export default {
       pinnedResizeHandle: 'Drag to resize (double-click to reset)',
       minimizePinned: 'Minimize (show title only)',
       expandPinned: 'Expand pinned card',
+    },
+    cardMenu: {
+      button: 'Panels',
+      groupMapTrack: 'Map & track',
+      groupLapsSectors: 'Laps & sectors',
+      groupChannelsValues: 'Channels & values',
+      groupDrivetrain: 'Drivetrain',
+      groupSessionMerge: 'Session merge',
+      groupCharts: 'Charts',
+      toggleAria: 'Show or hide the "{name}" card',
+      notShownHint: "Not shown right now (unchecked, or its show condition isn't met yet)",
+      noCharts: 'No charts yet',
     },
   },
   suspension: {

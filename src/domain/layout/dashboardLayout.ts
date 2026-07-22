@@ -9,7 +9,7 @@
  * store-assigned id, not its position in `analyzerStore.charts`.
  *
  * Persisted to localStorage as a flat `LayoutItem[]` — same global-slot
- * pattern as drivetrainStore/settingsStore/suspensionStore (`aracer-loga.*.v1`
+ * pattern as drivetrainStore/settingsStore/suspensionStore (`tracklogstudio.*.v1`
  * keys), not per-circuit: the user's preferred dashboard arrangement is a
  * device/UI preference, not something that should change when they load a
  * different log.
@@ -24,7 +24,7 @@ export interface DashboardLayoutItem {
   h: number
 }
 
-export const STORAGE_KEY = 'aracer-loga.dashboardLayout.v1'
+export const STORAGE_KEY = 'tracklogstudio.dashboardLayout.v1'
 
 /** Total column count of the wide (desktop) grid — see AnalyzerView's GridLayout `cols`. */
 export const GRID_COLS = 12

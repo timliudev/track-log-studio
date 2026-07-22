@@ -11,7 +11,7 @@
  * added) or (b) re-merging on every emit — both more fragile than just
  * keying a second, independent map by the same stable card id already
  * defined in dashboardLayout.ts (`STATIC_CARD_IDS` / `chartItemId`). Same
- * "global-slot" storage pattern (`aracer-loga.*.v1`) as dashboardLayout.ts /
+ * "global-slot" storage pattern (`tracklogstudio.*.v1`) as dashboardLayout.ts /
  * drivetrainStore / settingsStore.
  */
 
@@ -35,7 +35,7 @@ export interface PanelState {
   mobileOrder: string[]
 }
 
-export const STORAGE_KEY = 'aracer-loga.panelState.v1'
+export const STORAGE_KEY = 'tracklogstudio.panelState.v1'
 
 /** The empty/default panel state — no cards collapsed, none pinned, no
  *  mobile-order customisation yet. Exported (not just an internal fallback)

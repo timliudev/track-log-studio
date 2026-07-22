@@ -39,6 +39,20 @@ export default {
       importErrorInvalidShape: '匯入失敗：檔案內容格式不正確。',
       importErrorRead: '匯入失敗：讀取檔案時發生錯誤，請重試。',
     },
+    devOptions: {
+      tapHint: '再點版本號 {n} 次即可解鎖開發者選項',
+      heading: '開發者選項',
+      description: '功能旗標控制尚在測試中的功能是否顯示。也可用網址參數 ?ff=旗標名稱（例如 ?ff=cvtDynamics，加上減號如 ?ff=-cvtDynamics 表示關閉）或瀏覽器主控台的 window.__flags 覆蓋，僅本分頁/本次載入有效，優先權高於這裡的設定。',
+      overrideNote: '優先權（由高到低）：主控台 window.__flags → 網址 ?ff= → 這裡的開關 → 預設值。',
+      on: '開啟',
+      off: '關閉',
+      flags: {
+        cvtDynamics: {
+          label: 'CVT 動態模型卡片',
+          description: '在分析頁顯示 CVT 動態模型卡片；功能已完成但尚未經過完整場地測試。',
+        },
+      },
+    },
   },
   about: {
     project: {
@@ -616,6 +630,18 @@ export default {
       pinnedResizeHandle: '拖曳調整大小（點兩下重設）',
       minimizePinned: '迷你模式（只顯示標題）',
       expandPinned: '展開釘選卡片',
+    },
+    cardMenu: {
+      button: '面板',
+      groupMapTrack: '地圖與軌跡',
+      groupLapsSectors: '圈速與分段',
+      groupChannelsValues: '通道與數值',
+      groupDrivetrain: '傳動',
+      groupSessionMerge: '匯流',
+      groupCharts: '圖表',
+      toggleAria: '顯示或隱藏「{name}」卡片',
+      notShownHint: '目前未顯示（尚未勾選，或顯示條件尚未滿足）',
+      noCharts: '尚無圖表',
     },
   },
   suspension: {
