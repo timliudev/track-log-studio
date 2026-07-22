@@ -590,11 +590,22 @@ const focusStackIds = computed(() => mobileView.focusStackIds(mobileOrder.value.
 // Whether the Focus Stack (not the grid) is what should mount right now — the
 // two are mutually exclusive so they never both render.
 const showFocusStack = computed(() => isMobile.value && mobileMode.value === 'focus')
-// Per-panel height weight: the persisted splitWeights (reserved for the
-// phase-2 draggable divider) fall back to a map-heavy default (design §3:
-// map ~55% / the rest ~45%, i.e. the map/chart pairing reads 55/45).
+// Per-panel height weight: the persisted splitWeights (set by the phase-2
+// draggable divider, see onFocusResize below) fall back to a map-heavy
+// default (design §3: map ~55% / the rest ~45%, i.e. the map/chart pairing
+// reads 55/45) until the user has actually dragged a divider.
 function focusWeightFor(id: string): number {
   return mobileView.weightFor(id, id === STATIC_CARD_IDS.map ? 55 : 45)
+}
+// F1 phase 2 — MobileFocusStack emits `resize` once per divider drag, with
+// BOTH neighbours' new weights (keyed by card id); persist each through the
+// same useMobileView setter the store owns (see mobileView.ts's
+// `setSplitWeight` — synchronous multiple assignments within one tick are
+// coalesced into a single persist-watch flush, so this doesn't double-write).
+function onFocusResize(weights: Record<string, number>): void {
+  for (const [id, weight] of Object.entries(weights)) {
+    mobileView.setWeight(id, weight)
+  }
 }
 
 // Per-item props the library's OWN GridItem needs (we no longer render a
@@ -1131,6 +1142,7 @@ const cardCtx: AnalyzerCardContext = {
         :title-for="titleForItemId"
         :weight-for="focusWeightFor"
         @expand="setMobileMode('full')"
+        @resize="onFocusResize"
       />
       <div v-else ref="gridWrapRef" class="grid-wrap">
       <GridLayout

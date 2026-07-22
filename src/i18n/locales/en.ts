@@ -657,6 +657,7 @@ export default {
       full: 'Full',
       toggleAria: 'Switch between the focus stack and the full dashboard',
       expandToFull: 'Expand to the full dashboard',
+      resizeSplit: 'Drag to resize adjacent panel heights',
     },
   },
   suspension: {

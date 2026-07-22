@@ -648,6 +648,7 @@ export default {
       full: '完整',
       toggleAria: '在聚焦堆疊與完整儀表板之間切換',
       expandToFull: '展開為完整儀表板',
+      resizeSplit: '拖曳調整上下相鄰面板高度',
     },
   },
   suspension: {

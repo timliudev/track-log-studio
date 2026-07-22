@@ -11,6 +11,7 @@ import {
   setFocusOrder,
   resolveFocusStackOrder,
   weightFor,
+  setSplitWeight,
   type MobileViewState,
 } from '@/domain/layout/mobileView'
 
@@ -322,5 +323,58 @@ describe('weightFor', () => {
     expect(weightFor(state, 'map')).toBe(1)
     expect(weightFor(state, 'gear')).toBe(1)
     expect(weightFor(state, 'chart1')).toBe(1)
+  })
+})
+
+describe('setSplitWeight', () => {
+  it('sets a new weight for an id', () => {
+    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const next = setSplitWeight(state, 'map', 62)
+    expect(next.splitWeights).toEqual({ map: 62 })
+  })
+
+  it('does not mutate the input state', () => {
+    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: { map: 55 } }
+    setSplitWeight(state, 'map', 70)
+    expect(state.splitWeights).toEqual({ map: 55 })
+  })
+
+  it('overwrites an existing weight for the same id, leaving others intact', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: { map: 55, chart: 45 },
+    }
+    const next = setSplitWeight(state, 'map', 62)
+    expect(next.splitWeights).toEqual({ map: 62, chart: 45 })
+  })
+
+  it('is a same-reference no-op when the weight is unchanged', () => {
+    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: { map: 55 } }
+    expect(setSplitWeight(state, 'map', 55)).toBe(state)
+  })
+
+  it('ignores non-finite / zero / negative / non-numeric weights (same-reference no-op)', () => {
+    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: { map: 55 } }
+    expect(setSplitWeight(state, 'map', NaN)).toBe(state)
+    expect(setSplitWeight(state, 'map', Infinity)).toBe(state)
+    expect(setSplitWeight(state, 'map', -Infinity)).toBe(state)
+    expect(setSplitWeight(state, 'map', 0)).toBe(state)
+    expect(setSplitWeight(state, 'map', -1)).toBe(state)
+    expect(setSplitWeight(state, 'map', 'nope' as unknown as number)).toBe(state)
+  })
+
+  it('leaves mode and focusOrder intact', () => {
+    const state: MobileViewState = { mode: 'full', focusOrder: ['map'], splitWeights: {} }
+    const next = setSplitWeight(state, 'map', 62)
+    expect(next.mode).toBe('full')
+    expect(next.focusOrder).toEqual(['map'])
+  })
+
+  it('a newly set weight still gets dropped by reconcileMobileView once the id is gone', () => {
+    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const withWeight = setSplitWeight(state, 'chart-9', 30)
+    const next = reconcileMobileView(withWeight, ['map'])
+    expect(next.splitWeights).toEqual({})
   })
 })

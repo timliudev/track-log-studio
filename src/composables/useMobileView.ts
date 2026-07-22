@@ -8,6 +8,7 @@ import {
   setFocusOrder as setFocusOrderPure,
   resolveFocusStackOrder,
   weightFor as weightForPure,
+  setSplitWeight as setSplitWeightPure,
   type MobileViewState,
 } from '@/domain/layout/mobileView'
 
@@ -25,6 +26,7 @@ export function useMobileView(chartIds: Ref<number[]> | ComputedRef<number[]>): 
   setFocusOrder: (order: string[]) => void
   focusStackIds: (visibleIdsInDefaultOrder: string[]) => string[]
   weightFor: (id: string, fallback?: number) => number
+  setWeight: (id: string, weight: number) => void
 } {
   const state = ref<MobileViewState>(loadMobileView())
 
@@ -67,5 +69,13 @@ export function useMobileView(chartIds: Ref<number[]> | ComputedRef<number[]>): 
     return weightForPure(state.value, id, fallback)
   }
 
-  return { state, mode, setMode, focusOrder, setFocusOrder, focusStackIds, weightFor }
+  // F1 phase 2 — persists a panel's draggable-divider height weight
+  // (MobileFocusStack's `resize` emit calls this once per neighbour on drag
+  // end). Invalid weights are silently dropped by setSplitWeightPure, same
+  // permissive contract every other setter here has.
+  function setWeight(id: string, weight: number): void {
+    state.value = setSplitWeightPure(state.value, id, weight)
+  }
+
+  return { state, mode, setMode, focusOrder, setFocusOrder, focusStackIds, weightFor, setWeight }
 }
