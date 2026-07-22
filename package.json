@@ -43,5 +43,9 @@
     "vitest": "^4.1.10",
     "vue-tsc": "^3.3.7",
     "wrangler": "^4.112.0"
+  },
+  "overrides": {
+    "sharp": "^0.35.3",
+    "fast-uri": "^3.1.4"
   }
 }
