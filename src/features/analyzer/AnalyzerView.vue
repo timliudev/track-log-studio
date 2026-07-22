@@ -18,6 +18,7 @@ import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
 import { useGridGutters } from '@/composables/useGridGutters'
 import { useCardVisibility } from '@/composables/useCardVisibility'
+import { useMobileView } from '@/composables/useMobileView'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
@@ -58,6 +59,7 @@ import {
 import DashboardCard from '@/components/DashboardCard.vue'
 import CardMenu from './CardMenu.vue'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
+import MobileFocusStack from './MobileFocusStack.vue'
 import type { AnalyzerCardContext } from './analyzerCardContext'
 
 const { t } = useI18n()
@@ -568,6 +570,33 @@ const mobileVisibleLayout = computed<typeof layout.value>(() =>
   ),
 )
 
+// --- F1: mobile Focus Stack view mode (聚焦/完整) ---
+// A DEVICE preference (tracklogstudio.mobileView.v1): `focus` = the new
+// curated vertical stack (mobile default), `full` = the existing
+// full-dashboard single-column grid. Never shown/consulted on desktop — the
+// toggle is `v-if="isMobile"` and the grid path is what mounts otherwise.
+const mobileView = useMobileView(chartIds)
+const mobileMode = mobileView.mode
+function setMobileMode(mode: 'focus' | 'full'): void {
+  mobileView.setMode(mode)
+}
+// The curated, ordered id set the Focus Stack renders: the SAME visible
+// mobile set the mobile grid uses (mobileOrder filtered to `isVisibleId`),
+// run through the user's explicit focus order (resolveFocusStackOrder inside
+// useMobileView). Keeping AnalyzerView the single owner of the visible set is
+// deliberate — the stack and the grid can never disagree about which cards
+// are visible.
+const focusStackIds = computed(() => mobileView.focusStackIds(mobileOrder.value.filter(isVisibleId)))
+// Whether the Focus Stack (not the grid) is what should mount right now — the
+// two are mutually exclusive so they never both render.
+const showFocusStack = computed(() => isMobile.value && mobileMode.value === 'focus')
+// Per-panel height weight: the persisted splitWeights (reserved for the
+// phase-2 draggable divider) fall back to a map-heavy default (design §3:
+// map ~55% / the rest ~45%, i.e. the map/chart pairing reads 55/45).
+function focusWeightFor(id: string): number {
+  return mobileView.weightFor(id, id === STATIC_CARD_IDS.map ? 55 : 45)
+}
+
 // Per-item props the library's OWN GridItem needs (we no longer render a
 // GridItem ourselves — see the `#item` slot note). grid-layout-plus spreads
 // each layout entry as props onto the GridItem it wraps around the slot, so
@@ -974,7 +1003,7 @@ const cardCtx: AnalyzerCardContext = {
 </script>
 
 <template>
-  <div class="analyzer">
+  <div class="analyzer" :class="{ 'focus-mode': showFocusStack }">
     <p v-if="readyFiles.length === 0" class="empty">{{ t('analyzer.noFiles') }}</p>
 
     <template v-else>
@@ -993,6 +1022,32 @@ const cardCtx: AnalyzerCardContext = {
              standalone 新增圖表/新增散佈圖 buttons (T4) moved INTO the menu's
              圖表 section — see CardMenu.vue. -->
         <div class="layout-tools">
+          <!-- F1 — mobile-only 聚焦/完整 view toggle: Focus Stack vs the full
+               dashboard grid. Never rendered on desktop (the grid is the only
+               desktop presentation). Two-way bound to useMobileView().mode. -->
+          <div
+            v-if="isMobile"
+            class="view-mode"
+            role="group"
+            :aria-label="t('analyzer.mobileView.toggleAria')"
+          >
+            <button
+              type="button"
+              :class="{ active: mobileMode === 'focus' }"
+              :aria-pressed="mobileMode === 'focus'"
+              @click="setMobileMode('focus')"
+            >
+              {{ t('analyzer.mobileView.focus') }}
+            </button>
+            <button
+              type="button"
+              :class="{ active: mobileMode === 'full' }"
+              :aria-pressed="mobileMode === 'full'"
+              @click="setMobileMode('full')"
+            >
+              {{ t('analyzer.mobileView.full') }}
+            </button>
+          </div>
           <span class="drag-hint">{{ isMobile ? t('analyzer.layout.dragHintMobile') : t('analyzer.layout.dragHint') }}</span>
           <CardMenu
             :groups="cardMenuGroups"
@@ -1064,7 +1119,20 @@ const cardCtx: AnalyzerCardContext = {
            are placed relative to — it must wrap `<GridLayout>` exactly (no
            extra padding/border) so its measured width matches the library's
            own colWidth math (see useGridGutters.ts's `containerRef` doc). -->
-      <div ref="gridWrapRef" class="grid-wrap">
+      <!-- F1 — the mobile Focus Stack replaces the grid entirely when the
+           mobile view mode is `focus`. The two are mutually exclusive (v-if/
+           v-else) so the grid and the stack never both mount. On desktop, or
+           in mobile `full` mode, the existing GridLayout path below is
+           unchanged. -->
+      <MobileFocusStack
+        v-if="showFocusStack"
+        :ids="focusStackIds"
+        :ctx="cardCtx"
+        :title-for="titleForItemId"
+        :weight-for="focusWeightFor"
+        @expand="setMobileMode('full')"
+      />
+      <div v-else ref="gridWrapRef" class="grid-wrap">
       <GridLayout
         v-model:layout="activeLayout"
         :col-num="colNum"
@@ -1148,6 +1216,16 @@ const cardCtx: AnalyzerCardContext = {
   flex-direction: column;
   gap: calc(var(--space) * 2);
 }
+/* F1 — in the mobile Focus Stack mode the analyzer fills App.vue's `.content`
+   height (which is `flex: 1` inside the app shell, so it has a definite
+   height) so the stack below the toolbar can flex-grow to fill the space
+   between the toolbar and the fixed BottomNav rather than being content-sized.
+   Scoped to `focus-mode` (mobile + `focus`) so the desktop/full-grid layout —
+   where the page itself scrolls a tall content-sized grid — is untouched. */
+.analyzer.focus-mode {
+  height: 100%;
+  min-height: 0;
+}
 /* B36 — App.vue's `.content` zeroes its own horizontal padding on mobile so
    the dashboard grid below (`.grid-wrap`/`.pinned-anchor`, i.e. the actual
    DashboardCard content) can go edge-to-edge — see that file's own comment.
@@ -1201,6 +1279,27 @@ const cardCtx: AnalyzerCardContext = {
   cursor: pointer;
 }
 .xaxis button.active {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+/* F1 — the 聚焦/完整 mobile view toggle: same segmented-control language as
+   the time/distance `.xaxis` switch above so the two read as the same kind of
+   control. */
+.view-mode {
+  display: inline-flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.view-mode button {
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: none;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.view-mode button.active {
   background: var(--color-accent);
   color: var(--color-accent-text);
 }

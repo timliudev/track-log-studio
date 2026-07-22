@@ -643,6 +643,12 @@ export default {
       notShownHint: '目前未顯示（尚未勾選，或顯示條件尚未滿足）',
       noCharts: '尚無圖表',
     },
+    mobileView: {
+      focus: '聚焦',
+      full: '完整',
+      toggleAria: '在聚焦堆疊與完整儀表板之間切換',
+      expandToFull: '展開為完整儀表板',
+    },
   },
   suspension: {
     heading: '避震校正',
