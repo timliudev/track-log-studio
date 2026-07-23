@@ -203,6 +203,7 @@ export default {
     mapSouth: 'South (down)',
     mapEast: 'East (right)',
     mapWest: 'West (left)',
+    mapAlignComparisonHeading: 'Comparison recordings',
     trackChannelTitle: 'Track channel markers',
     trackChannel: 'Channel',
     trackColor: 'Track colour',

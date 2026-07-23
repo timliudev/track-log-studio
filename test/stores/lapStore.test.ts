@@ -753,6 +753,57 @@ describe('lapStore', () => {
     expect(s.mapOffsetOf(1)).toEqual({ x: 0, y: 0 })
   })
 
+  // #9 comparison half — sessionLapMapOffsetOf/nudgeSessionLapMapOffset/
+  // resetSessionLapMapOffset mirror mapOffsetOf/nudgeMapOffset/resetMapOffset
+  // above, but keyed by (fileId, index) on `sessionLapOffsets` instead of by
+  // index alone on `offsets`.
+  it('sessionLapMapOffsetOf/nudgeSessionLapMapOffset accumulate a per-comparison-lap 2-D metre shift', () => {
+    const s = useLapStore()
+    expect(s.sessionLapMapOffsetOf(10, 3)).toEqual({ x: 0, y: 0 })
+    s.nudgeSessionLapMapOffset(10, 3, 0.5, 0)
+    s.nudgeSessionLapMapOffset(10, 3, 0.5, -1)
+    expect(s.sessionLapMapOffsetOf(10, 3)).toEqual({ x: 1, y: -1 })
+    // A different fileId or a different lap index is unaffected.
+    expect(s.sessionLapMapOffsetOf(20, 3)).toEqual({ x: 0, y: 0 })
+    expect(s.sessionLapMapOffsetOf(10, 9)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('sessionLapMapOffsetOf/nudgeSessionLapMapOffset create the entry when absent (same rule as the primary facet)', () => {
+    const s = useLapStore()
+    s.nudgeSessionLapMapOffset(5, 1, 2, 3)
+    expect(s.sessionLapMapOffsetOf(5, 1)).toEqual({ x: 2, y: 3 })
+  })
+
+  it('resetSessionLapMapOffset zeroes only the map facet, keeping the time/dist chart facet', () => {
+    const s = useLapStore()
+    s.nudgeSessionLapOffset(7, 2, 'time', 0.4)
+    s.nudgeSessionLapMapOffset(7, 2, 3, 4)
+    s.resetSessionLapMapOffset(7, 2)
+    expect(s.sessionLapMapOffsetOf(7, 2)).toEqual({ x: 0, y: 0 })
+    expect(s.sessionLapOffsetOf(7, 2, 'time')).toBeCloseTo(0.4)
+  })
+
+  it('resetSessionLapMapOffset is a no-op when no offset entry exists yet', () => {
+    const s = useLapStore()
+    expect(() => s.resetSessionLapMapOffset(1, 1)).not.toThrow()
+    expect(s.sessionLapMapOffsetOf(1, 1)).toEqual({ x: 0, y: 0 })
+  })
+
+  it('session-lap chart and map offsets accumulate independently on the same comparison lap', () => {
+    const s = useLapStore()
+    s.nudgeSessionLapOffset(2, 4, 'time', 0.1)
+    s.nudgeSessionLapMapOffset(2, 4, 2, 3)
+    expect(s.sessionLapOffsetOf(2, 4, 'time')).toBeCloseTo(0.1)
+    expect(s.sessionLapMapOffsetOf(2, 4)).toEqual({ x: 2, y: 3 })
+  })
+
+  it('clearOffsets clears session-lap map offsets too', () => {
+    const s = useLapStore()
+    s.nudgeSessionLapMapOffset(1, 1, 5, 5)
+    s.clearOffsets()
+    expect(s.sessionLapMapOffsetOf(1, 1)).toEqual({ x: 0, y: 0 })
+  })
+
   it('offsets are independent of selection and exclusion', () => {
     const s = useLapStore()
     s.toggleLap(2)

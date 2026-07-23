@@ -59,6 +59,16 @@ export interface ExtremaMarker {
   label: string
 }
 
+/** One COMPARISON lap's row in the map-align panel (#9 comparison half) —
+ *  see AnalyzerView's `comparisonAlignLaps` computed for how these are
+ *  resolved/filtered. */
+export interface ComparisonAlignLap {
+  fileId: number
+  index: number
+  label: string
+  color: string
+}
+
 export interface AnalyzerCardContext {
   // --- shared session/track/axis data (many cards) ---
   session: Ref<LogSession | null>
@@ -82,6 +92,7 @@ export interface AnalyzerCardContext {
   line: Ref<LapLine | null>
   highlightLaps: Ref<HighlightLap[]>
   comparisonLapHighlights: Ref<ComparisonLapHighlight[]>
+  comparisonAlignLaps: Ref<ComparisonAlignLap[]>
   focusRange: Ref<{ startIdx: number; endIdx: number } | null>
   colorValues: Ref<Float64Array | null>
   trackColormap: Ref<ColormapId>

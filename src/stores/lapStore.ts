@@ -293,6 +293,34 @@ export const useLapStore = defineStore('lap', () => {
     sessionLapOffsets.value = next
   }
 
+  /** This comparison lap's MAP position shift in metres (east+/north+); zero
+   *  when none set — the {@link sessionLapOffsets} analogue of {@link mapOffsetOf}. */
+  function sessionLapMapOffsetOf(fileId: number, index: number): { x: number; y: number } {
+    const o = sessionLapOffsets.value[sessionLapKey(fileId, index)]
+    return o ? { x: o.mapX, y: o.mapY } : { x: 0, y: 0 }
+  }
+
+  /** Nudge comparison lap (`fileId`, `index`)'s MAP position by (`dx` east,
+   *  `dy` north) metres — the {@link sessionLapOffsets} analogue of
+   *  {@link nudgeMapOffset}. */
+  function nudgeSessionLapMapOffset(fileId: number, index: number, dx: number, dy: number): void {
+    const key = sessionLapKey(fileId, index)
+    const cur = sessionLapOffsets.value[key] ?? { ...ZERO_OFFSET }
+    sessionLapOffsets.value = {
+      ...sessionLapOffsets.value,
+      [key]: { ...cur, mapX: cur.mapX + dx, mapY: cur.mapY + dy },
+    }
+  }
+
+  /** Reset comparison lap (`fileId`, `index`)'s MAP shift to zero; keeps its
+   *  time/dist chart shift — the {@link sessionLapOffsets} analogue of
+   *  {@link resetMapOffset}. */
+  function resetSessionLapMapOffset(fileId: number, index: number): void {
+    const key = sessionLapKey(fileId, index)
+    const cur = sessionLapOffsets.value[key]
+    if (cur) sessionLapOffsets.value = { ...sessionLapOffsets.value, [key]: { ...cur, mapX: 0, mapY: 0 } }
+  }
+
   function clearAllLapSelections(): void {
     selected.value = []
     selectedAcrossSessions.value = []
@@ -591,6 +619,9 @@ export const useLapStore = defineStore('lap', () => {
     sessionLapOffsetOf,
     nudgeSessionLapOffset,
     resetSessionLapOffset,
+    sessionLapMapOffsetOf,
+    nudgeSessionLapMapOffset,
+    resetSessionLapMapOffset,
     toggleExcluded,
     isManuallyExcluded,
     isExcluded,
