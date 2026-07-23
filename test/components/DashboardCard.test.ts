@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createApp, h, nextTick, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
@@ -738,6 +738,323 @@ describe('DashboardCard (scaffold smoke test)', () => {
       vi.advanceTimersByTime(400)
       await wrapper.vm.$nextTick()
       expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-armed')
+      vi.useRealTimers()
+    })
+  })
+
+  describe('F1 phase 5 (B102a/b) — live-drag edge-autoscroll + two-finger arbitration', () => {
+    let rafCallback: FrameRequestCallback | null
+    let cancelledFrameIds: number[]
+    let scrollBySpy: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      rafCallback = null
+      cancelledFrameIds = []
+      // `vi.useFakeTimers()`'s DEFAULT `toFake` list also includes
+      // `requestAnimationFrame`/`cancelAnimationFrame`, which would silently
+      // shadow the manual stubs below (needed to drive edge-autoscroll frames
+      // deterministically, same technique MobileScrubber.test.ts's own
+      // rAF-driven play loop uses) — restricted to just the timers this
+      // component's long-press gates actually use (`setTimeout`) so rAF stays
+      // under this test file's own control.
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+        rafCallback = cb
+        return 42
+      })
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+        cancelledFrameIds.push(id)
+      })
+      scrollBySpy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+      window.innerHeight = 800
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      scrollBySpy.mockRestore()
+      window.innerHeight = 768
+    })
+
+    // A connected tree so the synthetic hand-off pointerdown (which bubbles
+    // up, standing in for interactjs's document-level listener — see the
+    // B61 `mountWithParentSpy` helper above for the same reasoning) isn't
+    // lost, though this block mostly cares about B102a/b's OWN side effects
+    // rather than the hand-off dispatch itself.
+    function mountArmed() {
+      const wrapper = mountCard()
+      const parent = document.createElement('div')
+      document.body.append(parent)
+      parent.append(wrapper.element)
+      return wrapper
+    }
+
+    it('B102a: scrolls the page UP while the pointer sits near the top edge during a live drag', async () => {
+      const wrapper = mountArmed()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 400, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+      expect(rafCallback).not.toBeNull()
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 10, pointerId: 7 }))
+      rafCallback!(0)
+
+      expect(scrollBySpy).toHaveBeenCalled()
+      const [, dy] = scrollBySpy.mock.calls[0] as [number, number]
+      expect(dy).toBeLessThan(0)
+    })
+
+    it('B102a: scrolls the page DOWN while the pointer sits near the bottom edge during a live drag', async () => {
+      const wrapper = mountArmed()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 400, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 795, pointerId: 7 }))
+      rafCallback!(0)
+
+      expect(scrollBySpy).toHaveBeenCalled()
+      const [, dy] = scrollBySpy.mock.calls[0] as [number, number]
+      expect(dy).toBeGreaterThan(0)
+    })
+
+    it('B102a: does not scroll while the pointer sits in the dead zone (middle of the viewport)', async () => {
+      const wrapper = mountArmed()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 400, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 400, pointerId: 7 }))
+      rafCallback!(0)
+
+      expect(scrollBySpy).not.toHaveBeenCalled()
+    })
+
+    it('stops the rAF loop and drops `touch-dragging` once the drag ends normally (real pointerup)', async () => {
+      const wrapper = mountArmed()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).toContain('touch-dragging')
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+      await wrapper.vm.$nextTick()
+
+      expect(cancelledFrameIds).toContain(42)
+      expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-dragging')
+    })
+
+    it('`touch-dragging` outlives the brief `touch-armed` flash — stays set well past 400ms while the drag is still live', async () => {
+      const wrapper = mountArmed()
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).toContain('touch-dragging')
+
+      vi.advanceTimersByTime(1000)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-armed')
+      expect(wrapper.find('.drag-handle').classes()).toContain('touch-dragging')
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+    })
+
+    it('B102b: a second finger touching down mid-PENDING cancels the hold — no hand-off reaches the ancestor at all', async () => {
+      const wrapper = mountArmed()
+      const parentSpy = vi.fn()
+      wrapper.element.parentElement!.addEventListener('pointerdown', parentSpy)
+
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 3 })
+      window.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 99, clientX: 200, clientY: 200 }))
+      vi.advanceTimersByTime(300)
+
+      expect(parentSpy).not.toHaveBeenCalled()
+    })
+
+    it('B102b: a second finger touching down mid-drag aborts it via a synthetic pointercancel (same pointerId) and never touches the new touch itself', async () => {
+      const wrapper = mountArmed()
+      const handle = wrapper.find('.drag-handle').element as HTMLElement
+      const cancelSpy = vi.fn()
+      handle.addEventListener('pointercancel', cancelSpy)
+
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+      expect(cancelSpy).not.toHaveBeenCalled()
+
+      const secondFingerDown = new PointerEvent('pointerdown', {
+        pointerId: 55,
+        clientX: 300,
+        clientY: 300,
+        cancelable: true,
+      })
+      const preventDefaultSpy = vi.spyOn(secondFingerDown, 'preventDefault')
+      window.dispatchEvent(secondFingerDown)
+
+      expect(cancelSpy).toHaveBeenCalledTimes(1)
+      const cancelEvt = cancelSpy.mock.calls[0][0] as PointerEvent
+      expect(cancelEvt.pointerId).toBe(7)
+      // The second finger's own event is never touched — free to drive
+      // native scrolling from the moment it lands.
+      expect(preventDefaultSpy).not.toHaveBeenCalled()
+      expect(cancelledFrameIds).toContain(42)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-dragging')
+    })
+
+    it('ignores its own synthetic hand-off pointerdown (same pointerId) — does not mistake it for a second finger', async () => {
+      const wrapper = mountArmed()
+      const handle = wrapper.find('.drag-handle').element as HTMLElement
+      const cancelSpy = vi.fn()
+      handle.addEventListener('pointercancel', cancelSpy)
+
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+
+      expect(cancelSpy).not.toHaveBeenCalled()
+      expect(wrapper.find('.drag-handle').classes()).toContain('touch-dragging')
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+    })
+  })
+
+  describe('B102c (F1 phase 5) — pin-resize-handle touch long-press gate', () => {
+    function stubRect(el: HTMLElement, width: number, height: number): void {
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width,
+        height,
+        right: width,
+        bottom: height,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return this
+        },
+      } as DOMRect)
+    }
+
+    it('does NOT start resizing immediately on touch — a plain tap/brush leaves size untouched', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
+      // Immediately (no hold yet) — unlike the mouse/pen path, no resize has
+      // started, so a move right now must not change anything.
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toBeUndefined()
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      vi.useRealTimers()
+    })
+
+    it('starts resizing once the touch hold completes (300ms, no disqualifying movement)', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
+      vi.advanceTimersByTime(300)
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      vi.useRealTimers()
+    })
+
+    it('cancels (no resize) when the touch moves past the threshold before the hold completes — scroll intent', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 260, pointerId: 1 }))
+      vi.advanceTimersByTime(300)
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 300, pointerId: 1 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('a second finger touching down mid-hold cancels it (B102b, same arbitration as the drag-handle)', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 88, clientX: 500, clientY: 500 }))
+      vi.advanceTimersByTime(300)
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('mouse/pen keep the original immediate-start behaviour, byte-for-byte (pointerType unset defaults away from touch)', async () => {
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { pointerType: 'mouse', clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      expect(wrapper.attributes('style')).toContain('height: 260px')
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+    })
+
+    it('shows the `touch-armed` flash on hold-confirm and `touch-dragging` for the duration of the resize', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ pinned: true })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      stubRect(el, 300, 200)
+
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
+      expect(handle.classes()).not.toContain('touch-armed')
+
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.pin-resize-handle').classes()).toContain('touch-armed')
+      expect(wrapper.find('.pin-resize-handle').classes()).toContain('touch-dragging')
+
+      vi.advanceTimersByTime(400)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.pin-resize-handle').classes()).not.toContain('touch-armed')
+      expect(wrapper.find('.pin-resize-handle').classes()).toContain('touch-dragging')
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.pin-resize-handle').classes()).not.toContain('touch-dragging')
       vi.useRealTimers()
     })
   })
