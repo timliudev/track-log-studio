@@ -647,9 +647,8 @@ export default {
     mobileView: {
       focus: '聚焦',
       full: '完整',
-      toggleAria: '在聚焦堆疊與完整儀表板之間切換',
-      expandToFull: '展開為完整儀表板',
-      resizeSplit: '拖曳調整上下相鄰面板高度',
+      toggleAria: '在單焦點視圖與完整儀表板之間切換',
+      focusViewTabsAria: '切換下方顯示的視覺內容',
       scrubberAria: '拖曳以跳到單圈或整段記錄中的某一點',
       scrubberPlay: '播放',
       scrubberPause: '暫停',

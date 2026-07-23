@@ -1,11 +1,13 @@
 /**
- * F1 — mobile "Focus Stack" view DEVICE preference: which of the two mobile
- * layouts is active (`focus` = new curated stack, `full` = existing
- * full-dashboard scroll), the user's explicit focus-stack panel order, and
- * (reserved for a later phase) per-panel height weights for a draggable
- * divider. A sibling module/storage key to cardVisibility.ts and
- * panelState.ts — same "device/UI preference, not per-circuit" pattern, see
- * docs/specs/F1-MOBILE-STACK-DESIGN.md §8 for the exact persisted shape.
+ * F1/F5 — mobile view DEVICE preference: which of the two mobile layouts is
+ * active (`focus` = F5's single-focus view, `full` = existing full-dashboard
+ * scroll), the user's explicit focus/tab order, the currently selected
+ * single-focus tab (F5, `currentViewId`), and (F1-only, deprecated) per-panel
+ * height weights the retired draggable divider used. A sibling module/storage
+ * key to cardVisibility.ts and panelState.ts — same "device/UI preference, not
+ * per-circuit" pattern. See docs/specs/F1-MOBILE-STACK-DESIGN.md §8 for the
+ * original persisted shape and docs/specs/F5-SINGLE-FOCUS-DESIGN.md §4 for the
+ * single-focus-view additions.
  *
  * `focusOrder` is deliberately NOT the same shape as panelState.ts's
  * `mobileOrder`: `mobileOrder` always holds a full permutation of every
@@ -23,27 +25,40 @@
  */
 
 export interface MobileViewState {
-  /** 'focus' = curated Focus Stack (mobile default), 'full' = existing
-   *  full-dashboard scroll. */
+  /** 'focus' = the mobile single-focus view (F5, mobile default; was the F1
+   *  curated Focus Stack), 'full' = existing full-dashboard scroll. */
   mode: 'focus' | 'full'
   /** Card ids in explicit focus-stack top-to-bottom order. Only ids the user
    *  has actually ordered — unknown/absent ids are tolerated on load and
    *  reconciled away (see {@link reconcileMobileView}); an id that's visible
    *  but not yet in this list simply falls after the ordered ones (see
-   *  {@link resolveFocusStackOrder}). */
+   *  {@link resolveFocusStackOrder}). Still doubles as F5's tab order (the
+   *  single-focus view's top tab bar uses the same resolved id list). */
   focusOrder: string[]
-  /** Per-panel height weight (finite, `> 0`), keyed by card id — reserved for
-   *  the phase-2 draggable divider between adjacent stack panels. Empty
-   *  object = use the built-in defaults (e.g. map 55% / chart 45%). */
+  /**
+   * @deprecated F1-only (per-panel flex-grow height weight for the retired
+   * draggable divider between adjacent stack panels). F5's single-focus view
+   * has no height split to weight — kept (and still sanitized/persisted
+   * verbatim) purely so old persisted `tracklogstudio.mobileView.v1` values
+   * round-trip without loss; no longer read by any view. See
+   * {@link weightFor}/{@link setSplitWeight}.
+   */
   splitWeights: Record<string, number>
+  /** F5 — the id of the card currently shown in the single-focus view's body
+   *  (selected via its top tab bar). `''` = unset/stale — the view falls back
+   *  to the first visible id (see AnalyzerView's `currentFocusViewId`).
+   *  Reconciled like `focusOrder`: an id that's no longer visible/valid is
+   *  dropped back to `''` rather than being remapped (see
+   *  {@link reconcileMobileView}). */
+  currentViewId: string
 }
 
 export const STORAGE_KEY = 'tracklogstudio.mobileView.v1'
 
 /** The empty/default mobile-view state — Focus Stack mode, no explicit order
- *  yet, default split weights. */
+ *  yet, default split weights, no current-view selection. */
 export function defaultMobileView(): MobileViewState {
-  return { mode: 'focus', focusOrder: [], splitWeights: {} }
+  return { mode: 'focus', focusOrder: [], splitWeights: {}, currentViewId: '' }
 }
 
 /** Exported constant mirror of {@link defaultMobileView} for callers that want
@@ -76,6 +91,10 @@ function toSplitWeights(v: unknown): Record<string, number> {
   return out
 }
 
+function toCurrentViewId(v: unknown): string {
+  return typeof v === 'string' ? v : ''
+}
+
 /** Sanitize an arbitrary (possibly corrupt/foreign) value into a well-formed
  *  `MobileViewState` — never throws. Anything malformed falls back to the
  *  corresponding default field rather than failing the whole parse, same
@@ -88,6 +107,7 @@ export function sanitizeMobileView(raw: unknown): MobileViewState {
     mode,
     focusOrder: toFocusOrder(d.focusOrder),
     splitWeights: toSplitWeights(d.splitWeights),
+    currentViewId: toCurrentViewId(d.currentViewId),
   }
 }
 
@@ -109,12 +129,15 @@ export function saveMobileView(state: MobileViewState): void {
   }
 }
 
-/** Drop focusOrder entries and splitWeights keys for card ids that no longer
- *  exist (e.g. a removed chart) — mirrors panelState.ts's
- *  `reconcilePanelState`, but (unlike `reconcileMobileOrder`) never APPENDS
- *  missing ids: `focusOrder` only ever holds ids the user explicitly placed.
- *  Returns the SAME object when nothing changed, so a persist-watch doesn't
- *  churn (same no-op guard convention as the sibling modules). */
+/** Drop focusOrder entries, splitWeights keys, and a stale currentViewId for
+ *  card ids that no longer exist (e.g. a removed chart) — mirrors
+ *  panelState.ts's `reconcilePanelState`, but (unlike `reconcileMobileOrder`)
+ *  never APPENDS missing ids: `focusOrder` only ever holds ids the user
+ *  explicitly placed. `currentViewId` is dropped back to `''` rather than
+ *  remapped — same "leave it unset, let the view fall back" contract as an id
+ *  that was never set. Returns the SAME object when nothing changed, so a
+ *  persist-watch doesn't churn (same no-op guard convention as the sibling
+ *  modules). */
 export function reconcileMobileView(state: MobileViewState, validIds: string[]): MobileViewState {
   const valid = new Set(validIds)
   const focusOrder = state.focusOrder.filter((id) => valid.has(id))
@@ -127,11 +150,13 @@ export function reconcileMobileView(state: MobileViewState, validIds: string[]):
       weightsChanged = true
     }
   }
+  const currentViewId = state.currentViewId !== '' && valid.has(state.currentViewId) ? state.currentViewId : ''
   const sameOrder =
     focusOrder.length === state.focusOrder.length &&
     focusOrder.every((id, i) => id === state.focusOrder[i])
-  if (sameOrder && !weightsChanged) return state
-  return { mode: state.mode, focusOrder, splitWeights }
+  const sameCurrentView = currentViewId === state.currentViewId
+  if (sameOrder && !weightsChanged && sameCurrentView) return state
+  return { mode: state.mode, focusOrder, splitWeights, currentViewId }
 }
 
 /** Returns a NEW state with `mode` set — pure, caller re-assigns + persists.
@@ -150,6 +175,19 @@ export function setFocusOrder(state: MobileViewState, order: string[]): MobileVi
     next.length === state.focusOrder.length && next.every((id, i) => id === state.focusOrder[i])
   if (same) return state
   return { ...state, focusOrder: next }
+}
+
+/** F5 — returns a NEW state with `currentViewId` set to `id`, the single-focus
+ *  view's top tab bar selection (see {@link MobileViewState.currentViewId}).
+ *  Same-reference no-op when `id` isn't a string or is already the current
+ *  value (same convention as {@link setMode}). Does not itself validate `id`
+ *  against the visible set — that's {@link reconcileMobileView}'s job (and
+ *  AnalyzerView's own fallback), same division of labour `setFocusOrder` has
+ *  with `resolveFocusStackOrder`. */
+export function setCurrentView(state: MobileViewState, id: string): MobileViewState {
+  if (typeof id !== 'string') return state
+  if (state.currentViewId === id) return state
+  return { ...state, currentViewId: id }
 }
 
 /**
@@ -177,15 +215,21 @@ export function resolveFocusStackOrder(
   return ordered
 }
 
-/** The effective height weight for `id`: the persisted `splitWeights[id]` if
- *  it's a finite, `> 0` number, else `fallback` (default `1`, i.e. "equal
- *  share" when no weight has been recorded). */
+/**
+ * @deprecated F1-only (see {@link MobileViewState.splitWeights}) — F5's
+ * single-focus view has nothing to weight; kept only so old persisted weights
+ * round-trip. The effective height weight for `id`: the persisted
+ * `splitWeights[id]` if it's a finite, `> 0` number, else `fallback` (default
+ * `1`, i.e. "equal share" when no weight has been recorded).
+ */
 export function weightFor(state: MobileViewState, id: string, fallback = 1): number {
   const weight = state.splitWeights[id]
   return typeof weight === 'number' && Number.isFinite(weight) && weight > 0 ? weight : fallback
 }
 
-/** F1 phase 2 — returns a NEW state with `splitWeights[id]` set to `weight`,
+/**
+ * @deprecated F1-only (see {@link weightFor}) — no longer read by any view.
+ * F1 phase 2 — returns a NEW state with `splitWeights[id]` set to `weight`,
  *  the draggable-divider persistence path {@link weightFor} reads back.
  *  Sanitizes the same way {@link sanitizeMobileView}'s `toSplitWeights` does:
  *  a `weight` that isn't a finite, `> 0` number is ignored — same-reference
