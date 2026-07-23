@@ -134,6 +134,12 @@ export default {
       distance: '{km} 公里',
       empty: '這個備份檔中找不到任何場次',
     },
+    rcnxSwitch: {
+      label: '切換場次',
+      aria: '切換 {name} 載入的場次',
+      switching: '切換中…',
+      failed: '切換場次失敗：{message}',
+    },
   },
   analyzer: {
     noFiles: '尚未載入記錄，請點選上方「載入記錄」；支援格式見按鈕旁的 ⓘ 說明。',

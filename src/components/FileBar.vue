@@ -112,7 +112,12 @@ function largestSession(sessions: RcnxSessionInfo[]): RcnxSessionInfo {
   return sessions.reduce((best, s) => (s.waypointCount > best.waypointCount ? s : best))
 }
 
-async function finishRcnxImport(id: number, file: File, sessionIndex: number): Promise<void> {
+async function finishRcnxImport(
+  id: number,
+  file: File,
+  sessionIndex: number,
+  sessions: RcnxSessionInfo[],
+): Promise<void> {
   try {
     const imp = detectImporter(await sniff(file))
     const importerId = imp?.id ?? 'rcnx'
@@ -122,10 +127,122 @@ async function finishRcnxImport(id: number, file: File, sessionIndex: number): P
       (f) => fileStore.setProgress(id, f),
       sessionIndex,
     )
-    fileStore.completeImport(id, session)
+    // F4 phase 1 — multi-session archives keep their full session list + the
+    // currently-loaded index on the record (only when there's more than one —
+    // see fileStore.completeImport's doc), so a later "切換場次" switch can
+    // re-parse the SAME File without re-importing (see switchRcnxSession).
+    fileStore.completeImport(id, session, { sessions, sessionIndex })
   } catch (e) {
     fileStore.failImport(id, e instanceof Error ? e.message : String(e))
   }
+}
+
+/** F4 phase 1 — file ids currently mid re-parse for a `.rcnx` session switch;
+ *  disables that record's switcher and guards against overlapping switches. */
+const rcnxSwitching = ref<Set<number>>(new Set())
+
+/** Per-file transient error from a failed session switch, keyed by file id.
+ *  A failed switch must NOT corrupt the existing ready record, so this is
+ *  surfaced separately rather than routed through `fileStore.failImport`
+ *  (which would flip the whole pill to its error state). */
+const rcnxSwitchError = ref<Record<number, string>>({})
+
+/** Compact label for one session in the "切換場次" `<select>` — built from
+ *  the same `RcnxSessionInfo` fields the import-time picker already shows
+ *  (waypoints / duration / lap-data), plus the session's start date/time
+ *  (the one field that reliably tells two sessions of the same track apart,
+ *  since `trackName` is typically identical across a day's sessions). */
+function rcnxSessionLabel(s: RcnxSessionInfo): string {
+  const bits: string[] = []
+  bits.push(s.startTimeMs !== undefined ? new Date(s.startTimeMs).toLocaleString() : t('fileBar.rcnxPicker.session', { n: s.n }))
+  const dur = durationMin(s)
+  if (dur !== undefined) bits.push(t('fileBar.rcnxPicker.duration', { m: dur }))
+  bits.push(t('fileBar.rcnxPicker.waypoints', { n: s.waypointCount }))
+  bits.push(s.hasLapData ? t('fileBar.rcnxPicker.hasLaps') : t('fileBar.rcnxPicker.noLaps'))
+  return bits.join(' · ')
+}
+
+/**
+ * F4 phase 1 — switch which session of an already-imported multi-session
+ * `.rcnx` is loaded: re-parse the SAME original File at a different
+ * `sessionIndex` and replace the record's LogSession in place (same
+ * id/slot/role — analysis selection, colour, comparison membership all stay
+ * put). No-op if the record has no switch context, is already showing
+ * `sessionIndex`, or a switch for it is already in flight.
+ *
+ * Composite/merge across sessions (loading two sessions as one continuous
+ * recording) is explicitly OUT of scope here — see the F4 phase 2 TODO below.
+ */
+async function switchRcnxSession(fileId: number, sessionIndex: number): Promise<void> {
+  const f = fileStore.files.find((x) => x.id === fileId)
+  if (!f || !f.rcnxSessions || f.rcnxSessionIndex === sessionIndex) return
+  if (rcnxSwitching.value.has(fileId)) return
+  const file = fileStore.getOriginalFile(fileId)
+  if (!file) return
+
+  rcnxSwitching.value.add(fileId)
+  if (fileId in rcnxSwitchError.value) {
+    const next = { ...rcnxSwitchError.value }
+    delete next[fileId]
+    rcnxSwitchError.value = next
+  }
+  try {
+    const imp = detectImporter(await sniff(file))
+    const importerId = imp?.id ?? 'rcnx'
+    const session = await parseFile(file, importerId, undefined, sessionIndex)
+    const isPrimary = analyzer.activeFileId === fileId
+    if (isPrimary) {
+      // B55's suppression flag, reused here (see lapStore.ts's doc on
+      // `primarySwapPending`): the active session's TRACK identity is about
+      // to change, which would otherwise make useLaps.ts's generic
+      // file-change watcher wipe the start/finish line + valid-lap bands —
+      // but those are track-level/shared, not this ONE record's, so they're
+      // kept. Only the lap-index-keyed state below is genuinely invalid.
+      lapStore.primarySwapPending = true
+    }
+    fileStore.replaceSession(fileId, session, sessionIndex)
+    if (isPrimary) {
+      lapStore.clearSelection()
+      lapStore.clearExcluded()
+      lapStore.clearPrimaryOffsets()
+    } else {
+      // Comparison recording: its cross-session selection/manual-exclusion
+      // state is keyed by fileId (unlike the primary's), so only ITS entry
+      // needs clearing — same call FileBar already makes when a comparison
+      // stops being compared (see toggleAnalysisFile above).
+      lapStore.clearSessionSelection(fileId)
+    }
+  } catch (e) {
+    rcnxSwitchError.value = { ...rcnxSwitchError.value, [fileId]: e instanceof Error ? e.message : String(e) }
+  } finally {
+    rcnxSwitching.value.delete(fileId)
+  }
+}
+
+// F4 phase 2 TODO: composite/multi-segment — instead of REPLACING a record's
+// session on switch, offer MERGING two or more of a multi-session .rcnx's
+// sessions into one continuous LogSession (reusing the SessionMerge/T6 GPS
+// splice path in useSessionMerge.ts), e.g. for a track day logged as separate
+// morning/afternoon sessions the user wants analysed as one lap set.
+
+/** Remove an imported file and its local (component-only) rcnx-switch UI
+ *  state together, so a later import that happens to reuse the same numeric
+ *  id (fileStore ids are never reused in practice, but this stays correct
+ *  either way) starts clean. */
+function removeFile(id: number): void {
+  fileStore.removeFile(id)
+  rcnxSwitching.value.delete(id)
+  if (id in rcnxSwitchError.value) {
+    const next = { ...rcnxSwitchError.value }
+    delete next[id]
+    rcnxSwitchError.value = next
+  }
+}
+
+function onRcnxSwitchChange(fileId: number, e: Event): void {
+  const target = e.target as HTMLSelectElement
+  const n = Number(target.value)
+  void switchRcnxSession(fileId, n)
 }
 
 /**
@@ -148,7 +265,7 @@ async function importOne(file: File): Promise<void> {
         pendingRcnx.value = { id, file, sessions }
         return
       }
-      await finishRcnxImport(id, file, sessions[0]?.n ?? 0)
+      await finishRcnxImport(id, file, sessions[0]?.n ?? 0, sessions)
       return
     }
     if (imp.id === 'rcz') {
@@ -180,7 +297,7 @@ async function choosePendingSession(n: number): Promise<void> {
   const pending = pendingRcnx.value
   if (!pending) return
   pendingRcnx.value = null
-  await finishRcnxImport(pending.id, pending.file, n)
+  await finishRcnxImport(pending.id, pending.file, n, pending.sessions)
 }
 
 function cancelPendingRcnx(): void {
@@ -436,7 +553,31 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
           {{ f.formatId }} · {{ t('fileBar.rows', { n: f.rowCount }) }}
         </span>
         <span v-else class="pill-meta err">{{ t('fileBar.error') }}</span>
-        <button type="button" class="pill-x" v-tooltip="t('fileBar.remove')" @click="fileStore.removeFile(f.id)">×</button>
+        <!-- F4 phase 1 — only present for records imported from a
+             multi-session .rcnx archive (fileStore only sets `rcnxSessions`
+             when there was more than one to begin with). Re-parses the SAME
+             original File at a different sessionIndex; see
+             switchRcnxSession's doc above. -->
+        <span v-if="f.status === 'ready' && f.rcnxSessions" class="rcnx-switch">
+          <label class="sr-only" :for="`rcnx-switch-${f.id}`">{{ t('fileBar.rcnxSwitch.label') }}</label>
+          <select
+            :id="`rcnx-switch-${f.id}`"
+            class="rcnx-switch-select"
+            :aria-label="t('fileBar.rcnxSwitch.aria', { name: f.name })"
+            :disabled="rcnxSwitching.has(f.id)"
+            :value="f.rcnxSessionIndex"
+            @change="onRcnxSwitchChange(f.id, $event)"
+          >
+            <option v-for="s in f.rcnxSessions" :key="s.n" :value="s.n">
+              {{ rcnxSessionLabel(s) }}
+            </option>
+          </select>
+          <span v-if="rcnxSwitching.has(f.id)" class="rcnx-switch-status">{{ t('fileBar.rcnxSwitch.switching') }}</span>
+        </span>
+        <span v-if="rcnxSwitchError[f.id]" class="rcnx-switch-err" role="alert">
+          {{ t('fileBar.rcnxSwitch.failed', { message: rcnxSwitchError[f.id] }) }}
+        </span>
+        <button type="button" class="pill-x" v-tooltip="t('fileBar.remove')" @click="removeFile(f.id)">×</button>
       </span>
     </div>
 
@@ -726,6 +867,55 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
 }
 .pill-meta.err {
   color: var(--color-accent);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* F4 phase 1 — the "切換場次" session switcher, shown only on records
+   imported from a multi-session .rcnx. Deliberately compact (a native
+   <select>, not a custom widget) so it fits inline in the pill alongside
+   every other per-file control. */
+.rcnx-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rcnx-switch-select {
+  max-width: 140px;
+  padding: 1px 3px;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.rcnx-switch-select:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+/* B35 — same coarse-pointer touch-target convention as .make-primary-btn:
+   a native <select> already gets OS-level touch handling, but a taller box
+   keeps the tap target comfortable alongside the pill's other controls. */
+:root[data-any-pointer-coarse] .rcnx-switch-select {
+  min-height: 32px;
+}
+.rcnx-switch-status {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.rcnx-switch-err {
+  color: var(--color-accent);
+  font-size: 0.72rem;
 }
 .pill-x {
   background: none;

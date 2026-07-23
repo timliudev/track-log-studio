@@ -140,6 +140,12 @@ export default {
       distance: '{km} km',
       empty: 'No sessions found in this backup',
     },
+    rcnxSwitch: {
+      label: 'Switch session',
+      aria: 'Switch which session of {name} is loaded',
+      switching: 'Switching…',
+      failed: 'Could not switch session: {message}',
+    },
   },
   analyzer: {
     noFiles: 'No logs loaded — use "Load files" above; see the ⓘ next to it for supported formats.',
