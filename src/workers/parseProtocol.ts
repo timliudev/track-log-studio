@@ -12,6 +12,13 @@ export interface ParseRequest {
    * by importers that don't understand it.
    */
   sessionIndex?: number
+  /**
+   * The chosen `sessions/session_<key>/…` for a RaceChrono `.rcz` DEVICE
+   * BACKUP (see `listRczSessions` / `parseRczBackupSession`). Omit for a
+   * plain single-session `.rcz` export — that path is unchanged. Ignored by
+   * importers that don't understand it.
+   */
+  rczSessionKey?: string
 }
 
 /** A channel in transferable form (the buffer is transferred, not copied). */

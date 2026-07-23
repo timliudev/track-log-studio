@@ -128,6 +128,12 @@ export default {
       recommended: '（資料最多）',
       cancel: '取消',
     },
+    rczPicker: {
+      title: '這是 RaceChrono 整機備份，含 {n} 個場次，請選擇要開啟的一個',
+      laps: '{n} 圈',
+      distance: '{km} 公里',
+      empty: '這個備份檔中找不到任何場次',
+    },
   },
   analyzer: {
     noFiles: '尚未載入記錄，請點選上方「載入記錄」；支援格式見按鈕旁的 ⓘ 說明。',

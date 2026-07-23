@@ -7,7 +7,8 @@ import { useLapStore } from '@/stores/lapStore'
 import { useLogImport } from '@/composables/useLogImport'
 import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/formatDefinitions'
 import type { RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
-import { extractZipFile, inspectRcnxFile } from '@/domain/import/lazyLoaders'
+import type { RczSessionInfo } from '@/domain/import/rcz/listRczSessions'
+import { extractZipFile, inspectRcnxFile, inspectRczFile } from '@/domain/import/lazyLoaders'
 import { filesFromDataTransfer, isFileDrag } from './fileDrop'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import {
@@ -150,6 +151,24 @@ async function importOne(file: File): Promise<void> {
       await finishRcnxImport(id, file, sessions[0]?.n ?? 0)
       return
     }
+    if (imp.id === 'rcz') {
+      // A device BACKUP nests many sessions and needs a picker; a plain
+      // single-session export (the common case) returns null here and falls
+      // straight through to the unchanged direct-parse path below.
+      const sessions = await inspectRczFile(file)
+      if (sessions) {
+        if (sessions.length > 1) {
+          pendingRcz.value = { id, file, sessions }
+          return
+        }
+        if (sessions.length === 1) {
+          await finishRczImport(id, file, sessions[0].key)
+          return
+        }
+        fileStore.failImport(id, t('fileBar.rczPicker.empty'))
+        return
+      }
+    }
     const session = await parseFile(file, imp.id, (f) => fileStore.setProgress(id, f))
     fileStore.completeImport(id, session)
   } catch (e) {
@@ -168,6 +187,38 @@ function cancelPendingRcnx(): void {
   const pending = pendingRcnx.value
   if (!pending) return
   pendingRcnx.value = null
+  fileStore.removeFile(pending.id)
+}
+
+/** Pending `.rcz` device-backup session choice, shown as a small inline picker. */
+const pendingRcz = ref<{ id: number; file: File; sessions: RczSessionInfo[] } | null>(null)
+
+async function finishRczImport(id: number, file: File, sessionKey: string): Promise<void> {
+  try {
+    const session = await parseFile(
+      file,
+      'rcz',
+      (f) => fileStore.setProgress(id, f),
+      undefined,
+      sessionKey,
+    )
+    fileStore.completeImport(id, session)
+  } catch (e) {
+    fileStore.failImport(id, e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function choosePendingRczSession(key: string): Promise<void> {
+  const pending = pendingRcz.value
+  if (!pending) return
+  pendingRcz.value = null
+  await finishRczImport(pending.id, pending.file, key)
+}
+
+function cancelPendingRcz(): void {
+  const pending = pendingRcz.value
+  if (!pending) return
+  pendingRcz.value = null
   fileStore.removeFile(pending.id)
 }
 
@@ -255,6 +306,19 @@ async function onDrop(e: DragEvent): Promise<void> {
 /** Duration in whole minutes for the picker label, or undefined if unknown. */
 function durationMin(s: RcnxSessionInfo): number | undefined {
   return s.durationMs !== undefined ? Math.round(s.durationMs / 60000) : undefined
+}
+
+/** Duration in whole minutes for an RCZ backup session, or undefined if unknown. */
+function rczDurationMin(s: RczSessionInfo): number | undefined {
+  return s.durationMs !== undefined ? Math.round(s.durationMs / 60000) : undefined
+}
+
+/** `YYYY-MM-DD HH:mm` label for an RCZ backup session's date, or undefined. */
+function rczDateLabel(s: RczSessionInfo): string | undefined {
+  if (!s.date) return undefined
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const d = s.date
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 </script>
 
@@ -410,6 +474,36 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
           </li>
         </ul>
         <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcnx">
+          {{ t('fileBar.rcnxPicker.cancel') }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="pendingRcz" class="rcnx-picker-backdrop" @click.self="cancelPendingRcz">
+      <div class="rcnx-picker" role="dialog" aria-modal="true">
+        <p class="rcnx-picker-title">{{ t('fileBar.rczPicker.title', { n: pendingRcz.sessions.length }) }}</p>
+        <p class="rcnx-picker-file">{{ t('fileBar.rcnxPicker.fileLabel') }}: {{ pendingRcz.file.name }}</p>
+        <ul class="rcnx-picker-list">
+          <li v-for="s in pendingRcz.sessions" :key="s.key">
+            <button type="button" class="rcnx-session-btn" @click="choosePendingRczSession(s.key)">
+              <span class="rcnx-session-name">
+                {{ rczDateLabel(s) || s.key }}
+              </span>
+              <span class="rcnx-session-meta">
+                <template v-if="s.lapCount !== undefined">
+                  {{ t('fileBar.rczPicker.laps', { n: s.lapCount }) }} ·
+                </template>
+                <template v-if="s.distanceKm !== undefined">
+                  {{ t('fileBar.rczPicker.distance', { km: s.distanceKm.toFixed(1) }) }} ·
+                </template>
+                <template v-if="rczDurationMin(s) !== undefined">
+                  {{ t('fileBar.rcnxPicker.duration', { m: rczDurationMin(s) }) }}
+                </template>
+              </span>
+            </button>
+          </li>
+        </ul>
+        <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcz">
           {{ t('fileBar.rcnxPicker.cancel') }}
         </button>
       </div>

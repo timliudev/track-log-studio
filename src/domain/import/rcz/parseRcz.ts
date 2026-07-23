@@ -71,11 +71,15 @@ export function decodeRcChannelName(id: number): string {
   return `rc_channel_${id}`
 }
 
-/** Element byte size for each RCZ channel type digit. */
-const ELEM_SIZE: Record<number, number> = { 0: 4, 1: 8, 3: 8 }
+/**
+ * Element byte size for each RCZ channel type digit. Shared with
+ * `parseRczBackup.ts` (device-backup sessions use the identical channel-file
+ * grammar, just nested under a `sessions/session_<ID>/` prefix).
+ */
+export const ELEM_SIZE: Record<number, number> = { 0: 4, 1: 8, 3: 8 }
 
-/** A parsed channel-file name. */
-interface ChannelFile {
+/** A parsed channel-file name, plus its (already-inflated) bytes. */
+export interface ChannelFile {
   name: string
   dev: number
   id: number
@@ -84,17 +88,19 @@ interface ChannelFile {
 }
 
 /**
- * Parse a `channel[2]_<A>_<dev>_0_<id>_<type>` file name. Returns null when the
- * name does not match the channel-file shape.
+ * Parse a `channel[2]_<A>_<dev>_0_<id>_<type>` file BASE name (no directory
+ * prefix — callers reading a nested backup entry must strip the
+ * `sessions/session_<ID>/` prefix first). Returns null when the name does not
+ * match the channel-file shape.
  */
-function parseChannelName(name: string): { dev: number; id: number; type: number } | null {
+export function parseChannelName(name: string): { dev: number; id: number; type: number } | null {
   const m = name.match(/^channel2?_\d+_(\d+)_0_(\d+)_(\d+)$/)
   if (!m) return null
   return { dev: Number(m[1]), id: Number(m[2]), type: Number(m[3]) }
 }
 
 /** Read a bare little-endian numeric array into a number[] per its type. */
-function readArray(bytes: Uint8Array, type: number): number[] {
+export function readArray(bytes: Uint8Array, type: number): number[] {
   const size = ELEM_SIZE[type]
   if (!size) return []
   const n = Math.floor(bytes.byteLength / size)
@@ -110,7 +116,7 @@ function readArray(bytes: Uint8Array, type: number): number[] {
 }
 
 /** Read the int64 epoch-ms timestamp stream for a device, or null if absent. */
-function readTimestamps(files: Map<string, ChannelFile>, dev: number): number[] | null {
+export function readTimestamps(files: Map<string, ChannelFile>, dev: number): number[] | null {
   const f = [...files.values()].find((c) => c.dev === dev && c.id === 1 && c.type === 1)
   return f ? readArray(f.bytes, 1) : null
 }
@@ -119,9 +125,10 @@ function readTimestamps(files: Map<string, ChannelFile>, dev: number): number[] 
  * Build a nearest-neighbour index map from `dst` timestamps onto `src`
  * timestamps. Both are monotonically increasing; result[i] is the index into
  * `src` whose timestamp is closest to `dst[i]`. Used to join GPS rows onto the
- * ECU master clock.
+ * ECU master clock (or, in a device-backup session, other-device rows onto the
+ * GPS master clock — see `parseRczBackup.ts`).
  */
-function nearestIndexMap(dst: number[], src: number[]): Int32Array {
+export function nearestIndexMap(dst: number[], src: number[]): Int32Array {
   const map = new Int32Array(dst.length)
   if (src.length === 0) return map
   let j = 0
