@@ -128,6 +128,12 @@ export default {
       recommended: '（資料最多）',
       cancel: '取消',
     },
+    rcnxSwitch: {
+      label: '切換場次',
+      aria: '切換 {name} 載入的場次',
+      switching: '切換中…',
+      failed: '切換場次失敗：{message}',
+    },
   },
   analyzer: {
     noFiles: '尚未載入記錄，請點選上方「載入記錄」；支援格式見按鈕旁的 ⓘ 說明。',
