@@ -1,9 +1,21 @@
 # F1 — Mobile Focus/Stack View (design proposal)
 
-> **STATUS: DESIGN APPROVED — key decisions locked (see §11).** Implementation
-> waits on `F2` landing (F1 reuses the F2 visibility store + menu). Nothing here is
-> implemented yet. Tracker entry: docs/ISSUES.md `F1`. Folds in `B102`/`B61` (mobile
-> drag-gesture arbitration). Depends on `F2` (the card-visibility menu) for curation.
+> **STATUS: ⚠️ PARTLY SUPERSEDED BY `F5` (2026-07-24).** All five phases WERE built and
+> landed, but device testing showed the stack itself was the wrong mobile paradigm: it
+> held EVERY visible card, so every panel sat at its `min-height: 180px` floor, the stack
+> scrolled as a whole, the phase-2 divider had **no free space to rebalance and did
+> nothing**, and the scrubber was pushed below the fold instead of pinning. The user chose
+> to pivot to a **single-focus view** — see docs/specs/F5-SINGLE-FOCUS-DESIGN.md, which
+> supersedes §3–§4 here.
+>
+> **Superseded / deleted:** `MobileFocusStack.vue` and the draggable divider (locked
+> choice (b)); `mobileView.splitWeights` (now deprecated, kept only for back-compat).
+> **Still live, reused by F5:** the bottom scrubber + ▶ play (locked choice (d) —
+> `MobileScrubber.vue` / `scrubber.ts`), the shared-`cursorIdx` sync, and the phase-5
+> drag-gesture engine (locked choice (c)), which still serves the full-dashboard mode.
+>
+> Tracker entries: docs/ISSUES.md `F1` (history) and `F5` (current). Folds in `B102`/`B61`
+> (mobile drag-gesture arbitration). Depends on `F2` (the card-visibility menu) for curation.
 >
 > **Locked choices:** (a) focus set = F2 visible set · (b) **draggable divider in v1**
 > · (c) **full drag-gesture engine in v1** (edge-autoscroll + two-finger-scroll +
