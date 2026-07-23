@@ -30,6 +30,7 @@ import type { CardDataContext } from '@/domain/layout/cardDataAvailability'
 import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
+import { scrubberDomain } from '@/domain/analysis/scrubber'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceFromLaunch, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
@@ -60,6 +61,7 @@ import DashboardCard from '@/components/DashboardCard.vue'
 import CardMenu from './CardMenu.vue'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
 import MobileFocusStack from './MobileFocusStack.vue'
+import MobileScrubber from './MobileScrubber.vue'
 import type { AnalyzerCardContext } from './analyzerCardContext'
 
 const { t } = useI18n()
@@ -608,6 +610,21 @@ function onFocusResize(weights: Record<string, number>): void {
   }
 }
 
+// F1 phase 3 — the Focus Stack's shared bottom scrubber's domain: exactly one
+// selected lap -> that lap's own sample span, else -> the full session (see
+// scrubber.ts's `scrubberDomain` doc). Derived here (not owned by the
+// scrubber) so AnalyzerView stays the single source for what "the current
+// selection" means, same as `selectedLaps`/`focusRange` above.
+const focusScrubberDomain = computed(() => scrubberDomain(selectedLaps.value, xValues.value?.length ?? 0))
+// The scrubber only ever CALLS the store's existing cursor setter — see
+// analyzerStore.ts's `setCursor` and this file's own `cardCtx.setCursor` —
+// it never invents new cursor state (design doc §6). Every other cursor
+// consumer (map, timeline charts, and overlay charts via TimeSeriesChart's
+// own reverse-link) already follows `cursorIdx` for free.
+function onScrubberScrub(index: number): void {
+  analyzer.setCursor(index)
+}
+
 // Per-item props the library's OWN GridItem needs (we no longer render a
 // GridItem ourselves — see the `#item` slot note). grid-layout-plus spreads
 // each layout entry as props onto the GridItem it wraps around the slot, so
@@ -1135,15 +1152,26 @@ const cardCtx: AnalyzerCardContext = {
            v-else) so the grid and the stack never both mount. On desktop, or
            in mobile `full` mode, the existing GridLayout path below is
            unchanged. -->
-      <MobileFocusStack
-        v-if="showFocusStack"
-        :ids="focusStackIds"
-        :ctx="cardCtx"
-        :title-for="titleForItemId"
-        :weight-for="focusWeightFor"
-        @expand="setMobileMode('full')"
-        @resize="onFocusResize"
-      />
+      <template v-if="showFocusStack">
+        <MobileFocusStack
+          :ids="focusStackIds"
+          :ctx="cardCtx"
+          :title-for="titleForItemId"
+          :weight-for="focusWeightFor"
+          @expand="setMobileMode('full')"
+          @resize="onFocusResize"
+        />
+        <!-- F1 phases 3-4 — the shared bottom scrubber. A normal flex child
+             right after the (flex:1, scrollable) stack, so it naturally sits
+             pinned above BottomNav within `.analyzer.focus-mode`'s own
+             height (see that class's comment) — no fixed positioning needed. -->
+        <MobileScrubber
+          :domain="focusScrubberDomain"
+          :time-ms="timeMs"
+          :cursor-idx="cursorIdx"
+          @scrub="onScrubberScrub"
+        />
+      </template>
       <div v-else ref="gridWrapRef" class="grid-wrap">
       <GridLayout
         v-model:layout="activeLayout"
