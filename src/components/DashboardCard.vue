@@ -7,8 +7,10 @@ import {
   DEFAULT_TOUCH_DRAG_DELAY,
   advanceOnMove,
   advanceOnTimeout,
+  advanceOnSecondPointer,
   type TouchDragDelayState,
 } from '@/domain/layout/touchDragDelay'
+import { edgeAutoscrollVelocity } from '@/domain/layout/edgeAutoscroll'
 
 /**
  * #8/#9 — one grid item's visual chrome on the analyzer dashboard: a header
@@ -127,6 +129,60 @@ import {
  * offline (touchDragDelay.test.ts), but the synthetic-pointerdown handoff to
  * interactjs is a structural fix that needs a real Android/iOS device to
  * confirm end-to-end (see the acceptance checklist wherever this ships).
+ *
+ * F1 phase 5 (B102a/b/c, 2026-07-23) — the rest of the gesture engine for
+ * this SAME long-press-then-drag gesture, once armed:
+ *
+ *  - **B102a edge-autoscroll**: the full-dashboard mobile grid has no
+ *    internal scroll container — the whole PAGE scrolls a tall content-sized
+ *    grid (see AnalyzerView.vue's `.analyzer.focus-mode` doc for the
+ *    contrast with the Focus Stack, which DOES have its own scroller). A
+ *    card drag is otherwise capped to whatever fits in one screenful — you
+ *    can't drag a card to a position currently off-screen. Fixed by a plain
+ *    `requestAnimationFrame` loop (`runEdgeAutoscroll`), started the instant
+ *    the drag arms and stopped the instant it ends, that reads the latest
+ *    tracked pointer Y every frame and calls `window.scrollBy` with whatever
+ *    `edgeAutoscroll.ts`'s pure `edgeAutoscrollVelocity` says for that Y (0
+ *    in the vertical middle, ramping up near the top/bottom edge) — the ramp
+ *    MATH is what's unit-tested offline; the rAF loop itself, like the
+ *    touch-action handoff below, needs a real device to confirm the actual
+ *    scroll feels smooth and controllable while a finger is also mid-drag.
+ *  - **B102b two-finger scroll during drag**: once armed, a SECOND real
+ *    finger touching down anywhere (`onActiveDragSecondPointer`, a `window`
+ *    `pointerdown` listener active only while a drag is live) means the user
+ *    wants to do something else with that hand — most commonly scroll with
+ *    the free hand while the other still has a card mid-reorder. Resolved by
+ *    dispatching a synthetic `pointercancel` (same pointerId the drag
+ *    started with) at the drag handle: interactjs's own source treats any
+ *    event whose type matches `/cancel$/i` as ending that pointer's
+ *    interaction (same "read the actual source" verification the original
+ *    hand-off pointerdown above already relies on), so this cleanly aborts
+ *    the in-flight drag. The new touch itself is never touched (no
+ *    `preventDefault`/`stopPropagation`) — it's free to drive native
+ *    scrolling from the moment it lands.
+ *  - **Clean touch-action handoff on arm**: `.drag-handle.touch-dragging` (a
+ *    NEW class, `touchDragActive` below — deliberately separate from the
+ *    existing 400ms `touchArmed` cosmetic flash, which stays exactly as it
+ *    was and still drives its own `.touch-armed` class/test) sets
+ *    `touch-action: none` for the handle the moment a drag arms, so a fast
+ *    "hold then immediately swipe" right after the hold completes has the
+ *    best chance of being read as further drag movement rather than getting
+ *    re-captured by the browser's own native vertical pan. CAVEAT, stated
+ *    plainly rather than overclaimed: `touch-action` is generally resolved by
+ *    the browser once per touch sequence at its very first contact point,
+ *    and several engines do NOT retroactively honour a CSS change made mid-
+ *    sequence for that SAME physical touch (this is a known, long-standing
+ *    web-platform rough edge, not something this codebase can control) — so
+ *    this class swap is a best-effort layer, not a guarantee, ON TOP OF
+ *    B102b's two-finger abort and the existing move-threshold/long-press
+ *    gate, which are the parts that ARE reliably enforceable from JS alone.
+ *    Real-device testing is the only way to know whether the residual "hold
+ *    then immediately fling" race is fully closed or just narrowed.
+ *
+ * The exact same long-press-then-touch-action-none shape (reusing the same
+ * pure `touchDragDelay.ts` state machine, a separate tracked gesture) is
+ * ALSO applied to `.pin-resize-handle` below — see that handle's own B102c
+ * doc for why.
  */
 const props = defineProps<{
   title: string
@@ -165,6 +221,13 @@ const rootEl = ref<HTMLElement | null>(null)
 // where the pointerdown listener lives AND where the synthetic hand-off
 // pointerdown gets (re-)dispatched from once armed.
 const dragHandleEl = ref<HTMLElement | null>(null)
+// B102c (F1 phase 5) — same role as `dragHandleEl` above, for the pin-resize
+// corner handle's own touch long-press gate (see that handle's B102c doc):
+// needed to call `setPointerCapture` from `startPinResize` when the gesture
+// began from the DELAYED (post-timer) touch path, which has no live
+// `PointerEvent`/`currentTarget` to read at arm-time — only mouse/pen's
+// immediate path still had one before this fix.
+const pinResizeHandleEl = ref<HTMLElement | null>(null)
 // Transient visual cue: true for a short window right when the long-press
 // completes (see `onTouchDragTimeout`), separate from — and earlier than —
 // grid-layout-plus's own `.vgl-item--dragging` class, which only appears
@@ -172,6 +235,13 @@ const dragHandleEl = ref<HTMLElement | null>(null)
 // finger movement.
 const touchArmed = ref(false)
 const TOUCH_ARMED_VISUAL_MS = 400
+
+// F1 phase 5 (B102a/b) — true from the instant a drag arms until it ends
+// (real pointerup/pointercancel, OR a B102b two-finger abort) — separate from
+// `touchArmed`'s brief 400ms cosmetic flash above (kept byte-identical, see
+// module doc), drives `.drag-handle.touch-dragging`'s `touch-action: none`
+// for the FULL duration of the handed-off drag, not just the confirm flash.
+const touchDragActive = ref(false)
 
 // B64/B99 — same 768px cutover useDashboardLayout.ts's MOBILE_BREAKPOINT_PX
 // uses for the JS-side desktop↔mobile switch (kept as a plain `window.innerWidth`
@@ -220,6 +290,7 @@ function clearTouchDragTracking(): void {
   window.removeEventListener('pointermove', onTouchDragMove)
   window.removeEventListener('pointerup', onTouchDragEnd)
   window.removeEventListener('pointercancel', onTouchDragEnd)
+  window.removeEventListener('pointerdown', onTouchDragSecondPointer)
   touchDragState = null
   touchDragStart = null
   touchDragLatest = null
@@ -235,6 +306,105 @@ function onTouchDragMove(e: PointerEvent): void {
 function onTouchDragEnd(e: PointerEvent): void {
   if (!touchDragStart || e.pointerId !== touchDragStart.pointerId) return
   clearTouchDragTracking()
+}
+
+// B102b — a genuine SECOND finger touching down anywhere while the FIRST is
+// still only 'pending' (hasn't held long enough to arm yet) means this was
+// never a plain single-finger long-press to begin with — most commonly a
+// second hand starting to scroll while the first still rests on a card
+// title. Hard-cancels via the same pure state machine `advanceOnMove` uses;
+// deliberately does NOT touch the second pointerdown itself (no
+// preventDefault/stopPropagation) so whatever that finger is doing proceeds
+// completely natively.
+function onTouchDragSecondPointer(e: PointerEvent): void {
+  if (!touchDragState || !touchDragStart || e.pointerId === touchDragStart.pointerId) return
+  touchDragState = advanceOnSecondPointer(touchDragState)
+  if (touchDragState === 'cancelled') clearTouchDragTracking()
+}
+
+// F1 phase 5 (B102a/b) — tracking for the LIVE, already-armed drag (after
+// hand-off to grid-layout-plus/interactjs), separate from the pending-phase
+// state above (which is fully torn down the instant a drag arms — see
+// `onTouchDragTimeout`). Module-level (not refs): nothing here needs to be
+// reactive, only `touchDragActive` above does.
+let activeDragPointerId: number | null = null
+let activeDragLatestY: number | null = null
+let activeDragRafId: number | null = null
+
+/** B102a — runs every animation frame for the duration of a live touch drag,
+ *  applying whatever `edgeAutoscroll.ts`'s pure ramp function says for the
+ *  latest tracked pointer Y. Self-reschedules via `requestAnimationFrame`
+ *  until `endActiveTouchDrag` clears `activeDragPointerId`, which is this
+ *  loop's own stop condition (checked at the TOP of each frame, not via a
+ *  cancelled rAF id, so a stray already-queued frame from the instant right
+ *  before `endActiveTouchDrag` ran is still a safe no-op). */
+function runEdgeAutoscroll(): void {
+  if (activeDragPointerId == null) {
+    activeDragRafId = null
+    return
+  }
+  if (activeDragLatestY != null) {
+    const velocity = edgeAutoscrollVelocity(activeDragLatestY, 0, window.innerHeight)
+    if (velocity !== 0) window.scrollBy(0, velocity)
+  }
+  activeDragRafId = window.requestAnimationFrame(runEdgeAutoscroll)
+}
+
+function onActiveDragMove(e: PointerEvent): void {
+  if (e.pointerId !== activeDragPointerId) return
+  activeDragLatestY = e.clientY
+}
+
+function onActiveDragEnd(e: PointerEvent): void {
+  if (e.pointerId !== activeDragPointerId) return
+  endActiveTouchDrag()
+}
+
+// B102b — the SAME second-finger arbitration as the pending phase above, but
+// for an ALREADY-ARMED (handed-off-to-interactjs) drag: abort it via a
+// synthetic `pointercancel` (see this component's module doc for why that
+// reliably ends interactjs's own tracking of the ORIGINAL pointerId) and let
+// the new touch drive native scrolling completely unobstructed.
+function onActiveDragSecondPointer(e: PointerEvent): void {
+  if (activeDragPointerId == null || e.pointerId === activeDragPointerId) return
+  const handle = dragHandleEl.value
+  const pointerId = activeDragPointerId
+  endActiveTouchDrag()
+  if (!handle) return
+  const cancelEvt = new PointerEvent('pointercancel', {
+    bubbles: true,
+    cancelable: false,
+    pointerId,
+    pointerType: 'touch',
+  })
+  handle.dispatchEvent(cancelEvt)
+}
+
+function startActiveTouchDrag(pointerId: number, y: number): void {
+  activeDragPointerId = pointerId
+  activeDragLatestY = y
+  touchDragActive.value = true
+  window.addEventListener('pointermove', onActiveDragMove)
+  window.addEventListener('pointerdown', onActiveDragSecondPointer)
+  window.addEventListener('pointerup', onActiveDragEnd)
+  window.addEventListener('pointercancel', onActiveDragEnd)
+  activeDragRafId = window.requestAnimationFrame(runEdgeAutoscroll)
+}
+
+/** Idempotent — safe to call from any exit path (real end, B102b abort,
+ *  unmount) exactly like `clearTouchDragTracking` above. */
+function endActiveTouchDrag(): void {
+  if (activeDragRafId != null) {
+    window.cancelAnimationFrame(activeDragRafId)
+    activeDragRafId = null
+  }
+  window.removeEventListener('pointermove', onActiveDragMove)
+  window.removeEventListener('pointerdown', onActiveDragSecondPointer)
+  window.removeEventListener('pointerup', onActiveDragEnd)
+  window.removeEventListener('pointercancel', onActiveDragEnd)
+  activeDragPointerId = null
+  activeDragLatestY = null
+  touchDragActive.value = false
 }
 
 // B61 — marks the synthetic hand-off pointerdown (see `onTouchDragTimeout`)
@@ -261,6 +431,7 @@ function onTouchDragTimeout(): void {
   window.removeEventListener('pointermove', onTouchDragMove)
   window.removeEventListener('pointerup', onTouchDragEnd)
   window.removeEventListener('pointercancel', onTouchDragEnd)
+  window.removeEventListener('pointerdown', onTouchDragSecondPointer)
   touchDragState = null
   touchDragStart = null
   touchDragLatest = null
@@ -271,6 +442,13 @@ function onTouchDragTimeout(): void {
   }, TOUCH_ARMED_VISUAL_MS)
 
   if (!handle) return
+  // F1 phase 5 — start B102a/b's live-drag tracking (edge-autoscroll +
+  // two-finger abort) BEFORE dispatching the hand-off below, so it's already
+  // watching by the time interactjs's own listeners run synchronously inside
+  // that dispatch. Ignores its own hand-off dispatch (same pointerId as
+  // `activeDragPointerId`, see `onActiveDragSecondPointer`'s guard) so this
+  // never mistakes the synthetic pointerdown for a second finger.
+  startActiveTouchDrag(pointerId, y)
   // Hand off to grid-layout-plus: this touch's ORIGINAL pointerdown was
   // never seen by interactjs (stopPropagation'd in
   // onDragHandlePointerDown) — a fresh synthetic one, same pointerId so the
@@ -324,6 +502,7 @@ function onDragHandlePointerDown(e: PointerEvent): void {
   window.addEventListener('pointermove', onTouchDragMove)
   window.addEventListener('pointerup', onTouchDragEnd)
   window.addEventListener('pointercancel', onTouchDragEnd)
+  window.addEventListener('pointerdown', onTouchDragSecondPointer)
   touchDragTimer = setTimeout(onTouchDragTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
 }
 
@@ -355,14 +534,139 @@ function clampPinnedSize(w: number, h: number): { w: number; h: number } {
 
 let pinResizeStart: { x: number; y: number; w: number; h: number } | null = null
 
-function onPinResizePointerDown(e: PointerEvent): void {
+// B102c investigation (F1 phase 5) — the mobile FULL-dashboard single-column
+// grid has NO pink split-resize gutter overlay at all: `AnalyzerView.vue`'s
+// `gutterEnabled` is `!isMobile && !isLocked`, and `useGridGutters.ts`'s own
+// `gutters` computed returns an empty array (and its `onGutterPointerDown` is
+// a no-op) whenever `enabled` is false — confirmed by reading both, not
+// reproducible on a real `isMobile===true` (<=768px) viewport. So B102's "背景
+// 的粉紅色 gutter grip 塊...與拖卡片搶手勢" cannot literally be the B90/B93
+// gutter strips in the scope this task is about (the legacy full-dashboard
+// mobile mode). The best evidence-backed match found instead: THIS handle.
+// `.pin-resize-handle` is a small "corner grip" — B18b's own doc above
+// already calls it exactly that — 10×10 CSS px on desktop, 30×30 on mobile
+// (`--vgl-resizer-size`'s own `@media (max-width:768px)` bump, AnalyzerView's
+// `.analyzer` rule — still short of §8's 44px coarse-pointer minimum) — that
+// lives at the bottom-right corner of a PINNED card, which on mobile is the
+// sticky, full-bleed, ALWAYS-VISIBLE floating card (B64) — i.e. it sits right
+// at the boundary where a thumb naturally lands to scroll past that sticky
+// card into whatever's below, at any breakpoint, on every device that has a
+// pinned card. It used to start resizing on the VERY FIRST touch contact
+// (`onPinResizePointerDown` ran unconditionally for every pointerType) with
+// `touch-action: none` unconditionally blocking any native-scroll recovery —
+// a real, un-gated mis-touch trap sitting exactly where accidental contact is
+// likely, with zero forgiveness. Its accent-tinted 2px border
+// (`--color-accent`, a saturated red — see theme.css — reads as pink/rose
+// once color-mixed at low opacity, matching "粉紅色") only reinforces the
+// visual-language mix-up with the ALSO-accent-tinted, ALSO-"grip"-named B90
+// gutter strip. Fixed the same B61 way the drag-handle gates: touch gets the
+// SAME pure long-press state machine (a separate tracked gesture below) and
+// `touch-action` starts as `pan-y` (scroll-recoverable) instead of `none`
+// until the hold is confirmed — see the `.pin-resize-handle` CSS block for
+// the touch-action side and its own coarse-pointer 44px hit-slop (previously
+// missing entirely, unlike every OTHER touch target this size in this file —
+// see §8's `:root[data-any-pointer-coarse]` policy). Mouse/pen are BYTE-
+// IDENTICAL to before (still start resizing on the very first pointerdown,
+// no gate, no behaviour change) — only real touch input goes through the new
+// gate below.
+// `viaTouch` drives `.pin-resize-handle.touch-dragging`'s `touch-action:
+// none` (see this handle's CSS block) for the FULL duration of a
+// touch-originated resize — separate from `pinResizeTouchArmed`'s brief
+// cosmetic flash, exactly mirroring `touchDragActive` vs `touchArmed` above.
+function startPinResize(x: number, y: number, pointerId: number, viaTouch = false): void {
   const el = rootEl.value
   if (!el) return
   const rect = el.getBoundingClientRect()
-  pinResizeStart = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height }
-  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  pinResizeStart = { x, y, w: rect.width, h: rect.height }
+  pinResizeHandleEl.value?.setPointerCapture?.(pointerId)
+  if (viaTouch) pinResizeTouchActive.value = true
   window.addEventListener('pointermove', onPinResizePointerMove)
   window.addEventListener('pointerup', onPinResizePointerUp)
+}
+
+let pinResizeTouchState: TouchDragDelayState | null = null
+let pinResizeTouchTimer: ReturnType<typeof setTimeout> | null = null
+let pinResizeTouchStart: { x: number; y: number; pointerId: number } | null = null
+let pinResizeTouchLatest: { x: number; y: number } | null = null
+const pinResizeTouchArmed = ref(false)
+const pinResizeTouchActive = ref(false)
+
+function clearPinResizeTouchTracking(): void {
+  if (pinResizeTouchTimer != null) {
+    clearTimeout(pinResizeTouchTimer)
+    pinResizeTouchTimer = null
+  }
+  window.removeEventListener('pointermove', onPinResizeTouchMove)
+  window.removeEventListener('pointerup', onPinResizeTouchEnd)
+  window.removeEventListener('pointercancel', onPinResizeTouchEnd)
+  window.removeEventListener('pointerdown', onPinResizeTouchSecondPointer)
+  pinResizeTouchState = null
+  pinResizeTouchStart = null
+  pinResizeTouchLatest = null
+}
+
+function onPinResizeTouchMove(e: PointerEvent): void {
+  if (!pinResizeTouchState || !pinResizeTouchStart || e.pointerId !== pinResizeTouchStart.pointerId) return
+  pinResizeTouchLatest = { x: e.clientX, y: e.clientY }
+  pinResizeTouchState = advanceOnMove(
+    pinResizeTouchState,
+    pinResizeTouchStart.x,
+    pinResizeTouchStart.y,
+    e.clientX,
+    e.clientY,
+  )
+  if (pinResizeTouchState === 'cancelled') clearPinResizeTouchTracking()
+}
+
+function onPinResizeTouchEnd(e: PointerEvent): void {
+  if (!pinResizeTouchStart || e.pointerId !== pinResizeTouchStart.pointerId) return
+  clearPinResizeTouchTracking()
+}
+
+function onPinResizeTouchSecondPointer(e: PointerEvent): void {
+  if (!pinResizeTouchState || !pinResizeTouchStart || e.pointerId === pinResizeTouchStart.pointerId) return
+  pinResizeTouchState = advanceOnSecondPointer(pinResizeTouchState)
+  if (pinResizeTouchState === 'cancelled') clearPinResizeTouchTracking()
+}
+
+function onPinResizeTouchTimeout(): void {
+  pinResizeTouchTimer = null
+  if (!pinResizeTouchState || !pinResizeTouchStart) return
+  pinResizeTouchState = advanceOnTimeout(pinResizeTouchState)
+  if (pinResizeTouchState !== 'armed') return
+
+  const { pointerId } = pinResizeTouchStart
+  const { x, y } = pinResizeTouchLatest ?? pinResizeTouchStart
+  clearPinResizeTouchTracking()
+
+  pinResizeTouchArmed.value = true
+  window.setTimeout(() => {
+    pinResizeTouchArmed.value = false
+  }, TOUCH_ARMED_VISUAL_MS)
+
+  // No library hand-off needed here (unlike the drag-handle's interactjs
+  // hand-off) — the resize gesture is entirely this component's own
+  // `onPinResizePointerMove`/`onPinResizePointerUp` logic, so once the hold
+  // is confirmed this just starts it directly at the latest tracked point.
+  startPinResize(x, y, pointerId, true)
+}
+
+function onPinResizePointerDown(e: PointerEvent): void {
+  // Mouse/pen: unchanged, immediate start — §8 layer 2, same pointerType
+  // branch the drag-handle above already uses.
+  if (e.pointerType !== 'touch') {
+    startPinResize(e.clientX, e.clientY, e.pointerId)
+    return
+  }
+  if (pinResizeTouchState) return
+  pinResizeTouchState = 'pending'
+  pinResizeTouchStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
+  pinResizeTouchLatest = null
+  window.addEventListener('pointermove', onPinResizeTouchMove)
+  window.addEventListener('pointerup', onPinResizeTouchEnd)
+  window.addEventListener('pointercancel', onPinResizeTouchEnd)
+  window.addEventListener('pointerdown', onPinResizeTouchSecondPointer)
+  pinResizeTouchTimer = setTimeout(onPinResizeTouchTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
 }
 // B99 — on mobile the floating pinned card is full-bleed (B64/B36: the
 // anchor's `width: 100%` media-query override, AnalyzerView.vue), so a
@@ -388,6 +692,7 @@ function onPinResizePointerMove(e: PointerEvent): void {
 }
 function onPinResizePointerUp(): void {
   pinResizeStart = null
+  pinResizeTouchActive.value = false
   window.removeEventListener('pointermove', onPinResizePointerMove)
   window.removeEventListener('pointerup', onPinResizePointerUp)
   window.removeEventListener('resize', resetPinnedMiniOutsideMobile)
@@ -599,6 +904,10 @@ onBeforeUnmount(() => {
   // B61 — same belt-and-braces reasoning: the long-press tracking listeners
   // are also on `window`, not this component's own DOM.
   clearTouchDragTracking()
+  // F1 phase 5 — same reasoning again for the live-drag (B102a/b) and
+  // pin-resize-touch-pending tracking, both also window-level.
+  endActiveTouchDrag()
+  clearPinResizeTouchTracking()
 })
 </script>
 
@@ -607,7 +916,7 @@ onBeforeUnmount(() => {
     <header
       ref="dragHandleEl"
       class="drag-handle"
-      :class="{ 'touch-armed': touchArmed }"
+      :class="{ 'touch-armed': touchArmed, 'touch-dragging': touchDragActive }"
       @pointerdown="onDragHandlePointerDown"
     >
       <span class="title">{{ title }}</span>
@@ -674,8 +983,10 @@ onBeforeUnmount(() => {
          resize otherwise) and not collapsed (a header-only card has no body
          to grow — see this handle's module doc above `pinnedSize`). -->
     <div
+      ref="pinResizeHandleEl"
       v-if="pinned && !collapsed && !pinnedMini"
       class="pin-resize-handle"
+      :class="{ 'touch-armed': pinResizeTouchArmed, 'touch-dragging': pinResizeTouchActive }"
       v-tooltip="t('analyzer.layout.pinnedResizeHandle')"
       :aria-label="t('analyzer.layout.pinnedResizeHandle')"
       role="separator"
@@ -812,6 +1123,16 @@ onBeforeUnmount(() => {
    feedback rather than nothing happening until it moves. */
 .drag-handle.touch-armed {
   background: color-mix(in srgb, var(--color-accent) 18%, var(--color-bg));
+}
+/* F1 phase 5 (B102a/b) — set for the FULL duration of a live handed-off touch
+   drag (see `touchDragActive` above), not just the brief `.touch-armed`
+   confirm flash: a best-effort "clean touch-action handoff" so a fast
+   hold-then-immediately-swipe has the best chance of staying a drag rather
+   than getting re-captured by native vertical pan — see this component's own
+   module doc for the honest caveat that `touch-action` changes mid-gesture
+   are not guaranteed to apply to the SAME physical touch on every engine. */
+.drag-handle.touch-dragging {
+  touch-action: none;
 }
 .title {
   font-size: 0.9rem;
@@ -986,7 +1307,42 @@ onBeforeUnmount(() => {
   width: var(--vgl-resizer-size, 10px);
   height: var(--vgl-resizer-size, 10px);
   cursor: se-resize;
+  /* B102c fix — was unconditionally `none` (blocks ALL native scroll
+     recovery from the very first touch contact, with no long-press gate at
+     all — see this handle's own module doc above for why that made it a real
+     mis-touch trap). `pan-y` mirrors the drag-handle's own B61 fix: keeps
+     native vertical scrolling available while `onPinResizePointerDown`'s
+     touch long-press gate is still 'pending', only committing to
+     `touch-action: none` (below, `.touch-dragging`) once the hold is
+     confirmed. Mouse/pen are unaffected either way. */
+  touch-action: pan-y;
+}
+/* B102c — brief highlight the instant a touch long-press is confirmed,
+   mirroring `.drag-handle.touch-armed` exactly (own ref, own timer — see
+   `pinResizeTouchArmed`). */
+.pin-resize-handle.touch-armed {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+/* B102c — set for the full duration of a touch-originated resize (own ref,
+   `pinResizeTouchActive` — mirrors `.drag-handle.touch-dragging`); same
+   mid-gesture-reliability caveat as that rule's own doc. */
+.pin-resize-handle.touch-dragging {
   touch-action: none;
+}
+/* B102c — invisible 44px hit-slop for any coarse pointer (§8 layer 3, the
+   SAME policy every other touch target in this file already gets — this
+   handle was the one exception), anchored to the SAME bottom-right corner so
+   it extends inward over the card rather than outward past it. Gated to
+   `:root[data-any-pointer-coarse]` exactly like B93's gutter hit-slop, so a
+   pure-mouse desktop machine renders NOTHING extra here — zero visual or hit-
+   test change for that case. */
+:root[data-any-pointer-coarse] .pin-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 44px;
+  height: 44px;
 }
 /* B99 — the drag gesture itself only changes height on mobile (see
    `onPinResizePointerMove`'s doc above `isMobileWidth`), so the diagonal
