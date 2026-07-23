@@ -649,6 +649,9 @@ export default {
       toggleAria: '在聚焦堆疊與完整儀表板之間切換',
       expandToFull: '展開為完整儀表板',
       resizeSplit: '拖曳調整上下相鄰面板高度',
+      scrubberAria: '拖曳以跳到單圈或整段記錄中的某一點',
+      scrubberPlay: '播放',
+      scrubberPause: '暫停',
     },
   },
   suspension: {

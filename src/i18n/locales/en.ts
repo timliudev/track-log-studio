@@ -658,6 +658,9 @@ export default {
       toggleAria: 'Switch between the focus stack and the full dashboard',
       expandToFull: 'Expand to the full dashboard',
       resizeSplit: 'Drag to resize adjacent panel heights',
+      scrubberAria: 'Scrub to a point in the lap or session',
+      scrubberPlay: 'Play',
+      scrubberPause: 'Pause',
     },
   },
   suspension: {
