@@ -1076,7 +1076,10 @@ const cardCtx: AnalyzerCardContext = {
               {{ t('analyzer.mobileView.full') }}
             </button>
           </div>
-          <span class="drag-hint">{{ isMobile ? t('analyzer.layout.dragHintMobile') : t('analyzer.layout.dragHint') }}</span>
+          <!-- F1 — drag-to-reorder doesn't apply in the Focus Stack (no grid,
+               no drag handles), so the hint would be misleading there; the
+               full dashboard (desktop always, or mobile's 完整 mode) keeps it. -->
+          <span v-if="!showFocusStack" class="drag-hint">{{ isMobile ? t('analyzer.layout.dragHintMobile') : t('analyzer.layout.dragHint') }}</span>
           <CardMenu
             :groups="cardMenuGroups"
             :charts="chartMenuEntries"

@@ -328,6 +328,20 @@ onBeforeUnmount(() => endActiveDrag?.())
   border-color: var(--color-accent);
   color: var(--color-accent);
 }
+/* §8/B35 — coarse pointers get a real ≥44px hit target; the visible box
+   grows with it (same direct-size-bump pattern as DashboardCard.vue's
+   `.icon-btn`), unlike the divider/scrubber-track above where an invisible
+   `::before` overlay was preferred to keep a slim visible line/thumb — this
+   button's border+background box already reads as its own hit area, so
+   growing the real box is simpler and no less correct. */
+:root[data-any-pointer-coarse] .focus-expand {
+  width: 44px;
+  height: 44px;
+}
+:root[data-any-pointer-coarse] .focus-expand svg {
+  width: 20px;
+  height: 20px;
+}
 .focus-panel-body {
   flex: 1;
   min-height: 0;
