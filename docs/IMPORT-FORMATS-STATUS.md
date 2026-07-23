@@ -25,7 +25,7 @@
 - VBO 匯入穩健性：超大 grid 配置上限（防 OOM）、超大 `[column names]` 行的堆疊溢位。
 - README 部署描述更正為 **Cloudflare Workers**（原誤植 Pages）。
 - XRK 規格 H-message opcode 端序更正（`0x6863` → `0x683c`）。
-- **RCNX 掉最後一圈（B104）**：`buildLapNumberChannel` 的尾巴沿用最後圈值、缺收尾 crossing，`detectLapsByChannel` 少偵測一圈（142.rcnx 8/4/7→7/3/6）。修法：尾巴段 counter +1 給最後一圈收尾。真檔驗證恢復 8/4/7。（本地未 push；見 ISSUES B104。）
+- **RCNX 掉最後一圈（B104）**：`buildLapNumberChannel` 的尾巴沿用最後圈值、缺收尾 crossing，`detectLapsByChannel` 少偵測一圈（142.rcnx 8/4/7→7/3/6）。修法：尾巴段 counter +1 給最後一圈收尾。真檔驗證恢復 8/4/7。（見 ISSUES B104。）
 
 ## 🛠️ 待修 / 已知限制
 - RCZ 同名通道後綴為 cosmetic 差異（AFR 第二份命名為 `rc_air_fuel_ratio_3`，與 VBO 端 `_2` 不一致）；不影響資料。
