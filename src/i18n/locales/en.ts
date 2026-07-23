@@ -146,6 +146,16 @@ export default {
       switching: 'Switching…',
       failed: 'Could not switch session: {message}',
     },
+    compositePicker: {
+      open: 'Composite segments (combine multiple sessions into one continuous record)',
+      title: 'Pick the sessions to combine ({n} sessions — check at least 2)',
+      hint: 'Sessions are ordered by their real recorded start time, keeping the true gap between them, and combined into a brand-new continuous record (the individual sessions are left unchanged).',
+      combine: 'Combine ({n} sessions)',
+      combining: 'Combining…',
+      buildFailed: 'Could not combine: missing session data or time axis',
+      failed: 'Could not combine: {message}',
+      done: 'Created composite record "{name}"',
+    },
   },
   analyzer: {
     noFiles: 'No logs loaded — use "Load files" above; see the ⓘ next to it for supported formats.',
