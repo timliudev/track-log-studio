@@ -134,6 +134,12 @@ export default {
       recommended: '(largest)',
       cancel: 'Cancel',
     },
+    rczPicker: {
+      title: 'This is a RaceChrono device backup with {n} sessions — pick one to open',
+      laps: '{n} laps',
+      distance: '{km} km',
+      empty: 'No sessions found in this backup',
+    },
   },
   analyzer: {
     noFiles: 'No logs loaded — use "Load files" above; see the ⓘ next to it for supported formats.',
