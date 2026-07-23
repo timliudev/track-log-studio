@@ -31,7 +31,17 @@
 - VBO 匯入的時間為相對重建（VBO 僅存 time-of-day，屬格式本身的有損特性）。
 
 ## 📋 待完成
-- **RCNX 多 session 展開**：目前一檔多 session 只取最大那場；若要全部展開需擴充 worker 協定（一檔多 LogSession）。
-- **RCNX 圈資料**：`sana_N.db` 內有官方圈/分段（lap/split），目前未讀；之後可接進 analyzer 圈資料。
+> 原列於此的兩項 RCNX 待辦均已落地（本節先前過期，2026-07-23 更正）：
+> - **RCNX 圈資料 → ✅ 已完成**：`parseRcnx` 的 `readSanaLaps` 讀 `sana_N.db` 的 `lap`
+>   表（`start_wp`/`finish_wp`/`bFailed`），`buildLapNumberChannel` 將官方圈邊界暴露為
+>   `IR_LapNumber` 計數通道，既有 `detectLapsByChannel`（ECU 圈來源）零改動即接收；
+>   單元測試見 `test/import/rcnx.test.ts` 的「lap data from sana_N.db」。
+> - **RCNX 多 session 選擇 → ✅ 已完成（挑一場）**：`listRcnxSessions` 列舉各場，
+>   `FileBar.vue` 的 `pendingRcnx` 內嵌選擇器讓使用者挑要匯入哪一場（預設最大場、
+>   顯示每場是否含官方圈），`sessionIndex` 一路經 `useLogImport`→`parse.worker`→`parseRcnx`。
+>
+> 真正殘留（皆為次要便利／niche，未排程）：
+- **RCNX 一次載入全部 session**：目前一檔一次挑「一場」匯入；若要一鍵把 N 場全部展開為 N 個 LogSession 同時載入，需擴充 worker 協定（一檔多 LogSession 回傳）。屬便利性，非阻塞（可重複挑不同場逐一載入）。
+- **RCNX 官方分段（split/sector）**：目前只讀 `lap` 表的圈邊界；分析器本就用 gate 幾何自算 sector，官方 split 時間未另行匯入（niche）。
 
 > 以下項目已完成，從舊版待辦移出：**任意格式互轉**（`converterStore.convertAll()` 對任何已載入格式 loga/nmea/vbo/rcz/xrk/rcnx 一視同仁跑 export registry，見該檔函式註解）；**匯出側 registry 化**（`src/domain/export/registry.ts` 的 `EXPORT_FORMATS`，見 ARCHITECTURE-FORMATS.md §4 附註）；**Sector 完整性判定有效圈**（`useSectors`/`SectorPanel.vue`，「N 圈未通過 sector 檢查」已併入排除邏輯，見使用手冊 §4.5）。
