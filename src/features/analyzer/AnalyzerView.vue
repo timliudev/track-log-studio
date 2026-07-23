@@ -138,21 +138,21 @@ const highlightLaps = computed(() =>
   })),
 )
 
-// The map-alignment panel applies to whatever laps are drawn on the map, so it
-// shows whenever ≥2 laps are selected (independent of any overlay chart).
-const showMapAlign = computed(() => selectedLaps.value.length >= 2)
-
 // Cross-file lap selections (picked from a COMPARISON recording's own per-lap
 // table — see SessionLapComparison.vue's `toggleSessionLap`), resolved to
 // drawable track-map segments on THEIR OWN session's track. This is the
 // track-map counterpart of `highlightLaps` above: same "one bright segment
 // per selected lap" idea, but each entry carries its own track (and that
-// session's map offset) instead of indexing into the primary `track`. The
-// mapping itself is a pure function (crossSessionLapHighlight.ts, unit-
-// tested) so this computed is just the store/composable-shaped adapter.
+// session's map offset, COMBINED with the lap's own per-lap map offset —
+// see crossSessionLapHighlight.ts) instead of indexing into the primary
+// `track`. The mapping itself is a pure function (crossSessionLapHighlight.ts,
+// unit-tested) so this computed is just the store/composable-shaped adapter.
 const comparisonLapHighlights = computed(() =>
   buildComparisonLapHighlights(
-    lapStore.selectedAcrossSessions,
+    lapStore.selectedAcrossSessions.map((ref) => ({
+      ...ref,
+      mapOffset: lapStore.sessionLapMapOffsetOf(ref.fileId, ref.index),
+    })),
     comparisonSessions.value.map((cs) => ({
       id: cs.id,
       color: cs.color,
@@ -162,6 +162,29 @@ const comparisonLapHighlights = computed(() =>
     })),
   ),
 )
+
+// The per-lap map-align panel's rows for COMPARISON laps (#9): every
+// cross-file lap selection that still resolves to a real lap on a CURRENT
+// comparison source, adapted to what MapAlignPanel needs to render + label a
+// row (file label + that session's identity color) — a stale ref (session no
+// longer compared, or its laps re-detected out from under the index) is
+// dropped, same rule `buildComparisonLapHighlights` applies for the map itself.
+const comparisonAlignLaps = computed(() => {
+  const out: { fileId: number; index: number; label: string; color: string }[] = []
+  for (const ref of lapStore.selectedAcrossSessions) {
+    const cs = comparisonSessions.value.find((s) => s.id === ref.fileId)
+    if (!cs) continue
+    if (!cs.laps.some((l) => l.index === ref.index)) continue
+    out.push({ fileId: ref.fileId, index: ref.index, label: cs.name, color: cs.color })
+  }
+  return out
+})
+
+// The map-alignment panel applies to whatever laps are drawn on the map, so it
+// shows whenever ≥2 laps are selected in total across BOTH the primary table
+// and comparison tables — e.g. 1 primary + 1 comparison lap is just as much a
+// two-line map to align as 2 primary laps.
+const showMapAlign = computed(() => selectedLaps.value.length + comparisonAlignLaps.value.length >= 2)
 
 // #7: derive the track map's chart-zoom-follow focus from the shared xRange.
 // xRange is written ONLY by charts with NO lap selected (B8 — overlay charts
@@ -978,6 +1001,7 @@ const cardCtx: AnalyzerCardContext = {
   line,
   highlightLaps,
   comparisonLapHighlights,
+  comparisonAlignLaps,
   focusRange,
   colorValues,
   trackColormap,

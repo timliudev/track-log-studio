@@ -197,6 +197,7 @@ export default {
     mapSouth: '往南（下）',
     mapEast: '往東（右）',
     mapWest: '往西（左）',
+    mapAlignComparisonHeading: '比較檔',
     trackChannelTitle: '軌跡通道標記',
     trackChannel: '通道',
     trackColor: '軌跡上色',
