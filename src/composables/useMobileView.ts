@@ -9,6 +9,7 @@ import {
   resolveFocusStackOrder,
   weightFor as weightForPure,
   setSplitWeight as setSplitWeightPure,
+  setCurrentView as setCurrentViewPure,
   type MobileViewState,
 } from '@/domain/layout/mobileView'
 
@@ -25,8 +26,14 @@ export function useMobileView(chartIds: Ref<number[]> | ComputedRef<number[]>): 
   focusOrder: ComputedRef<string[]>
   setFocusOrder: (order: string[]) => void
   focusStackIds: (visibleIdsInDefaultOrder: string[]) => string[]
+  /** @deprecated F1-only — see mobileView.ts's `weightFor`. */
   weightFor: (id: string, fallback?: number) => number
+  /** @deprecated F1-only — see mobileView.ts's `setSplitWeight`. */
   setWeight: (id: string, weight: number) => void
+  /** F5 — the single-focus view's currently selected tab id (`''` = unset). */
+  currentViewId: ComputedRef<string>
+  /** F5 — persists the single-focus view's tab selection. */
+  setCurrentView: (id: string) => void
 } {
   const state = ref<MobileViewState>(loadMobileView())
 
@@ -77,5 +84,25 @@ export function useMobileView(chartIds: Ref<number[]> | ComputedRef<number[]>): 
     state.value = setSplitWeightPure(state.value, id, weight)
   }
 
-  return { state, mode, setMode, focusOrder, setFocusOrder, focusStackIds, weightFor, setWeight }
+  // F5 — the single-focus view's top tab bar selection. AnalyzerView still
+  // falls back (to the first visible tab) when this is unset/stale — this
+  // composable just stores/persists whatever was last explicitly selected,
+  // same "dumb persistence, view owns the fallback" split as focusOrder.
+  const currentViewId = computed(() => state.value.currentViewId)
+  function setCurrentView(id: string): void {
+    state.value = setCurrentViewPure(state.value, id)
+  }
+
+  return {
+    state,
+    mode,
+    setMode,
+    focusOrder,
+    setFocusOrder,
+    focusStackIds,
+    weightFor,
+    setWeight,
+    currentViewId,
+    setCurrentView,
+  }
 }

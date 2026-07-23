@@ -656,9 +656,8 @@ export default {
     mobileView: {
       focus: 'Focus',
       full: 'Full',
-      toggleAria: 'Switch between the focus stack and the full dashboard',
-      expandToFull: 'Expand to the full dashboard',
-      resizeSplit: 'Drag to resize adjacent panel heights',
+      toggleAria: 'Switch between the single-focus view and the full dashboard',
+      focusViewTabsAria: 'Switch the visual shown below',
       scrubberAria: 'Scrub to a point in the lap or session',
       scrubberPlay: 'Play',
       scrubberPause: 'Pause',
