@@ -16,6 +16,8 @@ import {
   toggleIncludedSession,
   type SessionSelectionState,
 } from '@/domain/analysis/sessionSelection'
+import { buildCompositeSession } from '@/domain/analysis/sessionComposite'
+import { LogSession } from '@/domain/model/LogSession'
 
 const props = withDefaults(defineProps<{ analyzerMode?: boolean }>(), {
   analyzerMode: false,
@@ -219,11 +221,118 @@ async function switchRcnxSession(fileId: number, sessionIndex: number): Promise<
   }
 }
 
-// F4 phase 2 TODO: composite/multi-segment — instead of REPLACING a record's
-// session on switch, offer MERGING two or more of a multi-session .rcnx's
-// sessions into one continuous LogSession (reusing the SessionMerge/T6 GPS
-// splice path in useSessionMerge.ts), e.g. for a track day logged as separate
-// morning/afternoon sessions the user wants analysed as one lap set.
+/**
+ * F4 phase 2 — composite segments: unlike `switchRcnxSession` above (which
+ * REPLACES a record's session in place), combining picks TWO OR MORE of a
+ * multi-session `.rcnx` archive's sessions and registers a brand-new
+ * fileStore record holding one continuous `LogSession` — the source record(s)
+ * are left completely untouched, so the user can still switch/inspect any
+ * single session independently afterwards. This mirrors the SessionMerge/T6
+ * convention (`fileStore.addMergedSession` producing a new analyzable/
+ * exportable record rather than mutating an existing one — see
+ * useSessionMerge.ts's `merge()`) rather than phase 1's in-place replace,
+ * since a composite is a genuinely NEW record (not "this same slot, different
+ * content") and because the set of segments combined doesn't have to include
+ * the record's own currently-loaded session at all. All the actual time-axis/
+ * channel-union/lap-counter-seam logic lives in the pure, independently
+ * tested `sessionComposite.ts` (see its module doc for exactly how each is
+ * handled) — this is just the UI orchestration: re-parse each checked session
+ * (same original File, one `parseFile` call per `sessionIndex`, same as
+ * `finishRcnxImport`/`switchRcnxSession` above), sort by wall-clock start (not
+ * archive order, in case they ever differ), build, then hand off to
+ * `fileStore.addMergedSession`. Because it's a brand-new fileStore id, there
+ * is no per-file lap-selection state to migrate/clear (unlike
+ * `switchRcnxSession`'s `lapStore` cleanup) — a fresh id has never had any.
+ */
+
+/** Pending "複合區段" picker: which sessions of a multi-session `.rcnx`
+ *  archive (opened from the record at `fileId`) are checked to combine.
+ *  Keyed separately from `pendingRcnx` (the import-time single-session
+ *  picker) since this operates on an ALREADY-imported ready record. */
+const pendingComposite = ref<{ fileId: number; sessions: RcnxSessionInfo[]; selected: Set<number> } | null>(null)
+const compositeBusy = ref(false)
+const compositeError = ref<string | null>(null)
+/** Name of the most recently created composite record — small inline
+ *  confirmation, same convention as SessionMergePanel's `mergedName`. */
+const compositeResultName = ref<string | null>(null)
+
+function openCompositePicker(fileId: number): void {
+  const f = fileStore.files.find((x) => x.id === fileId)
+  if (!f || !f.rcnxSessions || f.rcnxSessions.length < 2) return
+  compositeError.value = null
+  compositeResultName.value = null
+  pendingComposite.value = {
+    fileId,
+    sessions: f.rcnxSessions,
+    selected: new Set(f.rcnxSessionIndex !== undefined ? [f.rcnxSessionIndex] : []),
+  }
+}
+
+function toggleCompositeSession(n: number): void {
+  const pending = pendingComposite.value
+  if (!pending) return
+  const next = new Set(pending.selected)
+  if (next.has(n)) next.delete(n)
+  else next.add(n)
+  pendingComposite.value = { ...pending, selected: next }
+}
+
+function cancelCompositePicker(): void {
+  pendingComposite.value = null
+}
+
+async function combineCompositeSessions(): Promise<void> {
+  const pending = pendingComposite.value
+  if (!pending || pending.selected.size < 2 || compositeBusy.value) return
+  const file = fileStore.getOriginalFile(pending.fileId)
+  if (!file) return
+
+  compositeBusy.value = true
+  compositeError.value = null
+  try {
+    const imp = detectImporter(await sniff(file))
+    const importerId = imp?.id ?? 'rcnx'
+    const chosenNs = [...pending.selected]
+    const parsed = await Promise.all(chosenNs.map((n) => parseFile(file, importerId, undefined, n)))
+
+    // Combine in WALL-CLOCK order (real recorded start time), not the archive
+    // `n` order the user happened to check them in — n is normally already
+    // chronological, but this stays correct even if it ever weren't.
+    const ordered = [...parsed].sort((a, b) => {
+      const at = a.meta.createdDate?.getTime()
+      const bt = b.meta.createdDate?.getTime()
+      if (at != null && bt != null) return at - bt
+      return 0
+    })
+
+    const result = buildCompositeSession(ordered)
+    if (!result) {
+      compositeError.value = t('fileBar.compositePicker.buildFailed')
+      return
+    }
+
+    const base = ordered[0]
+    const headerInfo: Record<string, string> = { ...base.meta.headerInfo }
+    headerInfo.compositeSessionIndexes = chosenNs.slice().sort((a, b) => a - b).join(',')
+    headerInfo.compositeSegmentCount = String(chosenNs.length)
+    const composite = new LogSession(result.channels, {
+      formatId: base.meta.formatId,
+      createdDate: base.meta.createdDate,
+      headerInfo,
+    })
+
+    const sourceFile = fileStore.files.find((x) => x.id === pending.fileId)
+    const baseName = sourceFile ? sourceFile.name.replace(/\.[^./]+$/, '') : 'session'
+    const name = `${baseName}_composite.rcnx`
+    fileStore.addMergedSession(name, composite)
+    compositeResultName.value = name
+    pendingComposite.value = null
+  } catch (e) {
+    compositeError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    compositeBusy.value = false
+  }
+}
 
 /** Remove an imported file and its local (component-only) rcnx-switch UI
  *  state together, so a later import that happens to reuse the same numeric
@@ -577,9 +686,31 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
         <span v-if="rcnxSwitchError[f.id]" class="rcnx-switch-err" role="alert">
           {{ t('fileBar.rcnxSwitch.failed', { message: rcnxSwitchError[f.id] }) }}
         </span>
+        <!-- F4 phase 2 — "複合區段": only offered alongside the switcher
+             above (same gate, ≥2 sessions), opens a checkbox picker to
+             combine 2+ of the archive's sessions into one new continuous
+             record; see combineCompositeSessions' doc above. -->
+        <button
+          v-if="f.status === 'ready' && f.rcnxSessions && f.rcnxSessions.length > 1"
+          type="button"
+          class="icon-btn composite-btn"
+          v-tooltip="t('fileBar.compositePicker.open')"
+          :aria-label="t('fileBar.compositePicker.open')"
+          @click="openCompositePicker(f.id)"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="12" height="12" rx="2" />
+            <rect x="9" y="9" width="12" height="12" rx="2" />
+          </svg>
+        </button>
         <button type="button" class="pill-x" v-tooltip="t('fileBar.remove')" @click="removeFile(f.id)">×</button>
       </span>
     </div>
+
+    <p v-if="compositeResultName" class="composite-result">
+      {{ t('fileBar.compositePicker.done', { name: compositeResultName }) }}
+      <button type="button" class="composite-result-dismiss" @click="compositeResultName = null">×</button>
+    </p>
 
     <button
       v-if="fileStore.files.length"
@@ -647,6 +778,52 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
         <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcz">
           {{ t('fileBar.rcnxPicker.cancel') }}
         </button>
+      </div>
+    </div>
+
+    <!-- F4 phase 2 — "複合區段" checkbox picker (opened from an ALREADY
+         imported multi-session record's new composite button above, not the
+         import-time pendingRcnx single-pick dialog). -->
+    <div v-if="pendingComposite" class="rcnx-picker-backdrop" @click.self="cancelCompositePicker">
+      <div class="rcnx-picker" role="dialog" aria-modal="true">
+        <p class="rcnx-picker-title">
+          {{ t('fileBar.compositePicker.title', { n: pendingComposite.sessions.length }) }}
+        </p>
+        <p class="rcnx-picker-file">{{ t('fileBar.compositePicker.hint') }}</p>
+        <ul class="rcnx-picker-list">
+          <li v-for="s in pendingComposite.sessions" :key="s.n">
+            <label class="rcnx-session-check">
+              <input
+                type="checkbox"
+                :checked="pendingComposite.selected.has(s.n)"
+                @change="toggleCompositeSession(s.n)"
+              />
+              <span class="rcnx-session-name">
+                {{ rcnxSessionLabel(s) }}
+              </span>
+            </label>
+          </li>
+        </ul>
+        <p v-if="compositeError" class="rcnx-switch-err" role="alert">
+          {{ t('fileBar.compositePicker.failed', { message: compositeError }) }}
+        </p>
+        <div class="composite-picker-actions">
+          <button type="button" class="rcnx-picker-cancel" @click="cancelCompositePicker">
+            {{ t('fileBar.rcnxPicker.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="composite-confirm-btn"
+            :disabled="pendingComposite.selected.size < 2 || compositeBusy"
+            @click="combineCompositeSessions"
+          >
+            {{
+              compositeBusy
+                ? t('fileBar.compositePicker.combining')
+                : t('fileBar.compositePicker.combine', { n: pendingComposite.selected.size })
+            }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1018,5 +1195,96 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
 }
 .rcnx-picker-cancel:hover {
   color: var(--color-text);
+}
+/* F4 phase 2 — "複合區段" button, sized/styled identically to
+   .make-primary-btn (same icon-button convention, incl. the §8 coarse-pointer
+   44px growth below). */
+.composite-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.composite-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.composite-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border);
+}
+:root[data-any-pointer-coarse] .composite-btn {
+  width: 44px;
+  height: 44px;
+}
+:root[data-any-pointer-coarse] .composite-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.rcnx-session-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+}
+.rcnx-session-check:hover {
+  border-color: var(--color-accent);
+}
+.rcnx-session-check input {
+  flex: none;
+}
+.composite-picker-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+.composite-confirm-btn {
+  padding: 6px 14px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border: none;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.composite-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.composite-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 8px;
+  padding: 3px 8px;
+  color: var(--color-accent);
+  font-size: 0.8rem;
+}
+.composite-result-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
 }
 </style>

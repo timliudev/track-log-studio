@@ -140,6 +140,16 @@ export default {
       switching: '切換中…',
       failed: '切換場次失敗：{message}',
     },
+    compositePicker: {
+      open: '複合區段（合併多場次為一份連續記錄）',
+      title: '選擇要合併的場次（{n} 個場次，至少勾選 2 個）',
+      hint: '會依各場次的實際錄製時間排序，保留場次之間真實的時間間隔，另外建立一份新的連續記錄（原本各場次仍維持不動）。',
+      combine: '合併（{n} 個場次）',
+      combining: '合併中…',
+      buildFailed: '合併失敗：場次資料不足或時間軸缺失',
+      failed: '合併失敗：{message}',
+      done: '已建立複合記錄「{name}」',
+    },
   },
   analyzer: {
     noFiles: '尚未載入記錄，請點選上方「載入記錄」；支援格式見按鈕旁的 ⓘ 說明。',
