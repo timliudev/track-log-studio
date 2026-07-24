@@ -55,7 +55,7 @@ Once installed, the app works **offline** (previously loaded pages and code are 
 | `.nmea` | a previously converted NMEA/RC3 log |
 | `.vbo` | Racelogic VBOX format (including files exported by this app, or from other sources) |
 | `.csv` | Generic telemetry CSV; its first nonblank row must be a header containing `Time` or `Timer` |
-| `.rcz` | RaceChrono log (ZIP containing session.json + binary channel data) |
+| `.rcz` | RaceChrono log (ZIP containing session.json + binary channel data). **RaceChrono device backups are supported too** — same `.rcz` extension, but holding hundreds of sessions; loading one opens a session picker, and **only the session you choose is decompressed**, so a multi-gigabyte backup won't exhaust memory |
 | `.xrk` | AiM Solo 2 DL / MyChron5 log |
 | `.rcnx` | Qstarz LT-Q6000 / Q6000S (QRacing) log |
 | `.zip` | a share-export from the aRacer x Tune app; auto-extracted and detected on upload |
@@ -67,6 +67,12 @@ For a generic CSV, use comma-separated, one-sample-per-row data. Header names be
 #### RCNX multi-session files
 
 A single `.rcnx` file can contain multiple sessions (separate recordings). If more than one session is detected, loading it opens a picker asking you to choose which one to open, listing each session's point count, duration (minutes), and whether it has lap data — the session with the most data is flagged as the recommended default. Click a session to open it, or "Cancel" to abandon the import. If that session's analysis data (the `sana` database) already contains lap records, lap boundaries are imported automatically from that source (i.e. ECU-based lap splitting — no need to drag the start/finish line manually).
+
+**You can change your mind afterwards, without re-loading the file:**
+
+- **Switch session**: a "Switch session" dropdown appears on the file row — pick a different session and that record's data is swapped in place. Its lap selection, manual exclusions and alignment nudges are cleared (they don't carry over to a different session); the start/finish line and sector gates are **circuit-level** settings and are kept.
+- **Composite segments**: the neighbouring "Composite segments" button lets you tick **two or more** sessions and combine them into **one new continuous recording** (the original sessions stay untouched and remain usable). Segments are ordered by their real recorded start time, and the **actual gap between sessions is preserved** (a lunch break stays a lunch break). If the sessions don't share exactly the same channels, the union is used and missing values are left blank.
+  - ⚠️ Note: the lap-splitting algorithm only ever pairs two adjacent lap boundaries and has no concept of "segments", so **each seam produces one extra, very long joining interval** — spanning precisely the real-world gap between the two sessions. This is **not a lost lap** (every real lap from every segment is still there); simply exclude that interval if it gets in the way.
 
 ### 2.5 Supported export formats
 
@@ -332,9 +338,20 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 - **Adding chart cards**: a chart added via the toolbar's "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
 - **Collapsing a card**: every card's title bar has a collapse/expand button (chevron) on the right — click it to hide the card's content and keep just the title bar. On desktop, collapsing also shrinks that card's grid slot down to a fixed two-row height, and neighbouring cards automatically **reflow** to pack into the freed-up space; expanding restores the original height and neighbours make room again, with no manual rearranging needed. Works on both desktop and mobile; the collapsed state is saved automatically.
 
-#### Mobile: single column + collapse + pin
+#### Mobile default: the single-focus view ("Focus")
 
-Below roughly 768px wide, the layout automatically collapses to a single column, ordered by the logical order derived from the desktop layout, and **dragging/resizing are disabled** (rearranging doesn't apply in a fixed single-column order). Mobile additionally offers:
+Below roughly 768px wide, the Analyzer **defaults to a single-focus view**: it shows exactly **one** visual at a time (track map / time-series chart / lap table / scatter chart…) instead of cramming several cards onto a small screen. The **Focus / Full** toggle in the toolbar switches between this and the classic full dashboard; your choice is remembered in the browser.
+
+- **Tab bar at the top**: lists the cards currently enabled in the "Panels" menu — tap one to switch to it. The bar scrolls horizontally when there are many tabs, and the active tab is scrolled into view automatically after a switch.
+- **Persistent scrubber + ▶ play at the bottom**: drag it to move the cursor across the whole recording (or across a single selected lap); **every visual shares that one cursor position**. Pressing ▶ advances at 1× along the recording's own timing, like a replay. If your system has "reduce motion" enabled, playback steps discretely on a fixed interval instead.
+- **Swipe to switch**: on panels that don't need horizontal dragging themselves (lap table, sectors, acceleration test, current values, and similar), swipe left/right across the content to move to the next/previous tab. **The track map and the charts deliberately do not support swipe-switching** — their own horizontal drag is already used for map panning and chart zoom/pan, so use the tab bar on those views. Swiping past the first or last tab does nothing (no wrap-around).
+- Mouse and stylus drags **never** switch tabs (the tab bar is equally easy to reach with any pointer, so the shortcut isn't needed there).
+
+> **Why it works this way:** an earlier version stacked several cards vertically with a draggable divider, but device testing showed a phone screen simply can't fit that — every panel bottomed out at its minimum height, the divider had no free space to redistribute (dragging it did nothing), and the scrubber got pushed off the bottom of the screen. Single-focus gives each visual the whole screen.
+
+#### Mobile "Full" mode: single column + collapse + pin
+
+Switching to **Full** returns to the classic full dashboard: the layout collapses to a single column, ordered by the logical order derived from the desktop layout, with **dragging/resizing disabled** (rearranging doesn't apply in a fixed single-column order). This mode additionally offers:
 
 - **Collapsing a card**: same as desktop — tap a card's chevron to collapse/expand its content, handy for skipping past sections you don't need right now in the single column.
 - **Pinning a card**: on mobile, every card's title bar also has a pin button. Tap it and that card becomes **stuck to the top of the screen** (sticky) while the rest of the cards keep scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table.
