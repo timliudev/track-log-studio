@@ -316,29 +316,32 @@ describe('parseRczBackupSession — F3 stage 2 CAN/ECU decode', () => {
     expect(time.data[1]).toBeCloseTo(20, 5)
   })
 
-  it('decodes CAN accel channels via decodeRcChannelName, fully UNSCALED (raw int, no unit)', () => {
+  it('decodes CAN accel channels via decodeRcChannelName, SCALED to G (mm/s² raw ÷ 9806.65 — validated, RCZ-FORMAT-SPEC.md §5/§6)', () => {
     const session = parseRczBackupSession(buildMultiDeviceBackup(), 'session_C')
     const accX = session.get('rc_x_acc')!
-    expect(accX.unit).toBeUndefined()
-    // Master device itself: identity join, raw values pass straight through.
-    expect(Array.from(accX.data)).toEqual([-3219, -3000, -2800, -2600, -2400, -2200])
+    expect(accX.unit).toBe('G')
+    // Master device itself: identity join, raw mm/s² values scaled to G.
+    const expectedG = [-3219, -3000, -2800, -2600, -2400, -2200].map((v) => v / 9806.65)
+    Array.from(accX.data).forEach((v, i) => expect(v).toBeCloseTo(expectedG[i], 6))
   })
 
-  it('disambiguates a channel-name collision across devices (both CAN1 and CAN2 expose id 9 → rc_x_acc)', () => {
+  it('disambiguates a channel-name collision across devices (both CAN1 and CAN2 expose id 9 → rc_x_acc), both scaled to G', () => {
     const session = parseRczBackupSession(buildMultiDeviceBackup(), 'session_C')
     expect(session.get('rc_x_acc')).toBeDefined() // CAN1 (master, first-seen) keeps the plain name
     const collided = session.get('rc_x_acc_dev101')! // CAN2 disambiguated by device id
     expect(collided).toBeDefined()
-    expect(collided.unit).toBeUndefined()
-    // CAN2 (5 samples) joined onto the 6-row master clock by nearest timestamp.
-    expect(Array.from(collided.data)).toEqual([111, 222, 333, 444, 555, 555])
+    expect(collided.unit).toBe('G')
+    // CAN2 (5 samples) joined onto the 6-row master clock by nearest timestamp, scaled to G.
+    const expectedG = [111, 222, 333, 444, 555, 555].map((v) => v / 9806.65)
+    Array.from(collided.data).forEach((v, i) => expect(v).toBeCloseTo(expectedG[i], 6))
   })
 
-  it('joins a non-master device (CAN2 gyro, 5 samples) onto the 6-row master clock by nearest timestamp', () => {
+  it('joins a non-master device (CAN2 gyro, 5 samples) onto the 6-row master clock by nearest timestamp, scaled to deg/s', () => {
     const session = parseRczBackupSession(buildMultiDeviceBackup(), 'session_C')
     const gyroX = session.get('rc_x_rate_of_rotation')!
-    expect(gyroX.unit).toBeUndefined()
-    expect(Array.from(gyroX.data)).toEqual([19409, 15000, 10000, 5000, -35400, -35400])
+    expect(gyroX.unit).toBe('deg/s')
+    const expectedDegS = [19409, 15000, 10000, 5000, -35400, -35400].map((v) => v / 1000)
+    Array.from(gyroX.data).forEach((v, i) => expect(v).toBeCloseTo(expectedDegS[i], 3))
   })
 
   it('falls through unknown ids (no NAMED_LO entry) to rc_channel_<id>', () => {
