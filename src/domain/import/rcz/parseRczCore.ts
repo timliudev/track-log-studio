@@ -357,6 +357,18 @@ export function buildRczSession(
   const rowCount = master.ts.length
   const t0 = master.ts[0]
 
+  // Every device carries its OWN id-2 cumulative-distance file (see the id-2
+  // branch below) — join'd onto the master clock they're all equivalent, so
+  // emitting one per device just spams the channel picker with duplicates
+  // (`distance` / `distance_dev101` / `distance_dev102` / …, all identical
+  // end values). Pick exactly one source device up front: GPS (type 1, the
+  // most trustworthy position-derived source) first, else the master-clock
+  // device, else whichever decodable device came first — `masterId` always
+  // exists once we get here, so that last tier is unreachable in practice
+  // and kept only for documentation/defensiveness.
+  const gpsDevice = decodable.find((d) => d.device.type === 1)
+  const distanceSourceDev = gpsDevice?.device.id ?? masterId ?? decodable[0].device.id
+
   const channels: Channel[] = []
   const used = new Set<string>()
   /** Push a channel, disambiguating by device then by (device,id) on collision. */
@@ -481,11 +493,16 @@ export function buildRczSession(
         }
       }
 
-      // Cumulative distance — id 2 (int64), independent of which device it
-      // appears on (validated: identical content on every device in the
-      // reference single-session sample). mm → km, matching parseRcnx's
-      // `distance` channel convention.
+      // Cumulative distance — id 2 (int64), same content on every device
+      // (validated: identical values across devices in the reference
+      // single-session sample once joined onto the master clock). Every
+      // device carries its own copy of this file, but we only want ONE
+      // `distance` channel in the output — see `distanceSourceDev` above for
+      // the GPS-first selection — so non-selected devices' id-2 files are
+      // skipped entirely rather than emitted as `distance_devNNN` dupes.
+      // mm → km, matching parseRcnx's `distance` channel convention.
       if (f.id === 2 && f.type === 1) {
+        if (dev !== distanceSourceDev) continue
         const raw = readArray(f.bytes, 1)
         const data = new Float32Array(rowCount)
         for (let i = 0; i < rowCount; i++) {

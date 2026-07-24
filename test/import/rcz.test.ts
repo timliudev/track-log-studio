@@ -396,3 +396,120 @@ describe('parseRcz — session.json laps[] → IR_LapNumber channel (B106 D)', (
     expect(Array.from(lapCh!.data)).toEqual([0, 1, 1, 1, 2, 2, 2, 3])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Distance dedup: every device carries its own id-2 stream, but the session
+// should only ever surface ONE `distance` channel (GPS-first, else master).
+// ---------------------------------------------------------------------------
+
+/**
+ * Three devices, all sharing the SAME timestamp array (identity join, so
+ * per-row values are trivial to predict) — a non-GPS "master" data device
+ * listed first (id 500, type 4), a GPS device listed second (id 300, type
+ * 1), and a third non-GPS data device listed last (id 200, type 4). ALL
+ * THREE carry their own id-2 cumulative-distance file with DELIBERATELY
+ * different values, so the test can prove which one wins.
+ */
+function buildMultiDeviceDistanceRcz(): Uint8Array {
+  const base = 1_900_000_000_000
+  const rows = 6
+  const ts = Array.from({ length: rows }, (_, i) => base + i * 100)
+
+  const session = { timeCreated: base }
+  const fragment = {
+    devices: {
+      items: [
+        { id: 500, model: 1, type: 4 }, // master (most samples; tie-break = list order)
+        { id: 300, model: 101, type: 1 }, // GPS — should win the distance channel
+        { id: 200, model: 2, type: 4 }, // neither master nor GPS — must be ignored
+      ],
+    },
+  }
+
+  const distanceMmMaster = Array.from({ length: rows }, (_, i) => i * 100_000) // 0..0.5 km
+  const distanceMmGps = Array.from({ length: rows }, (_, i) => i * 200_000) // 0..1.0 km
+  const distanceMmOther = Array.from({ length: rows }, (_, i) => i * 300_000) // 0..1.5 km
+
+  return zipSync({
+    'session.json': new TextEncoder().encode(JSON.stringify(session)),
+    'sessionfragment.json': new TextEncoder().encode(JSON.stringify(fragment)),
+
+    'channel_1_500_0_1_1': int64LE(ts),
+    'channel_1_500_0_2_1': int64LE(distanceMmMaster),
+
+    'channel_1_300_0_1_1': int64LE(ts),
+    'channel_1_300_0_2_1': int64LE(distanceMmGps),
+
+    'channel_1_200_0_1_1': int64LE(ts),
+    'channel_1_200_0_2_1': int64LE(distanceMmOther),
+  })
+}
+
+/**
+ * Two devices, BOTH non-GPS (type 4), sharing the same timestamp array. The
+ * first-listed device (id 600) has the most samples and is the master; the
+ * second (id 700) is a plain data device. Both carry their own id-2 stream
+ * with different values, to prove the "no GPS → use master" fallback tier.
+ */
+function buildMultiDeviceDistanceNoGpsRcz(): Uint8Array {
+  const base = 1_900_100_000_000
+  const rows = 4
+  const ts = Array.from({ length: rows }, (_, i) => base + i * 100)
+
+  const session = { timeCreated: base }
+  const fragment = {
+    devices: {
+      items: [
+        { id: 600, model: 1, type: 4 }, // master (list order tie-break, no GPS present)
+        { id: 700, model: 2, type: 4 }, // must be ignored
+      ],
+    },
+  }
+
+  const distanceMmMaster = Array.from({ length: rows }, (_, i) => i * 400_000) // 0..1.2 km
+  const distanceMmOther = Array.from({ length: rows }, (_, i) => i * 900_000) // 0..2.7 km
+
+  return zipSync({
+    'session.json': new TextEncoder().encode(JSON.stringify(session)),
+    'sessionfragment.json': new TextEncoder().encode(JSON.stringify(fragment)),
+
+    'channel_1_600_0_1_1': int64LE(ts),
+    'channel_1_600_0_2_1': int64LE(distanceMmMaster),
+
+    'channel_1_700_0_1_1': int64LE(ts),
+    'channel_1_700_0_2_1': int64LE(distanceMmOther),
+  })
+}
+
+describe('parseRcz — id-2 distance dedup across devices, GPS-first (B106 follow-up)', () => {
+  it('emits exactly ONE `distance` channel — never `distance_dev500`/`distance_dev200` — sourced from GPS, not the master or the third device', () => {
+    const session = parseRcz(buildMultiDeviceDistanceRcz())
+
+    expect(session.get('distance')).toBeDefined()
+    expect(session.get('distance_dev500')).toBeUndefined()
+    expect(session.get('distance_dev300')).toBeUndefined()
+    expect(session.get('distance_dev200')).toBeUndefined()
+
+    // masterDeviceId is the non-GPS device (500) — GPS still wins the distance pick.
+    expect(session.meta.headerInfo.masterDeviceId).toBe('500')
+
+    const distance = session.get('distance')!
+    expect(distance.unit).toBe('km')
+    const expectedKm = Array.from({ length: 6 }, (_, i) => (i * 200_000) / 1_000_000) // GPS values
+    Array.from(distance.data).forEach((v, i) => expect(v).toBeCloseTo(expectedKm[i], 5))
+  })
+
+  it('falls back to the master device when no device resolves as GPS, ignoring the other device\'s id-2 stream', () => {
+    const session = parseRcz(buildMultiDeviceDistanceNoGpsRcz())
+
+    expect(session.get('distance')).toBeDefined()
+    expect(session.get('distance_dev600')).toBeUndefined()
+    expect(session.get('distance_dev700')).toBeUndefined()
+
+    expect(session.meta.headerInfo.masterDeviceId).toBe('600')
+
+    const distance = session.get('distance')!
+    const expectedKm = Array.from({ length: 4 }, (_, i) => (i * 400_000) / 1_000_000) // master's values
+    Array.from(distance.data).forEach((v, i) => expect(v).toBeCloseTo(expectedKm[i], 5))
+  })
+})
