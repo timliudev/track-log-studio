@@ -666,15 +666,6 @@ export default {
       notShownHint: '目前未顯示（尚未勾選，或顯示條件尚未滿足）',
       noCharts: '尚無圖表',
     },
-    mobileView: {
-      focus: '聚焦',
-      full: '完整',
-      toggleAria: '在單焦點視圖與完整儀表板之間切換',
-      focusViewTabsAria: '切換下方顯示的視覺內容',
-      scrubberAria: '拖曳以跳到單圈或整段記錄中的某一點',
-      scrubberPlay: '播放',
-      scrubberPause: '暫停',
-    },
   },
   suspension: {
     heading: '避震校正',

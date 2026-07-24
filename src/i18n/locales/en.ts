@@ -675,15 +675,6 @@ export default {
       notShownHint: "Not shown right now (unchecked, or its show condition isn't met yet)",
       noCharts: 'No charts yet',
     },
-    mobileView: {
-      focus: 'Focus',
-      full: 'Full',
-      toggleAria: 'Switch between the single-focus view and the full dashboard',
-      focusViewTabsAria: 'Switch the visual shown below',
-      scrubberAria: 'Scrub to a point in the lap or session',
-      scrubberPlay: 'Play',
-      scrubberPause: 'Pause',
-    },
   },
   suspension: {
     heading: 'Suspension calibration',

@@ -18,7 +18,6 @@ import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
 import { useGridGutters } from '@/composables/useGridGutters'
 import { useCardVisibility } from '@/composables/useCardVisibility'
-import { useMobileView } from '@/composables/useMobileView'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
@@ -30,7 +29,6 @@ import type { CardDataContext } from '@/domain/layout/cardDataAvailability'
 import type { LapLine } from '@/domain/analysis/laps'
 import { lapColor } from './lapColors'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
-import { scrubberDomain } from '@/domain/analysis/scrubber'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { fastestDistanceFromLaunch, fastestSpeedSegment, type AccelSegment } from '@/domain/analysis/accelTest'
 import { cumulativeDistanceM } from '@/domain/analysis/distance'
@@ -60,8 +58,6 @@ import {
 import DashboardCard from '@/components/DashboardCard.vue'
 import CardMenu from './CardMenu.vue'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
-import MobileFocusView from './MobileFocusView.vue'
-import MobileScrubber from './MobileScrubber.vue'
 import type { AnalyzerCardContext } from './analyzerCardContext'
 
 const { t } = useI18n()
@@ -595,61 +591,6 @@ const mobileVisibleLayout = computed<typeof layout.value>(() =>
   ),
 )
 
-// --- F5 (was F1): mobile single-focus view mode (聚焦/完整) ---
-// A DEVICE preference (tracklogstudio.mobileView.v1): `focus` = the F5
-// single-focus view — one full-screen visual + a top tab switcher (see
-// MobileFocusView.vue; F1's curated vertical stack is retired), `full` = the
-// existing full-dashboard single-column grid. Never shown/consulted on
-// desktop — the toggle is `v-if="isMobile"` and the grid path is what mounts
-// otherwise.
-const mobileView = useMobileView(chartIds)
-const mobileMode = mobileView.mode
-function setMobileMode(mode: 'focus' | 'full'): void {
-  mobileView.setMode(mode)
-}
-// The curated, ordered id set the single-focus view's tab bar renders: the
-// SAME visible mobile set the mobile grid uses (mobileOrder filtered to
-// `isVisibleId`), run through the user's explicit focus order
-// (resolveFocusStackOrder inside useMobileView, unchanged from F1). Keeping
-// AnalyzerView the single owner of the visible set is deliberate — the
-// single-focus view and the grid can never disagree about which cards are
-// visible.
-const focusStackIds = computed(() => mobileView.focusStackIds(mobileOrder.value.filter(isVisibleId)))
-// Whether the single-focus view (not the grid) is what should mount right
-// now — the two are mutually exclusive so they never both render.
-const showFocusView = computed(() => isMobile.value && mobileMode.value === 'focus')
-// F5 — the tab currently shown in the single-focus view's body: the
-// persisted selection (useMobileView().currentViewId) if it's still one of
-// the visible ids, else the first visible id — same "persist verbatim, view
-// owns the fallback" split MobileFocusView.vue's own `activeId` computed
-// re-checks defensively (design doc §4/§6).
-const currentFocusViewId = computed<string>(() => {
-  const ids = focusStackIds.value
-  const persisted = mobileView.currentViewId.value
-  return persisted && ids.includes(persisted) ? persisted : (ids[0] ?? '')
-})
-// MobileFocusView emits `select` on every tab tap (even a no-op re-tap of the
-// already-active tab, see that component's emit doc) — persist it through the
-// same useMobileView setter the store owns.
-function onSelectFocusView(id: string): void {
-  mobileView.setCurrentView(id)
-}
-
-// F1 phase 3 — the single-focus view's shared bottom scrubber's domain:
-// exactly one selected lap -> that lap's own sample span, else -> the full
-// session (see scrubber.ts's `scrubberDomain` doc). Derived here (not owned
-// by the scrubber) so AnalyzerView stays the single source for what "the
-// current selection" means, same as `selectedLaps`/`focusRange` above.
-const focusScrubberDomain = computed(() => scrubberDomain(selectedLaps.value, xValues.value?.length ?? 0))
-// The scrubber only ever CALLS the store's existing cursor setter — see
-// analyzerStore.ts's `setCursor` and this file's own `cardCtx.setCursor` —
-// it never invents new cursor state (design doc §6). Every other cursor
-// consumer (map, timeline charts, and overlay charts via TimeSeriesChart's
-// own reverse-link) already follows `cursorIdx` for free.
-function onScrubberScrub(index: number): void {
-  analyzer.setCursor(index)
-}
-
 // Per-item props the library's OWN GridItem needs (we no longer render a
 // GridItem ourselves — see the `#item` slot note). grid-layout-plus spreads
 // each layout entry as props onto the GridItem it wraps around the slot, so
@@ -973,11 +914,11 @@ function locateCard(id: string): void {
 
 // --- F1: the shared card context, assembled ONCE from every ref/computed/
 // store-action/handler an extracted card body reads. The dispatcher
-// (AnalyzerCardBody) — and, on mobile, MobileFocusView — pass this straight
-// down so a card's content (now a standalone component under cards/) renders
-// identically whether it's inside the desktop grid's DashboardCard or the
-// mobile single-focus view. A plain object of refs + functions: the
-// reactivity is deliberately NOT cloned away (see analyzerCardContext.ts). ---
+// (AnalyzerCardBody) passes this straight down so a card's content (a
+// standalone component under cards/) renders identically whether it's inside
+// the desktop grid's DashboardCard or the mobile grid. A plain object of
+// refs + functions: the reactivity is deliberately NOT cloned away (see
+// analyzerCardContext.ts). ---
 const primaryFileId = computed(() => activeFile.value?.id ?? null)
 const primaryFileName = computed(() => activeFile.value?.name ?? '')
 const line = computed(() => lapStore.line)
@@ -1057,7 +998,7 @@ const cardCtx: AnalyzerCardContext = {
 </script>
 
 <template>
-  <div class="analyzer" :class="{ 'focus-mode': showFocusView }">
+  <div class="analyzer">
     <p v-if="readyFiles.length === 0" class="empty">{{ t('analyzer.noFiles') }}</p>
 
     <template v-else>
@@ -1076,38 +1017,7 @@ const cardCtx: AnalyzerCardContext = {
              standalone 新增圖表/新增散佈圖 buttons (T4) moved INTO the menu's
              圖表 section — see CardMenu.vue. -->
         <div class="layout-tools">
-          <!-- F5 (was F1) — mobile-only 聚焦/完整 view toggle: the single-focus
-               view vs the full dashboard grid. Never rendered on desktop (the
-               grid is the only desktop presentation). Two-way bound to
-               useMobileView().mode. -->
-          <div
-            v-if="isMobile"
-            class="view-mode"
-            role="group"
-            :aria-label="t('analyzer.mobileView.toggleAria')"
-          >
-            <button
-              type="button"
-              :class="{ active: mobileMode === 'focus' }"
-              :aria-pressed="mobileMode === 'focus'"
-              @click="setMobileMode('focus')"
-            >
-              {{ t('analyzer.mobileView.focus') }}
-            </button>
-            <button
-              type="button"
-              :class="{ active: mobileMode === 'full' }"
-              :aria-pressed="mobileMode === 'full'"
-              @click="setMobileMode('full')"
-            >
-              {{ t('analyzer.mobileView.full') }}
-            </button>
-          </div>
-          <!-- F5 (was F1) — drag-to-reorder doesn't apply in the single-focus
-               view (no grid, no drag handles), so the hint would be
-               misleading there; the full dashboard (desktop always, or
-               mobile's 完整 mode) keeps it. -->
-          <span v-if="!showFocusView" class="drag-hint">{{ isMobile ? t('analyzer.layout.dragHintMobile') : t('analyzer.layout.dragHint') }}</span>
+          <span class="drag-hint">{{ isMobile ? t('analyzer.layout.dragHintMobile') : t('analyzer.layout.dragHint') }}</span>
           <CardMenu
             :groups="cardMenuGroups"
             :charts="chartMenuEntries"
@@ -1178,32 +1088,7 @@ const cardCtx: AnalyzerCardContext = {
            are placed relative to — it must wrap `<GridLayout>` exactly (no
            extra padding/border) so its measured width matches the library's
            own colWidth math (see useGridGutters.ts's `containerRef` doc). -->
-      <!-- F5 (was F1) — the mobile single-focus view replaces the grid
-           entirely when the mobile view mode is `focus`. The two are
-           mutually exclusive (v-if/v-else) so the grid and the single-focus
-           view never both mount. On desktop, or in mobile `full` mode, the
-           existing GridLayout path below is unchanged. -->
-      <template v-if="showFocusView">
-        <MobileFocusView
-          :ids="focusStackIds"
-          :ctx="cardCtx"
-          :title-for="titleForItemId"
-          :current-view-id="currentFocusViewId"
-          @select="onSelectFocusView"
-        />
-        <!-- F1 phases 3-4 (reused as-is by F5) — the shared bottom scrubber.
-             A normal flex child right after the (flex:1) single-focus view,
-             so it naturally sits pinned above BottomNav within
-             `.analyzer.focus-mode`'s own height (see that class's comment) —
-             no fixed positioning needed. -->
-        <MobileScrubber
-          :domain="focusScrubberDomain"
-          :time-ms="timeMs"
-          :cursor-idx="cursorIdx"
-          @scrub="onScrubberScrub"
-        />
-      </template>
-      <div v-else ref="gridWrapRef" class="grid-wrap">
+      <div ref="gridWrapRef" class="grid-wrap">
       <GridLayout
         v-model:layout="activeLayout"
         :col-num="colNum"
@@ -1287,17 +1172,6 @@ const cardCtx: AnalyzerCardContext = {
   flex-direction: column;
   gap: calc(var(--space) * 2);
 }
-/* F1/F5 — in the mobile single-focus mode the analyzer fills App.vue's
-   `.content` height (which is `flex: 1` inside the app shell, so it has a
-   definite height) so MobileFocusView below the toolbar can flex-grow to fill
-   the space between the toolbar and the fixed BottomNav rather than being
-   content-sized. Scoped to `focus-mode` (mobile + `focus`) so the
-   desktop/full-grid layout — where the page itself scrolls a tall
-   content-sized grid — is untouched. */
-.analyzer.focus-mode {
-  height: 100%;
-  min-height: 0;
-}
 /* B36 — App.vue's `.content` zeroes its own horizontal padding on mobile so
    the dashboard grid below (`.grid-wrap`/`.pinned-anchor`, i.e. the actual
    DashboardCard content) can go edge-to-edge — see that file's own comment.
@@ -1351,27 +1225,6 @@ const cardCtx: AnalyzerCardContext = {
   cursor: pointer;
 }
 .xaxis button.active {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-/* F1 — the 聚焦/完整 mobile view toggle: same segmented-control language as
-   the time/distance `.xaxis` switch above so the two read as the same kind of
-   control. */
-.view-mode {
-  display: inline-flex;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.view-mode button {
-  background: var(--color-bg);
-  color: var(--color-text-muted);
-  border: none;
-  padding: 6px 12px;
-  font: inherit;
-  cursor: pointer;
-}
-.view-mode button.active {
   background: var(--color-accent);
   color: var(--color-accent-text);
 }
