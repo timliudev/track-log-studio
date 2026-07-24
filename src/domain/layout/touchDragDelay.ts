@@ -73,3 +73,21 @@ export function advanceOnMove(
 export function advanceOnTimeout(state: TouchDragDelayState): TouchDragDelayState {
   return state === 'pending' ? 'armed' : state
 }
+
+/**
+ * B102b — F1 phase 5 手勢引擎的第三個轉移入口(前兩個是 advanceOnMove/
+ * advanceOnTimeout)。第二根手指在這根手指還 'pending' 的長按判定期間按下,
+ * 代表使用者正在用另一根手指做別的事(最常見:單手長按住卡片標題的同時,
+ * 另一手在捲頁面)——這已經不是單指長按拖曳手勢了,直接判定取消,交還原生
+ * (跟位移超閾值同一個終態 'cancelled',不會因為計時器之後到期而復活)。
+ *
+ * 只有 'pending' 會被這個事件影響: 'armed' 這個模組自己的職責已經在
+ * onTouchDragTimeout 交棒給 grid-layout-plus 之後就結束了(DashboardCard.vue
+ * 會把 touchDragState 直接歸零,不會再看到這個狀態)——之後同一個拖曳手勢中
+ * 出現第二指,是 DOM 層(見 DashboardCard.vue 的 dragPointerId 追蹤 + 合成
+ * pointercancel 中止 interactjs)另外處理的問題,不是這個純狀態機的職責範圍;
+ * 'cancelled' 一樣是終態,原樣傳回。
+ */
+export function advanceOnSecondPointer(state: TouchDragDelayState): TouchDragDelayState {
+  return state === 'pending' ? 'cancelled' : state
+}

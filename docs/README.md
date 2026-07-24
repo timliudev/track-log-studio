@@ -15,7 +15,7 @@
 | [`IMPORT-FORMATS-STATUS.md`](./IMPORT-FORMATS-STATUS.md) | 狀態快照 | 格式匯入/匯出的**完成進度、已知限制、待完成**（✅/🔧/🛠️/📋）。 |
 | [`PHASE5-MERGE-STATUS.md`](./PHASE5-MERGE-STATUS.md) | 狀態快照 | GPS 場次合併原型建置紀錄（已 shipped，保留為歷史 rationale）。 |
 | [`ISSUES.md`](./ISSUES.md) | 活動追蹤 | **逐項 bug/請求的狀態 + 修復 commit**（B/M 編號）。跨會話的活清單。 |
-| [`specs/`](./specs/) | 研究 | 格式/演算法研究：CVT 動力、格式接入評估、XRK/RCNX 二進位規格。 |
+| [`specs/`](./specs/) | 研究 | 格式/演算法研究：CVT 動力、格式接入評估、XRK/RCNX/RCZ 二進位規格。 |
 | [`manual/`](./manual/) | 使用手冊 | 對使用者的 zh-Hant / en 操作說明。 |
 | `journal/` | 工時日誌 | 每會話開發日誌。**已 gitignore，不進版控**（避免洩漏工時）。 |
 

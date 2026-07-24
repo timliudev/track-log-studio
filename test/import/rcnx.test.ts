@@ -289,9 +289,15 @@ describe('parseRcnx — lap data from sana_N.db', () => {
     // where the counter RISES from a previously-seen value; the very first
     // sample never counts as a boundary (nothing to rise from), so 3 sana
     // laps starting exactly at row 0 give 2 rising edges (idx 5, idx 9) -> 1
-    // lap between them. (See the "pre-lap gap" test below for the case where
-    // the first lap's start_wp is NOT the first row — there the initial
-    // 0->1 rise IS visible.)
+    // lap between them. This is the "no tail" edge case: the last lap's
+    // finish_wp (12) lands exactly on the final WayPoints row (rowCount=12),
+    // so there are no trailing rows left to place a closing edge on for the
+    // final lap — buildLapNumberChannel's out-lap tail is a no-op here, and
+    // this assertion is unaffected by that fix. (See the "pre-lap gap" test
+    // below for the case where the first lap's start_wp is NOT the first
+    // row — there the initial 0->1 rise IS visible. See the "trailing rows"
+    // test below for the normal case WITH a tail, where the final lap IS
+    // now recovered.)
     const timeMs = Float64Array.from(session.timeChannel!.data)
     const laps = detectLapsByChannel(session, timeMs)
     expect(laps.length).toBe(1)
@@ -299,10 +305,11 @@ describe('parseRcnx — lap data from sana_N.db', () => {
     expect(laps[0].endIdx).toBe(9)
   })
 
-  it('counts pre-lap (out-lap) rows as lap 0, making the first lap boundary a visible rising edge', async () => {
+  it('counts pre-lap (out-lap) rows as lap 0, and recovers the single lap via the post-finish tail edge', async () => {
     const rows = makeRows(10, 1_556_346_856)
     const sess0 = buildSessDb(rows)
     // First lap starts at wp id 4 (row 3), NOT row 0 — rows 0..2 are out-lap.
+    // finish_wp=8 is row 7, leaving rows 8..9 as a 2-row post-lap tail.
     const sana0 = buildSanaDb([{ startWp: 4, finishWp: 8, bFailed: false }])
     const rcnx = zipSync({ 'sess_0.db\0': sess0, 'sana_0.db\0': sana0 })
 
@@ -312,14 +319,84 @@ describe('parseRcnx — lap data from sana_N.db', () => {
     expect(lapCh.data[2]).toBe(0)
     expect(lapCh.data[3]).toBe(1)
     expect(lapCh.data[7]).toBe(1)
-    expect(lapCh.data[9]).toBe(1)
+    // Rows 8..9 are the post-finish out-lap tail: a distinct value one
+    // greater than the lap's (2), not a continuation of lap 1.
+    expect(lapCh.data[8]).toBe(2)
+    expect(lapCh.data[9]).toBe(2)
 
-    // A single sana lap gives exactly one rising edge (0->1 at row 3), which
-    // alone isn't enough for detectLapsByChannel (needs >= 2 boundaries) —
-    // this documents the current single-lap limit rather than asserting a
-    // full lap.
+    // The single sana lap now gives TWO rising edges: 0->1 at row 3 (its
+    // start) and 1->2 at row 8 (the tail closing it) — enough for
+    // detectLapsByChannel to recover the one official lap, matching the
+    // sana lap-row count (1), instead of the old single-lap limit (0
+    // detected laps) that a repeated-tail-value counter produced.
     const timeMs = Float64Array.from(session.timeChannel!.data)
-    expect(detectLapsByChannel(session, timeMs)).toHaveLength(0)
+    const laps = detectLapsByChannel(session, timeMs)
+    expect(laps).toHaveLength(1)
+    expect(laps[0]).toMatchObject({ startIdx: 3, endIdx: 8 })
+  })
+
+  it('recovers the final lap when trailing rows follow the last lap\'s finish_wp (regression, real 142.rcnx shape)', async () => {
+    // Mirrors the real-world 142.rcnx shape: N official (sana) laps followed
+    // by a substantial tail of post-finish rows (Qstarz keeps logging after
+    // the finish line). Before the fix, buildLapNumberChannel's tail loop
+    // repeated the last lap's counter value instead of incrementing it, so
+    // the final lap had no closing rising edge and detectLapsByChannel
+    // dropped it (N laps -> N-1 detected). This test asserts all N laps are
+    // now recovered.
+    const rowCount = 40
+    const rows = makeRows(rowCount, 1_556_346_856)
+    const sess0 = buildSessDb(rows)
+    // WayPoints ids are 1-based (AUTOINCREMENT), so row i has id i+1.
+    // Laps are contiguous (finish_k == start_{k+1}), as real Qstarz laps are:
+    //   lap1: rows 3..8   (start_wp=4,  finish_wp=9)
+    //   lap2: rows 8..14  (start_wp=9,  finish_wp=15)
+    //   lap3: rows 14..20 (start_wp=15, finish_wp=21)
+    // Rows 21..39 (19 rows, ~half the session) are the post-lap tail —
+    // logged after lap3's finish_wp but with no further lap table entry.
+    const officialLaps: SanaLapRow[] = [
+      { startWp: 4, finishWp: 9, bFailed: false },
+      { startWp: 9, finishWp: 15, bFailed: false },
+      { startWp: 15, finishWp: 21, bFailed: false },
+    ]
+    const sana0 = buildSanaDb(officialLaps)
+    const rcnx = zipSync({ 'sess_0.db\0': sess0, 'sana_0.db\0': sana0 })
+
+    const session = await parseRcnx(rcnx)
+    const lapCh = session.get('IR_LapNumber')!
+    expect(lapCh).toBeDefined()
+    expect(lapCh.data.length).toBe(rowCount)
+
+    // Pre-lap rows (0..2) stay at lap 0.
+    expect(lapCh.data[0]).toBe(0)
+    expect(lapCh.data[2]).toBe(0)
+    // The three official laps.
+    expect(lapCh.data[3]).toBe(1)
+    expect(lapCh.data[8]).toBe(1)
+    expect(lapCh.data[9]).toBe(2)
+    expect(lapCh.data[14]).toBe(2)
+    expect(lapCh.data[15]).toBe(3)
+    expect(lapCh.data[20]).toBe(3)
+    // Tail rows (21..39) carry a distinct counter value ONE GREATER than the
+    // last official lap's (3 + 1 = 4) — a separate out-lap, not a
+    // continuation of lap 3.
+    expect(lapCh.data[21]).toBe(4)
+    expect(lapCh.data[39]).toBe(4)
+
+    // meta.headerInfo.lapCount reports the official sana lap count.
+    expect(session.meta.headerInfo.lapCount).toBe('3')
+    expect(session.meta.headerInfo.validLapCount).toBe('3')
+
+    // detectLapsByChannel must now recover ALL 3 official laps, not 2
+    // (N-1). The tail's distinct value creates a 4th rising edge (at row
+    // 21) that CLOSES lap 3, but produces no extra (4th) lap of its own,
+    // since there is no further rising edge after it.
+    const timeMs = Float64Array.from(session.timeChannel!.data)
+    const laps = detectLapsByChannel(session, timeMs)
+    expect(laps.length).toBe(3)
+    expect(laps.length).toBe(officialLaps.length) // detected count == official lap-row count
+    expect(laps[0]).toMatchObject({ startIdx: 3, endIdx: 9 })
+    expect(laps[1]).toMatchObject({ startIdx: 9, endIdx: 15 })
+    expect(laps[2]).toMatchObject({ startIdx: 15, endIdx: 21 })
   })
 
   it('has no IR_LapNumber channel when there is no matching sana_N.db', async () => {

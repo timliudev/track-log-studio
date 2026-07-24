@@ -17,8 +17,9 @@ export interface ComparisonLapHighlightSource {
   track: GpsTrack
   laps: { index: number; startIdx: number; endIdx: number }[]
   /** Manual map alignment in metres (east+/north+) — the SAME per-session
-   *  offset the faint overlay track is drawn with (see useTrackOverlay.ts),
-   *  not a per-lap nudge (cross-session laps have no separate map offset). */
+   *  offset the faint overlay track is drawn with (see useTrackOverlay.ts).
+   *  Combined additively with each ref's own `mapOffset` below, since a comparison
+   *  lap can be nudged BOTH as part of its whole session AND on its own (#9). */
   offset?: { x: number; y: number }
 }
 
@@ -28,6 +29,24 @@ export interface ComparisonLapHighlightSource {
 export interface SessionLapRef {
   fileId: number
   index: number
+  /** This lap's OWN map-alignment nudge, metres east+/north+ (lapStore's
+   *  `sessionLapMapOffsetOf`) — independent of, and additive with, the
+   *  session-wide `offset` on {@link ComparisonLapHighlightSource}. Optional
+   *  so callers that don't track per-lap map offsets (e.g. existing tests)
+   *  need not supply it; absent behaves exactly like a zero offset. */
+  mapOffset?: { x: number; y: number }
+}
+
+/** Componentwise-add two optional metre offsets, treating an absent side as
+ *  zero — but returning `undefined` (not `{x:0,y:0}`) when BOTH sides are
+ *  absent, so a highlight with no offset at all still renders exactly as
+ *  before this facet existed (see the 'absent mapOffset' test). */
+function addOffsets(
+  a: { x: number; y: number } | undefined,
+  b: { x: number; y: number } | undefined,
+): { x: number; y: number } | undefined {
+  if (!a && !b) return undefined
+  return { x: (a?.x ?? 0) + (b?.x ?? 0), y: (a?.y ?? 0) + (b?.y ?? 0) }
 }
 
 /** One comparison-file lap resolved to a drawable track-map segment: its OWN
@@ -66,7 +85,7 @@ export function buildComparisonLapHighlights(
       startIdx: lap.startIdx,
       endIdx: lap.endIdx,
       color: session.color,
-      offset: session.offset,
+      offset: addOffsets(session.offset, ref.mapOffset),
     })
   }
   return out

@@ -564,7 +564,7 @@ attribution。Mapbox key 不會進入設定匯出或我方後端，僅在使用�
 
 > 這兩批實機回饋是下列功能的**設計來源**；逐項完成狀態與修復 commit 一律見
 > [`ISSUES.md`](./ISSUES.md)，此處只保留仍有參考價值的設計要點，不再重列 DONE/待驗收狀態。
-> **尚未完成的兩項**（#9 單圈 GNSS 偏移微調、F 行動裝置真機驗收）見 §11c 的較長期待辦。
+> **#9 單圈 GNSS 偏移微調**其實已落地(PRIMARY 場):`MapAlignPanel.vue`(地圖對齊卡,選 ≥2 圈時顯示)提供逐圈東/北 0.5m 微調 + reset,存 `lapStore.offsets[i].mapX/mapY`,經 `AnalyzerView` 的 `highlightLaps[].offset` 由 TrackMap 繪製——此段先前過期(2026-07-23 更正)。比較場(`sessionLapOffsets`)的 per-lap mapX/mapY 亦已補齊(`sessionLapMapOffsetOf`/`nudgeSessionLapMapOffset`/`resetSessionLapMapOffset`,`MapAlignPanel` 比較檔分組,`buildComparisonLapHighlights` 合併 session+per-lap 偏移)——**#9 至此完整**。**F 行動裝置真機驗收** = F1,phases 1-5 已實作(見 [`ISSUES.md`](./ISSUES.md) F1),待真機驗證。
 
 - **Lap 管理（#1）**：excluded 爛圈不計入 opt time/delta；最速/最慢圈為 included-laps 純衍生
   （`domain/analysis/bestLap.ts` `fastestLapIndex` / `slowestLapIndex`，同一 exclusion-aware 慣例）。
@@ -600,8 +600,8 @@ attribution。Mapbox key 不會進入設定匯出或我方後端，僅在使用�
 
 ### 目前待辦（較長期 / 待方向拍板）
 
-短期具體條目不在此列——見 [`ISSUES.md`](./ISSUES.md)（目前未動工：M4 選做手冊、M6 手機分割視窗、
-M10 卡片增減選單；另有數項程式已完成、待實機驗收）。以下僅為**尚待方向拍板**的長期項目：
+短期具體條目不在此列——見 [`ISSUES.md`](./ISSUES.md)（目前未動工：M4 選做手冊；另有數項程式已完成、待實機驗收）。以下僅為**尚待方向拍板**的長期項目：
+（註：舊 roadmap 的「M6 手機分割視窗」為 Claude 自起、非使用者要求，已於 2026-07-24 移除，勿再列入。）
 
 - **雲端賽道庫第三階段（開放社群貢獻）**：原 §8 拍板 GitHub+jsDelivr 後暫緩，
   改等 [`TRACK-LIBRARY-OPTIONS.md`](./TRACK-LIBRARY-OPTIONS.md) 的二次拍板
@@ -609,7 +609,7 @@ M10 卡片增減選單；另有數項程式已完成、待實機驗收）。以�
 - **個人雲端備份（第四階段）**：Drive vs Gist 屆時再選（CLOUD-TRACK-DESIGN.md §5/§8 決策 6/7）。
 - **重視覺驗收積欠**：canvas 類（軌跡/熱力/起終點線把手/時鐘第二軸對位）無法自動驗證，
   需使用者目視——逐項清單保存在本機開發筆記。
-- **§11b 待辦佇列殘項**：#9 單圈 GNSS 偏移微調、F 行動裝置真機驗收（診斷面板已備 `?debug=1`）。
+- **§11b 待辦佇列殘項**：#9 單圈 GNSS 偏移微調 → **完整落地**(primary + 比較場 per-lap map 偏移皆接通,`MapAlignPanel.vue`);F 行動裝置真機驗收 = F1 phases 1-5 已實作、待真機驗證（診斷面板已備 `?debug=1`）。此節長期待辦至此僅剩雲端同步(`CLOUD-TRACK-DESIGN.md`,⛔ 待 §8 使用者決策)。
 - **AnalyzerView 持續拆分**：架構稽核點名的壓力點，已抽
   useTrackExtrema/useTrackHeatmap/useSectors 等；剩餘耦合（lap-select↔zoom）
   **刻意保留**在 AnalyzerView 作為唯一決策點，非待辦、僅列監控。

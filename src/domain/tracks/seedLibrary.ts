@@ -69,7 +69,6 @@ const { tracks, errors } = parseTrackLibrary(SEED_RAW)
 if (errors.length > 0) {
   // A malformed seed entry is a bug in THIS file (not user data), so surface
   // it loudly in dev rather than silently shipping a shrunk library.
-  // eslint-disable-next-line no-console
   console.error('[seedLibrary] malformed bundled track definition(s):', errors)
 }
 

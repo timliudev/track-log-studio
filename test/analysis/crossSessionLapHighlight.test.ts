@@ -70,4 +70,52 @@ describe('buildComparisonLapHighlights', () => {
   it('returns an empty array for an empty selection', () => {
     expect(buildComparisonLapHighlights([], [sessionA, sessionB])).toEqual([])
   })
+
+  // #9 comparison half — a ref's own per-lap `mapOffset` combines ADDITIVELY
+  // with its session's whole-session `offset`.
+  describe('per-lap mapOffset combination', () => {
+    it('adds the per-lap mapOffset to the session offset', () => {
+      const out = buildComparisonLapHighlights(
+        [{ fileId: 2, index: 1, mapOffset: { x: 0.5, y: 1 } }],
+        [sessionA, sessionB],
+      )
+      // sessionA.offset = { x: 1.5, y: -2 } + mapOffset { x: 0.5, y: 1 }
+      expect(out[0].offset).toEqual({ x: 2, y: -1 })
+    })
+
+    it('uses the per-lap mapOffset alone when the session has no offset', () => {
+      const out = buildComparisonLapHighlights(
+        [{ fileId: 3, index: 0, mapOffset: { x: -1, y: 2 } }],
+        [sessionA, sessionB],
+      )
+      expect(out[0].offset).toEqual({ x: -1, y: 2 })
+    })
+
+    it('behaves exactly as before when mapOffset is absent (session offset alone, or undefined)', () => {
+      const out = buildComparisonLapHighlights(
+        [
+          { fileId: 2, index: 1 },
+          { fileId: 3, index: 0 },
+        ],
+        [sessionA, sessionB],
+      )
+      expect(out[0].offset).toEqual(sessionA.offset)
+      expect(out[1].offset).toBeUndefined()
+    })
+
+    it('treats a zero mapOffset as a real (non-additive-noop) value, not as absent', () => {
+      const out = buildComparisonLapHighlights(
+        [{ fileId: 3, index: 0, mapOffset: { x: 0, y: 0 } }],
+        [sessionA, sessionB],
+      )
+      // sessionB has no session-level offset, so the result is exactly the
+      // (zero) per-lap offset — present, not omitted.
+      expect(out[0].offset).toEqual({ x: 0, y: 0 })
+    })
+
+    it('still drops a stale ref even when it carries a mapOffset', () => {
+      const out = buildComparisonLapHighlights([{ fileId: 99, index: 0, mapOffset: { x: 1, y: 1 } }], [sessionA, sessionB])
+      expect(out).toEqual([])
+    })
+  })
 })

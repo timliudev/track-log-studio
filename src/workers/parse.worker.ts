@@ -4,6 +4,7 @@ import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
 import { parseVbo } from '@/domain/import/vbo/parseVbo'
 import { parsePlainCsv } from '@/domain/import/csv/parsePlainCsv'
 import { parseRcz } from '@/domain/import/rcz/parseRcz'
+import { parseRczBackupSession } from '@/domain/import/rcz/parseRczBackup'
 import { parseRcnx } from '@/domain/import/rcnx/parseRcnx'
 import { parseXrk } from '@/domain/import/xrk/parseXrk'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
@@ -26,6 +27,7 @@ interface WorkerParser {
     input: string | Uint8Array,
     onProgress?: ProgressFn,
     sessionIndex?: number,
+    rczSessionKey?: string,
   ) => LogSession | Promise<LogSession>
 }
 
@@ -39,7 +41,16 @@ const WORKER_PARSERS: Record<string, WorkerParser> = {
   nmea: { binary: false, parse: (input) => nmeaToSession(input as string) },
   vbo: { binary: false, parse: (input) => parseVbo(input as string) },
   csv: { binary: false, parse: (input) => parsePlainCsv(input as string) },
-  rcz: { binary: true, parse: (input) => parseRcz(input as Uint8Array) },
+  rcz: {
+    binary: true,
+    // A device-BACKUP `.rcz` passes `rczSessionKey` (chosen via the FileBar
+    // picker after `listRczSessions`); a plain single-session export omits it
+    // and this stays byte-for-byte identical to the pre-F3 behaviour.
+    parse: (input, _onProgress, _sessionIndex, rczSessionKey) =>
+      rczSessionKey
+        ? parseRczBackupSession(input as Uint8Array, rczSessionKey)
+        : parseRcz(input as Uint8Array),
+  },
   rcnx: {
     binary: true,
     parse: (input, _onProgress, sessionIndex) =>
@@ -52,7 +63,7 @@ const WORKER_PARSERS: Record<string, WorkerParser> = {
 // channels are returned with their Float32Array buffers transferred (zero-copy)
 // so the main thread can rebuild a LogSession.
 ctx.onmessage = async (event: MessageEvent<ParseRequest>) => {
-  const { id, importerId, file, sessionIndex } = event.data
+  const { id, importerId, file, sessionIndex, rczSessionKey } = event.data
   try {
     const entry = WORKER_PARSERS[importerId]
     if (!entry) {
@@ -72,6 +83,7 @@ ctx.onmessage = async (event: MessageEvent<ParseRequest>) => {
         ctx.postMessage({ id, kind: 'progress', fraction } satisfies ParseResponse)
       },
       sessionIndex,
+      rczSessionKey,
     )
 
     const channels = session.channels.map((c) => ({

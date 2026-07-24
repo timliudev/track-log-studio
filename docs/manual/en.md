@@ -55,7 +55,7 @@ Once installed, the app works **offline** (previously loaded pages and code are 
 | `.nmea` | a previously converted NMEA/RC3 log |
 | `.vbo` | Racelogic VBOX format (including files exported by this app, or from other sources) |
 | `.csv` | Generic telemetry CSV; its first nonblank row must be a header containing `Time` or `Timer` |
-| `.rcz` | RaceChrono log (ZIP containing session.json + binary channel data) |
+| `.rcz` | RaceChrono log (ZIP containing session.json + binary channel data). **RaceChrono device backups are supported too** — same `.rcz` extension, but holding hundreds of sessions; loading one opens a session picker, and **only the session you choose is decompressed**, so a multi-gigabyte backup won't exhaust memory |
 | `.xrk` | AiM Solo 2 DL / MyChron5 log |
 | `.rcnx` | Qstarz LT-Q6000 / Q6000S (QRacing) log |
 | `.zip` | a share-export from the aRacer x Tune app; auto-extracted and detected on upload |
@@ -67,6 +67,12 @@ For a generic CSV, use comma-separated, one-sample-per-row data. Header names be
 #### RCNX multi-session files
 
 A single `.rcnx` file can contain multiple sessions (separate recordings). If more than one session is detected, loading it opens a picker asking you to choose which one to open, listing each session's point count, duration (minutes), and whether it has lap data — the session with the most data is flagged as the recommended default. Click a session to open it, or "Cancel" to abandon the import. If that session's analysis data (the `sana` database) already contains lap records, lap boundaries are imported automatically from that source (i.e. ECU-based lap splitting — no need to drag the start/finish line manually).
+
+**You can change your mind afterwards, without re-loading the file:**
+
+- **Switch session**: a "Switch session" dropdown appears on the file row — pick a different session and that record's data is swapped in place. Its lap selection, manual exclusions and alignment nudges are cleared (they don't carry over to a different session); the start/finish line and sector gates are **circuit-level** settings and are kept.
+- **Composite segments**: the neighbouring "Composite segments" button lets you tick **two or more** sessions and combine them into **one new continuous recording** (the original sessions stay untouched and remain usable). Segments are ordered by their real recorded start time, and the **actual gap between sessions is preserved** (a lunch break stays a lunch break). If the sessions don't share exactly the same channels, the union is used and missing values are left blank.
+  - ⚠️ Note: the lap-splitting algorithm only ever pairs two adjacent lap boundaries and has no concept of "segments", so **each seam produces one extra, very long joining interval** — spanning precisely the real-world gap between the two sessions. This is **not a lost lap** (every real lap from every segment is still there); simply exclude that interval if it gets in the way.
 
 ### 2.5 Supported export formats
 
@@ -334,7 +340,7 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 
 #### Mobile: single column + collapse + pin
 
-Below roughly 768px wide, the layout automatically collapses to a single column, ordered by the logical order derived from the desktop layout, and **dragging/resizing are disabled** (rearranging doesn't apply in a fixed single-column order). Mobile additionally offers:
+Below roughly 768px wide, the Analyzer layout collapses to a single column, ordered by the logical order derived from the desktop layout, with **dragging/resizing disabled** (rearranging doesn't apply in a fixed single-column order). This view additionally offers:
 
 - **Collapsing a card**: same as desktop — tap a card's chevron to collapse/expand its content, handy for skipping past sections you don't need right now in the single column.
 - **Pinning a card**: on mobile, every card's title bar also has a pin button. Tap it and that card becomes **stuck to the top of the screen** (sticky) while the rest of the cards keep scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table.

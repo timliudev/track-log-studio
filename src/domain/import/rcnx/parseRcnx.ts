@@ -219,6 +219,22 @@ function readSanaLaps(sanaBytes: Uint8Array | undefined, SQL: SqlJsStatic): Sana
  * make that first boundary invisible to the detector. Failed laps still
  * increment the counter (a boundary exists) but are not specially flagged
  * here — `detectLapsByChannel` has no failed-lap concept upstream.
+ *
+ * `detectLapsByChannel` forms a lap BETWEEN each pair of consecutive rising
+ * edges of the counter, so N laps need N+1 crossings to be recovered: each
+ * lap's `start_wp` (already an edge, since `lapNo` increments before it) AND
+ * one more edge at the last lap's `finish_wp` to CLOSE it. Each `sana_N.db`
+ * `lap` row is already a *complete* lap with its own `finish_wp` (unlike a
+ * live ECU counter, which is still counting up mid-lap) — so the rows after
+ * the last lap's `finish_wp` are NOT a continuation of that lap; they are a
+ * separate, incomplete out-lap and must get their own (incremented) counter
+ * value to produce the closing edge. Without this, the tail would silently
+ * repeat the last lap's number, no closing edge would exist, and
+ * `detectLapsByChannel` would drop the final lap entirely (N laps -> N-1
+ * detected). The one case this still can't recover: if the last lap's
+ * `finish_wp` IS the very last WayPoints row (no trailing rows at all), there
+ * is no row left to place the closing edge on — not a real-world case for
+ * Qstarz, which always keeps logging past the finish line.
  */
 function buildLapNumberChannel(
   laps: SanaLap[],
@@ -244,10 +260,15 @@ function buildLapNumberChannel(
     for (let i = cursor; i <= finishIdx && i < rowCount; i++) counter[i] = lapNo
     cursor = finishIdx + 1
   }
-  // Tail after the last recognised lap boundary keeps the last lap number
-  // (in-lap / partial lap), matching how detectLapsByChannel treats a
-  // plateau at the end of the counter.
-  for (let i = cursor; i < rowCount; i++) counter[i] = lapNo
+  // Rows after the last lap's finish_wp are a separate out-lap (a distinct,
+  // incremented counter value), NOT a continuation of the last lap — this is
+  // what creates the closing rising edge for the final lap. If there are no
+  // trailing rows (cursor already reached rowCount), or no lap was actually
+  // recognised (e.g. every finish_wp was unmatched), there is nothing to do.
+  if (lapNo > 0 && cursor < rowCount) {
+    lapNo += 1
+    for (let i = cursor; i < rowCount; i++) counter[i] = lapNo
+  }
   return lapNo > 0 ? counter : null
 }
 

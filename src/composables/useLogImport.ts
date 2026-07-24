@@ -47,6 +47,7 @@ export function useLogImport(): {
     importerId: string,
     onProgress?: ProgressFn,
     sessionIndex?: number,
+    rczSessionKey?: string,
   ) => Promise<LogSession>
 } {
   function parseFile(
@@ -54,12 +55,13 @@ export function useLogImport(): {
     importerId: string,
     onProgress?: ProgressFn,
     sessionIndex?: number,
+    rczSessionKey?: string,
   ): Promise<LogSession> {
     const w = ensureWorker()
     const id = nextId++
     return new Promise<LogSession>((resolve, reject) => {
       pending.set(id, { resolve, reject, onProgress })
-      w.postMessage({ id, importerId, file, sessionIndex } satisfies ParseRequest)
+      w.postMessage({ id, importerId, file, sessionIndex, rczSessionKey } satisfies ParseRequest)
     })
   }
 
