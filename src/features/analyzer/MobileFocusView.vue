@@ -38,13 +38,24 @@
  * tab, §7 item 4); pointercancel (OS gesture, unmount, or a second finger
  * arriving mid-drag never restarting tracking) always resets to idle without
  * emitting.
+ *
+ * Phase 3 (this revision, design doc §8) is polish, not new interaction:
+ *  - per-view scroll-position memory (see `scrollPositions` below) — a
+ *    single `.focus-view-body` element has its content swapped on every tab
+ *    switch, so without this every switch used to reset to the top.
+ *  - a scroll "edge fade" on the tab bar (`.focus-tabs-wrap`) so it's
+ *    visually obvious there are more tabs off-screen when it's scrollable —
+ *    see `computeScrollEdgeFade`. No icon set was added (see that function's
+ *    neighbour import comment below) — tab labels stay the existing i18n
+ *    `titleFor` strings, unchanged from phase 1.
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AnalyzerCardContext } from './analyzerCardContext'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
 import { consumesHorizontalDrag } from '@/domain/layout/horizontalGestureCards'
 import { pendingTouchIntent, resolveSwipeTarget, SWIPE_SLOP_PX } from '@/domain/layout/mobileSwipeGesture'
+import { computeScrollEdgeFade } from '@/domain/layout/scrollEdgeFade'
 
 const props = defineProps<{
   /** Visible card ids in tab order (AnalyzerView's `focusStackIds` —
@@ -183,6 +194,133 @@ watch(activeId, async (id) => {
   await nextTick()
   const el = tabsRef.value?.querySelector<HTMLElement>(`[data-tab-id="${CSS.escape(id)}"]`)
   el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  // The active tab moving into view can itself change which edge(s) of the
+  // (possibly now differently-scrolled) tab bar have more content hidden —
+  // recompute the edge fade after it settles.
+  updateTabsEdgeFade()
+})
+
+// --- F5 phase 3: per-view scroll-position memory ---
+// `.focus-view-body` is a SINGLE shared element whose content is swapped
+// whenever `activeId` changes (unlike F1's retired stack, which mounted
+// every card body at once, so each kept its own permanent scroll position
+// for free) — switching away and back used to always land back at the top.
+// This restores each view's own offset.
+//
+// Deliberately IN-MEMORY ONLY (a plain component-local `Map`) — NOT
+// persisted via useMobileView/localStorage. These numbers are tied to
+// whatever the CURRENT DOM layout happens to be (chart height, lap count,
+// how much data is loaded) — meaningless across a reload where nothing has
+// rendered yet, and a fundamentally different kind of state from
+// `mode`/`focusOrder`/`currentViewId` (durable, cross-session user
+// preferences worth persisting). Session-scoped also means it's fine to
+// just drop the whole map on a file switch (see the `primaryFileId` watch
+// below) rather than needing any migration/versioning story.
+const bodyRef = ref<HTMLElement | null>(null)
+const scrollPositions = new Map<string, number>()
+
+function saveScrollPosition(id: string): void {
+  if (bodyRef.value) scrollPositions.set(id, bodyRef.value.scrollTop)
+}
+
+/** Restores `id`'s remembered offset (0 for a never-visited view — a no-op,
+ *  since a freshly rendered body already starts at 0). Called from the
+ *  `activeId` watcher below, which runs at Vue's default 'pre' flush timing
+ *  — i.e. BEFORE the component re-renders — so `nextTick` first: setting
+ *  scrollTop immediately would still hit the OUTGOING body, not the
+ *  incoming one. One extra `requestAnimationFrame` retry covers card bodies
+ *  that lay out asynchronously (charts, the map): if the content isn't tall
+ *  enough yet on the very first attempt, the browser silently clamps
+ *  scrollTop back toward 0, and a single restore would stick at the wrong
+ *  place. Deliberately ONE retry, not a poll loop — this is polish, not
+ *  something worth chasing indefinitely. */
+async function restoreScrollPosition(id: string): Promise<void> {
+  await nextTick()
+  const target = scrollPositions.get(id) ?? 0
+  const el = bodyRef.value
+  if (!el) return
+  el.scrollTop = target
+  if (target === 0) return // nothing to retry — 0 is always reachable
+  requestAnimationFrame(() => {
+    if (activeId.value !== id) return // switched away again before the retry fired
+    const retryEl = bodyRef.value
+    if (retryEl && retryEl.scrollTop !== target) retryEl.scrollTop = target
+  })
+}
+
+watch(activeId, (newId, oldId) => {
+  if (oldId) saveScrollPosition(oldId)
+  if (newId) void restoreScrollPosition(newId)
+})
+
+// Stale-id cleanup: a card hidden/removed (CardMenu visibility toggle, a
+// chart deleted) should drop its remembered offset rather than let the map
+// grow forever with ids that can never be revisited.
+watch(
+  () => props.ids,
+  (ids) => {
+    const live = new Set(ids)
+    for (const id of scrollPositions.keys()) {
+      if (!live.has(id)) scrollPositions.delete(id)
+    }
+  },
+)
+
+// Session/file switch: every remembered offset belongs to content that's
+// about to be replaced wholesale, so drop the whole map. Cheap to detect —
+// `ctx.primaryFileId` is already assembled for other cards — rather than
+// plumbing a dedicated "session changed" signal through just for this.
+// (Optional-chained: some tests mount with a bare `{}` stub ctx.)
+watch(
+  () => props.ctx.primaryFileId?.value,
+  () => {
+    scrollPositions.clear()
+  },
+)
+
+// --- F5 phase 3: tab bar scroll "edge fade" ---
+// Purely visual affordance: when `.focus-tabs` has more tabs scrolled off
+// to one side, that edge gets a subtle fade so it reads as "scrollable"
+// rather than "this is all of them". See `computeScrollEdgeFade` for the
+// arithmetic and `.focus-tabs-wrap`'s style block for the overlay itself.
+const canScrollTabsLeft = ref(false)
+const canScrollTabsRight = ref(false)
+
+function updateTabsEdgeFade(): void {
+  const el = tabsRef.value
+  if (!el) {
+    canScrollTabsLeft.value = false
+    canScrollTabsRight.value = false
+    return
+  }
+  const fade = computeScrollEdgeFade({
+    scrollLeft: el.scrollLeft,
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+  })
+  canScrollTabsLeft.value = fade.canScrollLeft
+  canScrollTabsRight.value = fade.canScrollRight
+}
+
+// The tab set itself can grow/shrink (cards added/removed, charts added) —
+// recompute once the new tab list has actually rendered.
+watch(
+  () => props.ids,
+  async () => {
+    await nextTick()
+    updateTabsEdgeFade()
+  },
+)
+
+// Viewport rotation/resize changes how many tabs fit without any of the
+// above firing.
+function handleWindowResize(): void {
+  updateTabsEdgeFade()
+}
+onMounted(async () => {
+  await nextTick()
+  updateTabsEdgeFade()
+  window.addEventListener('resize', handleWindowResize)
 })
 
 // Unmount mid-gesture (e.g. navigating away via BottomNav while a finger is
@@ -190,33 +328,43 @@ watch(activeId, async (id) => {
 // these refs once the component is gone, but resetting is cheap and keeps
 // the intent of "always end a gesture on cleanup" explicit (same spirit as
 // DashboardCard.vue's own drag-teardown handlers).
-onBeforeUnmount(resetSwipe)
+onBeforeUnmount(() => {
+  resetSwipe()
+  window.removeEventListener('resize', handleWindowResize)
+})
 </script>
 
 <template>
   <div class="focus-view">
     <div
       v-if="ids.length > 0"
-      ref="tabsRef"
-      class="focus-tabs"
-      role="tablist"
-      :aria-label="t('analyzer.mobileView.focusViewTabsAria')"
+      class="focus-tabs-wrap"
+      :class="{ 'can-scroll-left': canScrollTabsLeft, 'can-scroll-right': canScrollTabsRight }"
     >
-      <button
-        v-for="id in ids"
-        :key="id"
-        type="button"
-        role="tab"
-        class="focus-tab"
-        :class="{ active: id === activeId }"
-        :aria-selected="id === activeId"
-        :data-tab-id="id"
-        @click="emit('select', id)"
+      <div
+        ref="tabsRef"
+        class="focus-tabs"
+        role="tablist"
+        :aria-label="t('analyzer.mobileView.focusViewTabsAria')"
+        @scroll="updateTabsEdgeFade"
       >
-        {{ titleFor(id) }}
-      </button>
+        <button
+          v-for="id in ids"
+          :key="id"
+          type="button"
+          role="tab"
+          class="focus-tab"
+          :class="{ active: id === activeId }"
+          :aria-selected="id === activeId"
+          :data-tab-id="id"
+          @click="emit('select', id)"
+        >
+          {{ titleFor(id) }}
+        </button>
+      </div>
     </div>
     <div
+      ref="bodyRef"
       class="focus-view-body"
       :class="{ 'focus-view-body--swipeable': !activeConsumesHorizontalDrag }"
       @pointerdown="onBodyPointerDown"
@@ -238,6 +386,56 @@ onBeforeUnmount(resetSwipe)
      unchanged from F1. */
   flex: 1;
   min-height: 0;
+}
+/* F5 phase 3 — scroll "edge fade": a non-scrolling wrapper around the
+   actually-scrollable `.focus-tabs`, so the fade overlays below stay
+   pinned at the visual edge instead of scrolling away with the tab
+   content. `position: relative` here (not on `.focus-tabs` itself) is
+   what makes that possible. */
+.focus-tabs-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+.focus-tabs-wrap::before,
+.focus-tabs-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  /* Never intercept taps — this is a purely visual affordance, and the real
+     tab buttons underneath keep their full §8 44px hit target. */
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.focus-tabs-wrap::before {
+  left: 0;
+  /* `color-mix` with `--color-text` (not a hardcoded colour) reads as a
+     soft vignette in both themes: a dark tint on the light theme's pale
+     bg, a light tint on the dark theme's near-black bg — both read as
+     "shadow at the edge" without needing a separate dark-mode override. */
+  background: linear-gradient(to right, color-mix(in srgb, var(--color-text) 20%, transparent), transparent);
+  border-top-left-radius: calc(var(--radius) * 1.5);
+  border-bottom-left-radius: calc(var(--radius) * 1.5);
+}
+.focus-tabs-wrap::after {
+  right: 0;
+  background: linear-gradient(to left, color-mix(in srgb, var(--color-text) 20%, transparent), transparent);
+  border-top-right-radius: calc(var(--radius) * 1.5);
+  border-bottom-right-radius: calc(var(--radius) * 1.5);
+}
+.focus-tabs-wrap.can-scroll-left::before {
+  opacity: 1;
+}
+.focus-tabs-wrap.can-scroll-right::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-tabs-wrap::before,
+  .focus-tabs-wrap::after {
+    transition: none;
+  }
 }
 .focus-tabs {
   display: flex;
