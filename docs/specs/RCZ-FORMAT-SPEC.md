@@ -264,22 +264,25 @@ lean angle」，只有 CSV/VBO 匯出才有。`sessionfragment.json` 的 `imuUse
 
 ---
 
-## 8. 現行實作的具體缺陷（可行動清單）
+## 8. 現行實作的具體缺陷（**已於 2026-07-24 全數修復，B106**）
 
-依嚴重度排序：
+原缺陷清單（依嚴重度）與修復狀態 —— 全部落在分支 `fix/b106-rcz-single-session`
+（核心重構+A–G `6496345`、驗收測試 `7ae02f3`、distance 去重 `c21ddd0`）：
 
-| # | 問題 | 位置 | 影響 |
-| --- | --- | --- | --- |
-| **A** | 單場匯出硬寫 `dev 100 = GPS / dev 101 = ECU`，未讀根目錄的 `sessionfragment.json` | `parseRcz.ts:176`、`:209`、`:231` | **本樣本匯入後只剩 Time + 3 條未縮放 acc，GPS 完全消失**。修法：比照 `parseRczBackup.ts` 依 `type` 判定（單場匯出的根目錄同樣有這個檔，新舊樣本皆有） |
-| **B** | GPS altitude 當成公尺直接輸出，實為 **mm** | `parseRcz.ts:255`、`parseRczBackup.ts:258` | 高度顯示成 311300 m |
-| **C** | 未處理 `INT32_MAX` 哨兵 | 兩個 parser 全部 int32 路徑 | 無資料通道會畫出 2.1e9 的直線，並毀掉自動 Y 軸範圍 |
-| **D** | `session.json.laps[]` 未使用 | 兩個 parser | 白白丟掉 RaceChrono 自己的圈次切分與 `isInvalid` |
-| **E** | int32 IMU 未縮放、無單位（`parseRczBackup.ts` 檔頭的 UNRESOLVED CALIBRATION） | `parseRczBackup.ts:299-308` | 本文件 §5.2/§6 已標定完成，可以移除該警告並套 `/9806.65`、`/1000`、`/1000` |
-| **F** | RC3 `analog/digital` id 空間（20002–20020）無命名規則 | `decodeRcChannelName()` | 會退化成 `rc_channel_20002`，使用者看不懂；應對映 `rc_digital_1` / `rc_analog_1`… |
-| **G** | `session.title` 讀不到（本檔只有 `trackName`）、`trackId`/`lapCount`/`lengthDistance` 在單場路徑未寫入 `headerInfo` | `parseRcz.ts:270-281` | metadata 比 backup 路徑少 |
+| # | 問題 | 修復 |
+| --- | --- | --- |
+| **A** | 單場匯出硬寫 `dev 100 = GPS / dev 101 = ECU`，未讀根目錄的 `sessionfragment.json` | ✅ 抽出共用核心 `parseRczCore.ts`，角色一律讀 `sessionfragment.json` 的 `type`（缺檔 fallback：有 channel id 3 者為 GPS） |
+| **B** | GPS altitude 當成公尺直接輸出，實為 **mm** | ✅ `/1000`（真檔驗證 302–312 m） |
+| **C** | 未處理 `INT32_MAX` 哨兵 | ✅ 全 int32 路徑轉 `NaN`（真檔全域 0 殘留哨兵） |
+| **D** | `session.json.laps[]` 未使用 | ✅ 轉成每列 `IR_LapNumber` 通道（0=首圈前，本檔 0–6） |
+| **E** | int32 IMU 未縮放、無單位 | ✅ `int32ScaleFor` 套 `/9806.65`(G)、`/1000`(deg·s⁻¹)、`/1000`(µT)；`parseRczBackup.ts` 檔頭警告已改寫 |
+| **F** | RC3 `analog/digital` id 空間（20002–20020）無命名規則 | ✅ 20002→`rc_digital_1`、20010→`rc_digital_2`、20003-07→`rc_analog_1..5`、20011-20→`rc_analog_6..15`，皆 `/1000` |
+| **G** | 單場路徑 `headerInfo` 比 backup 少 | ✅ 對齊 backup（trackName/bestLaptime/lapCount/trackId/distanceKm/deviceCount/master*/per-device type+channels+rateHz）；`session.title` 缺失容忍 |
+| ＋ | （複驗新發現）每裝置都帶 id-2 距離 → 吐 5 條重複 `distance` | ✅ `c21ddd0` 只留一條（GPS 優先→master→first） |
 
-最省事的收斂方向：**讓 `parseRcz` 與 `parseRczBackupSession` 共用同一個核心**
-（差別只有「檔案前綴」與「要不要挑場次」），順手把 B–G 一次做掉。
+收斂方式即原建議：`parseRcz` 與 `parseRczBackupSession` 共用 `parseRczCore.ts` 的
+`buildRczSession`，差別只剩「ZIP 條目前綴 `''` vs `sessions/<key>/`」與「要不要挑場次」。
+真檔複驗與 2261/2261 測試綠見 `docs/ISSUES.md` B106 條目。
 
 ---
 
