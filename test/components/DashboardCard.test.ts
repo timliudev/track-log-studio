@@ -753,10 +753,9 @@ describe('DashboardCard (scaffold smoke test)', () => {
       // `vi.useFakeTimers()`'s DEFAULT `toFake` list also includes
       // `requestAnimationFrame`/`cancelAnimationFrame`, which would silently
       // shadow the manual stubs below (needed to drive edge-autoscroll frames
-      // deterministically, same technique MobileScrubber.test.ts's own
-      // rAF-driven play loop uses) — restricted to just the timers this
-      // component's long-press gates actually use (`setTimeout`) so rAF stays
-      // under this test file's own control.
+      // deterministically) — restricted to just the timers this component's
+      // long-press gates actually use (`setTimeout`) so rAF stays under this
+      // test file's own control.
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
         rafCallback = cb

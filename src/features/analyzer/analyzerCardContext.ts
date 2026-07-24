@@ -4,10 +4,10 @@
  * AnalyzerView's big `#item` v-if/else-if chain, so each branch pulled
  * whatever it needed straight out of AnalyzerView's setup scope. Extracting
  * those bodies into standalone components (`cards/*.vue`) — so the SAME card
- * content can render either inside the desktop grid OR inside the mobile
- * Focus Stack (MobileFocusStack.vue) — needs one explicit contract for "all
- * the reactive data + handlers a card can reach", assembled ONCE in
- * AnalyzerView and passed down through the dispatcher (AnalyzerCardBody.vue).
+ * content renders identically inside the desktop grid and the mobile
+ * single-column grid — needs one explicit contract for "all the reactive
+ * data + handlers a card can reach", assembled ONCE in AnalyzerView and
+ * passed down through the dispatcher (AnalyzerCardBody.vue).
  *
  * Every reactive VALUE is a `Ref` (a `ComputedRef`/`WritableComputedRef` is a
  * `Ref`, so the assembling side can hand over computeds/store refs unchanged —

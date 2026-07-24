@@ -135,9 +135,7 @@ import { edgeAutoscrollVelocity } from '@/domain/layout/edgeAutoscroll'
  *
  *  - **B102a edge-autoscroll**: the full-dashboard mobile grid has no
  *    internal scroll container — the whole PAGE scrolls a tall content-sized
- *    grid (see AnalyzerView.vue's `.analyzer.focus-mode` doc for the
- *    contrast with the Focus Stack, which DOES have its own scroller). A
- *    card drag is otherwise capped to whatever fits in one screenful — you
+ *    grid. A card drag is otherwise capped to whatever fits in one screenful — you
  *    can't drag a card to a position currently off-screen. Fixed by a plain
  *    `requestAnimationFrame` loop (`runEdgeAutoscroll`), started the instant
  *    the drag arms and stopped the instant it ends, that reads the latest

@@ -4,11 +4,9 @@
  * `STATIC_CARD_IDS` value or a `chart-<id>` dynamic id) plus the shared
  * AnalyzerCardContext, it renders the ONE matching extracted card body — the
  * same content that used to live inline in AnalyzerView's `#item`
- * v-if/else-if chain. Both presentation shells reuse it: the desktop/mobile-
- * full grid wraps `<AnalyzerCardBody>` in a `<DashboardCard>`, and the mobile
- * Focus Stack (MobileFocusStack.vue) wraps it in its own slim header — so the
- * card content is written exactly once and mounted in whichever container is
- * active.
+ * v-if/else-if chain. The desktop grid and the mobile single-column grid both
+ * wrap `<AnalyzerCardBody>` in a `<DashboardCard>` — so the card content is
+ * written exactly once and mounted in whichever breakpoint is active.
  */
 import { computed } from 'vue'
 import { STATIC_CARD_IDS, chartItemId } from '@/domain/layout/dashboardLayout'
