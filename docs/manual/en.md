@@ -338,20 +338,9 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 - **Adding chart cards**: a chart added via the toolbar's "Add chart" / "Add XY scatter chart" gets a default position in the layout automatically; removing a chart also removes its layout entry.
 - **Collapsing a card**: every card's title bar has a collapse/expand button (chevron) on the right — click it to hide the card's content and keep just the title bar. On desktop, collapsing also shrinks that card's grid slot down to a fixed two-row height, and neighbouring cards automatically **reflow** to pack into the freed-up space; expanding restores the original height and neighbours make room again, with no manual rearranging needed. Works on both desktop and mobile; the collapsed state is saved automatically.
 
-#### Mobile default: the single-focus view ("Focus")
+#### Mobile: single column + collapse + pin
 
-Below roughly 768px wide, the Analyzer **defaults to a single-focus view**: it shows exactly **one** visual at a time (track map / time-series chart / lap table / scatter chart…) instead of cramming several cards onto a small screen. The **Focus / Full** toggle in the toolbar switches between this and the classic full dashboard; your choice is remembered in the browser.
-
-- **Tab bar at the top**: lists the cards currently enabled in the "Panels" menu — tap one to switch to it. The bar scrolls horizontally when there are many tabs, and the active tab is scrolled into view automatically after a switch.
-- **Persistent scrubber + ▶ play at the bottom**: drag it to move the cursor across the whole recording (or across a single selected lap); **every visual shares that one cursor position**. Pressing ▶ advances at 1× along the recording's own timing, like a replay. If your system has "reduce motion" enabled, playback steps discretely on a fixed interval instead.
-- **Swipe to switch**: on panels that don't need horizontal dragging themselves (lap table, sectors, acceleration test, current values, and similar), swipe left/right across the content to move to the next/previous tab. **The track map and the charts deliberately do not support swipe-switching** — their own horizontal drag is already used for map panning and chart zoom/pan, so use the tab bar on those views. Swiping past the first or last tab does nothing (no wrap-around).
-- Mouse and stylus drags **never** switch tabs (the tab bar is equally easy to reach with any pointer, so the shortcut isn't needed there).
-
-> **Why it works this way:** an earlier version stacked several cards vertically with a draggable divider, but device testing showed a phone screen simply can't fit that — every panel bottomed out at its minimum height, the divider had no free space to redistribute (dragging it did nothing), and the scrubber got pushed off the bottom of the screen. Single-focus gives each visual the whole screen.
-
-#### Mobile "Full" mode: single column + collapse + pin
-
-Switching to **Full** returns to the classic full dashboard: the layout collapses to a single column, ordered by the logical order derived from the desktop layout, with **dragging/resizing disabled** (rearranging doesn't apply in a fixed single-column order). This mode additionally offers:
+Below roughly 768px wide, the Analyzer layout collapses to a single column, ordered by the logical order derived from the desktop layout, with **dragging/resizing disabled** (rearranging doesn't apply in a fixed single-column order). This view additionally offers:
 
 - **Collapsing a card**: same as desktop — tap a card's chevron to collapse/expand its content, handy for skipping past sections you don't need right now in the single column.
 - **Pinning a card**: on mobile, every card's title bar also has a pin button. Tap it and that card becomes **stuck to the top of the screen** (sticky) while the rest of the cards keep scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table.
