@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 import { shallowMount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import MobileFocusView from '@/features/analyzer/MobileFocusView.vue'
@@ -16,7 +16,7 @@ import zhHant from '@/i18n/locales/zh-Hant'
  * (already covered on its own, see AnalyzerCardBody.test.ts) so this only
  * asserts MobileFocusView's own routing/emit behaviour.
  */
-function mountView(ids: string[], currentViewId = '') {
+function mountView(ids: string[], currentViewId = '', ctxOverrides: Record<string, unknown> = {}) {
   const i18n = createI18n({
     legacy: false,
     locale: 'en',
@@ -26,7 +26,7 @@ function mountView(ids: string[], currentViewId = '') {
   return shallowMount(MobileFocusView, {
     props: {
       ids,
-      ctx: {} as unknown as AnalyzerCardContext,
+      ctx: ctxOverrides as unknown as AnalyzerCardContext,
       titleFor: (id: string) => `title:${id}`,
       currentViewId,
     },
@@ -210,5 +210,272 @@ describe('MobileFocusView — active tab scroll-into-view', () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = original
     }
+  })
+})
+
+/**
+ * F5 phase 3 — per-view scroll-position memory. `.focus-view-body` is a
+ * single shared element whose content is swapped on every tab switch (unlike
+ * F1's retired stack, which mounted every card body permanently) — these
+ * tests assert each view's scrollTop offset survives a round trip through
+ * switching away and back, per MobileFocusView.vue's own module doc.
+ *
+ * happy-dom stores `scrollTop` as a raw, unclamped property (verified
+ * directly — it has no real layout engine, so nothing computes
+ * scrollHeight/clientHeight for a plain mounted element), so the "async
+ * layout hasn't caught up yet, first restore attempt gets clamped" scenario
+ * is simulated explicitly below via a fake clamping `scrollTop` accessor —
+ * the ONLY test that needs it; the rest rely on the real (unclamped)
+ * property, which is enough to prove save/restore wiring is correct.
+ */
+describe('MobileFocusView — per-view scroll-position memory (F5 phase 3)', () => {
+  it('restores a scrolled view\'s offset after switching away and back', async () => {
+    const wrapper = mountView(['map', 'gear'], 'map')
+    const body = wrapper.get('.focus-view-body').element as HTMLElement
+    body.scrollTop = 240
+
+    await wrapper.setProps({ currentViewId: 'gear' })
+    await nextTick() // restoreScrollPosition's own nextTick before it touches scrollTop
+    expect(body.scrollTop).toBe(0) // fresh view, never scrolled — starts at 0
+
+    await wrapper.setProps({ currentViewId: 'map' })
+    await nextTick()
+    expect(body.scrollTop).toBe(240) // 'map' remembers where it was left
+  })
+
+  it('a never-visited view starts at scrollTop 0', async () => {
+    const wrapper = mountView(['map', 'gear', 'laptable'], 'map')
+    const body = wrapper.get('.focus-view-body').element as HTMLElement
+    await wrapper.setProps({ currentViewId: 'laptable' })
+    await nextTick()
+    expect(body.scrollTop).toBe(0)
+  })
+
+  it('each view remembers its OWN offset independently', async () => {
+    const wrapper = mountView(['map', 'gear', 'laptable'], 'map')
+    const body = wrapper.get('.focus-view-body').element as HTMLElement
+
+    body.scrollTop = 50
+    await wrapper.setProps({ currentViewId: 'gear' })
+    await nextTick()
+    body.scrollTop = 90
+    await wrapper.setProps({ currentViewId: 'laptable' })
+    await nextTick()
+    expect(body.scrollTop).toBe(0)
+
+    await wrapper.setProps({ currentViewId: 'map' })
+    await nextTick()
+    expect(body.scrollTop).toBe(50)
+
+    await wrapper.setProps({ currentViewId: 'gear' })
+    await nextTick()
+    expect(body.scrollTop).toBe(90)
+  })
+
+  it('drops a stale id\'s remembered offset once it disappears from `ids`', async () => {
+    const wrapper = mountView(['map', 'gear'], 'map')
+    const body = wrapper.get('.focus-view-body').element as HTMLElement
+    body.scrollTop = 77
+    await wrapper.setProps({ currentViewId: 'gear' })
+    await nextTick()
+
+    // 'map' is removed from the visible set (e.g. CardMenu hid it) — its
+    // remembered offset should be dropped, not silently kept around.
+    await wrapper.setProps({ ids: ['gear'] })
+    // 'map' is added back later (a fresh id, from the component's point of
+    // view — no memory of the old 77 offset survives).
+    await wrapper.setProps({ ids: ['gear', 'map'], currentViewId: 'map' })
+    await nextTick()
+    expect(body.scrollTop).toBe(0)
+  })
+
+  it('clears every remembered offset on a file/session switch (ctx.primaryFileId change)', async () => {
+    const primaryFileId = ref<number | null>(1)
+    const wrapper = mountView(['map', 'gear'], 'map', { primaryFileId })
+    const body = wrapper.get('.focus-view-body').element as HTMLElement
+    body.scrollTop = 65
+    await wrapper.setProps({ currentViewId: 'gear' })
+    await nextTick()
+
+    primaryFileId.value = 2 // a different file loaded
+    await nextTick()
+
+    await wrapper.setProps({ currentViewId: 'map' })
+    await nextTick()
+    expect(body.scrollTop).toBe(0) // offset dropped, not carried into the new file
+  })
+
+  it('retries a restore once via requestAnimationFrame if content is not tall enough on the first attempt', async () => {
+    let rafCallback: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      rafCallback = cb
+      return 1
+    })
+    try {
+      const wrapper = mountView(['map', 'gear'], 'map')
+      const body = wrapper.get('.focus-view-body').element as HTMLElement
+
+      // 'map' genuinely was scrolled to 300 (real, unclamped property, same
+      // as every other test above) — this is what gets SAVED when switching
+      // away from it.
+      body.scrollTop = 300
+      await wrapper.setProps({ currentViewId: 'gear' })
+      await nextTick()
+
+      // NOW simulate the remount-time layout gap: when switching back to
+      // 'map', its (still-the-same, single shared) body isn't tall enough
+      // yet on the very first write — scrollTop clamps toward a small max —
+      // then "layout" catches up a frame later.
+      let raw = 0
+      let maxScroll = 10 // not tall enough yet — clamps writes above this
+      Object.defineProperty(body, 'scrollTop', {
+        configurable: true,
+        get: () => raw,
+        set: (v: number) => {
+          raw = Math.max(0, Math.min(v, maxScroll))
+        },
+      })
+
+      await wrapper.setProps({ currentViewId: 'map' })
+      await nextTick() // first restore attempt: clamped to maxScroll (10)
+      expect(body.scrollTop).toBe(10)
+
+      maxScroll = 500 // layout has now caught up
+      expect(rafCallback).not.toBeNull()
+      const fireRetry = rafCallback as unknown as FrameRequestCallback
+      fireRetry(0) // fire the retry
+      expect(body.scrollTop).toBe(300)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('does not restore into a view the user already switched away from again before the rAF retry fires', async () => {
+    let rafCallback: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      rafCallback = cb
+      return 1
+    })
+    try {
+      const wrapper = mountView(['map', 'gear', 'laptable'], 'map')
+      const body = wrapper.get('.focus-view-body').element as HTMLElement
+
+      body.scrollTop = 300
+      await wrapper.setProps({ currentViewId: 'gear' })
+      await nextTick()
+
+      let raw = 0
+      const maxScroll = 10
+      Object.defineProperty(body, 'scrollTop', {
+        configurable: true,
+        get: () => raw,
+        set: (v: number) => {
+          raw = Math.max(0, Math.min(v, maxScroll))
+        },
+      })
+
+      await wrapper.setProps({ currentViewId: 'map' })
+      await nextTick() // clamped restore attempt queues a rAF retry for 'map'
+
+      // Before that retry fires, the user switches to a third view.
+      await wrapper.setProps({ currentViewId: 'laptable' })
+      await nextTick()
+      const beforeRetry = body.scrollTop
+
+      const fireStaleRetry = rafCallback as unknown as FrameRequestCallback
+      fireStaleRetry(0) // the stale 'map' retry fires late — must be a no-op now
+      expect(body.scrollTop).toBe(beforeRetry)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+/**
+ * F5 phase 3 — tab bar scroll "edge fade". `.focus-tabs-wrap` gets a
+ * `can-scroll-left`/`can-scroll-right` class from `computeScrollEdgeFade`
+ * (unit-tested standalone in test/layout/scrollEdgeFade.test.ts) — these
+ * tests only check the component wires real DOM measurements into it and
+ * reacts to scroll/resize/id-set changes.
+ */
+describe('MobileFocusView — tab bar scroll edge fade (F5 phase 3)', () => {
+  function setTabsExtent(wrapper: ReturnType<typeof mountView>, extent: { scrollLeft: number; scrollWidth: number; clientWidth: number }): HTMLElement {
+    const tabs = wrapper.get('.focus-tabs').element as HTMLElement
+    Object.defineProperty(tabs, 'scrollLeft', { configurable: true, value: extent.scrollLeft })
+    Object.defineProperty(tabs, 'scrollWidth', { configurable: true, value: extent.scrollWidth })
+    Object.defineProperty(tabs, 'clientWidth', { configurable: true, value: extent.clientWidth })
+    return tabs
+  }
+
+  it('has neither can-scroll class when all tabs fit', async () => {
+    const wrapper = mountView(['map', 'gear'], 'map')
+    setTabsExtent(wrapper, { scrollLeft: 0, scrollWidth: 200, clientWidth: 200 })
+    wrapper.get('.focus-tabs').trigger('scroll')
+    await nextTick()
+    const wrap = wrapper.get('.focus-tabs-wrap')
+    expect(wrap.classes()).not.toContain('can-scroll-left')
+    expect(wrap.classes()).not.toContain('can-scroll-right')
+  })
+
+  it('adds can-scroll-right when scrolled to the start of overflowing content', async () => {
+    const wrapper = mountView(['map', 'gear', 'chart-1', 'laptable'], 'map')
+    setTabsExtent(wrapper, { scrollLeft: 0, scrollWidth: 600, clientWidth: 200 })
+    await wrapper.get('.focus-tabs').trigger('scroll')
+    const wrap = wrapper.get('.focus-tabs-wrap')
+    expect(wrap.classes()).toContain('can-scroll-right')
+    expect(wrap.classes()).not.toContain('can-scroll-left')
+  })
+
+  it('adds can-scroll-left when scrolled to the end of overflowing content', async () => {
+    const wrapper = mountView(['map', 'gear', 'chart-1', 'laptable'], 'map')
+    setTabsExtent(wrapper, { scrollLeft: 400, scrollWidth: 600, clientWidth: 200 })
+    await wrapper.get('.focus-tabs').trigger('scroll')
+    const wrap = wrapper.get('.focus-tabs-wrap')
+    expect(wrap.classes()).toContain('can-scroll-left')
+    expect(wrap.classes()).not.toContain('can-scroll-right')
+  })
+
+  it('adds both classes while scrolled in the middle', async () => {
+    const wrapper = mountView(['map', 'gear', 'chart-1', 'laptable'], 'map')
+    setTabsExtent(wrapper, { scrollLeft: 200, scrollWidth: 600, clientWidth: 200 })
+    await wrapper.get('.focus-tabs').trigger('scroll')
+    const wrap = wrapper.get('.focus-tabs-wrap')
+    expect(wrap.classes()).toContain('can-scroll-left')
+    expect(wrap.classes()).toContain('can-scroll-right')
+  })
+
+  it('does not render the tabs-wrap (or any fade) for an empty id list', () => {
+    const wrapper = mountView([], '')
+    expect(wrapper.find('.focus-tabs-wrap').exists()).toBe(false)
+  })
+})
+
+/** Regression: phase 1 tap and phase 2 swipe must still behave identically
+ *  after the phase-3 scroll-memory/edge-fade additions — the tab bar markup
+ *  gained an extra wrapping element (`.focus-tabs-wrap`) and the body gained
+ *  a `ref`, neither of which should change routing/emit behaviour. */
+describe('MobileFocusView — phase 1/2 regression after phase 3 additions', () => {
+  it('tap-to-switch still emits select with the tapped id', async () => {
+    const wrapper = mountView(['map', 'chart-1', 'gear'], 'map')
+    await wrapper.findAll('.focus-tab')[2].trigger('click')
+    expect(wrapper.emitted('select')).toEqual([['gear']])
+  })
+
+  it('swipe-to-switch still works on a swipe-enabled view', async () => {
+    const wrapper = mountView(['gear', 'laptable'], 'gear')
+    const body = wrapper.find('.focus-view-body')
+    await body.trigger('pointerdown', { pointerType: 'touch', pointerId: 1, clientX: 300, clientY: 200 })
+    await body.trigger('pointermove', { pointerType: 'touch', pointerId: 1, clientX: 220, clientY: 202 })
+    await body.trigger('pointerup', { pointerType: 'touch', pointerId: 1, clientX: 200, clientY: 202 })
+    expect(wrapper.emitted('select')).toEqual([['laptable']])
+  })
+
+  it('swipe is still suppressed on a map/chart view (owns horizontal drag)', async () => {
+    const wrapper = mountView(['map', 'gear'], 'map')
+    const body = wrapper.find('.focus-view-body')
+    await body.trigger('pointerdown', { pointerType: 'touch', pointerId: 1, clientX: 300, clientY: 200 })
+    await body.trigger('pointermove', { pointerType: 'touch', pointerId: 1, clientX: 220, clientY: 202 })
+    await body.trigger('pointerup', { pointerType: 'touch', pointerId: 1, clientX: 200, clientY: 202 })
+    expect(wrapper.emitted('select')).toBeUndefined()
   })
 })
