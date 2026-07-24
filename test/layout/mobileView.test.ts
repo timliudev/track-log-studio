@@ -11,6 +11,8 @@ import {
   setFocusOrder,
   resolveFocusStackOrder,
   weightFor,
+  setSplitWeight,
+  setCurrentView,
   type MobileViewState,
 } from '@/domain/layout/mobileView'
 
@@ -39,8 +41,13 @@ beforeEach(() => {
 })
 
 describe('defaultMobileView / DEFAULT_MOBILE_VIEW', () => {
-  it('is focus mode, no explicit order, no split weights', () => {
-    expect(defaultMobileView()).toEqual({ mode: 'focus', focusOrder: [], splitWeights: {} })
+  it('is focus mode, no explicit order, no split weights, no current view', () => {
+    expect(defaultMobileView()).toEqual({
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    })
   })
 
   it('the exported constant matches the factory default', () => {
@@ -61,7 +68,12 @@ describe('sanitizeMobileView', () => {
   })
 
   it('passes through a well-formed state', () => {
-    const state = { mode: 'full', focusOrder: ['map', 'gear'], splitWeights: { map: 2 } }
+    const state = {
+      mode: 'full',
+      focusOrder: ['map', 'gear'],
+      splitWeights: { map: 2 },
+      currentViewId: 'gear',
+    }
     expect(sanitizeMobileView(state)).toEqual(state)
   })
 
@@ -122,6 +134,22 @@ describe('sanitizeMobileView', () => {
     sanitized.focusOrder.push('mutated')
     expect(raw.focusOrder).toEqual(['map'])
   })
+
+  it('defaults a non-string currentViewId to "" (sanitize tolerance)', () => {
+    expect(sanitizeMobileView({ currentViewId: 123 }).currentViewId).toBe('')
+    expect(sanitizeMobileView({ currentViewId: null }).currentViewId).toBe('')
+    expect(sanitizeMobileView({ currentViewId: { a: 1 } }).currentViewId).toBe('')
+    expect(sanitizeMobileView({}).currentViewId).toBe('')
+  })
+
+  it('passes through a string currentViewId verbatim (no visibility check here)', () => {
+    expect(sanitizeMobileView({ currentViewId: 'map' }).currentViewId).toBe('map')
+    // sanitize is tolerant even of a foreign/unknown id — that's
+    // reconcileMobileView's job, not sanitize's (see design doc §4).
+    expect(sanitizeMobileView({ currentViewId: 'never-heard-of-it' }).currentViewId).toBe(
+      'never-heard-of-it',
+    )
+  })
 })
 
 describe('loadMobileView / saveMobileView', () => {
@@ -148,6 +176,7 @@ describe('loadMobileView / saveMobileView', () => {
       mode: 'full',
       focusOrder: ['map', 'gear'],
       splitWeights: { map: 1.5 },
+      currentViewId: 'gear',
     }
     saveMobileView(custom)
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual(custom)
@@ -171,6 +200,7 @@ describe('reconcileMobileView', () => {
       mode: 'focus',
       focusOrder: ['map', 'chart-1'],
       splitWeights: {},
+      currentViewId: '',
     }
     const next = reconcileMobileView(state, ['map'])
     expect(next.focusOrder).toEqual(['map'])
@@ -181,18 +211,29 @@ describe('reconcileMobileView', () => {
       mode: 'focus',
       focusOrder: [],
       splitWeights: { map: 2, gone: 3 },
+      currentViewId: '',
     }
     const next = reconcileMobileView(state, ['map'])
     expect(next.splitWeights).toEqual({ map: 2 })
   })
 
   it('keeps mode unchanged', () => {
-    const state: MobileViewState = { mode: 'full', focusOrder: [], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'full',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(reconcileMobileView(state, []).mode).toBe('full')
   })
 
   it('never appends missing ids to focusOrder (unlike panelState.mobileOrder)', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: ['map'], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['map'],
+      splitWeights: {},
+      currentViewId: '',
+    }
     const next = reconcileMobileView(state, ['map', 'gear', 'chart-1'])
     expect(next.focusOrder).toEqual(['map'])
   })
@@ -202,67 +243,236 @@ describe('reconcileMobileView', () => {
       mode: 'focus',
       focusOrder: ['map', 'gear'],
       splitWeights: { map: 2 },
+      currentViewId: 'map',
     }
     expect(reconcileMobileView(state, ['map', 'gear', 'chart-1'])).toBe(state)
   })
 
-  it('handles an empty valid-id set by clearing focusOrder and splitWeights', () => {
+  it('handles an empty valid-id set by clearing focusOrder, splitWeights, and currentViewId', () => {
     const state: MobileViewState = {
       mode: 'focus',
       focusOrder: ['map', 'gear'],
       splitWeights: { map: 2 },
+      currentViewId: 'map',
     }
     const next = reconcileMobileView(state, [])
-    expect(next).toEqual({ mode: 'focus', focusOrder: [], splitWeights: {} })
+    expect(next).toEqual({
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    })
+  })
+
+  it('drops a currentViewId that is no longer valid, back to ""', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['map'],
+      splitWeights: {},
+      currentViewId: 'chart-9',
+    }
+    const next = reconcileMobileView(state, ['map'])
+    expect(next.currentViewId).toBe('')
+  })
+
+  it('keeps a currentViewId that is still valid', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['map', 'gear'],
+      splitWeights: {},
+      currentViewId: 'gear',
+    }
+    const next = reconcileMobileView(state, ['map', 'gear'])
+    expect(next.currentViewId).toBe('gear')
+  })
+
+  it('leaves an already-empty currentViewId as "" (no spurious change)', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['map'],
+      splitWeights: {},
+      currentViewId: '',
+    }
+    expect(reconcileMobileView(state, ['map'])).toBe(state)
+  })
+
+  it('is a new reference when only currentViewId needed dropping', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['map'],
+      splitWeights: {},
+      currentViewId: 'gone',
+    }
+    const next = reconcileMobileView(state, ['map'])
+    expect(next).not.toBe(state)
+    expect(next.focusOrder).toEqual(['map'])
+    expect(next.currentViewId).toBe('')
   })
 })
 
 describe('setMode', () => {
   it('sets a new mode', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(setMode(state, 'full').mode).toBe('full')
   })
 
   it('does not mutate the input state', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
     setMode(state, 'full')
     expect(state.mode).toBe('focus')
   })
 
   it('is a same-reference no-op when the mode is unchanged', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(setMode(state, 'focus')).toBe(state)
   })
 })
 
 describe('setFocusOrder', () => {
   it('replaces the order, sanitizing non-string/empty/duplicate entries', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
     const next = setFocusOrder(state, ['map', 42 as unknown as string, 'map', '', 'gear'])
     expect(next.focusOrder).toEqual(['map', 'gear'])
   })
 
   it('does not mutate the input state and leaves other fields intact', () => {
-    const state: MobileViewState = { mode: 'full', focusOrder: ['a'], splitWeights: { a: 2 } }
+    const state: MobileViewState = {
+      mode: 'full',
+      focusOrder: ['a'],
+      splitWeights: { a: 2 },
+      currentViewId: 'a',
+    }
     const next = setFocusOrder(state, ['a', 'b'])
     expect(state.focusOrder).toEqual(['a'])
     expect(next.mode).toBe('full')
     expect(next.splitWeights).toEqual({ a: 2 })
+    expect(next.currentViewId).toBe('a')
   })
 
   it('returns the SAME state reference when the (sanitized) order is unchanged', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: ['a', 'b'], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['a', 'b'],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(setFocusOrder(state, ['a', 'b'])).toBe(state)
   })
 
   it('treats a de-dup that yields the current order as unchanged (same ref)', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: ['a', 'b'], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['a', 'b'],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(setFocusOrder(state, ['a', 'b', 'a'])).toBe(state)
   })
 
   it('returns a NEW reference when the order actually changes', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: ['a', 'b'], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['a', 'b'],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(setFocusOrder(state, ['b', 'a'])).not.toBe(state)
+  })
+})
+
+describe('setCurrentView', () => {
+  it('sets a new currentViewId', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
+    expect(setCurrentView(state, 'map').currentViewId).toBe('map')
+  })
+
+  it('does not mutate the input state', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
+    setCurrentView(state, 'map')
+    expect(state.currentViewId).toBe('')
+  })
+
+  it('leaves other fields intact', () => {
+    const state: MobileViewState = {
+      mode: 'full',
+      focusOrder: ['map', 'gear'],
+      splitWeights: { map: 2 },
+      currentViewId: 'map',
+    }
+    const next = setCurrentView(state, 'gear')
+    expect(next.mode).toBe('full')
+    expect(next.focusOrder).toEqual(['map', 'gear'])
+    expect(next.splitWeights).toEqual({ map: 2 })
+  })
+
+  it('is a same-reference no-op when the id is unchanged', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: ['map'],
+      splitWeights: {},
+      currentViewId: 'map',
+    }
+    expect(setCurrentView(state, 'map')).toBe(state)
+  })
+
+  it('is a same-reference no-op for a non-string id', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: 'map',
+    }
+    expect(setCurrentView(state, 42 as unknown as string)).toBe(state)
+  })
+
+  it('does not itself validate the id against any visible set (reconcile does that)', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
+    expect(setCurrentView(state, 'never-heard-of-it').currentViewId).toBe('never-heard-of-it')
+  })
+
+  it('returns a NEW reference when the id actually changes', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: 'map',
+    }
+    expect(setCurrentView(state, 'gear')).not.toBe(state)
   })
 })
 
@@ -299,17 +509,32 @@ describe('resolveFocusStackOrder', () => {
 
 describe('weightFor', () => {
   it('returns the persisted weight when finite and > 0', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: { map: 2.5 } }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: { map: 2.5 },
+      currentViewId: '',
+    }
     expect(weightFor(state, 'map')).toBe(2.5)
   })
 
   it('falls back to the default fallback (1) when no weight is recorded', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(weightFor(state, 'map')).toBe(1)
   })
 
   it('accepts a custom fallback', () => {
-    const state: MobileViewState = { mode: 'focus', focusOrder: [], splitWeights: {} }
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
     expect(weightFor(state, 'map', 3)).toBe(3)
   })
 
@@ -318,9 +543,94 @@ describe('weightFor', () => {
       mode: 'focus',
       focusOrder: [],
       splitWeights: { map: -1, gear: 0, chart1: Infinity },
+      currentViewId: '',
     }
     expect(weightFor(state, 'map')).toBe(1)
     expect(weightFor(state, 'gear')).toBe(1)
     expect(weightFor(state, 'chart1')).toBe(1)
+  })
+})
+
+describe('setSplitWeight', () => {
+  it('sets a new weight for an id', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
+    const next = setSplitWeight(state, 'map', 62)
+    expect(next.splitWeights).toEqual({ map: 62 })
+  })
+
+  it('does not mutate the input state', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: { map: 55 },
+      currentViewId: '',
+    }
+    setSplitWeight(state, 'map', 70)
+    expect(state.splitWeights).toEqual({ map: 55 })
+  })
+
+  it('overwrites an existing weight for the same id, leaving others intact', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: { map: 55, chart: 45 },
+      currentViewId: '',
+    }
+    const next = setSplitWeight(state, 'map', 62)
+    expect(next.splitWeights).toEqual({ map: 62, chart: 45 })
+  })
+
+  it('is a same-reference no-op when the weight is unchanged', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: { map: 55 },
+      currentViewId: '',
+    }
+    expect(setSplitWeight(state, 'map', 55)).toBe(state)
+  })
+
+  it('ignores non-finite / zero / negative / non-numeric weights (same-reference no-op)', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: { map: 55 },
+      currentViewId: '',
+    }
+    expect(setSplitWeight(state, 'map', NaN)).toBe(state)
+    expect(setSplitWeight(state, 'map', Infinity)).toBe(state)
+    expect(setSplitWeight(state, 'map', -Infinity)).toBe(state)
+    expect(setSplitWeight(state, 'map', 0)).toBe(state)
+    expect(setSplitWeight(state, 'map', -1)).toBe(state)
+    expect(setSplitWeight(state, 'map', 'nope' as unknown as number)).toBe(state)
+  })
+
+  it('leaves mode and focusOrder intact', () => {
+    const state: MobileViewState = {
+      mode: 'full',
+      focusOrder: ['map'],
+      splitWeights: {},
+      currentViewId: '',
+    }
+    const next = setSplitWeight(state, 'map', 62)
+    expect(next.mode).toBe('full')
+    expect(next.focusOrder).toEqual(['map'])
+  })
+
+  it('a newly set weight still gets dropped by reconcileMobileView once the id is gone', () => {
+    const state: MobileViewState = {
+      mode: 'focus',
+      focusOrder: [],
+      splitWeights: {},
+      currentViewId: '',
+    }
+    const withWeight = setSplitWeight(state, 'chart-9', 30)
+    const next = reconcileMobileView(withWeight, ['map'])
+    expect(next.splitWeights).toEqual({})
   })
 })

@@ -4,6 +4,7 @@ import {
   exceedsMoveThreshold,
   advanceOnMove,
   advanceOnTimeout,
+  advanceOnSecondPointer,
 } from '@/domain/layout/touchDragDelay'
 
 describe('exceedsMoveThreshold', () => {
@@ -92,5 +93,27 @@ describe('a realistic gesture sequence', () => {
     // isn't cancelled synchronously in every code path) — must not un-cancel.
     state = advanceOnTimeout(state)
     expect(state).toBe('cancelled')
+  })
+
+  it('second-finger-during-pending: pending -> (second pointerdown) -> cancelled, timer firing afterwards changes nothing', () => {
+    let state: ReturnType<typeof advanceOnMove> = 'pending'
+    state = advanceOnSecondPointer(state)
+    expect(state).toBe('cancelled')
+    state = advanceOnTimeout(state)
+    expect(state).toBe('cancelled')
+  })
+})
+
+describe('advanceOnSecondPointer (B102b — a second finger touches down mid-gesture)', () => {
+  it('cancels a still-pending single-finger hold (the second finger means this is not a plain long-press anymore)', () => {
+    expect(advanceOnSecondPointer('pending')).toBe('cancelled')
+  })
+
+  it('is a no-op once already armed — this module has already handed off by then, see the export doc', () => {
+    expect(advanceOnSecondPointer('armed')).toBe('armed')
+  })
+
+  it('is a no-op once already cancelled — terminal state', () => {
+    expect(advanceOnSecondPointer('cancelled')).toBe('cancelled')
   })
 })

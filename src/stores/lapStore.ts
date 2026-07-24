@@ -293,6 +293,34 @@ export const useLapStore = defineStore('lap', () => {
     sessionLapOffsets.value = next
   }
 
+  /** This comparison lap's MAP position shift in metres (east+/north+); zero
+   *  when none set — the {@link sessionLapOffsets} analogue of {@link mapOffsetOf}. */
+  function sessionLapMapOffsetOf(fileId: number, index: number): { x: number; y: number } {
+    const o = sessionLapOffsets.value[sessionLapKey(fileId, index)]
+    return o ? { x: o.mapX, y: o.mapY } : { x: 0, y: 0 }
+  }
+
+  /** Nudge comparison lap (`fileId`, `index`)'s MAP position by (`dx` east,
+   *  `dy` north) metres — the {@link sessionLapOffsets} analogue of
+   *  {@link nudgeMapOffset}. */
+  function nudgeSessionLapMapOffset(fileId: number, index: number, dx: number, dy: number): void {
+    const key = sessionLapKey(fileId, index)
+    const cur = sessionLapOffsets.value[key] ?? { ...ZERO_OFFSET }
+    sessionLapOffsets.value = {
+      ...sessionLapOffsets.value,
+      [key]: { ...cur, mapX: cur.mapX + dx, mapY: cur.mapY + dy },
+    }
+  }
+
+  /** Reset comparison lap (`fileId`, `index`)'s MAP shift to zero; keeps its
+   *  time/dist chart shift — the {@link sessionLapOffsets} analogue of
+   *  {@link resetMapOffset}. */
+  function resetSessionLapMapOffset(fileId: number, index: number): void {
+    const key = sessionLapKey(fileId, index)
+    const cur = sessionLapOffsets.value[key]
+    if (cur) sessionLapOffsets.value = { ...sessionLapOffsets.value, [key]: { ...cur, mapX: 0, mapY: 0 } }
+  }
+
   function clearAllLapSelections(): void {
     selected.value = []
     selectedAcrossSessions.value = []
@@ -302,7 +330,21 @@ export const useLapStore = defineStore('lap', () => {
   // runs, so the file-change watchers that would otherwise WIPE per-lap state
   // on any active-file change (useLaps.ts, useSectors.ts — see their own
   // module docs) know to skip that wipe THIS time, since the swap already
-  // migrated everything that needs migrating. Peeked (never consumed/reset)
+  // migrated everything that needs migrating.
+  //
+  // F4 phase 1 reuses this SAME flag for a second, related case: FileBar's
+  // `.rcnx` "切換場次" session switcher sets it directly before calling
+  // `fileStore.replaceSession` on the PRIMARY record, for the same reason —
+  // the active session's TRACK identity is about to change (a genuinely
+  // different `sess_N`, different channels/laps), which would otherwise make
+  // useLaps.ts's generic watcher wipe the start/finish line + valid-lap bands
+  // too. Those are track-level/shared (still nominally the same physical
+  // track/car across sessions of the same `.rcnx`), so they're kept — only
+  // the lap-INDEX-keyed state is genuinely invalid for the new session's
+  // different lap set, and FileBar clears that explicitly itself
+  // (`clearSelection` / `clearExcluded` / `clearPrimaryOffsets`) since,
+  // unlike an actual primary swap, there is no second session's state to
+  // migrate INTO — the old index-keyed state is simply discarded. Peeked (never consumed/reset)
   // by those watchers — TWO independent composables observe the same swap in
   // the same flush, so only one place may safely reset it, and it must run
   // AFTER both have peeked. The `watch` below (registered once, at store
@@ -520,6 +562,17 @@ export const useLapStore = defineStore('lap', () => {
     sessionLapOffsets.value = {}
   }
 
+  /**
+   * Clear only the PRIMARY's own per-lap alignment shifts — the primary-only
+   * analogue of {@link clearOffsets}, leaving every comparison recording's
+   * `sessionLapOffsets` untouched. Used when just the active session's own
+   * laps became invalid (F4's `.rcnx` session switch re-parsing the primary
+   * record in place) without every OTHER loaded recording's laps changing.
+   */
+  function clearPrimaryOffsets(): void {
+    offsets.value = {}
+  }
+
   /** Append a column for any metric kind (channel, lapTime, distance, …). */
   function addColumn(metric: LapMetric): void {
     columns.value.push({ id: nextColumnId++, metric })
@@ -576,6 +629,7 @@ export const useLapStore = defineStore('lap', () => {
     columns,
     offsets,
     sessionLapOffsets,
+    clearPrimaryOffsets,
     setLine,
     clearLine,
     setSource,
@@ -591,6 +645,9 @@ export const useLapStore = defineStore('lap', () => {
     sessionLapOffsetOf,
     nudgeSessionLapOffset,
     resetSessionLapOffset,
+    sessionLapMapOffsetOf,
+    nudgeSessionLapMapOffset,
+    resetSessionLapMapOffset,
     toggleExcluded,
     isManuallyExcluded,
     isExcluded,

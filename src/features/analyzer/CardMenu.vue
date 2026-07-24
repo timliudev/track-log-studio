@@ -227,6 +227,21 @@ function onLocate(id: string, locatable: boolean): void {
   gap: calc(var(--space) * 1.5);
 }
 
+/* Q5 — the 面板 toggle button sits on the right side of a
+   `justify-content: space-between` toolbar (AnalyzerView's .layout-tools),
+   so on narrow screens the popover's `left: 0` opens rightward off a
+   right-aligned anchor and its right edge overflows past the viewport.
+   Anchor to the right edge instead so it opens leftward and stays
+   on-screen; width is already capped by `min(320px, calc(100vw - 32px))`
+   above, so this only changes horizontal position, not size. Desktop
+   (left: 0) is unaffected. */
+@media (max-width: 768px) {
+  .popover {
+    left: auto;
+    right: 0;
+  }
+}
+
 .group {
   display: flex;
   flex-direction: column;

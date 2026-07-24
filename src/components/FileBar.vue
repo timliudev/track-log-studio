@@ -7,7 +7,8 @@ import { useLapStore } from '@/stores/lapStore'
 import { useLogImport } from '@/composables/useLogImport'
 import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/formatDefinitions'
 import type { RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
-import { extractZipFile, inspectRcnxFile } from '@/domain/import/lazyLoaders'
+import type { RczSessionInfo } from '@/domain/import/rcz/listRczSessions'
+import { extractZipFile, inspectRcnxFile, inspectRczFile } from '@/domain/import/lazyLoaders'
 import { filesFromDataTransfer, isFileDrag } from './fileDrop'
 import { categoricalColor } from '@/domain/analysis/colorPalette'
 import {
@@ -15,6 +16,8 @@ import {
   toggleIncludedSession,
   type SessionSelectionState,
 } from '@/domain/analysis/sessionSelection'
+import { buildCompositeSession } from '@/domain/analysis/sessionComposite'
+import { LogSession } from '@/domain/model/LogSession'
 
 const props = withDefaults(defineProps<{ analyzerMode?: boolean }>(), {
   analyzerMode: false,
@@ -111,7 +114,12 @@ function largestSession(sessions: RcnxSessionInfo[]): RcnxSessionInfo {
   return sessions.reduce((best, s) => (s.waypointCount > best.waypointCount ? s : best))
 }
 
-async function finishRcnxImport(id: number, file: File, sessionIndex: number): Promise<void> {
+async function finishRcnxImport(
+  id: number,
+  file: File,
+  sessionIndex: number,
+  sessions: RcnxSessionInfo[],
+): Promise<void> {
   try {
     const imp = detectImporter(await sniff(file))
     const importerId = imp?.id ?? 'rcnx'
@@ -121,10 +129,229 @@ async function finishRcnxImport(id: number, file: File, sessionIndex: number): P
       (f) => fileStore.setProgress(id, f),
       sessionIndex,
     )
-    fileStore.completeImport(id, session)
+    // F4 phase 1 — multi-session archives keep their full session list + the
+    // currently-loaded index on the record (only when there's more than one —
+    // see fileStore.completeImport's doc), so a later "切換場次" switch can
+    // re-parse the SAME File without re-importing (see switchRcnxSession).
+    fileStore.completeImport(id, session, { sessions, sessionIndex })
   } catch (e) {
     fileStore.failImport(id, e instanceof Error ? e.message : String(e))
   }
+}
+
+/** F4 phase 1 — file ids currently mid re-parse for a `.rcnx` session switch;
+ *  disables that record's switcher and guards against overlapping switches. */
+const rcnxSwitching = ref<Set<number>>(new Set())
+
+/** Per-file transient error from a failed session switch, keyed by file id.
+ *  A failed switch must NOT corrupt the existing ready record, so this is
+ *  surfaced separately rather than routed through `fileStore.failImport`
+ *  (which would flip the whole pill to its error state). */
+const rcnxSwitchError = ref<Record<number, string>>({})
+
+/** Compact label for one session in the "切換場次" `<select>` — built from
+ *  the same `RcnxSessionInfo` fields the import-time picker already shows
+ *  (waypoints / duration / lap-data), plus the session's start date/time
+ *  (the one field that reliably tells two sessions of the same track apart,
+ *  since `trackName` is typically identical across a day's sessions). */
+function rcnxSessionLabel(s: RcnxSessionInfo): string {
+  const bits: string[] = []
+  bits.push(s.startTimeMs !== undefined ? new Date(s.startTimeMs).toLocaleString() : t('fileBar.rcnxPicker.session', { n: s.n }))
+  const dur = durationMin(s)
+  if (dur !== undefined) bits.push(t('fileBar.rcnxPicker.duration', { m: dur }))
+  bits.push(t('fileBar.rcnxPicker.waypoints', { n: s.waypointCount }))
+  bits.push(s.hasLapData ? t('fileBar.rcnxPicker.hasLaps') : t('fileBar.rcnxPicker.noLaps'))
+  return bits.join(' · ')
+}
+
+/**
+ * F4 phase 1 — switch which session of an already-imported multi-session
+ * `.rcnx` is loaded: re-parse the SAME original File at a different
+ * `sessionIndex` and replace the record's LogSession in place (same
+ * id/slot/role — analysis selection, colour, comparison membership all stay
+ * put). No-op if the record has no switch context, is already showing
+ * `sessionIndex`, or a switch for it is already in flight.
+ *
+ * Composite/merge across sessions (loading two sessions as one continuous
+ * recording) is explicitly OUT of scope here — see the F4 phase 2 TODO below.
+ */
+async function switchRcnxSession(fileId: number, sessionIndex: number): Promise<void> {
+  const f = fileStore.files.find((x) => x.id === fileId)
+  if (!f || !f.rcnxSessions || f.rcnxSessionIndex === sessionIndex) return
+  if (rcnxSwitching.value.has(fileId)) return
+  const file = fileStore.getOriginalFile(fileId)
+  if (!file) return
+
+  rcnxSwitching.value.add(fileId)
+  if (fileId in rcnxSwitchError.value) {
+    const next = { ...rcnxSwitchError.value }
+    delete next[fileId]
+    rcnxSwitchError.value = next
+  }
+  try {
+    const imp = detectImporter(await sniff(file))
+    const importerId = imp?.id ?? 'rcnx'
+    const session = await parseFile(file, importerId, undefined, sessionIndex)
+    const isPrimary = analyzer.activeFileId === fileId
+    if (isPrimary) {
+      // B55's suppression flag, reused here (see lapStore.ts's doc on
+      // `primarySwapPending`): the active session's TRACK identity is about
+      // to change, which would otherwise make useLaps.ts's generic
+      // file-change watcher wipe the start/finish line + valid-lap bands —
+      // but those are track-level/shared, not this ONE record's, so they're
+      // kept. Only the lap-index-keyed state below is genuinely invalid.
+      lapStore.primarySwapPending = true
+    }
+    fileStore.replaceSession(fileId, session, sessionIndex)
+    if (isPrimary) {
+      lapStore.clearSelection()
+      lapStore.clearExcluded()
+      lapStore.clearPrimaryOffsets()
+    } else {
+      // Comparison recording: its cross-session selection/manual-exclusion
+      // state is keyed by fileId (unlike the primary's), so only ITS entry
+      // needs clearing — same call FileBar already makes when a comparison
+      // stops being compared (see toggleAnalysisFile above).
+      lapStore.clearSessionSelection(fileId)
+    }
+  } catch (e) {
+    rcnxSwitchError.value = { ...rcnxSwitchError.value, [fileId]: e instanceof Error ? e.message : String(e) }
+  } finally {
+    rcnxSwitching.value.delete(fileId)
+  }
+}
+
+/**
+ * F4 phase 2 — composite segments: unlike `switchRcnxSession` above (which
+ * REPLACES a record's session in place), combining picks TWO OR MORE of a
+ * multi-session `.rcnx` archive's sessions and registers a brand-new
+ * fileStore record holding one continuous `LogSession` — the source record(s)
+ * are left completely untouched, so the user can still switch/inspect any
+ * single session independently afterwards. This mirrors the SessionMerge/T6
+ * convention (`fileStore.addMergedSession` producing a new analyzable/
+ * exportable record rather than mutating an existing one — see
+ * useSessionMerge.ts's `merge()`) rather than phase 1's in-place replace,
+ * since a composite is a genuinely NEW record (not "this same slot, different
+ * content") and because the set of segments combined doesn't have to include
+ * the record's own currently-loaded session at all. All the actual time-axis/
+ * channel-union/lap-counter-seam logic lives in the pure, independently
+ * tested `sessionComposite.ts` (see its module doc for exactly how each is
+ * handled) — this is just the UI orchestration: re-parse each checked session
+ * (same original File, one `parseFile` call per `sessionIndex`, same as
+ * `finishRcnxImport`/`switchRcnxSession` above), sort by wall-clock start (not
+ * archive order, in case they ever differ), build, then hand off to
+ * `fileStore.addMergedSession`. Because it's a brand-new fileStore id, there
+ * is no per-file lap-selection state to migrate/clear (unlike
+ * `switchRcnxSession`'s `lapStore` cleanup) — a fresh id has never had any.
+ */
+
+/** Pending "複合區段" picker: which sessions of a multi-session `.rcnx`
+ *  archive (opened from the record at `fileId`) are checked to combine.
+ *  Keyed separately from `pendingRcnx` (the import-time single-session
+ *  picker) since this operates on an ALREADY-imported ready record. */
+const pendingComposite = ref<{ fileId: number; sessions: RcnxSessionInfo[]; selected: Set<number> } | null>(null)
+const compositeBusy = ref(false)
+const compositeError = ref<string | null>(null)
+/** Name of the most recently created composite record — small inline
+ *  confirmation, same convention as SessionMergePanel's `mergedName`. */
+const compositeResultName = ref<string | null>(null)
+
+function openCompositePicker(fileId: number): void {
+  const f = fileStore.files.find((x) => x.id === fileId)
+  if (!f || !f.rcnxSessions || f.rcnxSessions.length < 2) return
+  compositeError.value = null
+  compositeResultName.value = null
+  pendingComposite.value = {
+    fileId,
+    sessions: f.rcnxSessions,
+    selected: new Set(f.rcnxSessionIndex !== undefined ? [f.rcnxSessionIndex] : []),
+  }
+}
+
+function toggleCompositeSession(n: number): void {
+  const pending = pendingComposite.value
+  if (!pending) return
+  const next = new Set(pending.selected)
+  if (next.has(n)) next.delete(n)
+  else next.add(n)
+  pendingComposite.value = { ...pending, selected: next }
+}
+
+function cancelCompositePicker(): void {
+  pendingComposite.value = null
+}
+
+async function combineCompositeSessions(): Promise<void> {
+  const pending = pendingComposite.value
+  if (!pending || pending.selected.size < 2 || compositeBusy.value) return
+  const file = fileStore.getOriginalFile(pending.fileId)
+  if (!file) return
+
+  compositeBusy.value = true
+  compositeError.value = null
+  try {
+    const imp = detectImporter(await sniff(file))
+    const importerId = imp?.id ?? 'rcnx'
+    const chosenNs = [...pending.selected]
+    const parsed = await Promise.all(chosenNs.map((n) => parseFile(file, importerId, undefined, n)))
+
+    // Combine in WALL-CLOCK order (real recorded start time), not the archive
+    // `n` order the user happened to check them in — n is normally already
+    // chronological, but this stays correct even if it ever weren't.
+    const ordered = [...parsed].sort((a, b) => {
+      const at = a.meta.createdDate?.getTime()
+      const bt = b.meta.createdDate?.getTime()
+      if (at != null && bt != null) return at - bt
+      return 0
+    })
+
+    const result = buildCompositeSession(ordered)
+    if (!result) {
+      compositeError.value = t('fileBar.compositePicker.buildFailed')
+      return
+    }
+
+    const base = ordered[0]
+    const headerInfo: Record<string, string> = { ...base.meta.headerInfo }
+    headerInfo.compositeSessionIndexes = chosenNs.slice().sort((a, b) => a - b).join(',')
+    headerInfo.compositeSegmentCount = String(chosenNs.length)
+    const composite = new LogSession(result.channels, {
+      formatId: base.meta.formatId,
+      createdDate: base.meta.createdDate,
+      headerInfo,
+    })
+
+    const sourceFile = fileStore.files.find((x) => x.id === pending.fileId)
+    const baseName = sourceFile ? sourceFile.name.replace(/\.[^./]+$/, '') : 'session'
+    const name = `${baseName}_composite.rcnx`
+    fileStore.addMergedSession(name, composite)
+    compositeResultName.value = name
+    pendingComposite.value = null
+  } catch (e) {
+    compositeError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    compositeBusy.value = false
+  }
+}
+
+/** Remove an imported file and its local (component-only) rcnx-switch UI
+ *  state together, so a later import that happens to reuse the same numeric
+ *  id (fileStore ids are never reused in practice, but this stays correct
+ *  either way) starts clean. */
+function removeFile(id: number): void {
+  fileStore.removeFile(id)
+  rcnxSwitching.value.delete(id)
+  if (id in rcnxSwitchError.value) {
+    const next = { ...rcnxSwitchError.value }
+    delete next[id]
+    rcnxSwitchError.value = next
+  }
+}
+
+function onRcnxSwitchChange(fileId: number, e: Event): void {
+  const target = e.target as HTMLSelectElement
+  const n = Number(target.value)
+  void switchRcnxSession(fileId, n)
 }
 
 /**
@@ -147,8 +374,26 @@ async function importOne(file: File): Promise<void> {
         pendingRcnx.value = { id, file, sessions }
         return
       }
-      await finishRcnxImport(id, file, sessions[0]?.n ?? 0)
+      await finishRcnxImport(id, file, sessions[0]?.n ?? 0, sessions)
       return
+    }
+    if (imp.id === 'rcz') {
+      // A device BACKUP nests many sessions and needs a picker; a plain
+      // single-session export (the common case) returns null here and falls
+      // straight through to the unchanged direct-parse path below.
+      const sessions = await inspectRczFile(file)
+      if (sessions) {
+        if (sessions.length > 1) {
+          pendingRcz.value = { id, file, sessions }
+          return
+        }
+        if (sessions.length === 1) {
+          await finishRczImport(id, file, sessions[0].key)
+          return
+        }
+        fileStore.failImport(id, t('fileBar.rczPicker.empty'))
+        return
+      }
     }
     const session = await parseFile(file, imp.id, (f) => fileStore.setProgress(id, f))
     fileStore.completeImport(id, session)
@@ -161,13 +406,45 @@ async function choosePendingSession(n: number): Promise<void> {
   const pending = pendingRcnx.value
   if (!pending) return
   pendingRcnx.value = null
-  await finishRcnxImport(pending.id, pending.file, n)
+  await finishRcnxImport(pending.id, pending.file, n, pending.sessions)
 }
 
 function cancelPendingRcnx(): void {
   const pending = pendingRcnx.value
   if (!pending) return
   pendingRcnx.value = null
+  fileStore.removeFile(pending.id)
+}
+
+/** Pending `.rcz` device-backup session choice, shown as a small inline picker. */
+const pendingRcz = ref<{ id: number; file: File; sessions: RczSessionInfo[] } | null>(null)
+
+async function finishRczImport(id: number, file: File, sessionKey: string): Promise<void> {
+  try {
+    const session = await parseFile(
+      file,
+      'rcz',
+      (f) => fileStore.setProgress(id, f),
+      undefined,
+      sessionKey,
+    )
+    fileStore.completeImport(id, session)
+  } catch (e) {
+    fileStore.failImport(id, e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function choosePendingRczSession(key: string): Promise<void> {
+  const pending = pendingRcz.value
+  if (!pending) return
+  pendingRcz.value = null
+  await finishRczImport(pending.id, pending.file, key)
+}
+
+function cancelPendingRcz(): void {
+  const pending = pendingRcz.value
+  if (!pending) return
+  pendingRcz.value = null
   fileStore.removeFile(pending.id)
 }
 
@@ -255,6 +532,19 @@ async function onDrop(e: DragEvent): Promise<void> {
 /** Duration in whole minutes for the picker label, or undefined if unknown. */
 function durationMin(s: RcnxSessionInfo): number | undefined {
   return s.durationMs !== undefined ? Math.round(s.durationMs / 60000) : undefined
+}
+
+/** Duration in whole minutes for an RCZ backup session, or undefined if unknown. */
+function rczDurationMin(s: RczSessionInfo): number | undefined {
+  return s.durationMs !== undefined ? Math.round(s.durationMs / 60000) : undefined
+}
+
+/** `YYYY-MM-DD HH:mm` label for an RCZ backup session's date, or undefined. */
+function rczDateLabel(s: RczSessionInfo): string | undefined {
+  if (!s.date) return undefined
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const d = s.date
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 </script>
 
@@ -372,9 +662,55 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
           {{ f.formatId }} · {{ t('fileBar.rows', { n: f.rowCount }) }}
         </span>
         <span v-else class="pill-meta err">{{ t('fileBar.error') }}</span>
-        <button type="button" class="pill-x" v-tooltip="t('fileBar.remove')" @click="fileStore.removeFile(f.id)">×</button>
+        <!-- F4 phase 1 — only present for records imported from a
+             multi-session .rcnx archive (fileStore only sets `rcnxSessions`
+             when there was more than one to begin with). Re-parses the SAME
+             original File at a different sessionIndex; see
+             switchRcnxSession's doc above. -->
+        <span v-if="f.status === 'ready' && f.rcnxSessions" class="rcnx-switch">
+          <label class="sr-only" :for="`rcnx-switch-${f.id}`">{{ t('fileBar.rcnxSwitch.label') }}</label>
+          <select
+            :id="`rcnx-switch-${f.id}`"
+            class="rcnx-switch-select"
+            :aria-label="t('fileBar.rcnxSwitch.aria', { name: f.name })"
+            :disabled="rcnxSwitching.has(f.id)"
+            :value="f.rcnxSessionIndex"
+            @change="onRcnxSwitchChange(f.id, $event)"
+          >
+            <option v-for="s in f.rcnxSessions" :key="s.n" :value="s.n">
+              {{ rcnxSessionLabel(s) }}
+            </option>
+          </select>
+          <span v-if="rcnxSwitching.has(f.id)" class="rcnx-switch-status">{{ t('fileBar.rcnxSwitch.switching') }}</span>
+        </span>
+        <span v-if="rcnxSwitchError[f.id]" class="rcnx-switch-err" role="alert">
+          {{ t('fileBar.rcnxSwitch.failed', { message: rcnxSwitchError[f.id] }) }}
+        </span>
+        <!-- F4 phase 2 — "複合區段": only offered alongside the switcher
+             above (same gate, ≥2 sessions), opens a checkbox picker to
+             combine 2+ of the archive's sessions into one new continuous
+             record; see combineCompositeSessions' doc above. -->
+        <button
+          v-if="f.status === 'ready' && f.rcnxSessions && f.rcnxSessions.length > 1"
+          type="button"
+          class="icon-btn composite-btn"
+          v-tooltip="t('fileBar.compositePicker.open')"
+          :aria-label="t('fileBar.compositePicker.open')"
+          @click="openCompositePicker(f.id)"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="12" height="12" rx="2" />
+            <rect x="9" y="9" width="12" height="12" rx="2" />
+          </svg>
+        </button>
+        <button type="button" class="pill-x" v-tooltip="t('fileBar.remove')" @click="removeFile(f.id)">×</button>
       </span>
     </div>
+
+    <p v-if="compositeResultName" class="composite-result">
+      {{ t('fileBar.compositePicker.done', { name: compositeResultName }) }}
+      <button type="button" class="composite-result-dismiss" @click="compositeResultName = null">×</button>
+    </p>
 
     <button
       v-if="fileStore.files.length"
@@ -412,6 +748,82 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
         <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcnx">
           {{ t('fileBar.rcnxPicker.cancel') }}
         </button>
+      </div>
+    </div>
+
+    <div v-if="pendingRcz" class="rcnx-picker-backdrop" @click.self="cancelPendingRcz">
+      <div class="rcnx-picker" role="dialog" aria-modal="true">
+        <p class="rcnx-picker-title">{{ t('fileBar.rczPicker.title', { n: pendingRcz.sessions.length }) }}</p>
+        <p class="rcnx-picker-file">{{ t('fileBar.rcnxPicker.fileLabel') }}: {{ pendingRcz.file.name }}</p>
+        <ul class="rcnx-picker-list">
+          <li v-for="s in pendingRcz.sessions" :key="s.key">
+            <button type="button" class="rcnx-session-btn" @click="choosePendingRczSession(s.key)">
+              <span class="rcnx-session-name">
+                {{ rczDateLabel(s) || s.key }}
+              </span>
+              <span class="rcnx-session-meta">
+                <template v-if="s.lapCount !== undefined">
+                  {{ t('fileBar.rczPicker.laps', { n: s.lapCount }) }} ·
+                </template>
+                <template v-if="s.distanceKm !== undefined">
+                  {{ t('fileBar.rczPicker.distance', { km: s.distanceKm.toFixed(1) }) }} ·
+                </template>
+                <template v-if="rczDurationMin(s) !== undefined">
+                  {{ t('fileBar.rcnxPicker.duration', { m: rczDurationMin(s) }) }}
+                </template>
+              </span>
+            </button>
+          </li>
+        </ul>
+        <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcz">
+          {{ t('fileBar.rcnxPicker.cancel') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- F4 phase 2 — "複合區段" checkbox picker (opened from an ALREADY
+         imported multi-session record's new composite button above, not the
+         import-time pendingRcnx single-pick dialog). -->
+    <div v-if="pendingComposite" class="rcnx-picker-backdrop" @click.self="cancelCompositePicker">
+      <div class="rcnx-picker" role="dialog" aria-modal="true">
+        <p class="rcnx-picker-title">
+          {{ t('fileBar.compositePicker.title', { n: pendingComposite.sessions.length }) }}
+        </p>
+        <p class="rcnx-picker-file">{{ t('fileBar.compositePicker.hint') }}</p>
+        <ul class="rcnx-picker-list">
+          <li v-for="s in pendingComposite.sessions" :key="s.n">
+            <label class="rcnx-session-check">
+              <input
+                type="checkbox"
+                :checked="pendingComposite.selected.has(s.n)"
+                @change="toggleCompositeSession(s.n)"
+              />
+              <span class="rcnx-session-name">
+                {{ rcnxSessionLabel(s) }}
+              </span>
+            </label>
+          </li>
+        </ul>
+        <p v-if="compositeError" class="rcnx-switch-err" role="alert">
+          {{ t('fileBar.compositePicker.failed', { message: compositeError }) }}
+        </p>
+        <div class="composite-picker-actions">
+          <button type="button" class="rcnx-picker-cancel" @click="cancelCompositePicker">
+            {{ t('fileBar.rcnxPicker.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="composite-confirm-btn"
+            :disabled="pendingComposite.selected.size < 2 || compositeBusy"
+            @click="combineCompositeSessions"
+          >
+            {{
+              compositeBusy
+                ? t('fileBar.compositePicker.combining')
+                : t('fileBar.compositePicker.combine', { n: pendingComposite.selected.size })
+            }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -633,6 +1045,55 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
 .pill-meta.err {
   color: var(--color-accent);
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+/* F4 phase 1 — the "切換場次" session switcher, shown only on records
+   imported from a multi-session .rcnx. Deliberately compact (a native
+   <select>, not a custom widget) so it fits inline in the pill alongside
+   every other per-file control. */
+.rcnx-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rcnx-switch-select {
+  max-width: 140px;
+  padding: 1px 3px;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+.rcnx-switch-select:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+/* B35 — same coarse-pointer touch-target convention as .make-primary-btn:
+   a native <select> already gets OS-level touch handling, but a taller box
+   keeps the tap target comfortable alongside the pill's other controls. */
+:root[data-any-pointer-coarse] .rcnx-switch-select {
+  min-height: 32px;
+}
+.rcnx-switch-status {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.rcnx-switch-err {
+  color: var(--color-accent);
+  font-size: 0.72rem;
+}
 .pill-x {
   background: none;
   border: none;
@@ -734,5 +1195,96 @@ function durationMin(s: RcnxSessionInfo): number | undefined {
 }
 .rcnx-picker-cancel:hover {
   color: var(--color-text);
+}
+/* F4 phase 2 — "複合區段" button, sized/styled identically to
+   .make-primary-btn (same icon-button convention, incl. the §8 coarse-pointer
+   44px growth below). */
+.composite-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.composite-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.composite-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-border);
+}
+:root[data-any-pointer-coarse] .composite-btn {
+  width: 44px;
+  height: 44px;
+}
+:root[data-any-pointer-coarse] .composite-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.rcnx-session-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font: inherit;
+}
+.rcnx-session-check:hover {
+  border-color: var(--color-accent);
+}
+.rcnx-session-check input {
+  flex: none;
+}
+.composite-picker-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+.composite-confirm-btn {
+  padding: 6px 14px;
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  border: none;
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.composite-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.composite-result {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 0 8px;
+  padding: 3px 8px;
+  color: var(--color-accent);
+  font-size: 0.8rem;
+}
+.composite-result-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 2px;
 }
 </style>
