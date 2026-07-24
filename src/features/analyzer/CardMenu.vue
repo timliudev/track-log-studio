@@ -61,11 +61,31 @@ const { t } = useI18n()
 
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
+// The popover is teleported to <body> on mobile (see the template + the
+// mobile bottom-sheet styles below) so it's no longer a DOM descendant of
+// `rootEl` — the outside-click check below needs its OWN ref rather than
+// relying on `rootEl.contains(...)`.
+const popoverEl = ref<HTMLElement | null>(null)
+
+// Mirrors `mediaQueryRef` in useInputCapabilities.ts (not exported from
+// there, so re-implemented locally): a live `matchMedia` read, never a
+// load-time snapshot, so rotating a tablet across the breakpoint or resizing
+// a desktop window flips the Teleport target correctly. 768px matches
+// BottomNav.vue / App.vue / theme.css's shared mobile breakpoint.
+const mobileMql = window.matchMedia('(max-width: 768px)')
+const isMobileViewport = ref(mobileMql.matches)
+function onMobileMqlChange(e: MediaQueryListEvent): void {
+  isMobileViewport.value = e.matches
+}
+mobileMql.addEventListener('change', onMobileMqlChange)
+onBeforeUnmount(() => mobileMql.removeEventListener('change', onMobileMqlChange))
 
 function onDocumentPointerDown(e: PointerEvent): void {
   if (!open.value) return
-  const root = rootEl.value
-  if (root && e.target instanceof Node && !root.contains(e.target)) open.value = false
+  if (!(e.target instanceof Node)) return
+  const insideRoot = rootEl.value?.contains(e.target) ?? false
+  const insidePopover = popoverEl.value?.contains(e.target) ?? false
+  if (!insideRoot && !insidePopover) open.value = false
 }
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') open.value = false
@@ -112,72 +132,88 @@ function onLocate(id: string, locatable: boolean): void {
       <span>{{ t('analyzer.cardMenu.button') }}</span>
     </button>
 
-    <div v-if="open" class="popover" role="menu">
-      <section v-for="group in groups" :key="group.id" class="group" role="group" :aria-label="group.label">
-        <h3 class="group-heading">{{ group.label }}</h3>
-        <div v-for="item in group.items" :key="item.id" class="row">
-          <input
-            :id="`card-menu-check-${item.id}`"
-            type="checkbox"
-            class="row-check"
-            :checked="item.checked"
-            @change="onToggleInput(item.id, $event)"
-          />
-          <label :for="`card-menu-check-${item.id}`" class="visually-hidden">{{
-            t('analyzer.cardMenu.toggleAria', { name: item.title })
-          }}</label>
-          <button
-            type="button"
-            class="row-name"
-            :disabled="!item.locatable"
-            :title="item.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
-            @click="onLocate(item.id, item.locatable)"
-          >
-            {{ item.title }}
-          </button>
-        </div>
-      </section>
+    <!-- Below 768px this is teleported straight to <body> and repositioned
+         as a viewport-fixed bottom sheet (see the mobile media query in the
+         style block) — button-anchored absolute positioning can't avoid
+         overflowing the viewport when the button itself moves around inside
+         a wrapping, space-between toolbar (B105 only swapped which edge
+         overflowed, not whether one could). `disabled` keeps desktop's
+         existing in-place absolute anchor untouched. Teleporting (rather
+         than just changing `position` in place) also sidesteps App.vue's
+         tab-switch slide transition, which applies `transform` directly to
+         `.analyzer` (this component's ancestor) during enter/leave — any
+         transformed ancestor becomes `position: fixed`'s containing block
+         and would otherwise hijack the sheet's viewport anchoring; see
+         CvtProfileEditor.vue's identical Teleport-to-body for the same
+         reason. -->
+    <Teleport to="body" :disabled="!isMobileViewport">
+      <div v-if="open" ref="popoverEl" class="popover" role="menu">
+        <section v-for="group in groups" :key="group.id" class="group" role="group" :aria-label="group.label">
+          <h3 class="group-heading">{{ group.label }}</h3>
+          <div v-for="item in group.items" :key="item.id" class="row">
+            <input
+              :id="`card-menu-check-${item.id}`"
+              type="checkbox"
+              class="row-check"
+              :checked="item.checked"
+              @change="onToggleInput(item.id, $event)"
+            />
+            <label :for="`card-menu-check-${item.id}`" class="visually-hidden">{{
+              t('analyzer.cardMenu.toggleAria', { name: item.title })
+            }}</label>
+            <button
+              type="button"
+              class="row-name"
+              :disabled="!item.locatable"
+              :title="item.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
+              @click="onLocate(item.id, item.locatable)"
+            >
+              {{ item.title }}
+            </button>
+          </div>
+        </section>
 
-      <section class="group charts-group" role="group" :aria-label="chartsGroupLabel">
-        <h3 class="group-heading">{{ chartsGroupLabel }}</h3>
-        <p v-if="charts.length === 0" class="empty-hint">{{ t('analyzer.cardMenu.noCharts') }}</p>
-        <div v-for="c in charts" :key="c.id" class="row">
-          <input
-            :id="`card-menu-check-${c.itemId}`"
-            type="checkbox"
-            class="row-check"
-            :checked="c.checked"
-            @change="onToggleInput(c.itemId, $event)"
-          />
-          <label :for="`card-menu-check-${c.itemId}`" class="visually-hidden">{{
-            t('analyzer.cardMenu.toggleAria', { name: c.title })
-          }}</label>
-          <button
-            type="button"
-            class="row-name"
-            :disabled="!c.locatable"
-            :title="c.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
-            @click="onLocate(c.itemId, c.locatable)"
-          >
-            {{ c.title }}
+        <section class="group charts-group" role="group" :aria-label="chartsGroupLabel">
+          <h3 class="group-heading">{{ chartsGroupLabel }}</h3>
+          <p v-if="charts.length === 0" class="empty-hint">{{ t('analyzer.cardMenu.noCharts') }}</p>
+          <div v-for="c in charts" :key="c.id" class="row">
+            <input
+              :id="`card-menu-check-${c.itemId}`"
+              type="checkbox"
+              class="row-check"
+              :checked="c.checked"
+              @change="onToggleInput(c.itemId, $event)"
+            />
+            <label :for="`card-menu-check-${c.itemId}`" class="visually-hidden">{{
+              t('analyzer.cardMenu.toggleAria', { name: c.title })
+            }}</label>
+            <button
+              type="button"
+              class="row-name"
+              :disabled="!c.locatable"
+              :title="c.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
+              @click="onLocate(c.itemId, c.locatable)"
+            >
+              {{ c.title }}
+            </button>
+            <button
+              type="button"
+              class="row-delete"
+              :aria-label="t('analyzer.removeChart') + ' — ' + c.title"
+              @click="emit('remove-chart', c.id)"
+            >
+              ✕
+            </button>
+          </div>
+          <button type="button" class="add-row" @click="emit('add-timeseries')">
+            ＋ {{ t('analyzer.addChart') }}
           </button>
-          <button
-            type="button"
-            class="row-delete"
-            :aria-label="t('analyzer.removeChart') + ' — ' + c.title"
-            @click="emit('remove-chart', c.id)"
-          >
-            ✕
+          <button type="button" class="add-row" @click="emit('add-scatter')">
+            ＋ {{ t('analyzer.addScatterChart') }}
           </button>
-        </div>
-        <button type="button" class="add-row" @click="emit('add-timeseries')">
-          ＋ {{ t('analyzer.addChart') }}
-        </button>
-        <button type="button" class="add-row" @click="emit('add-scatter')">
-          ＋ {{ t('analyzer.addScatterChart') }}
-        </button>
-      </section>
-    </div>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -227,18 +263,32 @@ function onLocate(id: string, locatable: boolean): void {
   gap: calc(var(--space) * 1.5);
 }
 
-/* Q5 — the 面板 toggle button sits on the right side of a
-   `justify-content: space-between` toolbar (AnalyzerView's .layout-tools),
-   so on narrow screens the popover's `left: 0` opens rightward off a
-   right-aligned anchor and its right edge overflows past the viewport.
-   Anchor to the right edge instead so it opens leftward and stays
-   on-screen; width is already capped by `min(320px, calc(100vw - 32px))`
-   above, so this only changes horizontal position, not size. Desktop
-   (left: 0) is unaffected. */
+/* Q5/B105 follow-up — B105 anchored the popover to the button's right edge
+   instead of its left edge, but `.card-menu` lives in `.layout-tools` (a
+   `flex-wrap: wrap` row inside AnalyzerView's `justify-content:
+   space-between` toolbar), so the 面板 button's horizontal position isn't
+   fixed either way — whichever edge the popover anchors to can still run
+   off the OPPOSITE side of a narrow viewport. Below 768px, stop anchoring
+   to the button at all: `position: fixed` to the viewport, `left`/`right`
+   margins instead of a button-relative `width`, so it's centered in the
+   viewport and can never overflow horizontally by construction. Anchored to
+   the bottom, above BottomNav.vue's fixed tab bar (`--bottom-nav-height`,
+   theme.css — already 56px at this same breakpoint; the `56px` fallback
+   here is redundant-but-safe). `max-height`/`overflow-y: auto` from the
+   base rule above still apply, so a tall list scrolls internally instead of
+   overflowing vertically. Desktop (>768px) is completely unaffected — this
+   block only fires under the same breakpoint the JS `isMobileViewport` ref
+   uses to enable the Teleport in the template, so the two always agree on
+   which mode is active. */
 @media (max-width: 768px) {
   .popover {
-    left: auto;
-    right: 0;
+    position: fixed;
+    z-index: 50;
+    top: auto;
+    left: 16px;
+    right: 16px;
+    width: auto;
+    bottom: calc(var(--bottom-nav-height, 56px) + 16px + env(safe-area-inset-bottom, 0px));
   }
 }
 
