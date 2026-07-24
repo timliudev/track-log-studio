@@ -108,6 +108,39 @@ export function measuredSize(
 }
 
 /**
+ * ResizeObserver feedback-loop guard — whether a freshly measured host size
+ * differs enough from the size last actually APPLIED to the chart (via
+ * `chart.resize()`) to be worth reacting to again.
+ *
+ * In `equalAspect` (1:1) mode, `resize()` calls `render()` right after
+ * `chart.resize()`, and `render()` rebuilds the option's square grid box
+ * (see `squareGridBox`) from the container's CURRENT size. That rebuild can
+ * nudge the host element's own measured size by a sub-pixel amount (e.g.
+ * layout rounding on a fractional-DPI viewport), which fires the
+ * ResizeObserver again → `resize()` → `render()` → relayout → observer …
+ * forever, without ever settling. At some viewport sizes (reported: 1386×949
+ * with a 1:1 scatter) that sub-pixel echo doesn't damp out — the chart
+ * visibly zoom-pulses/flickers.
+ *
+ * Comparing the new measurement against the last-APPLIED size (not the last
+ * MEASURED size) with a >=1px-on-either-axis threshold filters that echo out
+ * (the echo is sub-pixel by construction) while still reacting to every
+ * genuine resize — a real window/card resize always moves by a whole pixel
+ * or more, well above this threshold.
+ */
+export function sizeChangedEnoughToApply(
+  lastApplied: { width: number; height: number } | null,
+  measured: { width: number; height: number },
+  thresholdPx = 1,
+): boolean {
+  if (!lastApplied) return true
+  return (
+    Math.abs(measured.width - lastApplied.width) >= thresholdPx ||
+    Math.abs(measured.height - lastApplied.height) >= thresholdPx
+  )
+}
+
+/**
  * XY-aspect feature — the raw [min,max] data extent across every series'
  * points, per axis. `Infinity`/`-Infinity` fields when there are no points
  * (caller falls back to a default range via {@link paddedAxisRange}, which
@@ -408,6 +441,15 @@ const host = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 let ro: ResizeObserver | null = null
 let themeObs: MutationObserver | null = null
+// ResizeObserver feedback-loop guard (see `sizeChangedEnoughToApply`'s doc) —
+// the size actually last passed to `chart.resize()`, compared against each
+// new measurement so a sub-pixel echo from `render()`'s own relayout doesn't
+// re-trigger work.
+let lastAppliedSize: { width: number; height: number } | null = null
+// Coalesces bursts of ResizeObserver/window-resize callbacks (an observer can
+// fire multiple times per frame) into a single measurement+resize per animation
+// frame — same rAF-coalescing shape as TrackMap's `scheduleDraw` (B30).
+let resizeRafId: number | null = null
 
 // B46 — current X/Y dataZoom window (see ScatterZoomWindow's doc), synced
 // from ECharts' own 'datazoom' event (attached once per chart instance —
@@ -734,7 +776,13 @@ function resetZoom(): void {
 function create(): void {
   if (!host.value) return
   destroy()
-  chart = echarts.init(host.value, undefined, hostSize())
+  const size = hostSize()
+  chart = echarts.init(host.value, undefined, size)
+  // The size just passed to `echarts.init` IS the applied size — seed the
+  // guard with it so the FIRST ResizeObserver callback (which fires right
+  // after mount, reporting this same size) is correctly treated as a no-op
+  // rather than an unnecessary extra resize+render.
+  lastAppliedSize = size
   attachZoomListener()
   render()
 }
@@ -745,22 +793,44 @@ function destroy(): void {
 }
 
 function resize(): void {
+  if (!chart) return
+  const size = hostSize()
+  // Feedback-loop guard — see `sizeChangedEnoughToApply`'s doc. In equalAspect
+  // mode, the render() below rebuilds the square grid box from the container
+  // size, which can nudge the host's own measured size by a sub-pixel amount;
+  // reacting to that echo re-triggers this same observer forever. Skipping
+  // sub-pixel "changes" breaks the loop while still catching every genuine
+  // (>=1px) resize.
+  if (!sizeChangedEnoughToApply(lastAppliedSize, size)) return
   // T3 — MUST pass the measured size: an argument-less resize() would reuse
   // the init-time explicit width/height stored by zrender and never follow
   // the container. See measuredSize's doc.
-  if (!chart) return
-  chart.resize(hostSize())
+  chart.resize(size)
+  lastAppliedSize = size
   // 1:1 mode sizes the square grid box from the CONTAINER size (see
   // squareGridBox), so a resize invalidates the current box — rebuild the
   // option at the new size to keep the square shape true.
   if (props.equalAspect ?? true) render()
 }
 
+/** Coalesces a burst of ResizeObserver/window-resize callbacks (an observer
+ *  can fire more than once per frame, and the feedback loop this component
+ *  guards against would otherwise fire it continuously) into one `resize()`
+ *  per animation frame, always acting on the LATEST measurement. Mirrors
+ *  TrackMap's `scheduleDraw` (B30). */
+function scheduleResize(): void {
+  if (resizeRafId !== null) return
+  resizeRafId = requestAnimationFrame(() => {
+    resizeRafId = null
+    resize()
+  })
+}
+
 onMounted(() => {
   create()
-  ro = new ResizeObserver(() => resize())
+  ro = new ResizeObserver(() => scheduleResize())
   if (host.value) ro.observe(host.value)
-  window.addEventListener('resize', resize)
+  window.addEventListener('resize', scheduleResize)
   // Re-render with new colours when the theme (data-theme) changes — same
   // pattern as UPlotChart.
   themeObs = new MutationObserver(() => render())
@@ -772,8 +842,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   ro?.disconnect()
+  if (resizeRafId !== null) {
+    cancelAnimationFrame(resizeRafId)
+    resizeRafId = null
+  }
   themeObs?.disconnect()
-  window.removeEventListener('resize', resize)
+  window.removeEventListener('resize', scheduleResize)
   destroy()
 })
 
