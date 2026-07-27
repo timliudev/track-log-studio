@@ -37,7 +37,8 @@ import {
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
-const { tzOverride, themePref, localePref, inputModePref, centreCursorMode } = storeToRefs(settingsStore)
+const { tzOverride, themePref, localePref, inputModePref, centreCursorMode, trackLineSmoothing } =
+  storeToRefs(settingsStore)
 const drivetrainStore = useDrivetrainStore()
 
 // Whole-hour offsets UTC-12 .. UTC+14; value is offset minutes east of UTC.
@@ -152,6 +153,7 @@ function exportSettings(): void {
       tzOverride: tzOverride.value,
       inputModePref: inputModePref.value,
       centreCursorMode: centreCursorMode.value,
+      trackLineSmoothing: trackLineSmoothing.value,
     },
     drivetrain: {
       kind: drivetrainStore.kind,
@@ -346,6 +348,30 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
         <span>{{ t('centreCursor.label') }}</span>
       </label>
       <p class="transfer-description">{{ t('centreCursor.hint') }}</p>
+      <!-- ⑥ (second half) — geometric smoothing amount for the track-map
+           polyline (centripetal Catmull-Rom resampling — see
+           domain/analysis/trackSmoothing.ts's module doc for the full
+           amount->subdivision contract). Default 0 = "忠實呈現" (faithful,
+           unchanged rendering for existing users); the slider steps toward
+           "平順" (smoothest). Purely a rendering preference — never touches
+           samples, lap times, distances, or the map's cursor/hit-testing
+           (see TrackMap.vue's `lineSmoothing` prop doc). -->
+      <label class="control">
+        <span>{{ t('trackLineSmoothing.label') }}</span>
+        <span class="smoothing-slider">
+          <span class="smoothing-endpoint">{{ t('trackLineSmoothing.faithful') }}</span>
+          <input
+            v-model.number="trackLineSmoothing"
+            type="range"
+            name="trackLineSmoothing"
+            min="0"
+            max="1"
+            step="0.25"
+          />
+          <span class="smoothing-endpoint">{{ t('trackLineSmoothing.smooth') }}</span>
+        </span>
+      </label>
+      <p class="transfer-description">{{ t('trackLineSmoothing.hint') }}</p>
     </div>
 
     <div class="card">
@@ -555,6 +581,30 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 .checkbox-control input {
   width: 16px;
   height: 16px;
+}
+.smoothing-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 220px;
+  min-width: 220px;
+}
+.smoothing-slider input[type='range'] {
+  flex: 1;
+  accent-color: var(--color-accent);
+}
+.smoothing-endpoint {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+/* §8 touch target — the slider itself grows to a comfortable drag height on
+   coarse pointers, same plain ":root[attr] .foo" selector convention every
+   other coarse-pointer rule in this codebase uses (see
+   test/lint/scopedCssGlobalBan.test.ts for why the Vue "global wrapper"
+   selector form is banned here). */
+:root[data-any-pointer-coarse] .smoothing-slider input[type='range'] {
+  min-height: 44px;
 }
 .transfer-actions {
   display: flex;

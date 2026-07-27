@@ -35,11 +35,26 @@ export interface AppearanceSettings {
    *  just fixed. Default false keeps every chart's existing pan/zoom/cursor
    *  behaviour unchanged. */
   centreCursorMode: boolean
+  /** ⑥ (second half) — geometric smoothing amount for the DRAWN track-map
+   *  polyline (centripetal Catmull-Rom resampling — see
+   *  `domain/analysis/trackSmoothing.ts`'s module doc for the full math/
+   *  amount-mapping contract). A plain number in `[0, 1]`: `0` = "忠實呈現"
+   *  (faithful — the exact recorded chords, bit-identical rendering) and the
+   *  DEFAULT (existing users' maps must not change unless they opt in);
+   *  `1` = "平順" (smoothest). Purely a rendering preference — never affects
+   *  samples, lap times, distances, or the map's cursor/hit-testing (see
+   *  TrackMap.vue's own wiring notes). Distinct from `centreCursorMode`
+   *  above: that's a chart-cursor interaction mode, this is track-map line
+   *  geometry — unrelated features that happen to sit next to each other in
+   *  this settings slice. */
+  trackLineSmoothing: number
 }
 
 const VALID_THEME_PREFS: readonly ThemePref[] = ['auto', 'light', 'dark']
 const VALID_LOCALE_PREFS: readonly LocalePref[] = ['auto', 'zh-Hant', 'en']
 const VALID_INPUT_MODE_PREFS: readonly InputModePref[] = ['auto', 'touch', 'pointer']
+const TRACK_LINE_SMOOTHING_MIN = 0
+const TRACK_LINE_SMOOTHING_MAX = 1
 
 export function defaultAppearanceSettings(): AppearanceSettings {
   return {
@@ -48,6 +63,7 @@ export function defaultAppearanceSettings(): AppearanceSettings {
     tzOverride: 'auto',
     inputModePref: 'auto',
     centreCursorMode: false,
+    trackLineSmoothing: 0,
   }
 }
 
@@ -80,7 +96,11 @@ export function mergeAppearanceSettings(
     : def.inputModePref
   const centreCursorMode =
     typeof partial.centreCursorMode === 'boolean' ? partial.centreCursorMode : def.centreCursorMode
-  return { themePref, localePref, tzOverride, inputModePref, centreCursorMode }
+  const trackLineSmoothing =
+    typeof partial.trackLineSmoothing === 'number' && Number.isFinite(partial.trackLineSmoothing)
+      ? Math.max(TRACK_LINE_SMOOTHING_MIN, Math.min(TRACK_LINE_SMOOTHING_MAX, partial.trackLineSmoothing))
+      : def.trackLineSmoothing
+  return { themePref, localePref, tzOverride, inputModePref, centreCursorMode, trackLineSmoothing }
 }
 
 function loadPersisted(): AppearanceSettings {
@@ -106,14 +126,16 @@ export const useSettingsStore = defineStore('settings', () => {
   const tzOverride = ref<TzOverride>(persisted.tzOverride)
   const inputModePref = ref<InputModePref>(persisted.inputModePref)
   const centreCursorMode = ref<boolean>(persisted.centreCursorMode)
+  const trackLineSmoothing = ref<number>(persisted.trackLineSmoothing)
 
-  watch([themePref, localePref, tzOverride, inputModePref, centreCursorMode], () => {
+  watch([themePref, localePref, tzOverride, inputModePref, centreCursorMode, trackLineSmoothing], () => {
     const data: AppearanceSettings = {
       themePref: themePref.value,
       localePref: localePref.value,
       tzOverride: tzOverride.value,
       inputModePref: inputModePref.value,
       centreCursorMode: centreCursorMode.value,
+      trackLineSmoothing: trackLineSmoothing.value,
     }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
@@ -122,7 +144,7 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   })
 
-  /** Replace all five appearance fields at once (B19 import) — a single
+  /** Replace all six appearance fields at once (B19 import) — a single
    *  assignment per ref so the `watch` above only fires (and persists) once
    *  rather than once per field. */
   function applyAppearance(next: AppearanceSettings): void {
@@ -131,7 +153,16 @@ export const useSettingsStore = defineStore('settings', () => {
     tzOverride.value = next.tzOverride
     inputModePref.value = next.inputModePref
     centreCursorMode.value = next.centreCursorMode
+    trackLineSmoothing.value = next.trackLineSmoothing
   }
 
-  return { themePref, localePref, tzOverride, inputModePref, centreCursorMode, applyAppearance }
+  return {
+    themePref,
+    localePref,
+    tzOverride,
+    inputModePref,
+    centreCursorMode,
+    trackLineSmoothing,
+    applyAppearance,
+  }
 })

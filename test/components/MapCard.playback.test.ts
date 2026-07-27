@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
+import { createPinia } from 'pinia'
 import MapCard from '@/features/analyzer/cards/MapCard.vue'
 import TrackMap from '@/features/analyzer/TrackMap.vue'
 import type { AnalyzerCardContext } from '@/features/analyzer/analyzerCardContext'
@@ -86,9 +87,12 @@ function mountCard(ctx: AnalyzerCardContext): VueWrapper {
     fallbackLocale: 'en',
     messages: { 'zh-Hant': zhHant, en },
   })
+  // ⑥ — MapCard now also reads settingsStore.trackLineSmoothing (forwarded to
+  // TrackMap as a plain prop, see MapCard.vue's own doc), so it needs an
+  // active Pinia the same way every other store-backed component's tests do.
   return mount(MapCard, {
     props: { ctx },
-    global: { plugins: [i18n], stubs: { TrackMap: true } },
+    global: { plugins: [i18n, createPinia()], stubs: { TrackMap: true } },
   })
 }
 

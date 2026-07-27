@@ -21,6 +21,7 @@ import {
   type HighlightSegment,
 } from '@/domain/analysis/trackMapGeometry'
 import { interpolateSample } from '@/domain/analysis/playback'
+import { smoothTrackRange } from '@/domain/analysis/trackSmoothing'
 import { fitProjection, type MapProjection } from './projection'
 import {
   meanCompositedLuminance,
@@ -164,6 +165,22 @@ const props = defineProps<{
   fillHeight?: boolean
   /** Store-owned host state, allowing maximize to survive view unmount/remount. */
   maximized?: boolean
+  /**
+   * ⑥ (second half) — geometric smoothing amount for the drawn track PATH
+   * (not the cursor marker — that's `cursorFrac`/`interpolateSample`,
+   * unrelated), `0..1` (see `settingsStore.trackLineSmoothing` /
+   * `domain/analysis/trackSmoothing.ts`'s module doc for the full amount
+   * contract). Defaults to 0 ("忠實呈現") so every OTHER caller of
+   * `TrackMap` (none currently set this — only `MapCard.vue` reads the
+   * store setting and forwards it) keeps drawing the exact original chords,
+   * unchanged. Applied to the PLAIN (non-heatmap) polyline strokes only —
+   * `drawTrackPath`'s casing/inner + non-heat highlight branches,
+   * `drawOverlayTracks`, `drawComparisonHighlights` — never to the heatmap-
+   * coloured buckets (those are coloured per ORIGINAL sample and would lose
+   * that correspondence if resampled) nor to the start/finish line, sector
+   * gates, extrema markers, or the cursor marker.
+   */
+  lineSmoothing?: number
 }>()
 
 // Fixed, theme-independent colour for sector gates — distinct from the accent
@@ -417,6 +434,74 @@ let sampleIndex: TrackSampleSpatialIndex | null = null
 // hit-testing and dragging happen in the same on-screen coordinate frame.
 let projection: MapProjection | null = null
 
+// ⑥ (second half) — smoothing cache for the ACTIVE track's full plain path
+// (drawTrackPath's non-heat branches, `[0, n-1]` — the big one, up to a
+// whole session's sample count). `draw()` recomputes `px`/`py` from scratch
+// via `projectSamples` on EVERY call, but several of its own watch()es below
+// (gates/extremaMarkers/highlightLaps/line/background/colorValues…) fire a
+// full `draw()` without the view projection or track set actually changing —
+// re-running the Catmull-Rom spline over the whole session on each of those
+// would be pure waste. Keyed on the plain values that actually determine the
+// projected pixels (object identity for track/overlayTracks — reference
+// equality is exactly what the `watch()`es below already treat as "did this
+// change" — plus the numeric view transform/canvas size/amount), NOT on
+// `px`/`py` array identity (those are always a fresh allocation, so identity
+// would never hit). A cursor-only redraw never reaches this at all — see
+// `scheduleDraw`/`drawInteractionOverlay`, which repaint a SEPARATE canvas
+// and never call `draw()` — so playback costs nothing extra here either.
+let activeSmoothCache: {
+  track: GpsTrack | null
+  overlayTracks: TrackOverlayEntry[] | undefined
+  z: number
+  tx: number
+  ty: number
+  w: number
+  h: number
+  n: number
+  amount: number
+  x: Float64Array
+  y: Float64Array
+} | null = null
+
+/** Resolves (from cache, or freshly computed) the active track's smoothed
+ *  full-path pixels. `amount <= 0` skips the cache entirely and returns
+ *  `px`/`py` verbatim — matching `smoothTrackRange`'s own "0 = zero-cost
+ *  passthrough" contract, so the default (smoothing off) never touches this
+ *  cache machinery at all. */
+function smoothedActivePath(
+  px: Float64Array,
+  py: Float64Array,
+  n: number,
+  amount: number,
+  track: GpsTrack | null,
+  overlayTracks: TrackOverlayEntry[] | undefined,
+  z: number,
+  tx: number,
+  ty: number,
+  w: number,
+  h: number,
+): { x: Float64Array; y: Float64Array } {
+  if (amount <= 0) return { x: px, y: py }
+  const c = activeSmoothCache
+  if (
+    c &&
+    c.track === track &&
+    c.overlayTracks === overlayTracks &&
+    c.z === z &&
+    c.tx === tx &&
+    c.ty === ty &&
+    c.w === w &&
+    c.h === h &&
+    c.n === n &&
+    c.amount === amount
+  ) {
+    return { x: c.x, y: c.y }
+  }
+  const sm = smoothTrackRange(px, py, 0, n - 1, amount)
+  activeSmoothCache = { track, overlayTracks, z, tx, ty, w, h, n, amount, x: sm.x, y: sm.y }
+  return sm
+}
+
 // View transform on top of the base fit: screen = base * zoom + (panX, panY).
 // Zoom/pan let the user inspect the track like a map; the base fit (projection.ts)
 // stays the zoom-1 / pan-0 reference. Kept as refs so the reset button can react.
@@ -586,33 +671,24 @@ function drawHeatmapSegment(
  *  belonging to the active session — painter's-order keeps the active track
  *  (and its heatmap/highlight/start-finish/gates/extrema/cursor) drawn on
  *  top, so it always reads as the prominent one regardless of how many
- *  overlays are on. */
+ *  overlays are on. ⑥ — each overlay's own polyline is smoothed the same way
+ *  as the active track's (see `smoothTrackRange`'s module doc); `amount`
+ *  0 is the module's own zero-cost passthrough, so this is a no-op by
+ *  default. */
 function drawOverlayTracks(
   ctx: CanvasRenderingContext2D,
   overlays: { color: string; xs: Float64Array; ys: Float64Array; offset?: { x: number; y: number } }[],
   pixelShift: (off?: { x: number; y: number }) => [number, number],
+  amount: number,
 ): void {
   for (const { color, xs, ys, offset } of overlays) {
     const [dx, dy] = pixelShift(offset)
+    const sm = smoothTrackRange(xs, ys, 0, xs.length - 1, amount)
     ctx.save()
     ctx.globalAlpha = OVERLAY_ALPHA
     ctx.strokeStyle = color
     ctx.lineWidth = OVERLAY_LINE_WIDTH
-    ctx.beginPath()
-    let on = false
-    for (let i = 0; i < xs.length; i++) {
-      if (Number.isNaN(xs[i])) {
-        on = false
-        continue
-      }
-      if (!on) {
-        ctx.moveTo(xs[i] + dx, ys[i] + dy)
-        on = true
-      } else {
-        ctx.lineTo(xs[i] + dx, ys[i] + dy)
-      }
-    }
-    ctx.stroke()
+    drawPlainSegment(ctx, sm.x, sm.y, 0, sm.x.length - 1, dx, dy)
     ctx.restore()
   }
 }
@@ -620,11 +696,18 @@ function drawOverlayTracks(
 /** Full-track polyline. With no selection it's the normal muted track (or
  *  the heatmap if active); with a selection (same-file OR cross-file) it's
  *  drawn faint (border color) for context and the selected laps stand out,
- *  per "only show selected laps". */
+ *  per "only show selected laps". ⑥ — the PLAIN branches (casing/inner and
+ *  the muted-context stroke) draw the SMOOTHED path (`smPx`/`smPy`, already
+ *  resolved by `draw()` — cached there so this function never re-runs the
+ *  spline itself); the heatmap branch keeps drawing the RAW `px`/`py` (per-
+ *  bucket colour is tied to the original sample index, so it's never
+ *  resampled — see this component's `lineSmoothing` prop doc). */
 function drawTrackPath(
   ctx: CanvasRenderingContext2D,
   px: Float64Array,
   py: Float64Array,
+  smPx: Float64Array,
+  smPy: Float64Array,
   n: number,
   heat: boolean,
   anySelection: boolean,
@@ -640,20 +723,24 @@ function drawTrackPath(
     // stroke remains visible wherever brightness flips underneath it.
     ctx.strokeStyle = contrast.casing
     ctx.lineWidth = 5
-    drawPlainSegment(ctx, px, py, 0, n - 1)
+    drawPlainSegment(ctx, smPx, smPy, 0, smPx.length - 1)
     ctx.strokeStyle = contrast.inner
     ctx.lineWidth = 2.5
-    drawPlainSegment(ctx, px, py, 0, n - 1)
+    drawPlainSegment(ctx, smPx, smPy, 0, smPx.length - 1)
   } else {
     ctx.strokeStyle = cssVar(anySelection ? '--color-border' : '--color-text-muted')
     ctx.lineWidth = 2
-    drawPlainSegment(ctx, px, py, 0, n - 1)
+    drawPlainSegment(ctx, smPx, smPy, 0, smPx.length - 1)
   }
 }
 
 /** Selected laps (or the focus segment): each [startIdx, endIdx] span,
  *  thicker. Heatmap-coloured by value when a heatmap channel is chosen, else
- *  its identity color (lap colour, or the accent colour for a focus range). */
+ *  its identity color (lap colour, or the accent colour for a focus range).
+ *  ⑥ — the non-heat branch smooths just its own [lo, hi] span (a small
+ *  fraction of a full session, so recomputed straight from `px`/`py` on
+ *  every draw() without a dedicated cache — see the active-path cache in
+ *  `draw()` for the case that DOES need one). */
 function drawLapHighlights(
   ctx: CanvasRenderingContext2D,
   laps: HighlightSegment[],
@@ -664,6 +751,7 @@ function drawLapHighlights(
   colorVals: Float64Array | null | undefined,
   swatches: string[],
   pixelShift: (off?: { x: number; y: number }) => [number, number],
+  amount: number,
 ): void {
   for (const lap of laps) {
     const lo = Math.max(0, Math.min(lap.startIdx, lap.endIdx))
@@ -672,9 +760,10 @@ function drawLapHighlights(
     if (heat && colorVals) {
       drawHeatmapSegment(ctx, px, py, colorVals, swatches, lo, hi, 3, dx, dy)
     } else {
+      const sm = smoothTrackRange(px, py, lo, hi, amount)
       ctx.strokeStyle = lap.color
       ctx.lineWidth = 3
-      drawPlainSegment(ctx, px, py, lo, hi, dx, dy)
+      drawPlainSegment(ctx, sm.x, sm.y, 0, sm.x.length - 1, dx, dy)
     }
   }
 }
@@ -684,7 +773,9 @@ function drawLapHighlights(
  *  the active track's px/py. Never heatmap-coloured — the active heatmap
  *  channel's data belongs to the PRIMARY session, not a comparison one, so
  *  identity color is always used (matching how drawOverlayTracks also
- *  ignores the heatmap). */
+ *  ignores the heatmap). ⑥ — projects its own [lo, hi] span into a local
+ *  px/py pair (NaN where `!valid`, same contract every other draw helper
+ *  uses) and smooths that, same as `drawLapHighlights`'s non-heat branch. */
 function drawComparisonHighlights(
   ctx: CanvasRenderingContext2D,
   highlights: {
@@ -699,32 +790,31 @@ function drawComparisonHighlights(
   tx: number,
   ty: number,
   pixelShift: (off?: { x: number; y: number }) => [number, number],
+  amount: number,
 ): void {
   for (const hl of highlights) {
     const hn = hl.track.valid.length
     const lo = Math.max(0, Math.min(hl.startIdx, hl.endIdx))
     const hi = Math.min(hn - 1, Math.max(hl.startIdx, hl.endIdx))
+    if (hi < lo) continue
     const [dx, dy] = pixelShift(hl.offset)
-    ctx.strokeStyle = hl.color
-    ctx.lineWidth = 3
-    ctx.beginPath()
-    let on = false
+    const len = hi - lo + 1
+    const hpx = new Float64Array(len)
+    const hpy = new Float64Array(len)
     for (let i = lo; i <= hi; i++) {
       if (!hl.track.valid[i]) {
-        on = false
+        hpx[i - lo] = NaN
+        hpy[i - lo] = NaN
         continue
       }
       const p = base.toPixel(hl.track.lat[i], hl.track.lon[i])
-      const x = p.x * z + tx + dx
-      const y = p.y * z + ty + dy
-      if (!on) {
-        ctx.moveTo(x, y)
-        on = true
-      } else {
-        ctx.lineTo(x, y)
-      }
+      hpx[i - lo] = p.x * z + tx
+      hpy[i - lo] = p.y * z + ty
     }
-    ctx.stroke()
+    const sm = smoothTrackRange(hpx, hpy, 0, len - 1, amount)
+    ctx.strokeStyle = hl.color
+    ctx.lineWidth = 3
+    drawPlainSegment(ctx, sm.x, sm.y, 0, sm.x.length - 1, dx, dy)
   }
 }
 
@@ -1021,15 +1111,27 @@ function draw(): void {
   const swatches = colorVals ? colormapSwatches(props.colormap ?? 'turbo', HEAT_BUCKETS) : []
   const heat = !!colorVals
 
-  drawOverlayTracks(ctx, overlayPixels, pixelShift)
+  // ⑥ (second half) — geometric line smoothing amount (0..1, "忠實呈現" ->
+  // "平順"; see settingsStore.trackLineSmoothing / this component's
+  // `lineSmoothing` prop doc / trackSmoothing.ts's module doc). Sanitized
+  // here (not trusted from the prop as-is) since it may come straight from a
+  // persisted/imported setting.
+  const smoothAmount = Number.isFinite(props.lineSmoothing) ? Math.max(0, Math.min(1, props.lineSmoothing as number)) : 0
+
+  drawOverlayTracks(ctx, overlayPixels, pixelShift, smoothAmount)
 
   const highlightLaps = resolveHighlightSegments(props.highlightLaps, props.focusRange, cssVar('--color-accent'))
   const comparisonHighlights = props.comparisonLapHighlights ?? []
   const anySelection = highlightLaps.length > 0 || comparisonHighlights.length > 0
 
-  drawTrackPath(ctx, px, py, n, heat, anySelection, colorVals, swatches, backgroundTrackContrast(w, h))
-  drawLapHighlights(ctx, highlightLaps, px, py, n, heat, colorVals, swatches, pixelShift)
-  drawComparisonHighlights(ctx, comparisonHighlights, base, z, tx, ty, pixelShift)
+  // NOTE: keyed on `props.overlayTracks` directly (not the `overlayTracks`
+  // local above, which falls back to a FRESH `[]` literal every call when
+  // the prop is absent — that would defeat the cache for the common
+  // single-file case, since `[] !== []` on every comparison).
+  const activeSmoothed = smoothedActivePath(px, py, n, smoothAmount, track, props.overlayTracks, z, tx, ty, w, h)
+  drawTrackPath(ctx, px, py, activeSmoothed.x, activeSmoothed.y, n, heat, anySelection, colorVals, swatches, backgroundTrackContrast(w, h))
+  drawLapHighlights(ctx, highlightLaps, px, py, n, heat, colorVals, swatches, pixelShift, smoothAmount)
+  drawComparisonHighlights(ctx, comparisonHighlights, base, z, tx, ty, pixelShift, smoothAmount)
   if (dragging?.target.kind !== 'line') drawStartFinishLine(ctx, proj, props.line)
   const hiddenGateIndex = dragging?.target.kind === 'gate' ? dragging.target.index : -1
   drawSectorGates(ctx, proj, props.gates ?? [], hiddenGateIndex)

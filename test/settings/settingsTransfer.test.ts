@@ -18,6 +18,7 @@ const APPEARANCE = {
   tzOverride: 480,
   inputModePref: 'touch' as const,
   centreCursorMode: false,
+  trackLineSmoothing: 0,
 }
 
 const SAMPLE_MT: MtFormState = {
@@ -119,6 +120,7 @@ describe('settingsTransfer — parseImportBundle', () => {
           tzOverride: 'nonsense',
           inputModePref: 'not-a-mode',
           centreCursorMode: 'not-a-bool',
+          trackLineSmoothing: 'not-a-number',
         },
       }),
     )
@@ -130,6 +132,7 @@ describe('settingsTransfer — parseImportBundle', () => {
       tzOverride: 'auto',
       inputModePref: 'auto',
       centreCursorMode: false,
+      trackLineSmoothing: 0,
     })
   })
 
