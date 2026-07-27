@@ -172,6 +172,72 @@ describe('TrackMap cursor overlay redraw coalescing', () => {
   })
 })
 
+describe('TrackMap ⑤/⑥ cursor-marker interpolation (cursorFrac)', () => {
+  it('draws the marker at the exact sample when cursorFrac is 0, and glides toward the next sample as cursorFrac rises', async () => {
+    const track = straightTrack(50)
+    const w = mountMap(track)
+    const canvas = w.find('canvas.track').element as HTMLCanvasElement
+    const overlay = w.find('canvas.track-interaction').element as HTMLCanvasElement
+
+    const arcSpy = vi.fn()
+    // @ts-expect-error test stub — happy-dom's canvas has no real 2D context
+    canvas.getContext = () => stubContext(vi.fn())
+    // @ts-expect-error test stub
+    overlay.getContext = () => ({ ...stubContext(vi.fn()), arc: arcSpy })
+    Object.defineProperty(canvas, 'clientWidth', { value: 400, configurable: true })
+    Object.defineProperty(canvas, 'clientHeight', { value: 300, configurable: true })
+    Object.defineProperty(overlay, 'clientWidth', { value: 400, configurable: true })
+    Object.defineProperty(overlay, 'clientHeight', { value: 300, configurable: true })
+    await w.setProps({ track: { ...track } })
+
+    const projection = fitProjection(track, 400, 300, 16)!
+    const p10 = projection.toPixel(track.lat[10], track.lon[10])
+    const p11 = projection.toPixel(track.lat[11], track.lon[11])
+
+    await w.setProps({ cursorIdx: 10, cursorFrac: 0 })
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    expect(arcSpy).toHaveBeenCalledTimes(1)
+    expect(arcSpy.mock.calls[0][0]).toBeCloseTo(p10.x, 5)
+    expect(arcSpy.mock.calls[0][1]).toBeCloseTo(p10.y, 5)
+
+    arcSpy.mockClear()
+    // Same cursorIdx, only cursorFrac changes — must still redraw (its own
+    // watcher, not piggybacking on the cursorIdx one).
+    await w.setProps({ cursorFrac: 0.5 })
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    expect(arcSpy).toHaveBeenCalledTimes(1)
+    expect(arcSpy.mock.calls[0][0]).toBeCloseTo((p10.x + p11.x) / 2, 5)
+    expect(arcSpy.mock.calls[0][1]).toBeCloseTo((p10.y + p11.y) / 2, 5)
+  })
+
+  it('falls back to the exact sample (frac ignored) when there is no next sample to glide toward', async () => {
+    const track = straightTrack(50)
+    const w = mountMap(track)
+    const canvas = w.find('canvas.track').element as HTMLCanvasElement
+    const overlay = w.find('canvas.track-interaction').element as HTMLCanvasElement
+
+    const arcSpy = vi.fn()
+    // @ts-expect-error test stub
+    canvas.getContext = () => stubContext(vi.fn())
+    // @ts-expect-error test stub
+    overlay.getContext = () => ({ ...stubContext(vi.fn()), arc: arcSpy })
+    Object.defineProperty(canvas, 'clientWidth', { value: 400, configurable: true })
+    Object.defineProperty(canvas, 'clientHeight', { value: 300, configurable: true })
+    Object.defineProperty(overlay, 'clientWidth', { value: 400, configurable: true })
+    Object.defineProperty(overlay, 'clientHeight', { value: 300, configurable: true })
+    await w.setProps({ track: { ...track } })
+
+    const projection = fitProjection(track, 400, 300, 16)!
+    const pLast = projection.toPixel(track.lat[49], track.lon[49])
+
+    await w.setProps({ cursorIdx: 49, cursorFrac: 0.9 })
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    expect(arcSpy).toHaveBeenCalledTimes(1)
+    expect(arcSpy.mock.calls[0][0]).toBeCloseTo(pLast.x, 5)
+    expect(arcSpy.mock.calls[0][1]).toBeCloseTo(pLast.y, 5)
+  })
+})
+
 describe('TrackMap line drag commit boundary', () => {
   it('previews pointer moves locally and emits only the final line on pointer-up', async () => {
     const track = straightTrack(50)

@@ -20,6 +20,7 @@ import {
   type BBox,
   type HighlightSegment,
 } from '@/domain/analysis/trackMapGeometry'
+import { interpolateSample } from '@/domain/analysis/playback'
 import { fitProjection, type MapProjection } from './projection'
 import {
   meanCompositedLuminance,
@@ -55,6 +56,14 @@ import {
 const props = defineProps<{
   track: GpsTrack | null
   cursorIdx: number | null
+  /**
+   * ⑤/⑥ — the map card's playback glide fraction (0..1, how far from
+   * `cursorIdx` toward `cursorIdx + 1`; see `domain/analysis/playback.ts` +
+   * `analyzerStore.cursorFrac`). Optional/defaults to 0 so every OTHER
+   * caller of `TrackMap` (which never sets this) keeps drawing the marker
+   * exactly at `cursorIdx`, unchanged.
+   */
+  cursorFrac?: number
   line: LapLine | null
   /**
    * Multi-file track-map overlay (賽道地圖多檔疊圖): OTHER loaded sessions'
@@ -892,19 +901,23 @@ function drawExtremaMarkers(
   })
 }
 
-/** Cursor marker: a filled accent-colour dot at the current sample index, or
- *  nothing when out of range / on a gap (no fix at that sample). */
+/** Cursor marker: a filled accent-colour dot at the current sample index —
+ *  or, during playback, glided `cursorFrac` of the way toward the NEXT
+ *  sample (see `interpolateSample`, ⑤/⑥) — or nothing when out of range /
+ *  on a gap (no fix at that sample). */
 function drawCursorMarker(
   ctx: CanvasRenderingContext2D,
   px: Float64Array,
   py: Float64Array,
   cursorIdx: number | null | undefined,
+  cursorFrac: number,
   n: number,
 ): void {
-  if (cursorIdx == null || cursorIdx < 0 || cursorIdx >= n || Number.isNaN(px[cursorIdx])) return
+  const p = interpolateSample(px, py, n, cursorIdx, cursorFrac)
+  if (!p) return
   ctx.fillStyle = cssVar('--color-accent')
   ctx.beginPath()
-  ctx.arc(px[cursorIdx], py[cursorIdx], 5, 0, Math.PI * 2)
+  ctx.arc(p.x, p.y, 5, 0, Math.PI * 2)
   ctx.fill()
 }
 
@@ -1156,7 +1169,7 @@ function drawInteractionOverlay(): void {
   if (!ctx || !projection) return
   if (draftLine) drawStartFinishLine(ctx, projection, draftLine)
   if (draftGate) drawSectorGate(ctx, projection, { line: draftGate.line, confirmed: true }, draftGate.index + 1)
-  if (px && py) drawCursorMarker(ctx, px, py, props.cursorIdx, Math.min(px.length, py.length))
+  if (px && py) drawCursorMarker(ctx, px, py, props.cursorIdx, props.cursorFrac ?? 0, Math.min(px.length, py.length))
 }
 
 /** Position relative to the canvas, in CSS px, from any event with clientX/Y. */
@@ -1488,6 +1501,10 @@ onBeforeUnmount(() => {
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
 watch(() => props.track, () => resetView())
 watch(() => props.cursorIdx, () => scheduleDraw())
+// ⑤/⑥ playback: a frac-only change (marker gliding between two samples,
+// cursorIdx unchanged) must redraw too — same coalesced rAF path, so a
+// playback frame still costs exactly one overlay paint.
+watch(() => props.cursorFrac, () => scheduleDraw())
 watch(() => props.line, () => {
   if (dragging?.target.kind !== 'line') draftLine = null
   draw()

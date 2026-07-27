@@ -66,6 +66,16 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
   // Owned here (not locally in AnalyzerView) so future cursor-following readouts
   // can subscribe to it; presentational charts still receive it as a prop.
   const cursorIdx = ref<number | null>(null)
+  // ⑤/⑥ — the track-map card's own fractional companion to `cursorIdx`:
+  // how far (0..1) the map's playback marker has glided from `cursorIdx`
+  // toward `cursorIdx + 1` (see domain/analysis/playback.ts). `cursorIdx`
+  // itself stays an INTEGER sample index for every OTHER consumer (charts,
+  // current-values, lap tables, …) — this is a SEPARATE ref so the map's
+  // sub-sample interpolation never leaks into anything that treats
+  // `cursorIdx` as "the" sample. Any ordinary `setCursor` call (map hover,
+  // chart cursor, lap click) resets this to 0; only playback's
+  // `setCursorAt` sets a non-zero value.
+  const cursorFrac = ref(0)
   // Transient but store-owned so switching away from the analyzer (which
   // unmounts AnalyzerView) does not reset the user's in-card map view.
   const mapMaximized = ref(false)
@@ -127,6 +137,20 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
 
   function setCursor(i: number | null): void {
     cursorIdx.value = i
+    // A non-playback cursor move (map hover, chart cursor, lap click) always
+    // lands exactly on a whole sample — reset the map's glide fraction so a
+    // stale value from a previous playback run never leaks into a plain jump.
+    cursorFrac.value = 0
+  }
+
+  /** Playback's own setter (`cards/MapCard.vue`'s ▶ loop): sets BOTH the
+   *  integer cursor and its fractional companion in one call, so a playback
+   *  frame never causes an intermediate render with a stale frac paired to
+   *  the new idx (or vice versa). `frac` is clamped to `[0, 1]` and treated
+   *  as `0` if non-finite. */
+  function setCursorAt(i: number, frac: number): void {
+    cursorIdx.value = i
+    cursorFrac.value = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0
   }
 
   function setOverlayCursor(i: number | null): void {
@@ -297,6 +321,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     charts,
     xRange,
     cursorIdx,
+    cursorFrac,
     mapMaximized,
     overlayCursorIdx,
     trackChannel,
@@ -309,6 +334,7 @@ export const useAnalyzerStore = defineStore('analyzer', () => {
     sessionOffsets,
     setXRange,
     setCursor,
+    setCursorAt,
     setOverlayCursor,
     setTrackChannel,
     setTrackColormap,

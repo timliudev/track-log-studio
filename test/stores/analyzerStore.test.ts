@@ -200,6 +200,29 @@ describe('analyzerStore', () => {
     expect(s.cursorIdx).toBeNull()
   })
 
+  it('cursorFrac starts at 0 and a plain setCursor call (map hover / chart cursor / lap click) always resets it to 0', () => {
+    const s = useAnalyzerStore()
+    expect(s.cursorFrac).toBe(0)
+    s.setCursorAt(10, 0.7)
+    expect(s.cursorIdx).toBe(10)
+    expect(s.cursorFrac).toBe(0.7)
+    // A non-playback move to the SAME idx must still zero the fraction —
+    // it must never linger from a previous playback run.
+    s.setCursor(10)
+    expect(s.cursorIdx).toBe(10)
+    expect(s.cursorFrac).toBe(0)
+  })
+
+  it('setCursorAt clamps frac into [0, 1] and treats a non-finite frac as 0', () => {
+    const s = useAnalyzerStore()
+    s.setCursorAt(5, 1.5)
+    expect(s.cursorFrac).toBe(1)
+    s.setCursorAt(5, -0.5)
+    expect(s.cursorFrac).toBe(0)
+    s.setCursorAt(5, NaN)
+    expect(s.cursorFrac).toBe(0)
+  })
+
   it('toggleSessionComparison adds/removes a file id from the global comparison set', () => {
     const s = useAnalyzerStore()
     expect(s.selectedSessions).toEqual([])
