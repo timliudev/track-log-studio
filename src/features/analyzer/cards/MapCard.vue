@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { storeToRefs } from 'pinia'
 import type { AnalyzerCardContext } from '../analyzerCardContext'
 import TrackMap from '../TrackMap.vue'
 import { prefersReducedMotion } from '@/composables/useFlipAnimation'
+import { useSettingsStore } from '@/stores/settingsStore'
 import {
   playbackDomain,
   advanceByTime,
@@ -81,6 +83,13 @@ const {
 } = props.ctx
 
 const { t } = useI18n()
+
+// ⑥ (second half) — the track-line smoothing amount is a global appearance
+// preference (settingsStore.trackLineSmoothing), same as centreCursorMode's
+// wiring in TimeSeriesChart.vue: read here (the card body) and forwarded
+// down to TrackMap as a plain prop, rather than TrackMap reading the store
+// itself.
+const { trackLineSmoothing } = storeToRefs(useSettingsStore())
 
 // --- ⑤/⑥ playback ---------------------------------------------------------
 
@@ -211,6 +220,7 @@ onBeforeUnmount(() => stopPlay())
     :gates="mapGates"
     :extrema-markers="allExtremaMarkers"
     :overlay-tracks="overlayTracks"
+    :line-smoothing="trackLineSmoothing"
     @cursor="setCursor"
     @update:line="setLine"
     @update:gate="onUpdateGate"
