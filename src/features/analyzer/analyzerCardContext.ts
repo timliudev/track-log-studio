@@ -76,6 +76,11 @@ export interface AnalyzerCardContext {
   xValues: Ref<Float64Array | null>
   xRange: Ref<{ min: number; max: number } | null>
   cursorIdx: Ref<number | null>
+  /** ⑤/⑥ — the map card's playback-only fractional companion to `cursorIdx`
+   *  (see `analyzerStore.cursorFrac` / `domain/analysis/playback.ts`). Every
+   *  other card ignores this; only `TrackMap`'s cursor-marker interpolation
+   *  reads it. */
+  cursorFrac: Ref<number>
   laps: Ref<Lap[]>
   timeMs: Ref<Float64Array | null>
   selectedLaps: Ref<Lap[]>
@@ -131,6 +136,9 @@ export interface AnalyzerCardContext {
 
   // --- handlers / actions (functions, not refs) ---
   setCursor: (index: number | null) => void
+  /** Playback's own setter (`cards/MapCard.vue`'s ▶ loop) — sets `cursorIdx`
+   *  and `cursorFrac` together; see `analyzerStore.setCursorAt`. */
+  setCursorAt: (index: number, frac: number) => void
   setLine: (line: LapLine) => void
   onUpdateGate: (index: number, line: LapLine) => void
   setMapMaximized: (value: boolean) => void

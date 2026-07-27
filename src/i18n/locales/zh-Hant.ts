@@ -167,6 +167,8 @@ export default {
     addChart: '新增圖表',
     addScatterChart: '新增散佈圖',
     removeChart: '移除',
+    mapPlay: '播放軌跡',
+    mapPause: '暫停播放',
     lapCount: '圈數：{n}',
     lapCountExcluded: '圈數：{n}（已排除 {x}）',
     lapBand: '有效圈速區間（秒）',

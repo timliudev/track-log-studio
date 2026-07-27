@@ -173,6 +173,8 @@ export default {
     addChart: 'Add chart',
     addScatterChart: 'Add scatter chart',
     removeChart: 'Remove',
+    mapPlay: 'Play track',
+    mapPause: 'Pause playback',
     lapCount: 'Laps: {n}',
     lapCountExcluded: 'Laps: {n} ({x} excluded)',
     lapBand: 'Valid lap-time band (s)',

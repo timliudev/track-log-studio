@@ -67,8 +67,19 @@ const lapStore = useLapStore()
 const sectorStore = useSectorStore()
 const drivetrainStore = useDrivetrainStore()
 const suspensionStore = useSuspensionStore()
-const { charts, xAxis, xRange, cursorIdx, mapMaximized, trackChannel, trackColormap, trackColorEnabled, markMinima, markMaxima } =
-  storeToRefs(analyzer)
+const {
+  charts,
+  xAxis,
+  xRange,
+  cursorIdx,
+  cursorFrac,
+  mapMaximized,
+  trackChannel,
+  trackColormap,
+  trackColorEnabled,
+  markMinima,
+  markMaxima,
+} = storeToRefs(analyzer)
 const { session, track, xValues } = useActiveSession()
 const { laps, timeMs, resetLine } = useLaps()
 // Local track-setup persistence (§11 D) + SHARED-library auto-apply
@@ -932,6 +943,7 @@ const cardCtx: AnalyzerCardContext = {
   xValues,
   xRange,
   cursorIdx,
+  cursorFrac,
   laps,
   timeMs,
   selectedLaps,
@@ -973,6 +985,7 @@ const cardCtx: AnalyzerCardContext = {
   ambiguousMatches,
   appliedSharedTrack,
   setCursor: (index) => analyzer.setCursor(index),
+  setCursorAt: (index, frac) => analyzer.setCursorAt(index, frac),
   setLine: (nextLine) => lapStore.setLine(nextLine),
   onUpdateGate,
   setMapMaximized: (value) => {
