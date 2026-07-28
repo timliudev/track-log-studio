@@ -344,7 +344,11 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 
 #### Mobile: single column + collapse + pin
 
-Below roughly 768px wide, the Analyzer layout collapses to a single column, ordered by the logical order derived from the desktop layout, with **dragging/resizing disabled** (rearranging doesn't apply in a fixed single-column order). This view additionally offers:
+Below roughly 768px wide, the Analyzer layout collapses to a single column, ordered by the logical order derived from the desktop layout. This view additionally offers:
+
+- **Long-press to reorder**: press and hold a card's title bar for about 0.3 s, then drag to change its position in the single column (an ordinary swipe still scrolls the page, so this can't be triggered by accident). Dragging to the top or bottom edge **auto-scrolls**, so a card can be moved to a position that's currently off-screen; if a second finger lands mid-drag, the drag is **aborted** (so the two gestures can't fight).
+- **Card resizing**: in the mobile single column only the **height** can be adjusted (width is always full-bleed, so dragging width would be meaningless).
+- When "Lock layout" is on, dragging and resizing are disabled entirely (desktop and mobile alike).
 
 - **Collapsing a card**: same as desktop — tap a card's chevron to collapse/expand its content, handy for skipping past sections you don't need right now in the single column.
 - **Pinning a card**: on mobile, every card's title bar also has a pin button. Tap it and that card becomes **stuck to the top of the screen** (sticky) while the rest of the cards keep scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table.
