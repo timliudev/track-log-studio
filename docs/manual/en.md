@@ -166,6 +166,10 @@ Go to the "Analyzer" tab and use the "Load files" control at the top to pick a `
 - **Reset view**: one click restores the default zoom and position (double-click the map also resets it).
 - **Start/finish line**: drag the two endpoints on the track to set the start/finish line used for lap splitting; "Reset line" restores the default position.
 - **Track channel markers**: see section 4.6 — track colouring and extrema marking are now a single "pick a channel" control.
+- **Play ▶**: a play/pause button above the map, available on **both desktop and mobile**. It advances the cursor at **1×** along the recording's own timing, replaying the run along the track; **every card shares that one cursor**, so the time-series charts, current values, and the rest follow along.
+  - Playback range: the **single selected lap** if exactly one is selected, otherwise the whole recording. It stops at the end (no wrap-around); pressing play again resumes from where it stopped.
+  - Changing the lap selection, switching recordings, or leaving the Analyzer stops playback automatically.
+  - During playback the cursor **interpolates smoothly between adjacent GPS samples** instead of hopping sample to sample (a 10 Hz recording otherwise steps only every 100 ms). If your system has "reduce motion" enabled, it steps discretely on a fixed interval instead.
 
 ### 4.3 Lap table
 
@@ -390,7 +394,16 @@ Beyond comparing laps within a single recording (see 4.4), the Analyzer also sup
 
 Times shown in the Analyzer and Converter are converted according to the time zone set here: choose "Auto (browser)," or pick a whole-hour zone manually from UTC-12 to UTC+14.
 
-> Suspension calibration and saving a modified `.loga` have moved to the Converter tab (see sections 3.4 and 3.6) — Settings now only holds general app settings such as theme, language, and time zone.
+### 5.3 Track line smoothing
+
+GPS samples at a fixed rate (10 Hz, for example), and the track map connects adjacent samples with **straight** lines by default, so corners render with a polygonal, faceted look. This slider adjusts how much the track line is **smoothed**:
+
+- **Far left = faithful (default)**: no smoothing at all — exactly the line formed by the raw GPS samples. At this setting the display is **identical** to how it looked before this feature existed.
+- **Toward the right = smoother**: the line is resampled along a centripetal Catmull-Rom curve through the original samples, reading closer to the real path travelled.
+
+> **Smoothing is purely visual.** It never alters the underlying data: lap times, distances, channel values, the cursor↔sample mapping, and the sample snapping when you hover or scrub on the map (which always snaps to a **real sample**, never to an interpolated point on the curve) are all unaffected. Gaps caused by lost GPS fixes are preserved as breaks in the line rather than being bridged by the curve.
+
+> Suspension calibration and saving a modified `.loga` have moved to the Converter tab (see sections 3.4 and 3.6).
 
 ---
 
