@@ -1518,17 +1518,25 @@ const cardCtx: AnalyzerCardContext = {
    only sets this at the ITEM level for Android — see grid-item.vue's
    `no-touch` class — not on the resizer itself, and not for iOS at all).
    B18b — the plain `.analyzer` override (not just `:deep(.vgl-layout)`) is
-   what lets the pinned handle grow to the same 30px touch target here too. */
-@media (max-width: 768px) {
-  .analyzer {
-    --vgl-resizer-size: 30px;
-  }
-  .analyzer :deep(.vgl-layout) {
-    --vgl-resizer-size: 30px;
-  }
-  .analyzer :deep(.vgl-item__resizer) {
-    touch-action: none;
-  }
+   what lets the pinned handle grow to the same 30px touch target here too.
+
+   B110 — this used to be a `@media (max-width: 768px)` WIDTH breakpoint, but
+   the handle's real audience is whatever pointer is actually driving the
+   drag, not the viewport size: a desktop mouse user who narrows the window
+   below 768px got the chunky 30px target for no reason, while a touch tablet
+   wider than 768px was stuck with the 10px mouse-sized one — untappable.
+   §8/B35 already solved exactly this class of problem for `.grid-gutter`
+   above via the `any-pointer: coarse` capability signal mirrored onto
+   `<html>` by useInputCapabilities.ts; reuse the same `:root[data-any-
+   pointer-coarse]` selector here instead (never `:global(...)` — see B92). */
+:root[data-any-pointer-coarse] .analyzer {
+  --vgl-resizer-size: 30px;
+}
+:root[data-any-pointer-coarse] .analyzer :deep(.vgl-layout) {
+  --vgl-resizer-size: 30px;
+}
+:root[data-any-pointer-coarse] .analyzer :deep(.vgl-item__resizer) {
+  touch-action: none;
 }
 
 /* F2 — card-menu 定位 (locate): a brief outline pulse on the card the user
