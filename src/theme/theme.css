@@ -116,26 +116,20 @@ body {
   opacity: 1;
 }
 
-/* B35 — §8 觸控友善四層政策 layer 3: analyzer dashboard grid's own resize
-   handle (grid-layout-plus's `.vgl-item__resizer`, plus DashboardCard.vue's
-   `.pin-resize-handle` which reads the SAME `--vgl-resizer-*` vars — see its
-   own doc) already grows to a 30px touch target under
-   AnalyzerView.vue's `@media (max-width: 768px)` rule, but that's a
-   viewport-width gate — a tablet running the full desktop grid layout
-   (coarse pointer, but wide viewport) fell through it entirely. This
-   PLAIN, unscoped rule (not inside AnalyzerView.vue's `<style scoped>`, so
-   no `data-v-*` attribute gates it) reaches the same `.analyzer` /
-   `.vgl-layout` elements from outside and applies the identical 30px value
-   whenever ANY coarse pointer is present (useInputCapabilities.ts's
-   `data-any-pointer-coarse`, mirrored onto <html>) — width-independent,
-   layered on TOP of (not replacing) the existing mobile rule, which still
-   covers narrow touch phones the same as before. */
-:root[data-any-pointer-coarse] .analyzer {
-  --vgl-resizer-size: 30px;
-}
-:root[data-any-pointer-coarse] .analyzer .vgl-layout {
-  --vgl-resizer-size: 30px;
-}
-:root[data-any-pointer-coarse] .analyzer .vgl-item__resizer {
-  touch-action: none;
-}
+/* B35 (superseded by B110) — §8 觸控友善四層政策 layer 3: this used to be a
+   PLAIN, unscoped `:root[data-any-pointer-coarse] .analyzer {...}` band-aid
+   reaching into AnalyzerView.vue's grid resize handle (grid-layout-plus's
+   `.vgl-item__resizer`) from OUTSIDE that component's `<style scoped>`
+   block, added specifically because AnalyzerView.vue's OWN 30px rule was
+   still gated on `@media (max-width: 768px)` (viewport width) rather than
+   the coarse-pointer capability signal — a tablet running the full desktop
+   grid layout (coarse pointer, but wide viewport) fell through the width
+   gate entirely, so this file patched the same CSS custom properties from
+   outside as an interim fix, layered on top of (not replacing) the
+   width-gated one.
+   B110 fixed AnalyzerView.vue's OWN `--vgl-resizer-size`/`--vgl-item__
+   resizer` rules directly to key off the SAME `:root[data-any-pointer-
+   coarse]` signal (see that file's own doc, `.analyzer` in its `<style
+   scoped>` block) — the root problem this file's rule was working around no
+   longer exists, so the duplicate override was removed from here rather
+   than left as dead, easy-to-diverge-from redundancy. */
