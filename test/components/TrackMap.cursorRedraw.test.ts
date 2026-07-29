@@ -238,6 +238,53 @@ describe('TrackMap ⑤/⑥ cursor-marker interpolation (cursorFrac)', () => {
   })
 })
 
+describe('TrackMap overlay-top-right slot', () => {
+  it('renders host content passed into #overlay-top-right inside the top-right control row, alongside reset-view', async () => {
+    const track = straightTrack(50)
+    const i18n = createI18n({
+      legacy: false,
+      locale: 'zh-Hant',
+      fallbackLocale: 'en',
+      messages: { 'zh-Hant': zhHant, en },
+    })
+    wrapper = mount(TrackMap, {
+      props: { track, cursorIdx: null, line: null },
+      global: { plugins: [i18n], directives: { tooltip: vTooltip } },
+      slots: {
+        'overlay-top-right': '<button type="button" class="host-play-toggle">▶</button>',
+      },
+    })
+
+    const row = wrapper.find('.map-controls-tr')
+    expect(row.exists()).toBe(true)
+    const hostButton = row.find('button.host-play-toggle')
+    expect(hostButton.exists()).toBe(true)
+
+    // No reset-view yet (view hasn't been zoomed/panned) — the slot content
+    // is the row's only child so far.
+    expect(row.find('.reset-view').exists()).toBe(false)
+
+    // Once the view is zoomed (showReset becomes true), reset-view joins the
+    // SAME row rather than reclaiming the corner for itself — proving the
+    // two controls can never overlap regardless of `showReset`.
+    const canvas = wrapper.find('canvas.track').element as HTMLCanvasElement
+    const overlay = wrapper.find('canvas.track-interaction').element as HTMLCanvasElement
+    // @ts-expect-error test stub — happy-dom's canvas has no real 2D context
+    canvas.getContext = () => stubContext(vi.fn())
+    // @ts-expect-error test stub
+    overlay.getContext = () => stubContext(vi.fn())
+    Object.defineProperty(canvas, 'clientWidth', { value: 400, configurable: true })
+    Object.defineProperty(canvas, 'clientHeight', { value: 300, configurable: true })
+    Object.defineProperty(overlay, 'clientWidth', { value: 400, configurable: true })
+    Object.defineProperty(overlay, 'clientHeight', { value: 300, configurable: true })
+    await wrapper.find('canvas.track').trigger('wheel', { deltaY: -100 })
+
+    const rowAfterZoom = wrapper.find('.map-controls-tr')
+    expect(rowAfterZoom.find('.reset-view').exists()).toBe(true)
+    expect(rowAfterZoom.find('button.host-play-toggle').exists()).toBe(true)
+  })
+})
+
 describe('TrackMap line drag commit boundary', () => {
   it('previews pointer moves locally and emits only the final line on pointer-up', async () => {
     const track = straightTrack(50)

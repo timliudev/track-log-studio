@@ -34,6 +34,13 @@ import {
  * `TrackMap`'s marker reads, so the marker glides instead of hopping between
  * 10Hz GPS fixes. `prefers-reduced-motion` falls back to discrete stepping
  * (frac forced to 0) — no sub-sample animation against that preference.
+ *
+ * ⑤ follow-up — the button itself is passed into TrackMap's own
+ * `overlay-top-right` named slot (rendered inside TrackMap's top-right
+ * control row, alongside "reset view") instead of sitting in its own row
+ * above the map: this reclaims a full row of vertical space in the card. All
+ * playback STATE and the rAF loop stay right here — only the button's DOM
+ * location moved, not its ownership.
  */
 const props = defineProps<{ ctx: AnalyzerCardContext }>()
 const {
@@ -188,23 +195,6 @@ onBeforeUnmount(() => stopPlay())
 </script>
 
 <template>
-  <div class="map-playback">
-    <button
-      type="button"
-      class="play-toggle"
-      :disabled="!domain"
-      :aria-label="playing ? t('analyzer.mapPause') : t('analyzer.mapPlay')"
-      @click="togglePlay"
-    >
-      <svg v-if="!playing" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <polygon points="6 4 20 12 6 20" />
-      </svg>
-      <svg v-else viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <rect x="5" y="4" width="5" height="16" rx="1" />
-        <rect x="14" y="4" width="5" height="16" rx="1" />
-      </svg>
-    </button>
-  </div>
   <TrackMap
     fill-height
     :maximized="mapMaximized"
@@ -225,7 +215,26 @@ onBeforeUnmount(() => stopPlay())
     @update:line="setLine"
     @update:gate="onUpdateGate"
     @update:maximized="setMapMaximized"
-  />
+  >
+    <template #overlay-top-right>
+      <button
+        type="button"
+        class="play-toggle"
+        :disabled="!domain"
+        :aria-label="playing ? t('analyzer.mapPause') : t('analyzer.mapPlay')"
+        v-tooltip="playing ? t('analyzer.mapPause') : t('analyzer.mapPlay')"
+        @click="togglePlay"
+      >
+        <svg v-if="!playing" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <polygon points="6 4 20 12 6 20" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <rect x="5" y="4" width="5" height="16" rx="1" />
+          <rect x="14" y="4" width="5" height="16" rx="1" />
+        </svg>
+      </button>
+    </template>
+  </TrackMap>
   <details v-if="!mapMaximized && overlayTracks.length" class="map-comparison-align">
     <summary>{{ t('analyzer.comparisonMapAlign') }}</summary>
     <div v-for="entry in overlayTracks" :key="entry.id" class="map-offset-row">
@@ -352,17 +361,18 @@ onBeforeUnmount(() => stopPlay())
 </template>
 
 <style scoped>
-/* ⑤ — play/pause row: a normal flex sibling BEFORE the map, rendered
+/* ⑤ follow-up — play/pause is now passed into TrackMap's own
+   `overlay-top-right` slot (see TrackMap.vue's `.map-controls-tr` row), so it
+   floats over the map canvas itself instead of occupying a dedicated row in
+   this card's layout — reclaiming that vertical space. It's rendered
    unconditionally (not gated by `!mapMaximized` like the rest of this card's
    controls below) so it stays usable both in the normal card layout and in
    the in-card "maximized" state (B7 — maximized never leaves the card or
-   covers the viewport, it just hides these OTHER controls and lets the map's
-   own flex-grow fill the reclaimed space; see TrackMap.vue's own doc). */
-.map-playback {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 4px;
-}
+   covers the viewport; TrackMap's own top-left maximize/close toggle leaves
+   the top-right corner free in both states). Sized/coloured to match
+   TrackMap's own overlay buttons (`.maximize-toggle`) — same 32px box,
+   `--color-surface`/`--color-border`/`var(--radius)` — rather than the
+   pill shape this used before it moved onto the map's own imagery. */
 .play-toggle {
   display: inline-flex;
   align-items: center;
@@ -373,8 +383,11 @@ onBeforeUnmount(() => stopPlay())
   color: var(--color-text);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   cursor: pointer;
+}
+.play-toggle:hover {
+  border-color: var(--color-text-muted);
 }
 .play-toggle:disabled {
   opacity: 0.5;
