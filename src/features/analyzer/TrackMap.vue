@@ -1680,9 +1680,25 @@ watch(background.image, () => draw())
       <input v-model="alignBackground" type="checkbox" /> {{ t('analyzer.mapBackground.dragAlign') }}
     </label>
     <a v-if="background.settings.value.kind === 'osm'" class="osm-attribution" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap contributors</a>
-    <button v-if="showReset" type="button" class="reset-view" @click="resetView">
-      {{ t('analyzer.resetView') }}
-    </button>
+    <!-- ⑤ follow-up — top-right overlay row: "reset view" (conditional) and
+         the host's own overlay-top-right slot content (MapCard's ▶/⏸ button)
+         share ONE flex row instead of both claiming the same absolute corner,
+         so they can never overlap regardless of whether `showReset` is
+         active. Order is reset-view FIRST, slot LAST: the row itself is
+         anchored by `right: 8px` on the CONTAINER, so the last (rightmost)
+         child is the one that stays pinned exactly in the corner — keeping
+         the play button's position fixed whether or not reset-view is
+         present, while reset-view slides in to its left only when the user
+         has actually zoomed/panned. `pointer-events: none` on the row (with
+         `auto` restored on its children) keeps the rest of this corner free
+         for the map's own pan/zoom gestures — only the buttons themselves
+         capture pointer input. -->
+    <div class="map-controls-tr">
+      <button v-if="showReset" type="button" class="reset-view" @click="resetView">
+        {{ t('analyzer.resetView') }}
+      </button>
+      <slot name="overlay-top-right" />
+    </div>
     <button
       v-if="!maximized"
       type="button"
@@ -1765,10 +1781,24 @@ watch(background.image, () => draw())
 .align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
 .osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: 10px; }
 :root[data-any-pointer-coarse] .align-background { min-height: 44px; display: flex; align-items: center; }
-.reset-view {
+/* ⑤ follow-up — shared top-right overlay row (reset-view + host slot, e.g.
+   MapCard's play/pause button). `pointer-events: none` on the row itself so
+   the empty space around the button(s) still falls through to the map's own
+   pan/zoom gestures; `auto` is restored on the row's own children so only the
+   buttons capture pointer input. */
+.map-controls-tr {
   position: absolute;
   top: 8px;
   right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.map-controls-tr > * {
+  pointer-events: auto;
+}
+.reset-view {
   padding: 4px 10px;
   font-size: 0.8rem;
   background: var(--color-surface);

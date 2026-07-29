@@ -22,6 +22,15 @@ import en from '@/i18n/locales/en'
  * at the store level in test/stores/analyzerStore.test.ts — this only proves
  * MapCard forwards TrackMap's own `@cursor` emit to `ctx.setCursor`, not
  * `setCursorAt`).
+ *
+ * ⑤ follow-up — the button is now passed to TrackMap through its
+ * `overlay-top-right` named slot rather than sitting in its own template row,
+ * so the TrackMap stub below needs to actually render that named slot (the
+ * default `stubs: { TrackMap: true }` shorthand only ever renders the
+ * DEFAULT slot, never named ones — see @vue/test-utils' `createStub`) for
+ * `button.play-toggle` to still be findable in the mounted tree. This keeps
+ * every assertion below exercising MapCard's real playback wiring, unchanged
+ * from before the button's DOM location moved onto the map's own overlay.
  */
 
 function lap(index: number, startIdx: number, endIdx: number): Lap {
@@ -92,7 +101,20 @@ function mountCard(ctx: AnalyzerCardContext): VueWrapper {
   // active Pinia the same way every other store-backed component's tests do.
   return mount(MapCard, {
     props: { ctx },
-    global: { plugins: [i18n, createPinia()], stubs: { TrackMap: true } },
+    global: {
+      plugins: [i18n, createPinia()],
+      // Named-slot-rendering stub (see the module doc above): shallow like
+      // `TrackMap: true`, but also renders whatever MapCard passes into
+      // `#overlay-top-right` so the play button stays reachable via
+      // `wrapper.find('button.play-toggle')`. `props: TrackMap.props` reuses
+      // the REAL component's declared prop list so `:cursor-frac="..."` etc.
+      // still land as actual props (not fallthrough attrs) on this stub —
+      // otherwise `wrapper.findComponent(TrackMap).props('cursorFrac')` below
+      // would come back `undefined`.
+      stubs: {
+        TrackMap: { props: TrackMap.props, template: '<div><slot name="overlay-top-right" /></div>' },
+      },
+    },
   })
 }
 
