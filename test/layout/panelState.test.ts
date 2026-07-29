@@ -11,6 +11,7 @@ import {
   reconcilePanelState,
   reconcileMobileOrder,
   setMobileOrder,
+  mergeMobileOrder,
   type PanelState,
 } from '@/domain/layout/panelState'
 
@@ -396,5 +397,39 @@ describe('setMobileOrder', () => {
   it('returns a NEW reference when the order actually changes', () => {
     const state: PanelState = { collapsed: [], pinnedIds: [], mobileOrder: ['a', 'b'] }
     expect(setMobileOrder(state, ['b', 'a'])).not.toBe(state)
+  })
+})
+
+describe('mergeMobileOrder (B112 — a pinned/hidden id keeps its exact array slot)', () => {
+  it('substitutes the re-ordered ids in place, leaving an excluded id at its own slot', () => {
+    // b is pinned (excluded from `next`, the grid's re-ordered emission of
+    // just a and c) — it must stay exactly between a and c, not get bumped
+    // to the end.
+    const base = ['a', 'b', 'c']
+    const next = ['c', 'a'] // a and c swapped
+    expect(mergeMobileOrder(base, next)).toEqual(['c', 'b', 'a'])
+  })
+
+  it('is a no-op when next is already in the same relative order', () => {
+    const base = ['a', 'b', 'c']
+    expect(mergeMobileOrder(base, ['a', 'c'])).toEqual(['a', 'b', 'c'])
+  })
+
+  it('supports more than one excluded id, each keeping its own slot', () => {
+    const base = ['a', 'b', 'c', 'd', 'e']
+    // b and d are pinned/hidden; a, c, e get reordered to [e, c, a].
+    const next = ['e', 'c', 'a']
+    expect(mergeMobileOrder(base, next)).toEqual(['e', 'b', 'c', 'd', 'a'])
+  })
+
+  it('appends an id from next that is not present in base at all (defensive — should not normally happen)', () => {
+    const base = ['a', 'b']
+    const next = ['a', 'b', 'new']
+    expect(mergeMobileOrder(base, next)).toEqual(['a', 'b', 'new'])
+  })
+
+  it('handles every id being excluded (next empty) as a full no-op', () => {
+    const base = ['a', 'b', 'c']
+    expect(mergeMobileOrder(base, [])).toEqual(['a', 'b', 'c'])
   })
 })

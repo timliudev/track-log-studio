@@ -203,6 +203,43 @@ export function reconcileMobileOrder(stored: string[], orderedIds: string[]): st
   return kept
 }
 
+/**
+ * B112 — merge a partial re-order (e.g. from a mobile drag-to-reorder
+ * gesture, already filtered down to only the ids the grid actually rendered)
+ * back into the FULL persisted order, preserving the exact array POSITION of
+ * every id absent from `next` — a hidden align card, or a card currently
+ * PINNED and Teleported out of the grid entirely (see AnalyzerView's
+ * `mobileVisibleLayout`/`#dashboard-pinned-anchor` doc) — instead of bumping
+ * it to the end.
+ *
+ * Before this existed, AnalyzerView's mobile write-back computed `hidden =
+ * mobileOrder.filter(id => !visibleSet.has(id))` and appended it wholesale
+ * after the newly-reordered visible ids — correct for ids that are simply
+ * gone (a removed chart, cleaned up separately by reconcileMobileOrder), but
+ * wrong for a pinned card: reordering two OTHER cards while a third stays
+ * pinned would silently drag the pinned card's remembered slot down to the
+ * very bottom of the stack, so unpinning it later would no longer restore it
+ * between the same neighbours it started between.
+ *
+ * Algorithm: walk `base` in its existing order; wherever an id also appears
+ * in `next` (i.e. it was one of the ids re-ordered), substitute IN PLACE with
+ * `next`'s ids in `next`'s own new relative order; every other id (hidden or
+ * pinned) keeps its own original slot untouched. Any id present in `next` but
+ * missing from `base` (should not normally happen — admitting a brand-new id
+ * is `reconcileMobileOrder`'s job, not this function's) is appended at the
+ * end so nothing from `next` is ever silently dropped.
+ *
+ * Pure; a `next` whose members are already in that same relative order inside
+ * `base` is a no-op (every substituted value equals what was already there).
+ */
+export function mergeMobileOrder(base: string[], next: string[]): string[] {
+  const nextSet = new Set(next)
+  let i = 0
+  const merged = base.map((id) => (nextSet.has(id) ? next[i++] : id))
+  const extra = next.slice(i)
+  return extra.length ? [...merged, ...extra] : merged
+}
+
 /** Drop collapsed/pinned entries for card ids that no longer exist (e.g. a
  *  removed chart) — mirrors dashboardLayout.ts's reconcileLayout so
  *  localStorage doesn't accumulate stale ids forever. `validIds` is the full

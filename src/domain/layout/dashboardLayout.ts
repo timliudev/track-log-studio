@@ -510,6 +510,47 @@ export function mergeLayoutPositions<T extends DashboardLayoutItem>(
   return changed ? merged : base
 }
 
+/**
+ * B112 — run a geometry pass (resolveOverlaps and/or one of the compact*
+ * packers above) over `layout` while treating every id in `excludeIds` as
+ * fully INERT: those entries are pulled out before `transform` runs and
+ * spliced back in completely UNCHANGED afterward, rather than being part of
+ * the array `transform` reasons about.
+ *
+ * Why this is needed: a pinned card's real content is Teleported out of the
+ * grid entirely (see AnalyzerView's `#dashboard-pinned-anchor` doc), so its
+ * OLD canonical rect in `layout` no longer corresponds to anything the user
+ * can currently see — the grid simply doesn't render a slot there any more
+ * (desktopVisibleLayout/mobileVisibleLayout filter it out of what's PASSED to
+ * `<GridLayout>`). But the WRITE-BACK path (AnalyzerView's `activeLayout`
+ * setter) still merges a drag/resize's new positions into the FULL canonical
+ * `layout` array, which still carries the pinned card's untouched rect —
+ * `resolveOverlaps`/`compactLayoutTopLeft`/`compactVertical` all process the
+ * FULL array they're given, by reading order `(y, x)`, and only ever push
+ * items in ONE direction to avoid a collision. If the user drags some OTHER
+ * card into the space the pinned card visually vacated, that other card's
+ * new position can newly collide with the pinned card's still-present old
+ * rect on paper — and get shoved away from where the user visibly dropped it,
+ * even though nothing occupies that spot on screen. Excluding pinned ids from
+ * the geometry pass entirely (this function) avoids that phantom collision
+ * while leaving `mergeLayoutPositions`'s own "absent from the grid's emitted
+ * payload = keep unchanged" guarantee as the ONLY thing that touches a pinned
+ * card's stored position — so it never drifts and unpinning always restores
+ * it exactly where it was.
+ *
+ * Pure; `excludeIds` empty is a plain `transform(layout)` no-op passthrough.
+ */
+export function packExcluding(
+  layout: DashboardLayoutItem[],
+  excludeIds: ReadonlySet<string>,
+  transform: (items: DashboardLayoutItem[]) => DashboardLayoutItem[],
+): DashboardLayoutItem[] {
+  if (excludeIds.size === 0) return transform(layout)
+  const excluded = layout.filter((it) => excludeIds.has(it.i))
+  const packable = layout.filter((it) => !excludeIds.has(it.i))
+  return [...transform(packable), ...excluded]
+}
+
 /** The grid item id for a chart, keyed by the chart's OWN store id (stable
  *  across add/remove/reorder) — never its index in `analyzerStore.charts`. */
 export function chartItemId(chartId: number): string {

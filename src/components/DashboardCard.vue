@@ -1260,8 +1260,17 @@ onBeforeUnmount(() => {
    pinned-card anchor (see its module doc) — a pinned card's markup is
    Teleported there, so this class only needs to bound its own size/shape
    once it's inside that anchor (an unbounded body could otherwise grow to
-   dominate the screen) and add a visual "floating" cue. Applies identically
-   at both breakpoints now.
+   dominate the screen). Applies identically at both breakpoints now.
+
+   B112 — this rule deliberately does NOT add its own border/radius/width
+   chrome any more (a pinned card now reads as "part of this page, stuck to
+   the top", not a separate floating panel — the old distinct look was
+   AnalyzerView's own `width: min(560px, 100%)` centring on the anchor,
+   removed there; see that file's `.pinned-anchor :deep(.dashboard-card)`
+   doc). The one thing kept here on purpose is the `box-shadow` below: a
+   pinned card visually overlaps whatever content has scrolled underneath it,
+   and a subtle shadow is what keeps its edge legible against that — genuinely
+   needed for the sticky affordance, not a "floating card" cue.
    #18 fix — `aspect-ratio` (set inline via `cardStyle`, from the card's own
    grid w/h ratio) now drives the card's HEIGHT from its width, so a pinned
    card keeps roughly the shape it had in the grid instead of every pinned
