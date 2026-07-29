@@ -1799,6 +1799,14 @@ watch(background.image, () => draw())
   pointer-events: auto;
 }
 .reset-view {
+  /* height parity with the 32px icon buttons it now sits beside (maximize-
+     toggle / MapCard's play-toggle) — this is a TEXT button so we grow it
+     with min-height + flex-centering rather than a hard height, keeping the
+     label vertically centred while the box still sizes to its text/padding
+     horizontally. */
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: 4px 10px;
   font-size: 0.8rem;
   background: var(--color-surface);
@@ -1809,6 +1817,15 @@ watch(background.image, () => draw())
 }
 .reset-view:hover {
   border-color: var(--color-text-muted);
+}
+/* §8 touch-target convention: grow the hit target to >=44px on coarse
+   pointers by writing the :root[...] attribute selector directly (never
+   wrapped in the Vue scoped-CSS global-selector escape hatch) — see
+   test/lint/scopedCssGlobalBan.test.ts. Only min-height, not min-width:
+   .reset-view is a text button and should keep sizing to its label
+   horizontally, matching the desktop min-height-only treatment above. */
+:root[data-any-pointer-coarse] .reset-view {
+  min-height: 44px;
 }
 
 /* B7 — in-card maximize: `.maximized` on `.track-wrap`/`.track` is kept as a
@@ -1838,6 +1855,15 @@ watch(background.image, () => draw())
 }
 .maximize-toggle:hover {
   border-color: var(--color-text-muted);
+}
+/* §8 touch-target convention, mirroring MapCard's .play-toggle coarse rule
+   (same min-width/min-height 44px shape, since both are fixed-size icon
+   buttons) — see test/lint/scopedCssGlobalBan.test.ts. Applies to both the
+   open (`.maximize-toggle`) and maximized-close (`.maximize-toggle--close`)
+   variants since the latter always carries the base class too. */
+:root[data-any-pointer-coarse] .maximize-toggle {
+  min-width: 44px;
+  min-height: 44px;
 }
 .maximize-icon {
   display: block;
