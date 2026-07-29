@@ -507,11 +507,25 @@ const chartIds = computed(() => charts.value.map((c) => c.id))
 const { layout, colNum, isMobile, isDraggable, isResizable, gridMargin, resetLayout } =
   useDashboardLayout(chartIds, isLocked)
 
-// --- #9: per-card collapse (all breakpoints) + single cross-breakpoint pin
-// (釘選 — see DashboardCard's module doc for the Teleport-based redesign) +
-// mobile drag-to-reorder order ---
-const { state: panelState, isCollapsed, isPinned, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
+// --- #9: per-card collapse (all breakpoints) + cross-breakpoint pin (釘選 —
+// see DashboardCard's module doc for the Teleport-based redesign) + mobile
+// drag-to-reorder order. B111 — pin is now a STACK (`pinnedIds`, pin order
+// preserved), not a single card; `pinOrder` below feeds each pinned card's
+// position in that stack to DashboardCard via CSS `order` (see the template's
+// `#dashboard-pinned-anchor` doc for why explicit ordering, not DOM/Teleport
+// insertion order, drives the visual stack). ---
+const { state: panelState, isCollapsed, isPinned, pinnedIds, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
   usePanelState(chartIds)
+
+/** B111 — this card's position within the pinned stack (0 = pinned first =
+ *  topmost), or -1 when not pinned. Bound to DashboardCard's `pin-order` prop,
+ *  which turns it into an inline `order` style — see that prop's doc for why
+ *  CSS order (not relying on Teleport's own DOM insertion order) is what
+ *  actually keeps the stack in pin order regardless of the cards' grid
+ *  positions or the order they happened to mount in. */
+function pinOrderFor(id: string): number {
+  return pinnedIds.value.indexOf(id)
+}
 
 // The set of currently-collapsed card ids, fed into the collapse-reflow overlay
 // (applyCollapsedHeights) so a collapsed card shrinks its grid slot and its
@@ -1069,18 +1083,35 @@ const cardCtx: AnalyzerCardContext = {
         </div>
       </div>
 
-      <!-- 釘選 (pin) anchor: a single sticky slot that a pinned card's markup
-           is Teleported into (see the #item slot below and DashboardCard's
-           module doc). Placed here — right after the toolbar, before the
-           grid — so at scroll position 0 it just sits inline (no visual
-           jump), then sticks to the viewport top once the page scrolls past
-           it, exactly like the card's own former mobile-only sticky trick,
-           generalised to work regardless of the grid's absolute-positioned
-           desktop items. `:empty` hides it when nothing is pinned so it never
-           reserves space or shows a stray border. Works identically at both
-           breakpoints — this IS the mobile pin mechanism now, not a
-           duplicate of it (see DashboardCard's module doc for the
-           consolidation rationale). -->
+      <!-- 釘選 (pin) anchor: a single sticky slot that EVERY pinned card's
+           markup is Teleported into (see the #item slot below and
+           DashboardCard's module doc). Placed here — right after the
+           toolbar, before the grid — so at scroll position 0 it just sits
+           inline (no visual jump), then sticks to the viewport top once the
+           page scrolls past it, exactly like the card's own former
+           mobile-only sticky trick, generalised to work regardless of the
+           grid's absolute-positioned desktop items. `:empty` hides it when
+           nothing is pinned so it never reserves space or shows a stray
+           border. Works identically at both breakpoints — this IS the
+           mobile pin mechanism now, not a duplicate of it (see
+           DashboardCard's module doc for the consolidation rationale).
+
+           B111 — multiple cards can be pinned at once now (a stand-in for a
+           proper mobile split view — see panelState.ts's `pinnedIds` doc).
+           Each pinned card's own `<Teleport>` (below) still targets this
+           SAME anchor independently, so this element becomes a `display:
+           flex; flex-direction: column` STACK once more than one card lands
+           in it; visual order is driven by each card's `pin-order` CSS
+           `order` (see `pinOrderFor` above and DashboardCard's `pinOrder`
+           prop) rather than relying on Teleport's own DOM-insertion order,
+           which follows grid/mount position, not pin sequence. The anchor's
+           OWN `max-height: 50vh` + `overflow-y: auto` (see the CSS below)
+           caps the COMBINED stack height, not any one card individually —
+           each card's `.pinned` rule no longer carries its own fixed
+           max-height (see DashboardCard.vue), so pinning several tall cards
+           makes the STACK scroll internally instead of shrinking every card
+           or swallowing the viewport; the rest of the dashboard always keeps
+           roughly half the screen. -->
       <div id="dashboard-pinned-anchor" class="pinned-anchor" />
 
       <!-- #8/#9: draggable dashboard grid (grid-layout-plus). Drag is restricted
@@ -1147,6 +1178,7 @@ const cardCtx: AnalyzerCardContext = {
             :title="titleForItemId(String(item.i))"
             :collapsed="isCollapsed(String(item.i))"
             :pinned="isPinned(String(item.i))"
+            :pin-order="pinOrderFor(String(item.i))"
             :aspect-ratio="item.w / item.h"
             :show-pin="String(item.i) === 'suspension' ? isMobile : undefined"
             @update:collapsed="toggleCollapsed(String(item.i))"
@@ -1411,27 +1443,51 @@ const cardCtx: AnalyzerCardContext = {
 }
 
 /* 釘選 (pin) anchor + placeholder — see the template's doc comments above the
-   anchor div and the #item slot's Teleport for the full mechanism. */
+   anchor div and the #item slot's Teleport for the full mechanism.
+
+   B111 — multiple cards can now land here at once (one per pinned card's own
+   Teleport), so this is a flex COLUMN stack rather than a single-card slot:
+   `flex-direction: column` lays pinned cards top-to-bottom in the order set
+   by each card's `pin-order`-driven CSS `order` (see `pinOrderFor` in the
+   template's script, and DashboardCard's `.dashboard-card.pinned`'s own CSS
+   `order` — NOT this file's), and `max-height: 50vh` + `overflow-y: auto`
+   cap the COMBINED height of the whole stack (not any one card) so the rest
+   of the dashboard always keeps roughly half the screen no matter how many
+   cards are pinned — the stack itself scrolls internally past that. This
+   replaces the old per-card `max-height: 45vh` safety ceiling that used to
+   live on DashboardCard's `.pinned` rule: with only ever one pinned card
+   that per-card cap WAS the combined cap, but with several it could let the
+   pins alone swallow the viewport, which is exactly what this rule now
+   prevents at the STACK level instead. */
 .pinned-anchor {
   position: sticky;
   top: 0;
   z-index: 30;
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 .pinned-anchor:empty {
   display: none;
 }
-/* Bound the Teleported card so a tall body (e.g. an overlay chart) can't grow
-   to dominate the screen once it's floating above the grid — matches
-   DashboardCard's own `.pinned` max-height so the two agree on how big a
-   pinned card is allowed to get. `width: min(560px, 100%)` is a DESKTOP-only
-   choice (a floating centered card looks intentional on a wide screen); on
-   mobile (#9 fix) the 560px cap left dead space on either side of the card
-   on any viewport wider than 560px — including exactly 768px, the phone
-   breakpoint itself — so the mobile media query below overrides back to a
-   full-width card. */
+/* Bound each Teleported card's WIDTH/shape so a tall body (e.g. an overlay
+   chart) can't grow to dominate the stack — height is now bounded by the
+   ANCHOR's own `max-height`/`overflow-y` above (see that rule's B111 doc),
+   not a per-card cap. `width: min(560px, 100%)` is a DESKTOP-only choice (a
+   floating centered card looks intentional on a wide screen); on mobile (#9
+   fix) the 560px cap left dead space on either side of the card on any
+   viewport wider than 560px — including exactly 768px, the phone breakpoint
+   itself — so the mobile media query below overrides back to a full-width
+   card. */
 .pinned-anchor :deep(.dashboard-card) {
   width: min(560px, 100%);
   margin: 0 auto calc(var(--space) * 1.5);
+  /* B111 — `flex-shrink: 0` so a short stack (e.g. one small pinned card)
+     never gets stretched taller than its natural size by the column flex
+     container; a tall stack instead grows past `max-height` and triggers
+     the anchor's own scroll, which is the intended behaviour. */
+  flex-shrink: 0;
 }
 @media (max-width: 768px) {
   .pinned-anchor :deep(.dashboard-card) {
@@ -1518,17 +1574,27 @@ const cardCtx: AnalyzerCardContext = {
    only sets this at the ITEM level for Android — see grid-item.vue's
    `no-touch` class — not on the resizer itself, and not for iOS at all).
    B18b — the plain `.analyzer` override (not just `:deep(.vgl-layout)`) is
-   what lets the pinned handle grow to the same 30px touch target here too. */
-@media (max-width: 768px) {
-  .analyzer {
-    --vgl-resizer-size: 30px;
-  }
-  .analyzer :deep(.vgl-layout) {
-    --vgl-resizer-size: 30px;
-  }
-  .analyzer :deep(.vgl-item__resizer) {
-    touch-action: none;
-  }
+   what lets the pinned handle grow to the same 30px touch target here too.
+
+   B110 — this used to be a `@media (max-width: 768px)` WIDTH breakpoint, but
+   the handle's real audience is whatever pointer is actually driving the
+   drag, not the viewport size: a desktop mouse user who narrows the window
+   below 768px got the chunky 30px target for no reason, while a touch tablet
+   wider than 768px was stuck with the 10px mouse-sized one — untappable.
+   §8/B35 already solved exactly this class of problem for `.grid-gutter`
+   above via the `any-pointer: coarse` capability signal mirrored onto
+   `<html>` by useInputCapabilities.ts; reuse the same `:root[data-any-
+   pointer-coarse]` selector here instead — NEVER wrap that `:root[...]`
+   prefix in the Vue scoped-CSS global-escape helper (see B92: doing so drops
+   scoping for the WHOLE selector, not just the `:root[...]` part). */
+:root[data-any-pointer-coarse] .analyzer {
+  --vgl-resizer-size: 30px;
+}
+:root[data-any-pointer-coarse] .analyzer :deep(.vgl-layout) {
+  --vgl-resizer-size: 30px;
+}
+:root[data-any-pointer-coarse] .analyzer :deep(.vgl-item__resizer) {
+  touch-action: none;
 }
 
 /* F2 — card-menu 定位 (locate): a brief outline pulse on the card the user

@@ -300,6 +300,59 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
   })
 
+  describe('B111 — pinOrder (multi-pin stack position, applied as CSS `order`)', () => {
+    it('applies an inline `order` style when pinned with a pinOrder', () => {
+      const wrapper = mountCard({ pinned: true, pinOrder: 2 })
+      expect(wrapper.attributes('style')).toContain('order: 2')
+    })
+
+    it('does NOT apply order when the card is not pinned, even if pinOrder is given', () => {
+      const wrapper = mountCard({ pinned: false, pinOrder: 2 })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('does NOT apply order when pinned but pinOrder is omitted (single-pin-like usage)', () => {
+      const wrapper = mountCard({ pinned: true })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('ignores a negative pinOrder (not currently in the pinned stack)', () => {
+      const wrapper = mountCard({ pinned: true, pinOrder: -1 })
+      expect(wrapper.attributes('style')).toBeUndefined()
+    })
+
+    it('combines with aspectRatio — both order and aspect-ratio land in the same inline style', () => {
+      const wrapper = mountCard({ pinned: true, pinOrder: 1, aspectRatio: 4 / 5 })
+      expect(wrapper.attributes('style')).toContain('order: 1')
+      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
+    })
+
+    it('combines with a dragged pixel width/height', async () => {
+      const wrapper = mountCard({ pinned: true, pinOrder: 0 })
+      const el = wrapper.find('.dashboard-card').element as HTMLElement
+      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 300,
+        height: 200,
+        right: 300,
+        bottom: 200,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return this
+        },
+      } as DOMRect)
+      const handle = wrapper.find('.pin-resize-handle')
+      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.attributes('style')).toContain('order: 0')
+      expect(wrapper.attributes('style')).toContain('width: 350px')
+      window.dispatchEvent(new PointerEvent('pointerup'))
+    })
+  })
+
   describe('B18 — pinned-card resize handle', () => {
     function stubRect(el: HTMLElement, width: number, height: number): void {
       vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
