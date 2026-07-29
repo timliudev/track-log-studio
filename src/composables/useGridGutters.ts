@@ -25,10 +25,12 @@ export interface UseGridGuttersOptions {
   /** Cards to detect shared edges between. The CALLER is responsible for
    *  filtering this down to whatever's actually draggable-via-gutter in its
    *  context — same contract gridGutter.ts's `detectGutters` documents.
-   *  AnalyzerView passes the visible desktop layout with the currently-
-   *  pinned card's placeholder excluded (its slot is an inert Teleport
-   *  target, not a real card — see dashboardLayout.ts's `isItemDraggable`
-   *  for the equivalent rule on the library's own corner-resize handle). */
+   *  AnalyzerView passes the visible desktop layout with any currently-
+   *  pinned card already excluded entirely (B112 — a pinned card has no grid
+   *  slot at all any more, not even an inert placeholder; see
+   *  AnalyzerView's `desktopVisibleLayout`/`gutterItems` doc and
+   *  dashboardLayout.ts's `isItemDraggable` for the equivalent rule on the
+   *  library's own corner-resize handle). */
   items: Ref<DashboardLayoutItem[]> | ComputedRef<DashboardLayoutItem[]>
   /** Whether gutter dragging is allowed at all right now — false while the
    *  dashboard is locked (useLayoutLock) or on the mobile single-column

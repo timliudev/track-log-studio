@@ -66,9 +66,10 @@ export function gutterKey(g: Pick<GridGutter, 'orientation' | 'aId' | 'bId'>): s
  * top) edge, AND their spans on the orthogonal axis actually overlap (not
  * just touch at a single corner point). `items` should already be filtered
  * down to whatever's actually draggable/visible in the CALLER's context (the
- * Vue layer excludes hidden align-cards and the currently-pinned card's
- * placeholder — see useGridGutters.ts) since this function has no notion of
- * visibility itself; it just looks at the x/y/w/h it's given.
+ * Vue layer excludes hidden align-cards and, since B112, any currently-
+ * pinned card entirely — it has no grid slot of its own any more, see
+ * useGridGutters.ts) since this function has no notion of visibility
+ * itself; it just looks at the x/y/w/h it's given.
  *
  * O(n²) over `items`, which is fine at dashboard-card counts (a dozen-ish).
  */

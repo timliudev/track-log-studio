@@ -52,9 +52,11 @@ import {
   resolveOverlaps,
   applyCollapsedHeights,
   sameLayoutPositions,
+  packExcluding,
   COLLAPSED_ROWS,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
+import { mergeMobileOrder } from '@/domain/layout/panelState'
 import DashboardCard from '@/components/DashboardCard.vue'
 import CardMenu from './CardMenu.vue'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
@@ -586,8 +588,24 @@ function isVisibleId(id: string): boolean {
 // into `layout` would drop the hidden entries — instead we merge: keep every
 // hidden item from `layout` unchanged, and take every visible item's new
 // position from the emitted array.
+//
+// B112 — ALSO filters out any currently-PINNED id, for the same reason and
+// via the same mechanism: a pinned card's real content is Teleported out of
+// the grid entirely (see the template's `#dashboard-pinned-anchor` doc and
+// the dedicated pinned-cards `v-for` below the grid), so its grid slot must
+// not exist at all any more — this is what lets grid-layout-plus's own
+// vertical compaction close the gap left behind, instead of an inert
+// placeholder reserving the space (the reported "empty hole" bug). This is
+// the ONE place desktop pinned-filtering happens; `desktopDisplayLayout` and
+// `gutterItems` below both derive from THIS computed, so the grid and the
+// gutter overlay can never disagree about which cards are actually on
+// screen (same B52 lesson the collapse-reflow overlay already had to learn).
+// `layout.value` itself (the persisted array) is untouched — a pinned card's
+// real position/size stays there exactly as it was, so unpinning restores it
+// with no special-case "remembered slot" bookkeeping (see `packExcluding`'s
+// doc for how the write-back path avoids corrupting it in the meantime).
 const desktopVisibleLayout = computed<typeof layout.value>(() =>
-  layout.value.filter((it) => isVisibleId(it.i)),
+  layout.value.filter((it) => isVisibleId(it.i) && !isPinned(it.i)),
 )
 
 // B52 fix — the collapse-reflow DISPLAY layout (see applyCollapsedHeights),
@@ -609,9 +627,14 @@ const desktopDisplayLayout = computed<typeof layout.value>(() =>
 // mobile path only ever writes back into `mobileOrder` (never `layout`),
 // reordering on a phone can NEVER corrupt the desktop dashboardLayout.v1 — the
 // two arrangements are fully independent.
+//
+// B112 — also excludes pinned ids, same reason/mechanism as
+// `desktopVisibleLayout` above (pinned cards render via the dedicated
+// `v-for` below the grid instead, at every breakpoint — the pin STACK is not
+// per-breakpoint). `mobileOrder.value` itself (persisted) is untouched.
 const mobileVisibleLayout = computed<typeof layout.value>(() =>
   mobileLayout(
-    mobileOrder.value.filter(isVisibleId),
+    mobileOrder.value.filter((id) => isVisibleId(id) && !isPinned(id)),
     layout.value,
   ),
 )
@@ -696,16 +719,17 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
   set: (next) => {
     if (isMobile.value) {
       // Mobile drag-to-reorder: derive the new top-to-bottom order from the
-      // emitted items (sorted by y, then x for determinism) and persist ONLY
-      // that order. Hidden align cards keep their stored slot in mobileOrder
-      // (they're not in `next`), appended in their existing relative order so
-      // toggling laps back on restores them where the user last had them.
+      // emitted items (sorted by y, then x for determinism) and merge it back
+      // into the full persisted order — an id absent from `next` (a hidden
+      // align card, or B112: a currently-PINNED card, Teleported out of the
+      // grid entirely) keeps its own exact array slot rather than being
+      // bumped to the end, so reordering two OTHER cards while a third stays
+      // pinned can never silently move the pinned card's remembered position
+      // (see mergeMobileOrder's doc).
       const orderedVisible = [...next]
         .sort((a, b) => a.y - b.y || a.x - b.x)
         .map((it) => it.i)
-      const visibleSet = new Set(orderedVisible)
-      const hidden = mobileOrder.value.filter((id) => !visibleSet.has(id))
-      setMobileOrder([...orderedVisible, ...hidden])
+      setMobileOrder(mergeMobileOrder(mobileOrder.value, orderedVisible))
       return
     }
     // Desktop: merge visible items' new positions back into the full layout,
@@ -750,7 +774,16 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
         )
       : next
     const pack = collapsedIds.value.size > 0 ? compactVertical : compactLayoutTopLeft
-    const packed = pack(resolveOverlaps(mergeLayoutPositions(layout.value, restored)))
+    const merged = mergeLayoutPositions(layout.value, restored)
+    // B112 — `next`/`restored` never mentions a currently-pinned card (it's
+    // excluded from what's fed to the grid — see desktopVisibleLayout), so
+    // `merged` already carries its rect through completely untouched
+    // (mergeLayoutPositions's "absent = keep unchanged" guarantee). It must
+    // ALSO sit out of resolveOverlaps/`pack` themselves: both process the
+    // FULL array by reading order and can push a just-dragged card away from
+    // a spot that's visually free purely because the pinned card's stale
+    // rect still "collides" with it on paper — see packExcluding's doc.
+    const packed = packExcluding(merged, new Set(pinnedIds.value), (items) => pack(resolveOverlaps(items)))
     // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
     // display we fed it, which `packed` reconstructs back into the current
     // canonical layout — assigning a fresh-but-equal array would re-run the
@@ -789,19 +822,18 @@ function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): vo
 // this just calls into. Desktop-only (isMobile has no side-by-side pairs)
 // and disabled while the dashboard is locked, same two conditions that
 // already gate the grid's own drag/resize (isDraggable/isResizable in
-// useDashboardLayout). The currently-pinned card is excluded from
-// `gutterItems` — its grid slot is an inert Teleport placeholder (see the
-// template's pin-placeholder note), so a gutter touching it would visibly do
-// nothing.
+// useDashboardLayout). A currently-pinned card no longer has ANY grid slot at
+// all (see desktopVisibleLayout's B112 doc) — it's excluded there, upstream
+// of `desktopDisplayLayout`, so it's already absent by the time it reaches
+// here; a gutter overlay built from this computed can never target it.
 //
 // B52 fix — built from `desktopDisplayLayout` (the collapse-reflow DISPLAY
 // layout, same one fed to `<GridLayout>` by `activeLayout`'s getter), not the
-// canonical `desktopVisibleLayout`: pinned filtering now happens AFTER the
-// collapse overlay so it matches exactly what's on screen, whether or not
-// the pinned card is also collapsed.
-const gutterItems = computed<DashboardLayoutItem[]>(() =>
-  desktopDisplayLayout.value.filter((it) => !isPinned(it.i)),
-)
+// canonical `desktopVisibleLayout`, so the gutter overlay is positioned from
+// the EXACT same rects the grid actually renders (matters for a collapsed
+// card's reflowed neighbours, same lesson as `desktopDisplayLayout`'s own
+// doc above).
+const gutterItems = computed<DashboardLayoutItem[]>(() => desktopDisplayLayout.value)
 const gutterEnabled = computed(() => !isMobile.value && !isLocked.value)
 const gridGutters = useGridGutters({
   items: gutterItems,
@@ -871,17 +903,34 @@ function chartTitle(chart: (typeof charts.value)[number]): string {
   return t('analyzer.layout.cardChart', { n })
 }
 
-/** Title for ANY card id (static or chart), used by the pinned-card
- *  placeholder (see template) which renders OUTSIDE the big per-card
- *  v-if/else-if chain and so can't just read whichever branch's own `title`
- *  prop happened to fire. Static ids look up their i18n key in
- *  STATIC_CARD_TITLE_KEYS; a chart id falls back to the same numbered
- *  chartTitle() the card itself uses. */
+/** Title for ANY card id (static or chart), used by the pinned-card block
+ *  (see template) which renders OUTSIDE the big per-card v-if/else-if chain
+ *  and so can't just read whichever branch's own `title` prop happened to
+ *  fire. Static ids look up their i18n key in STATIC_CARD_TITLE_KEYS; a chart
+ *  id falls back to the same numbered chartTitle() the card itself uses. */
 function titleForItemId(id: string): string {
   const key = STATIC_CARD_TITLE_KEYS[id]
   if (key) return t(key)
   const chart = charts.value.find((c) => chartItemId(c.id) === id)
   return chart ? chartTitle(chart) : ''
+}
+
+/** B112 — the `aspect-ratio` DashboardCard uses to size a PINNED card (see
+ *  its own `aspectRatio` prop doc: "keeps roughly the same shape it had in
+ *  the grid"). Pinned cards now render via their own dedicated `v-for`
+ *  (template, below the grid) rather than inside GridLayout's per-breakpoint
+ *  `#item` slot, so there's no `item.w`/`item.h` in scope any more — this
+ *  looks the id up directly in the CANONICAL desktop `layout` instead, which
+ *  is also the more correct source regardless of breakpoint: the mobile
+ *  single-column array always has `w:1` (see mobileLayout), so using IT would
+ *  produce a nonsensically tall `w/h` ratio (e.g. a 4-wide/12-tall desktop
+ *  card would read as 1/12) — the desktop shape is what "the grid" actually
+ *  means here. Falls back to `1` (square) for an id somehow missing from
+ *  `layout` (shouldn't happen — reconcileLayout keeps every known id
+ *  present). */
+function aspectRatioForItemId(id: string): number {
+  const it = layout.value.find((entry) => entry.i === id)
+  return it && it.h > 0 ? it.w / it.h : 1
 }
 
 // --- F2: the grouped card menu (CardMenu.vue) — presentation-only data built
@@ -1084,14 +1133,14 @@ const cardCtx: AnalyzerCardContext = {
       </div>
 
       <!-- 釘選 (pin) anchor: a single sticky slot that EVERY pinned card's
-           markup is Teleported into (see the #item slot below and
-           DashboardCard's module doc). Placed here — right after the
-           toolbar, before the grid — so at scroll position 0 it just sits
-           inline (no visual jump), then sticks to the viewport top once the
-           page scrolls past it, exactly like the card's own former
-           mobile-only sticky trick, generalised to work regardless of the
-           grid's absolute-positioned desktop items. `:empty` hides it when
-           nothing is pinned so it never reserves space or shows a stray
+           markup is Teleported into (see the dedicated pinned-cards `v-for`
+           below the grid, and DashboardCard's module doc). Placed here —
+           right after the toolbar, before the grid — so at scroll position 0
+           it just sits inline (no visual jump), then sticks to the viewport
+           top once the page scrolls past it, exactly like the card's own
+           former mobile-only sticky trick, generalised to work regardless of
+           the grid's absolute-positioned desktop items. `:empty` hides it
+           when nothing is pinned so it never reserves space or shows a stray
            border. Works identically at both breakpoints — this IS the
            mobile pin mechanism now, not a duplicate of it (see
            DashboardCard's module doc for the consolidation rationale).
@@ -1104,14 +1153,13 @@ const cardCtx: AnalyzerCardContext = {
            in it; visual order is driven by each card's `pin-order` CSS
            `order` (see `pinOrderFor` above and DashboardCard's `pinOrder`
            prop) rather than relying on Teleport's own DOM-insertion order,
-           which follows grid/mount position, not pin sequence. The anchor's
-           OWN `max-height: 50vh` + `overflow-y: auto` (see the CSS below)
-           caps the COMBINED stack height, not any one card individually —
-           each card's `.pinned` rule no longer carries its own fixed
-           max-height (see DashboardCard.vue), so pinning several tall cards
-           makes the STACK scroll internally instead of shrinking every card
-           or swallowing the viewport; the rest of the dashboard always keeps
-           roughly half the screen. -->
+           which follows grid/mount position, not pin sequence.
+
+           B112 — the combined-stack `max-height: 50vh` + `overflow-y: auto`
+           (see the CSS below) is now MOBILE-ONLY: it was a phone-UI stopgap
+           (B111), and on desktop it produced an unwanted inner scrollbar on
+           a floating card with plenty of room below it — see that CSS
+           rule's own doc. Desktop has no height cap at all now. -->
       <div id="dashboard-pinned-anchor" class="pinned-anchor" />
 
       <!-- #8/#9: draggable dashboard grid (grid-layout-plus). Drag is restricted
@@ -1157,28 +1205,21 @@ const cardCtx: AnalyzerCardContext = {
                (drag-allow-from/-ignore-from + the pinned non-draggable/
                non-resizable exception) is carried on each layout item instead
                (see `activeLayout` getter's decoration), which the library
-               spreads onto the GridItem it creates. -->
+               spreads onto the GridItem it creates.
 
-          <!-- 釘選 placeholder: when THIS item is the pinned one, its real
-               DashboardCard below is Teleported out into #dashboard-pinned-
-               anchor (see that div's doc, above the grid) — this placeholder
-               fills the vacated grid slot so the layout doesn't jump, and
-               tells the user where the card went. Unpinning removes the
-               Teleport's `disabled` override and the card simply re-renders
-               here on the next tick. -->
-          <div v-if="isPinned(String(item.i))" class="pin-placeholder">
-            <span class="pin-placeholder-icon" aria-hidden="true">📌</span>
-            <span class="pin-placeholder-title">{{ titleForItemId(String(item.i)) }}</span>
-            <span class="pin-placeholder-text">{{ t('analyzer.layout.pinnedPlaceholder') }}</span>
-          </div>
-
-          <Teleport to="#dashboard-pinned-anchor" :disabled="!isPinned(String(item.i))" defer>
+               B112 — a currently-PINNED card's id never reaches this slot at
+               all any more: desktopVisibleLayout/mobileVisibleLayout filter
+               pinned ids out of what's fed to `<GridLayout>` (so the library's
+               own compaction closes the gap instead of an inert placeholder
+               reserving it — the reported "empty hole" bug). Pinned cards
+               render via their OWN dedicated `v-for` below instead — see that
+               block's doc for why it can no longer share this exact template
+               location. -->
           <DashboardCard
             :data-card-id="String(item.i)"
             :title="titleForItemId(String(item.i))"
             :collapsed="isCollapsed(String(item.i))"
             :pinned="isPinned(String(item.i))"
-            :pin-order="pinOrderFor(String(item.i))"
             :aspect-ratio="item.w / item.h"
             :show-pin="String(item.i) === 'suspension' ? isMobile : undefined"
             @update:collapsed="toggleCollapsed(String(item.i))"
@@ -1186,9 +1227,56 @@ const cardCtx: AnalyzerCardContext = {
           >
             <AnalyzerCardBody :id="String(item.i)" :ctx="cardCtx" />
           </DashboardCard>
-          </Teleport>
         </template>
       </GridLayout>
+      <!-- 釘選 (pin) cards — rendered OUTSIDE `<GridLayout>` entirely (they are
+           NOT one of its items any more, see desktopVisibleLayout's B112 doc)
+           and Teleported into `#dashboard-pinned-anchor` above. Keyed by id
+           via `pinnedIds` (already in pin order, see `pinOrderFor`) so a
+           card's identity is stable across re-pins.
+
+           This used to be the SAME template location as a grid-resident card
+           (one `<DashboardCard>`, wrapped in a `<Teleport :disabled>` that
+           just toggled), which is why pin/unpin used to visually SLIDE (#19's
+           FLIP transition on the one persisted DOM node Teleport relocated,
+           never remounted). Now that a pinned card's grid slot must not exist
+           at all — the whole point of this fix — the two can no longer be
+           the same template instance: pinning UNMOUNTS the card from the
+           grid's `#item` slot and mounts a fresh one here (unpinning is the
+           reverse). The slide animation therefore no longer plays across
+           that specific transition, and any of DashboardCard's own
+           pin-session-only local state (`pinnedSize`, `pinnedMini`, …)
+           simply restarts — harmless, since none of it is meaningful outside
+           an active pin anyway. Teleport itself is still exactly what solves
+           the underlying problem this component's module doc explains
+           (`position: sticky` does nothing inside grid-layout-plus's
+           transformed grid items) — it is just hosted from this dedicated,
+           always-enabled block instead of a conditionally-disabled one
+           shared with the grid.
+
+           `aspectRatioForItemId` reads the CANONICAL `layout` (not a
+           per-breakpoint rendered array, since this block no longer has
+           one) — see that function's doc for why this also incidentally
+           fixes the mobile shape (previously `item.w/item.h` came from the
+           1-column mobile array, where `w` is always 1, producing a
+           nonsensically tall aspect-ratio box). -->
+      <template v-for="id in pinnedIds" :key="id">
+        <Teleport to="#dashboard-pinned-anchor">
+          <DashboardCard
+            :data-card-id="id"
+            :title="titleForItemId(id)"
+            :collapsed="isCollapsed(id)"
+            :pinned="true"
+            :pin-order="pinOrderFor(id)"
+            :aspect-ratio="aspectRatioForItemId(id)"
+            :show-pin="id === 'suspension' ? isMobile : undefined"
+            @update:collapsed="toggleCollapsed(id)"
+            @update:pinned="togglePinned(id)"
+          >
+            <AnalyzerCardBody :id="id" :ctx="cardCtx" />
+          </DashboardCard>
+        </Teleport>
+      </template>
       <!-- #2 縫隙拖動 overlay: one thin hit-box per shared card edge, drawn
            exactly over the margin gap between two adjacent cards (see
            gridGutter.ts's `gutterRect`) — never over any card's own content,
@@ -1442,85 +1530,59 @@ const cardCtx: AnalyzerCardContext = {
   transition: none;
 }
 
-/* 釘選 (pin) anchor + placeholder — see the template's doc comments above the
-   anchor div and the #item slot's Teleport for the full mechanism.
+/* 釘選 (pin) anchor — see the template's doc comments above the anchor div
+   and the dedicated pinned-cards `v-for` below the grid for the full
+   mechanism. No placeholder rule any more (B112 removed it along with the
+   grid slot it used to fill — see desktopVisibleLayout's doc): a pinned
+   card's original spot is no longer reserved at all, so the cards below it
+   simply close up.
 
-   B111 — multiple cards can now land here at once (one per pinned card's own
+   B111 — multiple cards can land here at once (one per pinned card's own
    Teleport), so this is a flex COLUMN stack rather than a single-card slot:
    `flex-direction: column` lays pinned cards top-to-bottom in the order set
    by each card's `pin-order`-driven CSS `order` (see `pinOrderFor` in the
    template's script, and DashboardCard's `.dashboard-card.pinned`'s own CSS
-   `order` — NOT this file's), and `max-height: 50vh` + `overflow-y: auto`
-   cap the COMBINED height of the whole stack (not any one card) so the rest
-   of the dashboard always keeps roughly half the screen no matter how many
-   cards are pinned — the stack itself scrolls internally past that. This
-   replaces the old per-card `max-height: 45vh` safety ceiling that used to
-   live on DashboardCard's `.pinned` rule: with only ever one pinned card
-   that per-card cap WAS the combined cap, but with several it could let the
-   pins alone swallow the viewport, which is exactly what this rule now
-   prevents at the STACK level instead. */
+   `order` — NOT this file's).
+
+   B112 — `max-height: 50vh` + `overflow-y: auto` (capping the COMBINED
+   height of the whole stack, not any one card) is now MOBILE-ONLY (see the
+   `@media` block below): it was a B111 phone-UI stopgap so pinning several
+   tall cards never swallows the whole small screen, but on a wide desktop
+   viewport that same cap forced an unwanted inner scrollbar on a floating
+   card that had plenty of room below it — reported as "the pinned card acts
+   like a separate framed panel". Desktop now has no height cap at all; the
+   stack simply grows to whatever height its (now unpinned-width, see below)
+   cards need. */
 .pinned-anchor {
   position: sticky;
   top: 0;
   z-index: 30;
   display: flex;
   flex-direction: column;
-  max-height: 50vh;
-  overflow-y: auto;
 }
 .pinned-anchor:empty {
   display: none;
 }
-/* Bound each Teleported card's WIDTH/shape so a tall body (e.g. an overlay
-   chart) can't grow to dominate the stack — height is now bounded by the
-   ANCHOR's own `max-height`/`overflow-y` above (see that rule's B111 doc),
-   not a per-card cap. `width: min(560px, 100%)` is a DESKTOP-only choice (a
-   floating centered card looks intentional on a wide screen); on mobile (#9
-   fix) the 560px cap left dead space on either side of the card on any
-   viewport wider than 560px — including exactly 768px, the phone breakpoint
-   itself — so the mobile media query below overrides back to a full-width
-   card. */
-.pinned-anchor :deep(.dashboard-card) {
-  width: min(560px, 100%);
-  margin: 0 auto calc(var(--space) * 1.5);
-  /* B111 — `flex-shrink: 0` so a short stack (e.g. one small pinned card)
-     never gets stretched taller than its natural size by the column flex
-     container; a tall stack instead grows past `max-height` and triggers
-     the anchor's own scroll, which is the intended behaviour. */
-  flex-shrink: 0;
-}
 @media (max-width: 768px) {
-  .pinned-anchor :deep(.dashboard-card) {
-    width: 100%;
-    margin-bottom: calc(var(--space) * 1.5);
+  .pinned-anchor {
+    max-height: 50vh;
+    overflow-y: auto;
   }
 }
-.pin-placeholder {
-  height: 100%;
-  min-height: 64px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: var(--space);
-  border: 1px dashed var(--color-border);
-  border-radius: calc(var(--radius) * 1.5);
-  background: var(--color-bg);
-  color: var(--color-text-muted);
-  text-align: center;
-}
-.pin-placeholder-icon {
-  font-size: 1.1rem;
-  line-height: 1;
-}
-.pin-placeholder-title {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--color-text);
-}
-.pin-placeholder-text {
-  font-size: 0.75rem;
+/* B112 — a pinned card now spans the SAME width as the grid/page content, at
+   every breakpoint, exactly like an ordinary card does — reads as "part of
+   this page, stuck to the top" rather than a separate floating panel.
+   Previously desktop capped it at `width: min(560px, 100%)` and centred it
+   (a deliberately floating look); removed per the same user report above.
+   `flex-shrink: 0` still applies so a short stack (e.g. one small pinned
+   card) is never stretched taller than its natural size by the column flex
+   container — a tall stack instead grows past mobile's own `max-height` and
+   triggers the anchor's scroll (see that rule's own doc); desktop has no cap
+   to grow past. */
+.pinned-anchor :deep(.dashboard-card) {
+  width: 100%;
+  margin-bottom: calc(var(--space) * 1.5);
+  flex-shrink: 0;
 }
 
 /* #3 — theme the resize handle (grid-layout-plus's `.vgl-item__resizer`,
