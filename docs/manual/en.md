@@ -352,10 +352,10 @@ Below roughly 768px wide, the Analyzer layout collapses to a single column, orde
 
 - **Collapsing a card**: same as desktop — tap a card's chevron to collapse/expand its content, handy for skipping past sections you don't need right now in the single column.
 - **Pinning a card**: on mobile, every card's title bar also has a pin button. Tap it and that card becomes **stuck to the top of the screen** (sticky) while the rest of the cards keep scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table.
-  - Only **one card can be pinned at a time** — pinning a different card automatically unpins the previous one.
-  - A pinned card's height is capped at roughly 45% of the screen (`max-height: 45vh`) so it doesn't take over the whole screen and block scrolling to the rest of the content.
+  - **Several cards can be pinned at once**: they stack top to bottom in the order you pinned them (the first one pinned stays on top). Tapping a pinned card's pin button again unpins just that one — the rest of the stack and its order are unaffected.
+  - The pinned cards' **combined** height is capped at roughly 50% of the screen — beyond that, the pinned stack itself scrolls up/down internally rather than shrinking any individual card, so the (unpinned) content below always keeps roughly half the screen scrollable, no matter how many cards you pin.
   - Tap the pin button again to unpin.
-  - Collapse and pin state are each saved in the browser (localStorage) and persist across reloads and closed tabs.
+  - Collapse and pin state are each saved in the browser (localStorage) and persist across reloads and closed tabs; an older single-pin save is automatically upgraded to the new format without losing the existing pin.
 
 ### 4.11 GPS session merge
 

@@ -45,9 +45,15 @@ import { edgeAutoscrollVelocity } from '@/domain/layout/edgeAutoscroll'
  * original grid slot (so the layout doesn't jump). This component has no
  * idea whether it's currently rendering inside the grid or inside that
  * anchor — same props/emits either way, which is what makes the Teleport
- * possible without DashboardCard itself changing. Only one card may be
- * pinned at a time (enforced by panelState.ts's togglePinned, documented via
- * the pin button's own tooltip) rather than supporting a multi-pin stack.
+ * possible without DashboardCard itself changing. B111 — SEVERAL cards may
+ * now be pinned at once (a stand-in for a proper mobile split view until one
+ * exists — see panelState.ts's `pinnedIds` doc); this component still has no
+ * idea how many other cards are ALSO pinned, it only knows its own `pinned`
+ * flag and its `pinOrder` (stack position, purely a CSS `order` value — see
+ * that prop's doc below). The combined-height cap now lives on
+ * AnalyzerView's shared anchor (`max-height: 50vh` + internal scroll), not on
+ * this component's own `.pinned` rule (see that CSS's B111 note) — several
+ * pinned cards must share one ~half-screen budget, not each get their own.
  *
  * #19 — the Teleport move itself is otherwise an instant DOM jump (Vue's own
  * `<Transition>` can't help here — see flip.ts's module doc for why), so
@@ -195,6 +201,16 @@ const props = defineProps<{
    *  omitted (or not finite), falls back to the old fixed-height behaviour —
    *  see the `.pinned` CSS below. */
   aspectRatio?: number
+  /** B111 — this card's position within the pinned STACK (0 = pinned first =
+   *  topmost), or -1/undefined when not pinned. Applied as an inline CSS
+   *  `order` (see `cardStyle` below) so the visual stacking order in
+   *  AnalyzerView's shared `#dashboard-pinned-anchor` always matches PIN
+   *  order, regardless of each card's own grid position or the order its
+   *  `<Teleport>` happened to mount in (Vue's Teleport otherwise follows
+   *  source/DOM order, which is the grid's arrangement, not pin sequence).
+   *  Ignored while `!pinned` — only meaningful once this card's markup is
+   *  actually inside the shared anchor. */
+  pinOrder?: number
 }>()
 
 const emit = defineEmits<{
@@ -731,28 +747,43 @@ function onPinResizeReset(): void {
 // does), without needing any dedicated `.pinned-mini` CSS rule — `.pinned`'s
 // own `height: auto` already does the work once the inline style stops
 // forcing a height.
+// B111 — this card's `order` within the shared pinned-anchor flex stack (see
+// AnalyzerView's `pinOrderFor`/`.pinned-anchor` doc), merged into whichever
+// branch below `cardStyle` returns. Only meaningful while pinned; a
+// negative/non-finite value (not currently in the stack, or prop omitted)
+// contributes nothing so an unpinned card's style is unaffected.
+const pinOrderStyle = computed(() => {
+  if (!props.pinned || props.pinOrder == null || !Number.isFinite(props.pinOrder) || props.pinOrder < 0) {
+    return {}
+  }
+  return { order: props.pinOrder }
+})
+
 const cardStyle = computed(() => {
   if (!props.pinned) return undefined
   if (pinnedSize.value) {
     if (props.collapsed || pinnedMini.value) {
-      return { width: `${pinnedSize.value.w}px`, maxWidth: 'none' }
+      return { ...pinOrderStyle.value, width: `${pinnedSize.value.w}px`, maxWidth: 'none' }
     }
     // A user-dragged size overrides both the aspect-ratio default AND the
-    // `.pinned` CSS rule's `max-height: 45vh` / the anchor's `width:
-    // min(560px, 100%)` cap — clampPinnedSize already bounds it sensibly, so
-    // those class-level ceilings would otherwise silently fight this.
+    // anchor's `width: min(560px, 100%)` cap — clampPinnedSize already
+    // bounds it sensibly, so those class-level ceilings would otherwise
+    // silently fight this. (Height itself is no longer separately capped
+    // per-card — see `.dashboard-card.pinned`'s B111 doc — the shared anchor
+    // scrolls past its own combined `max-height` instead.)
     return {
+      ...pinOrderStyle.value,
       width: `${pinnedSize.value.w}px`,
       height: `${pinnedSize.value.h}px`,
       maxWidth: 'none',
       maxHeight: 'none',
     }
   }
-  if (props.collapsed || pinnedMini.value) return undefined
+  if (props.collapsed || pinnedMini.value) return pinOrderStyle.value
   if (props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0) {
-    return { aspectRatio: String(props.aspectRatio) }
+    return { ...pinOrderStyle.value, aspectRatio: String(props.aspectRatio) }
   }
-  return undefined
+  return pinOrderStyle.value
 })
 
 function onToggleCollapsed(): void {
@@ -1235,11 +1266,22 @@ onBeforeUnmount(() => {
    grid w/h ratio) now drives the card's HEIGHT from its width, so a pinned
    card keeps roughly the shape it had in the grid instead of every pinned
    card — short control panel or tall chart alike — being squashed into the
-   exact same 45vh box. `max-height: 45vh` stays as a SAFETY CEILING (a very
-   tall/narrow card's aspect-ratio-derived height could otherwise still push
-   past a comfortable viewport share) rather than the primary sizing rule;
-   when `aspectRatio` isn't supplied, this falls back to the old behaviour
-   unchanged.
+   exact same box; when `aspectRatio` isn't supplied, this falls back to the
+   old fixed-height-ish behaviour (bounded only by the anchor now — see
+   below).
+   B111 — this rule USED TO also carry its own `max-height: 45vh` SAFETY
+   CEILING (a very tall/narrow card's aspect-ratio-derived height could
+   otherwise still push past a comfortable viewport share). That was fine
+   when only one card could ever be pinned — the per-card cap WAS the
+   combined cap — but once several cards can be pinned at once, each one
+   separately capping at 45vh would let just TWO pins alone swallow 90% of
+   the viewport, defeating "the rest of the dashboard keeps roughly half the
+   screen". The combined-height ceiling now lives ONE level up, on
+   AnalyzerView's shared `#dashboard-pinned-anchor` (`max-height: 50vh` +
+   `overflow-y: auto` on the STACK, not any individual card) — see that
+   rule's own doc. This card simply sizes to its natural (aspect-ratio-
+   derived, or drag-resized) height and lets the anchor's scroll handle
+   anything past the shared budget.
    B100 fix — this rule's `height: auto` also has to WIN while `.collapsed`
    is ALSO present (a pinned card can be collapsed, same header-only chevron
    as a grid card): both classes carry equal (two-class) specificity, and
@@ -1258,7 +1300,6 @@ onBeforeUnmount(() => {
      value the aspect-ratio calculation must respect, not override) and
      silently defeat the whole fix above. */
   height: auto;
-  max-height: 45vh;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
   /* B18 — positioning context for `.pin-resize-handle` below. */
   position: relative;
@@ -1274,9 +1315,11 @@ onBeforeUnmount(() => {
 /* B18b — pinned-card resize handle: bottom-right corner grip, shown only
    while pinned + not collapsed (see the template's `v-if`). Dragging it sets
    an explicit pixel width/height on the card (`pinnedSize`/`cardStyle`
-   above), overriding both the aspect-ratio default and the `max-height: 45vh`
-   / anchor `width: min(560px, 100%)` ceilings — `clampPinnedSize` keeps the
-   result sane instead.
+   above), overriding both the aspect-ratio default and the anchor's own
+   `width: min(560px, 100%)` ceiling — `clampPinnedSize` keeps the result
+   sane instead. (B111: height is no longer separately capped per-card here —
+   see `.dashboard-card.pinned`'s own doc — a manually-resized-tall card just
+   makes the shared anchor's stack scroll further.)
    Previously this drew its OWN bespoke 90°-corner icon (fixed 18px box,
    plain `--color-text-muted` border, hover-only opacity) — a different
    affordance from the one every GRID card already has for the exact same

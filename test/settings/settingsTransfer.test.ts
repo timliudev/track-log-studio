@@ -264,4 +264,44 @@ describe('settingsTransfer — parseImportBundle', () => {
     const withoutVersion = parseImportBundle('{}')
     expect(withoutVersion.ok && withoutVersion.bundle.schemaVersion).toBe(SETTINGS_EXPORT_SCHEMA_VERSION)
   })
+
+  // B111 — panelState's pin moved from a single `pinnedId: string | null` to
+  // a `pinnedIds: string[]` stack; parseImportBundle delegates straight to
+  // `parsePanelState` (see this file's module doc), so these two tests exist
+  // to confirm that delegation actually carries the NEW multi-pin shape (and
+  // the OLD single-pin shape's migration) all the way through a B19 import,
+  // not just at the panelState.ts unit level.
+  describe('B111 — panelState pinnedIds shape through B19 import', () => {
+    it('round-trips a layout bundle with several pinned cards, preserving pin order', () => {
+      const original: SettingsExportBundle = buildExportBundle({
+        appearance: APPEARANCE,
+        drivetrain: DRIVETRAIN,
+        layout: {
+          dashboardLayout: defaultLayout(),
+          panelState: { collapsed: ['gear'], pinnedIds: ['map', 'chart-1', 'gear'], mobileOrder: [] },
+          layoutLocked: false,
+          currentValuesFieldPrefs: defaultCurrentValuesFieldPrefs(),
+        },
+      })
+      const result = parseImportBundle(serializeExportBundle(original))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.bundle.layout?.panelState.pinnedIds).toEqual(['map', 'chart-1', 'gear'])
+    })
+
+    it('migrates an OLDER exported bundle whose layout.panelState still uses the legacy pinnedId string', () => {
+      const result = parseImportBundle(
+        JSON.stringify({
+          layout: {
+            dashboardLayout: defaultLayout(),
+            panelState: { collapsed: [], pinnedId: 'map', mobileOrder: [] },
+            layoutLocked: false,
+          },
+        }),
+      )
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.bundle.layout?.panelState.pinnedIds).toEqual(['map'])
+    })
+  })
 })

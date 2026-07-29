@@ -1,6 +1,9 @@
 /**
  * #9 — Analyzer dashboard PANEL state: per-card collapse (all breakpoints)
- * and a single mobile-only PIN (sticky-to-top while the rest scrolls).
+ * and mobile-only PIN (sticky-to-top while the rest scrolls). B111 widened
+ * pin from a single card to a stacked LIST of pinned cards (see `pinnedIds`
+ * below) — everything else about the mechanism (Teleport, storage key,
+ * reconciliation) is unchanged.
  *
  * Deliberately a SIBLING module/storage key to dashboardLayout.ts rather than
  * an extension of it: the v1 layout shape (`{ i, x, y, w, h }[]`) is read/
@@ -19,8 +22,20 @@
 export interface PanelState {
   /** Card ids that are currently collapsed (header-only). Absence = expanded. */
   collapsed: string[]
-  /** The single pinned (sticky, mobile-only) card id, or null for none. */
-  pinnedId: string | null
+  /**
+   * B111 — the pinned (sticky, mobile-only) card ids, in PIN ORDER: index 0
+   * is the card pinned first (topmost in the stack), later entries were
+   * pinned more recently and stack below it. Was a single `pinnedId: string
+   * | null` (only one card could ever be pinned) until the user asked for
+   * multiple simultaneous pins as a stand-in for a proper mobile layout —
+   * see AnalyzerView's `#dashboard-pinned-anchor` for how the stack renders
+   * (flex column, combined height capped ~50vh with its own internal
+   * scroll, so the rest of the dashboard always keeps roughly half the
+   * screen no matter how many cards are pinned). Empty array = nothing
+   * pinned. `parsePanelState` below migrates an older persisted `pinnedId`
+   * string into a single-element array so existing users don't lose their
+   * pin on upgrade. */
+  pinnedIds: string[]
   /**
    * #9 (revised) — the user's chosen MOBILE (single-column) card order, top to
    * bottom, keyed by the same stable card id. Kept HERE rather than in
@@ -42,12 +57,19 @@ export const STORAGE_KEY = 'tracklogstudio.panelState.v1'
  *  so other callers needing a well-formed default (e.g. the settings
  *  export/import transfer module, B19) don't have to hand-roll the shape. */
 export function defaultPanelState(): PanelState {
-  return { collapsed: [], pinnedId: null, mobileOrder: [] }
+  return { collapsed: [], pinnedIds: [], mobileOrder: [] }
 }
 
 /** Parse persisted JSON into a PanelState, or null if missing/invalid (caller
  *  falls back to an empty state). Permissive about extra/missing fields, same
- *  spirit as dashboardLayout.ts's parseLayout. */
+ *  spirit as dashboardLayout.ts's parseLayout.
+ *
+ *  B111 — `pinnedIds` (array, current shape) is read when present; a blob
+ *  written by an OLDER build only has the single `pinnedId: string | null`
+ *  field, which is migrated to a one-element array (or `[]` for null/
+ *  garbage) so an existing user's pin survives the upgrade instead of being
+ *  silently dropped. `pinnedIds` wins if BOTH are somehow present (shouldn't
+ *  happen from a real persisted blob, but keeps the parse deterministic). */
 export function parsePanelState(raw: string | null): PanelState | null {
   if (!raw) return null
   try {
@@ -56,7 +78,17 @@ export function parsePanelState(raw: string | null): PanelState | null {
     const collapsed = Array.isArray(data.collapsed)
       ? data.collapsed.filter((x: unknown): x is string => typeof x === 'string')
       : []
-    const pinnedId = typeof data.pinnedId === 'string' ? data.pinnedId : null
+    let pinnedIds: string[]
+    if (Array.isArray(data.pinnedIds)) {
+      pinnedIds = [
+        ...new Set<string>(data.pinnedIds.filter((x: unknown): x is string => typeof x === 'string')),
+      ]
+    } else if (typeof data.pinnedId === 'string') {
+      // Legacy single-pin shape — migrate to a one-element list.
+      pinnedIds = [data.pinnedId]
+    } else {
+      pinnedIds = []
+    }
     // `mobileOrder` is a v1.1 addition — tolerate its absence (older blobs) by
     // defaulting to []; filter to strings + de-dup so a corrupt/duplicated
     // entry can't wedge the reorder logic downstream.
@@ -67,7 +99,7 @@ export function parsePanelState(raw: string | null): PanelState | null {
           ),
         ]
       : []
-    return { collapsed, pinnedId, mobileOrder }
+    return { collapsed, pinnedIds, mobileOrder }
   } catch {
     return null
   }
@@ -106,12 +138,25 @@ export function toggleCollapsed(state: PanelState, id: string, force?: boolean):
   }
 }
 
-/** Returns a NEW state with `id` pinned — pinning a second card unpins the
- *  first (only one card may be pinned at a time, per the task's mobile
- *  "watch the map while scrolling" design). Pinning the already-pinned card
- *  unpins it (toggle). */
+/** True when `id` is currently pinned (membership test — B111, was a single
+ *  `pinnedId === id` equality check back when only one card could be
+ *  pinned). */
+export function isPinned(state: PanelState, id: string): boolean {
+  return state.pinnedIds.includes(id)
+}
+
+/** Returns a NEW state with `id`'s pin toggled — B111: pinning a card that
+ *  isn't already pinned APPENDS it to the end of `pinnedIds` (so it stacks
+ *  BELOW whatever is already pinned — first pinned stays topmost), rather
+ *  than replacing the sole previous pin as the old single-`pinnedId` model
+ *  did. Toggling an already-pinned card removes just that id, preserving the
+ *  relative order of whatever else is still pinned. */
 export function togglePinned(state: PanelState, id: string): PanelState {
-  return { ...state, pinnedId: state.pinnedId === id ? null : id }
+  const pinned = isPinned(state, id)
+  return {
+    ...state,
+    pinnedIds: pinned ? state.pinnedIds.filter((x) => x !== id) : [...state.pinnedIds, id],
+  }
 }
 
 /** Returns a NEW state with the mobile card order replaced — pure, caller
@@ -161,19 +206,26 @@ export function reconcileMobileOrder(stored: string[], orderedIds: string[]): st
 /** Drop collapsed/pinned entries for card ids that no longer exist (e.g. a
  *  removed chart) — mirrors dashboardLayout.ts's reconcileLayout so
  *  localStorage doesn't accumulate stale ids forever. `validIds` is the full
- *  current set of static + chart card ids. */
+ *  current set of static + chart card ids.
+ *
+ *  B111 — `pinnedIds` is filtered (not just nulled) so removing ONE stale
+ *  pinned card (e.g. its chart got deleted) leaves any OTHER still-valid
+ *  pinned cards, and their remaining stack order, untouched. */
 export function reconcilePanelState(state: PanelState, validIds: string[]): PanelState {
   const valid = new Set(validIds)
   const collapsed = state.collapsed.filter((id) => valid.has(id))
-  const pinnedId = state.pinnedId != null && valid.has(state.pinnedId) ? state.pinnedId : null
+  const pinnedIds = state.pinnedIds.filter((id) => valid.has(id))
   // `validIds` doubles as the canonical top-to-bottom order for appending any
   // not-yet-ordered card (usePanelState passes [...staticIds, ...chartIds]).
   const mobileOrder = reconcileMobileOrder(state.mobileOrder, validIds)
   const sameOrder =
     mobileOrder.length === state.mobileOrder.length &&
     mobileOrder.every((id, i) => id === state.mobileOrder[i])
-  if (collapsed.length === state.collapsed.length && pinnedId === state.pinnedId && sameOrder) {
+  const samePinned =
+    pinnedIds.length === state.pinnedIds.length &&
+    pinnedIds.every((id, i) => id === state.pinnedIds[i])
+  if (collapsed.length === state.collapsed.length && samePinned && sameOrder) {
     return state
   }
-  return { collapsed, pinnedId, mobileOrder }
+  return { collapsed, pinnedIds, mobileOrder }
 }
