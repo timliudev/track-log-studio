@@ -282,6 +282,17 @@ describe('TrackMap overlay-top-right slot', () => {
     const rowAfterZoom = wrapper.find('.map-controls-tr')
     expect(rowAfterZoom.find('.reset-view').exists()).toBe(true)
     expect(rowAfterZoom.find('button.host-play-toggle').exists()).toBe(true)
+
+    // Height-consistency regression guard (button-heights fix): all three
+    // overlay controls that share this corner — reset-view (top-right row),
+    // the host's play-button stand-in (same row), and maximize-toggle
+    // (top-left, but the same visual size language) — must all be present
+    // once the view is interactive. happy-dom doesn't process <style scoped>
+    // blocks (no `css: true` in this repo's vitest config), so actual
+    // computed pixel heights can't be asserted here; see
+    // test/lint/mapOverlayButtonSizing.test.ts for the CSS-source-level
+    // invariant that locks in matching min-height/coarse-pointer rules.
+    expect(wrapper.find('.maximize-toggle').exists()).toBe(true)
   })
 })
 
