@@ -44,9 +44,9 @@ describe('window.__flags console API', () => {
   it('list() returns the fully-resolved snapshot', async () => {
     await import('@/config/featureFlags')
     const flags = window.__flags as { list: () => Record<string, boolean> }
-    expect(flags.list()).toEqual({ cvtDynamics: false })
+    expect(flags.list()).toEqual({ cvtDynamics: false, cssGridDashboard: false })
     ;(window.__flags as Record<string, unknown>).cvtDynamics = true
-    expect(flags.list()).toEqual({ cvtDynamics: true })
+    expect(flags.list()).toEqual({ cvtDynamics: true, cssGridDashboard: false })
   })
 
   it('reset(name) clears one in-memory override, falling back to the next layer', async () => {

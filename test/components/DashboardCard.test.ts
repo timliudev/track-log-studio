@@ -452,6 +452,12 @@ describe('DashboardCard (scaffold smoke test)', () => {
       expect(mountCard({ pinned: true, collapsed: true }).find('.pin-resize-handle').exists()).toBe(false)
     })
 
+    it('F6 stage 1 — disablePinResize hides the handle even while pinned and not collapsed', () => {
+      expect(mountCard({ pinned: true, disablePinResize: true }).find('.pin-resize-handle').exists()).toBe(false)
+      // Default (omitted) is unaffected — existing callers keep the handle.
+      expect(mountCard({ pinned: true, disablePinResize: false }).find('.pin-resize-handle').exists()).toBe(true)
+    })
+
     it('dragging the handle sets an explicit pixel width/height, overriding the aspect-ratio default', async () => {
       const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
       const el = wrapper.find('.dashboard-card').element as HTMLElement

@@ -61,6 +61,7 @@ import { pinnedCardPixelSize, type GridMetrics } from '@/domain/layout/gridGutte
 import DashboardCard from '@/components/DashboardCard.vue'
 import CardMenu from './CardMenu.vue'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
+import CssGridGrid from './CssGridGrid.vue'
 import type { AnalyzerCardContext } from './analyzerCardContext'
 
 const { t } = useI18n()
@@ -888,6 +889,49 @@ watch(gridWrapRef, (el) => {
   gridGutters.containerRef.value = el
 })
 
+// --- F6 stage 1 — CSS Grid dashboard renderer (feature-flag gated, see
+// CssGridGrid.vue's own module doc for the full "why": grid-layout-plus's
+// `position: absolute` items are incompatible with `position: sticky`, which
+// is why pinning had to fake it via Teleport into a separate anchor — the
+// user explicitly rejected that. RENDER ONLY for stage 1 (no drag/resize/
+// gutter — those are stages 2-4, see docs/ISSUES.md's F6 entry), so these
+// computeds only need read-only, already-visible layouts, unlike
+// `activeLayout`'s get/set pair above (which also carries the
+// grid-layout-plus-specific drag decoration + write-back merge logic this
+// renderer has no use for).
+//
+// Unlike desktopVisibleLayout/mobileVisibleLayout, pinned ids are NOT
+// filtered out here — CssGridGrid.vue keeps a pinned card in its own grid
+// slot (no Teleport, no reserved-then-reclaimed gap) and makes IT
+// `position: sticky` there instead. The collapse-reflow overlay
+// (applyCollapsedHeights) still applies uniformly to every visible card
+// (pinned or not), same "same layout as today" behaviour stage 1 asks for. ---
+const cssGridEnabled = computed(() => isFlagEnabled('cssGridDashboard'))
+
+const cssGridDesktopLayout = computed<DashboardLayoutItem[]>(() =>
+  applyCollapsedHeights(
+    layout.value.filter((it) => isVisibleId(it.i)),
+    collapsedIds.value,
+  ),
+)
+const cssGridMobileLayout = computed<DashboardLayoutItem[]>(() =>
+  applyCollapsedHeights(
+    mobileLayout(
+      mobileOrder.value.filter((id) => isVisibleId(id)),
+      layout.value,
+    ),
+    collapsedIds.value,
+  ),
+)
+/** The single layout array fed to `<CssGridGrid>` — desktop 2-D on wide
+ *  screens, the mobile 1-column build below the breakpoint, mirroring
+ *  `activeLayout`'s own desktop/mobile branch but without its write-back
+ *  setter (this renderer never mutates `layout`/`mobileOrder` — stage 1 is
+ *  read-only). */
+const cssGridActiveLayout = computed<DashboardLayoutItem[]>(() =>
+  isMobile.value ? cssGridMobileLayout.value : cssGridDesktopLayout.value,
+)
+
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
 }
@@ -1214,8 +1258,16 @@ const cardCtx: AnalyzerCardContext = {
            (see the CSS below) is now MOBILE-ONLY: it was a phone-UI stopgap
            (B111), and on desktop it produced an unwanted inner scrollbar on
            a floating card with plenty of room below it — see that CSS
-           rule's own doc. Desktop has no height cap at all now. -->
-      <div id="dashboard-pinned-anchor" class="pinned-anchor" />
+           rule's own doc. Desktop has no height cap at all now.
+
+           F6 stage 1 — this whole anchor + the grid/pinned-cards/gutters
+           block below it are the OLD (grid-layout-plus + Teleport) renderer,
+           now gated behind `v-if="!cssGridEnabled"` so the two renderers
+           never both run: with the flag ON, no Teleport target exists at
+           all (see the `v-else` branch below), which is what guarantees
+           "the old teleport/anchor path must not also run" rather than just
+           happening to render nothing. -->
+      <div v-if="!cssGridEnabled" id="dashboard-pinned-anchor" class="pinned-anchor" />
 
       <!-- #8/#9: draggable dashboard grid (grid-layout-plus). Drag is restricted
            to each card's own `.drag-handle` header (DashboardCard's title bar)
@@ -1235,7 +1287,7 @@ const cardCtx: AnalyzerCardContext = {
            are placed relative to — it must wrap `<GridLayout>` exactly (no
            extra padding/border) so its measured width matches the library's
            own colWidth math (see useGridGutters.ts's `containerRef` doc). -->
-      <div ref="gridWrapRef" class="grid-wrap">
+      <div v-if="!cssGridEnabled" ref="gridWrapRef" class="grid-wrap">
       <GridLayout
         v-model:layout="activeLayout"
         :col-num="colNum"
@@ -1353,6 +1405,48 @@ const cardCtx: AnalyzerCardContext = {
         @pointerdown="onGutterPointerDown(g, $event)"
       />
       </div>
+
+      <!-- F6 stage 1 — the new CSS-Grid dashboard renderer (see
+           CssGridGrid.vue's module doc). RENDER ONLY: no drag/resize/gutter
+           yet (stages 2-4). Reuses the SAME card markup (DashboardCard +
+           AnalyzerCardBody) as the `#item` slot above — this is a new
+           renderer, not a new card system.
+
+           Pinning here needs no Teleport/anchor at all: `pinned-ids` tells
+           CssGridGrid which items to render `position: sticky`, in their OWN
+           grid slot. `aspect-ratio`/`pinned-width-px`/`pinned-height-px` are
+           deliberately NOT passed to `<DashboardCard>` — with none of the
+           three set, its `cardStyle` computed contributes no inline
+           width/height/aspect-ratio at all while pinned (see that
+           component's own doc), so the card keeps its NORMAL grid-slot size
+           exactly like the task asks, instead of the old floating-anchor
+           sizing path. `disable-pin-resize` hides the pinned-card's own
+           floating corner resize handle (DashboardCard.vue), since dragging
+           it would set an explicit pixel size that fights the grid's own
+           sizing — resize entirely is out of scope for this stage anyway. -->
+      <CssGridGrid
+        v-else
+        :layout="cssGridActiveLayout"
+        :cols="colNum"
+        :row-height="GRID_ROW_HEIGHT"
+        :margin-x="gridMargin[0]"
+        :margin-y="gridMargin[1]"
+        :pinned-ids="pinnedIds"
+      >
+        <template #item="{ item }">
+          <DashboardCard
+            :data-card-id="String(item.i)"
+            :title="titleForItemId(String(item.i))"
+            :collapsed="isCollapsed(String(item.i))"
+            :pinned="isPinned(String(item.i))"
+            :disable-pin-resize="true"
+            @update:collapsed="toggleCollapsed(String(item.i))"
+            @update:pinned="togglePinned(String(item.i))"
+          >
+            <AnalyzerCardBody :id="String(item.i)" :ctx="cardCtx" />
+          </DashboardCard>
+        </template>
+      </CssGridGrid>
     </template>
   </div>
 </template>
