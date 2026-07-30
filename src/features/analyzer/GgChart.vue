@@ -108,39 +108,6 @@ export function measuredSize(
 }
 
 /**
- * ResizeObserver feedback-loop guard — whether a freshly measured host size
- * differs enough from the size last actually APPLIED to the chart (via
- * `chart.resize()`) to be worth reacting to again.
- *
- * In `equalAspect` (1:1) mode, `resize()` calls `render()` right after
- * `chart.resize()`, and `render()` rebuilds the option's square grid box
- * (see `squareGridBox`) from the container's CURRENT size. That rebuild can
- * nudge the host element's own measured size by a sub-pixel amount (e.g.
- * layout rounding on a fractional-DPI viewport), which fires the
- * ResizeObserver again → `resize()` → `render()` → relayout → observer …
- * forever, without ever settling. At some viewport sizes (reported: 1386×949
- * with a 1:1 scatter) that sub-pixel echo doesn't damp out — the chart
- * visibly zoom-pulses/flickers.
- *
- * Comparing the new measurement against the last-APPLIED size (not the last
- * MEASURED size) with a >=1px-on-either-axis threshold filters that echo out
- * (the echo is sub-pixel by construction) while still reacting to every
- * genuine resize — a real window/card resize always moves by a whole pixel
- * or more, well above this threshold.
- */
-export function sizeChangedEnoughToApply(
-  lastApplied: { width: number; height: number } | null,
-  measured: { width: number; height: number },
-  thresholdPx = 1,
-): boolean {
-  if (!lastApplied) return true
-  return (
-    Math.abs(measured.width - lastApplied.width) >= thresholdPx ||
-    Math.abs(measured.height - lastApplied.height) >= thresholdPx
-  )
-}
-
-/**
  * XY-aspect feature — the raw [min,max] data extent across every series'
  * points, per axis. `Infinity`/`-Infinity` fields when there are no points
  * (caller falls back to a default range via {@link paddedAxisRange}, which
@@ -376,6 +343,7 @@ import {
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { colormapSwatches } from '@/domain/analysis/colormap'
+import { sizeChangedEnoughToApply } from '@/domain/analysis/chartResize'
 
 echarts.use([
   ScatterChart,
