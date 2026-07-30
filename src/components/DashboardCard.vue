@@ -229,6 +229,19 @@ const props = defineProps<{
    *  Ignored while `!pinned` — only meaningful once this card's markup is
    *  actually inside the shared anchor. */
   pinOrder?: number
+  /** F6 stage 1 — true under the new CSS-Grid dashboard renderer
+   *  (`CssGridGrid.vue`, gated by the `cssGridDashboard` feature flag), where
+   *  a pinned card stays an ordinary in-flow grid item (`position: sticky`)
+   *  rather than a floating panel Teleported into a dedicated anchor. That
+   *  renderer wants the card to "keep its normal [grid-slot] size" (no
+   *  `aspectRatio`/`pinnedWidthPx`/`pinnedHeightPx` are passed there either,
+   *  so `cardStyle` already falls through to no inline size override) — this
+   *  flag additionally hides the `.pin-resize-handle` corner grip so a user
+   *  can't drag `pinnedSize` into existence and reintroduce an explicit
+   *  pixel size that would fight the grid's own sizing. Defaults to `false`
+   *  so every existing (grid-layout-plus + Teleport) caller is byte-for-byte
+   *  unaffected. */
+  disablePinResize?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -1059,7 +1072,7 @@ onBeforeUnmount(() => {
          to grow — see this handle's module doc above `pinnedSize`). -->
     <div
       ref="pinResizeHandleEl"
-      v-if="pinned && !collapsed && !pinnedMini"
+      v-if="pinned && !collapsed && !pinnedMini && !disablePinResize"
       class="pin-resize-handle"
       :class="{ 'touch-armed': pinResizeTouchArmed, 'touch-dragging': pinResizeTouchActive }"
       v-tooltip="t('analyzer.layout.pinnedResizeHandle')"

@@ -56,6 +56,11 @@ export default {
           description:
             'Shows the CVT dynamics card on the analyzer page; feature-complete but not yet fully field-tested.',
         },
+        cssGridDashboard: {
+          label: 'CSS Grid dashboard renderer',
+          description:
+            'Renders the analyzer dashboard with CSS Grid instead of grid-layout-plus; read-only for now (no drag/resize) and pinned cards become genuinely sticky in place. Staged migration still in progress.',
+        },
       },
     },
   },

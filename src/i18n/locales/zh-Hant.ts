@@ -51,6 +51,10 @@ export default {
           label: 'CVT 動態模型卡片',
           description: '在分析頁顯示 CVT 動態模型卡片；功能已完成但尚未經過完整場地測試。',
         },
+        cssGridDashboard: {
+          label: 'CSS Grid 版面渲染器',
+          description: '分析頁儀表板改用 CSS Grid 渲染(取代 grid-layout-plus);目前僅唯讀顯示,不含拖曳/縮放,釘選卡片改為原地 sticky。仍在分階段開發中。',
+        },
       },
     },
   },
