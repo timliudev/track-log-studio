@@ -5,6 +5,7 @@ import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import 'echarts-gl'
 import { computeAxisRanges, equalAspectBoxSize, xyzPoints } from '@/domain/analysis/scatter3d'
+import { sizeChangedEnoughToApply } from '@/domain/analysis/chartResize'
 import type { GgSeries } from './GgChart.vue'
 
 echarts.use([TooltipComponent, CanvasRenderer])
@@ -39,6 +40,16 @@ const props = defineProps<{
 const host = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 let ro: ResizeObserver | null = null
+// ResizeObserver feedback-loop guard (see `sizeChangedEnoughToApply`'s doc,
+// shared with GgChart.vue/B107) — the size actually last passed to
+// `chart.resize()`, compared against each new measurement so a sub-pixel
+// echo doesn't re-trigger work forever.
+let lastAppliedSize: { width: number; height: number } | null = null
+// Coalesces bursts of ResizeObserver callbacks (an observer can fire more
+// than once per frame) into a single measurement+resize per animation frame
+// — same rAF-coalescing shape as GgChart's `scheduleResize` (B107)/TrackMap's
+// `scheduleDraw` (B30).
+let resizeRafId: number | null = null
 
 function hostSize(): { width: number; height: number } {
   return {
@@ -104,18 +115,52 @@ function render(): void {
 function create(): void {
   if (!host.value) return
   chart?.dispose()
-  chart = echarts.init(host.value, undefined, hostSize())
+  const size = hostSize()
+  chart = echarts.init(host.value, undefined, size)
+  // The size just passed to `echarts.init` IS the applied size — seed the
+  // guard with it so the FIRST ResizeObserver callback (which fires right
+  // after mount, reporting this same size) is correctly treated as a no-op
+  // rather than an unnecessary extra resize+render — see GgChart's `create()`
+  // (B107) for the identical reasoning.
+  lastAppliedSize = size
   render()
+}
+
+function resize(): void {
+  if (!chart) return
+  const size = hostSize()
+  // Feedback-loop guard — see `sizeChangedEnoughToApply`'s doc. Skipping
+  // sub-pixel "changes" breaks the loop while still catching every genuine
+  // (>=1px) resize.
+  if (!sizeChangedEnoughToApply(lastAppliedSize, size)) return
+  chart.resize(size)
+  lastAppliedSize = size
+}
+
+/** Coalesces a burst of ResizeObserver callbacks into one `resize()` per
+ *  animation frame, always acting on the LATEST measurement — see GgChart's
+ *  `scheduleResize` (B107)/TrackMap's `scheduleDraw` (B30) for the same
+ *  pattern. */
+function scheduleResize(): void {
+  if (resizeRafId !== null) return
+  resizeRafId = requestAnimationFrame(() => {
+    resizeRafId = null
+    resize()
+  })
 }
 
 onMounted(() => {
   create()
-  ro = new ResizeObserver(() => chart?.resize(hostSize()))
+  ro = new ResizeObserver(() => scheduleResize())
   if (host.value) ro.observe(host.value)
 })
 
 onBeforeUnmount(() => {
   ro?.disconnect()
+  if (resizeRafId !== null) {
+    cancelAnimationFrame(resizeRafId)
+    resizeRafId = null
+  }
   chart?.dispose()
   chart = null
 })
