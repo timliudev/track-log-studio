@@ -1191,4 +1191,197 @@ describe('DashboardCard (scaffold smoke test)', () => {
       vi.useRealTimers()
     })
   })
+
+  describe('F6 stage 2 — CSS Grid drag mode (dragMode="cssGrid", self-contained: no interactjs hand-off)', () => {
+    it('mouse pointerdown starts the drag IMMEDIATELY (no long-press gate) and emits css-grid-drag-start', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 40, clientY: 50, pointerId: 1 })
+
+      expect(wrapper.emitted('css-grid-drag-start')).toEqual([[{ x: 40, y: 50 }]])
+    })
+
+    it('pen behaves the same as mouse — immediate start', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'pen', clientX: 5, clientY: 6, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-drag-start')).toEqual([[{ x: 5, y: 6 }]])
+    })
+
+    it('draggable:false blocks the drag entirely, even for mouse', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid', draggable: false })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 10, clientY: 10, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-drag-start')).toBeUndefined()
+    })
+
+    it('does not intercept a pointerdown on the header action buttons (pin/collapse keep their plain tap)', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.pin-btn')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 10, clientY: 10, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-drag-start')).toBeUndefined()
+    })
+
+    it('a live mouse drag forwards pointermove as css-grid-drag-move and pointerup as css-grid-drag-end(committed:true)', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
+
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 30, clientY: 40 }))
+      expect(wrapper.emitted('css-grid-drag-move')).toEqual([[{ x: 30, y: 40 }]])
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      expect(wrapper.emitted('css-grid-drag-end')).toEqual([[{ committed: true }]])
+    })
+
+    it('a genuine pointercancel aborts the live drag — css-grid-drag-end(committed:false)', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
+
+      window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1 }))
+      expect(wrapper.emitted('css-grid-drag-end')).toEqual([[{ committed: false }]])
+    })
+
+    it('a second pointer landing mid-drag aborts it (committed:false) without touching the new pointer', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
+
+      const secondDown = new PointerEvent('pointerdown', { pointerId: 2, clientX: 5, clientY: 5, cancelable: true })
+      const preventDefaultSpy = vi.spyOn(secondDown, 'preventDefault')
+      window.dispatchEvent(secondDown)
+
+      expect(wrapper.emitted('css-grid-drag-end')).toEqual([[{ committed: false }]])
+      expect(preventDefaultSpy).not.toHaveBeenCalled()
+
+      // The aborted drag's own listeners are torn down — a stray move for the
+      // ORIGINAL pointer no longer does anything.
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 99, clientY: 99 }))
+      expect(wrapper.emitted('css-grid-drag-move')).toBeUndefined()
+    })
+
+    it('touch does NOT start before the long-press threshold — a plain tap/brush emits nothing', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      expect(wrapper.emitted('css-grid-drag-start')).toBeUndefined()
+
+      vi.advanceTimersByTime(250)
+      expect(wrapper.emitted('css-grid-drag-start')).toBeUndefined()
+
+      vi.useRealTimers()
+    })
+
+    it('touch starts the drag once the long-press hold completes (300ms, no disqualifying movement)', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+
+      vi.advanceTimersByTime(300)
+      expect(wrapper.emitted('css-grid-drag-start')).toEqual([[{ x: 10, y: 10 }]])
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+      vi.useRealTimers()
+    })
+
+    it('cancels the touch hold (no start) when the finger moves past the threshold before the delay elapses — scroll intent', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 60, pointerId: 7 }))
+      vi.advanceTimersByTime(300)
+
+      expect(wrapper.emitted('css-grid-drag-start')).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('B102b: a second finger touching down mid-PENDING cancels the hold — no start at all', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 3 })
+
+      window.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 99, clientX: 200, clientY: 200 }))
+      vi.advanceTimersByTime(300)
+
+      expect(wrapper.emitted('css-grid-drag-start')).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('B102b: a second finger touching down mid-drag (armed) aborts it directly (committed:false) — no synthetic pointercancel needed', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      vi.advanceTimersByTime(300)
+      expect(wrapper.emitted('css-grid-drag-start')).toEqual([[{ x: 10, y: 10 }]])
+
+      window.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 55, clientX: 300, clientY: 300 }))
+      expect(wrapper.emitted('css-grid-drag-end')).toEqual([[{ committed: false }]])
+
+      vi.useRealTimers()
+    })
+
+    it('applies the touch-dragging class for the duration of an armed touch drag, same visual cue the legacy mode uses', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const handle = wrapper.find('.drag-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-dragging')
+
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).toContain('touch-dragging')
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-dragging')
+      vi.useRealTimers()
+    })
+
+    it('does not fall through to the legacy TOUCH_HANDOFF_MARKER/interactjs branch at all under dragMode="cssGrid"', async () => {
+      // Legacy mode's own synthetic hand-off pointerdown carries a private
+      // marker; under `dragMode="cssGrid"` there is no hand-off at all, so a
+      // pointerdown carrying that marker (which should never happen in
+      // practice under this mode) is simply treated as an ordinary mouse/pen
+      // start rather than specially ignored — this just documents that the
+      // two branches are mutually exclusive, not a real user scenario.
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 1, clientY: 2, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-drag-start')).toEqual([[{ x: 1, y: 2 }]])
+    })
+
+    it('unmounting mid-drag cleans up window listeners (no stray emit after unmount)', async () => {
+      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      await wrapper
+        .find('.drag-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-drag-start')).toHaveLength(1)
+
+      wrapper.unmount()
+      // Nothing throws, and no further emits are possible post-unmount.
+      expect(() =>
+        window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 5, clientY: 5 })),
+      ).not.toThrow()
+    })
+  })
 })

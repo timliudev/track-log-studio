@@ -17,6 +17,7 @@ import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
 import { useGridGutters } from '@/composables/useGridGutters'
+import { useCssGridDashboardDrag } from '@/composables/useCssGridDashboardDrag'
 import { useCardVisibility } from '@/composables/useCardVisibility'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
@@ -704,6 +705,102 @@ function decorateForGrid(
 // back only `{ i, x, y, w, h }` (the decorations are ignored) and routes the
 // library's `update:layout` emission to the RIGHT persistence path for the
 // current breakpoint so the other one is never touched.
+/**
+ * The shared write-back path for a "here is a full array of items with new
+ * coordinates" event — used by BOTH the legacy grid-layout-plus renderer's
+ * `activeLayout` setter below (its `update:layout`/`layout-updated` payload)
+ * AND the F6 stage 2 CSS Grid drag-to-reorder commit (`onCssGridDragCommit`,
+ * see useCssGridDashboardDrag.ts's `onCommit` option). Extracted into one
+ * function specifically so BOTH renderers' drag results flow through the
+ * EXACT same invariants — B52's display-vs-canonical layout split, the echo/
+ * no-op guard (`sameLayoutPositions`) that prevents an update→compact→update
+ * loop, `packExcluding` keeping pinned cards out of the geometry pass, and
+ * `mergeMobileOrder` protecting a pinned card's remembered mobile slot —
+ * rather than two independently-maintained copies of this logic silently
+ * drifting apart as either renderer evolves.
+ */
+function writeBackLayout(next: DashboardLayoutItem[]): void {
+  if (isMobile.value) {
+    // Mobile drag-to-reorder: derive the new top-to-bottom order from the
+    // emitted items (sorted by y, then x for determinism) and merge it back
+    // into the full persisted order — an id absent from `next` (a hidden
+    // align card, or B112: a currently-PINNED card) keeps its own exact array
+    // slot rather than being bumped to the end, so reordering two OTHER cards
+    // while a third stays pinned can never silently move the pinned card's
+    // remembered position (see mergeMobileOrder's doc).
+    const orderedVisible = [...next]
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+      .map((it) => it.i)
+    setMobileOrder(mergeMobileOrder(mobileOrder.value, orderedVisible))
+    return
+  }
+  // Desktop: merge visible items' new positions back into the full layout,
+  // preserving hidden items untouched (pure function — only coordinates
+  // are copied, decoration fields like dragAllowFrom/minW never leak into
+  // the persisted array — see mergeLayoutPositions's doc).
+  //
+  // Grid-compact fix — this is the ONE code path every desktop coordinate
+  // change flows through (native drag/resize end via onLayoutUpdated below,
+  // a gutter drag's eventual settle — see useGridGutters' onChange doc — AND,
+  // as of F6 stage 2, a CSS Grid drag-to-reorder commit), so running
+  // compactLayoutTopLeft here closes whatever hole moving/resizing a card
+  // just left behind, on both axes, right after the gesture ends. Composing
+  // two identity-preserving pure functions keeps the whole chain a genuine
+  // no-op once positions converge (same invariant #4's crash fix relies on —
+  // see mergeLayoutPositions's doc): an already-compacted layout makes
+  // compactLayoutTopLeft hand back the exact same array it was given, so a
+  // `layout.value` assignment that changed nothing never re-triggers
+  // GridLayout's own prop watcher.
+  //
+  // Collapse-reflow: `next` carries collapsed cards at their DISPLAY height
+  // (COLLAPSED_ROWS). Revert those to the canonical (expanded) height held in
+  // `layout` before persisting, so dragging while a card is collapsed never
+  // freezes its header-only height into the saved arrangement — expanding
+  // still restores the full height. resolveOverlaps then re-seats the
+  // just-restored full-height cards below their neighbours before
+  // compaction closes any gap.
+  //
+  // Which packer runs here matters: while ANY card is collapsed, this write-
+  // back path is also where the collapse-reflow display (built by
+  // applyCollapsedHeights/compactVertical, see the getter above) echoes back
+  // through the grid's `update:layout`/`layout-updated` events — so it must
+  // use the SAME vertical-only packer, or the echo would horizontally
+  // re-pack the canonical layout with compactLayoutTopLeft and reintroduce
+  // the reported bug (collapsing a row-2 card sideways-yanking a row-3
+  // card from a different column). When nothing is collapsed this is just
+  // the ordinary drag/resize/delete write-back, which keeps the existing
+  // top-left (vertical+horizontal) compaction unchanged.
+  const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
+  const restored = collapsedIds.value.size
+    ? next.map((it) =>
+        collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it,
+      )
+    : next
+  const pack = collapsedIds.value.size > 0 ? compactVertical : compactLayoutTopLeft
+  const merged = mergeLayoutPositions(layout.value, restored)
+  // B112 — `next`/`restored` never mentions a currently-pinned card (it's
+  // excluded from what's fed to the grid — see desktopVisibleLayout), so
+  // `merged` already carries its rect through completely untouched
+  // (mergeLayoutPositions's "absent = keep unchanged" guarantee). It must
+  // ALSO sit out of resolveOverlaps/`pack` themselves: both process the
+  // FULL array by reading order and can push a just-dragged card away from
+  // a spot that's visually free purely because the pinned card's stale
+  // rect still "collides" with it on paper — see packExcluding's doc.
+  const packed = packExcluding(merged, new Set(pinnedIds.value), (items) => pack(resolveOverlaps(items)))
+  // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
+  // display we fed it, which `packed` reconstructs back into the current
+  // canonical layout — assigning a fresh-but-equal array would re-run the
+  // getter and spin the update→compact→update loop DashboardCard's #9 warns
+  // of. resolveOverlaps always allocates, so this value comparison (not a
+  // reference check) is what actually breaks the cycle.
+  if (!sameLayoutPositions(packed, layout.value)) layout.value = packed
+}
+
+// The single array bound to GridLayout via v-model: desktop 2-D on wide
+// screens, our 1-column mobileLayout below MOBILE_BREAKPOINT_PX. The getter
+// decorates items with the per-GridItem drag props above; the setter routes
+// the library's `update:layout` emission through `writeBackLayout` above
+// (the decorations are ignored — that function reads only `{ i, x, y, w, h }`).
 const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
   get: () =>
     // Collapse-reflow overlay: collapsed cards shrink to COLLAPSED_ROWS and the
@@ -718,82 +815,7 @@ const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
         : desktopDisplayLayout.value,
       isMobile.value,
     ),
-  set: (next) => {
-    if (isMobile.value) {
-      // Mobile drag-to-reorder: derive the new top-to-bottom order from the
-      // emitted items (sorted by y, then x for determinism) and merge it back
-      // into the full persisted order — an id absent from `next` (a hidden
-      // align card, or B112: a currently-PINNED card, Teleported out of the
-      // grid entirely) keeps its own exact array slot rather than being
-      // bumped to the end, so reordering two OTHER cards while a third stays
-      // pinned can never silently move the pinned card's remembered position
-      // (see mergeMobileOrder's doc).
-      const orderedVisible = [...next]
-        .sort((a, b) => a.y - b.y || a.x - b.x)
-        .map((it) => it.i)
-      setMobileOrder(mergeMobileOrder(mobileOrder.value, orderedVisible))
-      return
-    }
-    // Desktop: merge visible items' new positions back into the full layout,
-    // preserving hidden items untouched (pure function — only coordinates
-    // are copied, decoration fields like dragAllowFrom/minW never leak into
-    // the persisted array — see mergeLayoutPositions's doc).
-    //
-    // Grid-compact fix — this is the ONE code path every desktop coordinate
-    // change flows through (native drag/resize end via onLayoutUpdated below,
-    // AND a gutter drag's eventual settle — see useGridGutters' onChange doc),
-    // so running compactLayoutTopLeft here closes whatever hole moving/
-    // resizing a card just left behind, on both axes, right after the
-    // gesture ends. Composing two identity-preserving pure functions keeps
-    // the whole chain a genuine no-op once positions converge (same
-    // invariant #4's crash fix relies on — see mergeLayoutPositions's doc):
-    // an already-compacted layout makes compactLayoutTopLeft hand back the
-    // exact same array it was given, so a `layout.value` assignment that
-    // changed nothing never re-triggers GridLayout's own prop watcher.
-    //
-    // Collapse-reflow: `next` carries collapsed cards at their DISPLAY height
-    // (COLLAPSED_ROWS). Revert those to the canonical (expanded) height held in
-    // `layout` before persisting, so dragging while a card is collapsed never
-    // freezes its header-only height into the saved arrangement — expanding
-    // still restores the full height. resolveOverlaps then re-seats the
-    // just-restored full-height cards below their neighbours before
-    // compaction closes any gap.
-    //
-    // Which packer runs here matters: while ANY card is collapsed, this write-
-    // back path is also where the collapse-reflow display (built by
-    // applyCollapsedHeights/compactVertical, see the getter above) echoes back
-    // through the grid's `update:layout`/`layout-updated` events — so it must
-    // use the SAME vertical-only packer, or the echo would horizontally
-    // re-pack the canonical layout with compactLayoutTopLeft and reintroduce
-    // the reported bug (collapsing a row-2 card sideways-yanking a row-3
-    // card from a different column). When nothing is collapsed this is just
-    // the ordinary drag/resize/delete write-back, which keeps the existing
-    // top-left (vertical+horizontal) compaction unchanged.
-    const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
-    const restored = collapsedIds.value.size
-      ? next.map((it) =>
-          collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it,
-        )
-      : next
-    const pack = collapsedIds.value.size > 0 ? compactVertical : compactLayoutTopLeft
-    const merged = mergeLayoutPositions(layout.value, restored)
-    // B112 — `next`/`restored` never mentions a currently-pinned card (it's
-    // excluded from what's fed to the grid — see desktopVisibleLayout), so
-    // `merged` already carries its rect through completely untouched
-    // (mergeLayoutPositions's "absent = keep unchanged" guarantee). It must
-    // ALSO sit out of resolveOverlaps/`pack` themselves: both process the
-    // FULL array by reading order and can push a just-dragged card away from
-    // a spot that's visually free purely because the pinned card's stale
-    // rect still "collides" with it on paper — see packExcluding's doc.
-    const packed = packExcluding(merged, new Set(pinnedIds.value), (items) => pack(resolveOverlaps(items)))
-    // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
-    // display we fed it, which `packed` reconstructs back into the current
-    // canonical layout — assigning a fresh-but-equal array would re-run the
-    // getter and spin the update→compact→update loop DashboardCard's #9 warns
-    // of. resolveOverlaps always allocates, so this value comparison (not a
-    // reference check) is what actually breaks the cycle.
-    if (!sameLayoutPositions(packed, layout.value)) layout.value = packed
-  },
+  set: (next) => writeBackLayout(next),
 })
 
 // #1 fix — grid-layout-plus's `update:layout` (our v-model, handled by
@@ -931,6 +953,41 @@ const cssGridMobileLayout = computed<DashboardLayoutItem[]>(() =>
 const cssGridActiveLayout = computed<DashboardLayoutItem[]>(() =>
   isMobile.value ? cssGridMobileLayout.value : cssGridDesktopLayout.value,
 )
+
+// --- F6 stage 2 — CSS Grid drag-to-reorder (see useCssGridDashboardDrag.ts's
+// own module doc for the full design: pixel measurement + pointer-event
+// coalescing live there, collision/compaction is the SAME pure
+// dashboardLayout.ts functions the legacy renderer's write-back already
+// uses). Wired directly to `writeBackLayout` above so a CSS-grid drag commits
+// through the EXACT same persistence path a legacy drag/resize does — same
+// B52 display/canonical split, echo guard, and pinned/mobile-order handling.
+const cssGridDrag = useCssGridDashboardDrag({
+  layout: cssGridActiveLayout,
+  pinnedIds,
+  cols: colNum,
+  rowHeight: GRID_ROW_HEIGHT,
+  marginX: computed(() => gridMargin.value[0]),
+  marginY: GRID_MARGIN[1],
+  draggable: isDraggable,
+  onCommit: writeBackLayout,
+})
+// Top-level consts so Vue's `<script setup>` template compiler auto-unwraps
+// these two ComputedRefs the same way `gutters`/`containerWidthPx` above do
+// — a NESTED `cssGridDrag.previewLayout` property access written directly in
+// the template would NOT auto-unwrap (only a top-level script-setup binding
+// does), so the template below reads these two names instead.
+const cssGridDragPreviewLayout = cssGridDrag.previewLayout
+const cssGridDragOffsetPx = cssGridDrag.dragOffsetPx
+// Same component-ref -> composable `containerRef` wiring `gridWrapRef`/
+// `gridGutters.containerRef` use above, pointed at CssGridGrid's own root
+// element instead: the legacy grid-wrap div doesn't exist in the DOM at all
+// while this renderer is active (`v-if="!cssGridEnabled"`), so this
+// renderer's drag needs its OWN width measurement rather than reusing that
+// (stale/absent) ResizeObserver target.
+const cssGridGridRef = ref<{ $el: HTMLElement } | null>(null)
+watch(cssGridGridRef, (inst) => {
+  cssGridDrag.containerRef.value = (inst?.$el as HTMLElement | undefined) ?? null
+})
 
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
@@ -1406,11 +1463,11 @@ const cardCtx: AnalyzerCardContext = {
       />
       </div>
 
-      <!-- F6 stage 1 — the new CSS-Grid dashboard renderer (see
-           CssGridGrid.vue's module doc). RENDER ONLY: no drag/resize/gutter
-           yet (stages 2-4). Reuses the SAME card markup (DashboardCard +
-           AnalyzerCardBody) as the `#item` slot above — this is a new
-           renderer, not a new card system.
+      <!-- F6 — the new CSS-Grid dashboard renderer (see CssGridGrid.vue's
+           module doc). Stage 1 was render-only; stage 2 adds drag-to-reorder
+           (resize/gutter are still stage 3/4). Reuses the SAME card markup
+           (DashboardCard + AnalyzerCardBody) as the `#item` slot above — this
+           is a new renderer, not a new card system.
 
            Pinning here needs no Teleport/anchor at all: `pinned-ids` tells
            CssGridGrid which items to render `position: sticky`, in their OWN
@@ -1423,15 +1480,32 @@ const cardCtx: AnalyzerCardContext = {
            sizing path. `disable-pin-resize` hides the pinned-card's own
            floating corner resize handle (DashboardCard.vue), since dragging
            it would set an explicit pixel size that fights the grid's own
-           sizing — resize entirely is out of scope for this stage anyway. -->
+           sizing — resize entirely is out of scope for this stage anyway.
+
+           F6 stage 2 — `:layout` is now `cssGridDragPreviewLayout` (the
+           settled `cssGridActiveLayout` while nothing is dragging, or the
+           LIVE reflow preview mid-drag — see useCssGridDashboardDrag.ts's
+           `previewLayout` doc) instead of `cssGridActiveLayout` directly, and
+           `:drag-offset-px` carries the dragged card's raw pixel follow-offset
+           through to CssGridGrid's own `dragOffsetFor`. Each card's
+           `drag-mode="cssGrid"` + `:draggable` + the three `@css-grid-drag-*`
+           listeners are what actually drive the composable — see
+           DashboardCard.vue's own module doc for why this renderer's drag
+           has to be entirely self-contained (no interactjs to hand off to,
+           unlike the legacy `#item` slot above). `ref="cssGridGridRef"` feeds
+           the composable's own container-width ResizeObserver (script-side
+           watch, see its own doc) since the legacy grid-wrap div this could
+           otherwise have reused doesn't exist in the DOM under this renderer. -->
       <CssGridGrid
         v-else
-        :layout="cssGridActiveLayout"
+        ref="cssGridGridRef"
+        :layout="cssGridDragPreviewLayout"
         :cols="colNum"
         :row-height="GRID_ROW_HEIGHT"
         :margin-x="gridMargin[0]"
         :margin-y="gridMargin[1]"
         :pinned-ids="pinnedIds"
+        :drag-offset-px="cssGridDragOffsetPx"
       >
         <template #item="{ item }">
           <DashboardCard
@@ -1440,8 +1514,13 @@ const cardCtx: AnalyzerCardContext = {
             :collapsed="isCollapsed(String(item.i))"
             :pinned="isPinned(String(item.i))"
             :disable-pin-resize="true"
+            drag-mode="cssGrid"
+            :draggable="cssGridDrag.isItemDraggableNow(String(item.i))"
             @update:collapsed="toggleCollapsed(String(item.i))"
             @update:pinned="togglePinned(String(item.i))"
+            @css-grid-drag-start="cssGridDrag.onCardDragStart(String(item.i), $event.x, $event.y)"
+            @css-grid-drag-move="cssGridDrag.onCardDragMove($event.x, $event.y)"
+            @css-grid-drag-end="cssGridDrag.onCardDragEnd($event.committed)"
           >
             <AnalyzerCardBody :id="String(item.i)" :ctx="cardCtx" />
           </DashboardCard>

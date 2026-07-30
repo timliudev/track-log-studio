@@ -188,7 +188,21 @@ import { edgeAutoscrollVelocity } from '@/domain/layout/edgeAutoscroll'
  * ALSO applied to `.pin-resize-handle` below — see that handle's own B102c
  * doc for why.
  */
-const props = defineProps<{
+// F6 stage 2 — `withDefaults` (rather than plain `defineProps`) ONLY because
+// `draggable` needs a TRUE default: Vue's compiler-generated runtime prop
+// declaration applies "boolean casting" (see
+// https://vuejs.org/guide/components/props.html#boolean-casting) to any
+// prop typed as `boolean | undefined` — an OMITTED boolean prop resolves to
+// `false`, not `undefined`, unless a default is given. Every OTHER
+// boolean-typed prop below (`collapsed`/`pinned`/etc.) already wants that
+// same false-when-omitted behaviour, so only `draggable` needs an explicit
+// entry here — omitting it would make `props.draggable` silently read
+// `false` for every caller that never mentions this brand-new prop
+// (including every one of THIS component's own pre-existing tests), which
+// would make dragMode="cssGrid" undraggable by default instead of the
+// documented "defaults to true" behaviour below.
+const props = withDefaults(
+  defineProps<{
   title: string
   collapsed?: boolean
   pinned?: boolean
@@ -242,11 +256,47 @@ const props = defineProps<{
    *  so every existing (grid-layout-plus + Teleport) caller is byte-for-byte
    *  unaffected. */
   disablePinResize?: boolean
-}>()
+  /** F6 stage 2 — when `'cssGrid'`, the `.drag-handle` header drives the NEW
+   *  CSS Grid dashboard's own self-contained drag-to-reorder instead of
+   *  handing off to grid-layout-plus's interactjs (there is nothing to hand
+   *  off to under that renderer — see CssGridGrid.vue's module doc). Omitted/
+   *  undefined (every existing caller) keeps today's legacy behaviour byte-
+   *  for-byte unchanged — see `onDragHandlePointerDown`'s branch below. */
+  dragMode?: 'cssGrid'
+  /** F6 stage 2 — only meaningful while `dragMode === 'cssGrid'`: whether
+   *  THIS card is currently allowed to start a drag (the caller has already
+   *  folded in 鎖定布局 + the pinned-card exception via
+   *  dashboardLayout.ts's `isItemDraggable` — see
+   *  useCssGridDashboardDrag.ts's `isItemDraggableNow`). Defaults to `true`
+   *  so a caller that never sets `dragMode` never needs to think about this
+   *  either. The legacy renderer decides draggability entirely through
+   *  grid-layout-plus's own `is-draggable`/pinned-placeholder mechanism and
+   *  never reads this prop. */
+  draggable?: boolean
+  }>(),
+  { draggable: true },
+)
 
 const emit = defineEmits<{
   (e: 'update:collapsed', value: boolean): void
   (e: 'update:pinned', value: boolean): void
+  /** F6 stage 2 (dragMode="cssGrid" only) — a drag started (mouse/pen:
+   *  immediately on pointerdown; touch: once the long-press hold completes).
+   *  `x`/`y` are the pointer's CLIENT coordinates at that instant. */
+  (e: 'css-grid-drag-start', payload: { x: number; y: number }): void
+  /** F6 stage 2 — the pointer moved while a drag from THIS card is live.
+   *  Fired for every raw pointermove (no throttling here — see
+   *  useCssGridDashboardDrag.ts's own rAF-coalescing doc for where that
+   *  happens instead, mirroring how `touch-dragging`'s B102a edge-autoscroll
+   *  loop already just records the latest coordinate on every move too). */
+  (e: 'css-grid-drag-move', payload: { x: number; y: number }): void
+  /** F6 stage 2 — the drag ended. `committed: true` for a genuine pointerup
+   *  (the caller should persist the settled preview); `false` for an abort
+   *  (a real `pointercancel`, or a second pointer landing mid-drag — B102b's
+   *  same two-finger arbitration the legacy path already has, just resolved
+   *  directly here instead of via a synthetic pointercancel to a 3rd-party
+   *  library, since there's nothing to fool under this renderer). */
+  (e: 'css-grid-drag-end', payload: { committed: boolean }): void
 }>()
 
 const { t } = useI18n()
@@ -515,6 +565,14 @@ function onTouchDragTimeout(): void {
 }
 
 function onDragHandlePointerDown(e: PointerEvent): void {
+  // F6 stage 2 — under the new CSS Grid renderer there is no interactjs to
+  // hand off to at all, so this whole gesture is handled directly (see
+  // `onCssGridDragHandlePointerDown`'s own doc) rather than falling through
+  // to any of the legacy hand-off logic below.
+  if (props.dragMode === 'cssGrid') {
+    onCssGridDragHandlePointerDown(e)
+    return
+  }
   // Our own synthetic hand-off, arriving back at the very listener that
   // dispatched it (same element) — let it through untouched so it can
   // bubble on to grid-layout-plus, see TOUCH_HANDOFF_MARKER's doc above.
@@ -549,6 +607,185 @@ function onDragHandlePointerDown(e: PointerEvent): void {
   window.addEventListener('pointercancel', onTouchDragEnd)
   window.addEventListener('pointerdown', onTouchDragSecondPointer)
   touchDragTimer = setTimeout(onTouchDragTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
+}
+
+// F6 stage 2 — CSS Grid drag-to-reorder. Self-contained (no library hand-off,
+// unlike the legacy grid-layout-plus/interactjs branch above): mouse/pen
+// start immediately (§8 layer 2, same as legacy), touch reuses the IDENTICAL
+// long-press gate shape (its own separately-tracked gesture state, so the two
+// drag modes can never cross-contaminate even though `dragMode` is fixed per
+// instance anyway) before starting, and B102a/b's edge-autoscroll +
+// two-finger-abort behaviour is reused nearly verbatim — this drag has the
+// exact same "can't reach an off-screen drop target" / "two-finger scroll
+// while dragging" needs the legacy path already solved, just without a
+// synthetic event to fool a 3rd-party library, since there's nothing to hand
+// off to: a real pointerup DIRECTLY commits (`css-grid-drag-end` with
+// `committed: true`), a real pointercancel or a second pointer DIRECTLY
+// aborts (`committed: false`) — see this component's module doc for the
+// legacy comparison.
+let cssGridPendingState: TouchDragDelayState | null = null
+let cssGridPendingTimer: ReturnType<typeof setTimeout> | null = null
+let cssGridPendingStart: { x: number; y: number; pointerId: number } | null = null
+let cssGridPendingLatest: { x: number; y: number } | null = null
+
+function clearCssGridPendingTracking(): void {
+  if (cssGridPendingTimer != null) {
+    clearTimeout(cssGridPendingTimer)
+    cssGridPendingTimer = null
+  }
+  window.removeEventListener('pointermove', onCssGridPendingMove)
+  window.removeEventListener('pointerup', onCssGridPendingEnd)
+  window.removeEventListener('pointercancel', onCssGridPendingEnd)
+  window.removeEventListener('pointerdown', onCssGridPendingSecondPointer)
+  cssGridPendingState = null
+  cssGridPendingStart = null
+  cssGridPendingLatest = null
+}
+
+function onCssGridPendingMove(e: PointerEvent): void {
+  if (!cssGridPendingState || !cssGridPendingStart || e.pointerId !== cssGridPendingStart.pointerId) return
+  cssGridPendingLatest = { x: e.clientX, y: e.clientY }
+  cssGridPendingState = advanceOnMove(cssGridPendingState, cssGridPendingStart.x, cssGridPendingStart.y, e.clientX, e.clientY)
+  if (cssGridPendingState === 'cancelled') clearCssGridPendingTracking()
+}
+function onCssGridPendingEnd(e: PointerEvent): void {
+  if (!cssGridPendingStart || e.pointerId !== cssGridPendingStart.pointerId) return
+  clearCssGridPendingTracking()
+}
+function onCssGridPendingSecondPointer(e: PointerEvent): void {
+  if (!cssGridPendingState || !cssGridPendingStart || e.pointerId === cssGridPendingStart.pointerId) return
+  cssGridPendingState = advanceOnSecondPointer(cssGridPendingState)
+  if (cssGridPendingState === 'cancelled') clearCssGridPendingTracking()
+}
+
+// Tracking for the LIVE, already-armed CSS-grid drag — module-level (not
+// refs) exactly like `activeDragPointerId`/`activeDragLatestY` above, since
+// nothing here needs to be reactive except `touchDragActive` (reused as-is:
+// same `.drag-handle.touch-dragging` visual cue applies to EITHER drag mode,
+// they're mutually exclusive per instance).
+let cssGridActivePointerId: number | null = null
+let cssGridActiveLatestY: number | null = null
+let cssGridActiveRafId: number | null = null
+
+/** Same rAF edge-autoscroll loop as the legacy path's `runEdgeAutoscroll` —
+ *  the math is mode-agnostic (just reads window.innerHeight + the latest
+ *  tracked pointer Y), so this is a separate loop only because it has its own
+ *  separate pointerId/rafId bookkeeping, not because the ramp itself differs. */
+function runCssGridEdgeAutoscroll(): void {
+  if (cssGridActivePointerId == null) {
+    cssGridActiveRafId = null
+    return
+  }
+  if (cssGridActiveLatestY != null) {
+    const velocity = edgeAutoscrollVelocity(cssGridActiveLatestY, 0, window.innerHeight)
+    if (velocity !== 0) window.scrollBy(0, velocity)
+  }
+  cssGridActiveRafId = window.requestAnimationFrame(runCssGridEdgeAutoscroll)
+}
+
+function onCssGridActiveMove(e: PointerEvent): void {
+  if (e.pointerId !== cssGridActivePointerId) return
+  cssGridActiveLatestY = e.clientY
+  emit('css-grid-drag-move', { x: e.clientX, y: e.clientY })
+}
+function onCssGridActiveUp(e: PointerEvent): void {
+  if (e.pointerId !== cssGridActivePointerId) return
+  endCssGridActiveDrag()
+  emit('css-grid-drag-end', { committed: true })
+}
+// A genuine `pointercancel` (OS-level interruption — e.g. a system gesture
+// stealing the pointer) is an ABORT, unlike a real pointerup — this renderer
+// has no library to defer that distinction to, so it has to make the call
+// itself (the legacy path never needed to: interactjs's own drag/resize
+// completion is what decides commit-vs-cancel there, via `layout-updated`).
+function onCssGridActiveCancel(e: PointerEvent): void {
+  if (e.pointerId !== cssGridActivePointerId) return
+  endCssGridActiveDrag()
+  emit('css-grid-drag-end', { committed: false })
+}
+// B102b — same two-finger arbitration as the legacy path's
+// `onActiveDragSecondPointer`, but resolved directly (no synthetic
+// pointercancel needed — nothing to fool) by just aborting this drag.
+function onCssGridActiveSecondPointer(e: PointerEvent): void {
+  if (cssGridActivePointerId == null || e.pointerId === cssGridActivePointerId) return
+  endCssGridActiveDrag()
+  emit('css-grid-drag-end', { committed: false })
+}
+
+function startCssGridActiveDrag(pointerId: number, x: number, y: number): void {
+  cssGridActivePointerId = pointerId
+  cssGridActiveLatestY = y
+  touchDragActive.value = true
+  window.addEventListener('pointermove', onCssGridActiveMove)
+  window.addEventListener('pointerdown', onCssGridActiveSecondPointer)
+  window.addEventListener('pointerup', onCssGridActiveUp)
+  window.addEventListener('pointercancel', onCssGridActiveCancel)
+  cssGridActiveRafId = window.requestAnimationFrame(runCssGridEdgeAutoscroll)
+  emit('css-grid-drag-start', { x, y })
+}
+
+/** Idempotent — same belt-and-braces reasoning as `endActiveTouchDrag`: safe
+ *  to call from any exit path (real end, B102b abort, unmount). Does NOT
+ *  itself emit `css-grid-drag-end` — every caller above emits its own
+ *  `committed` value right after calling this. */
+function endCssGridActiveDrag(): void {
+  if (cssGridActiveRafId != null) {
+    window.cancelAnimationFrame(cssGridActiveRafId)
+    cssGridActiveRafId = null
+  }
+  window.removeEventListener('pointermove', onCssGridActiveMove)
+  window.removeEventListener('pointerdown', onCssGridActiveSecondPointer)
+  window.removeEventListener('pointerup', onCssGridActiveUp)
+  window.removeEventListener('pointercancel', onCssGridActiveCancel)
+  cssGridActivePointerId = null
+  cssGridActiveLatestY = null
+  touchDragActive.value = false
+}
+
+function onCssGridDragTimeout(): void {
+  cssGridPendingTimer = null
+  if (!cssGridPendingState || !cssGridPendingStart) return
+  cssGridPendingState = advanceOnTimeout(cssGridPendingState)
+  if (cssGridPendingState !== 'armed') return
+
+  const { pointerId } = cssGridPendingStart
+  const { x, y } = cssGridPendingLatest ?? cssGridPendingStart
+  clearCssGridPendingTracking()
+
+  touchArmed.value = true
+  window.setTimeout(() => {
+    touchArmed.value = false
+  }, TOUCH_ARMED_VISUAL_MS)
+
+  dragHandleEl.value?.setPointerCapture?.(pointerId)
+  startCssGridActiveDrag(pointerId, x, y)
+}
+
+/** The `dragMode === 'cssGrid'` branch of `onDragHandlePointerDown` below —
+ *  mouse/pen start the drag immediately (no long-press gate — §8 layer 2,
+ *  same rule the legacy branch already follows); touch runs the SAME
+ *  long-press-then-arm gate the legacy branch uses, just driving this
+ *  renderer's own direct pointer tracking once armed instead of a synthetic
+ *  hand-off. */
+function onCssGridDragHandlePointerDown(e: PointerEvent): void {
+  if (!props.draggable) return
+  if ((e.target as HTMLElement).closest('.actions')) return
+  if (e.pointerType !== 'touch') {
+    if (cssGridActivePointerId != null) return // belt-and-braces: a drag is already live
+    dragHandleEl.value?.setPointerCapture?.(e.pointerId)
+    startCssGridActiveDrag(e.pointerId, e.clientX, e.clientY)
+    return
+  }
+  if (cssGridPendingState) return
+  e.stopPropagation()
+  cssGridPendingState = 'pending'
+  cssGridPendingStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
+  cssGridPendingLatest = null
+  window.addEventListener('pointermove', onCssGridPendingMove)
+  window.addEventListener('pointerup', onCssGridPendingEnd)
+  window.addEventListener('pointercancel', onCssGridPendingEnd)
+  window.addEventListener('pointerdown', onCssGridPendingSecondPointer)
+  cssGridPendingTimer = setTimeout(onCssGridDragTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
 }
 
 // B18 — pinned cards can be resized by dragging a corner handle (see
@@ -996,6 +1233,10 @@ onBeforeUnmount(() => {
   // pin-resize-touch-pending tracking, both also window-level.
   endActiveTouchDrag()
   clearPinResizeTouchTracking()
+  // F6 stage 2 — same belt-and-braces cleanup for the CSS Grid drag mode's
+  // own (separately-tracked) pending long-press and live-drag state.
+  clearCssGridPendingTracking()
+  endCssGridActiveDrag()
 })
 </script>
 
