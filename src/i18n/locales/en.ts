@@ -666,6 +666,7 @@ export default {
       pin: 'Pin (stays fixed at the top while scrolling)',
       unpin: 'Unpin',
       pinnedResizeHandle: 'Drag to resize (double-click to reset)',
+      cssGridResizeHandle: 'Drag to resize card',
       minimizePinned: 'Minimize (show title only)',
       expandPinned: 'Expand pinned card',
     },

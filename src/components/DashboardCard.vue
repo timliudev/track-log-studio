@@ -273,8 +273,27 @@ const props = withDefaults(
    *  grid-layout-plus's own `is-draggable`/pinned-placeholder mechanism and
    *  never reads this prop. */
   draggable?: boolean
+  /** F6 stage 3(a) — when `'cssGrid'`, the bottom-right corner handle drives
+   *  the NEW CSS Grid dashboard's own self-contained w/h resize instead of
+   *  grid-layout-plus's own `.vgl-item__resizer` (there is no such handle
+   *  under this renderer — CssGridGrid.vue never wraps a card in anything
+   *  grid-layout-plus owns). Omitted/undefined (every existing caller,
+   *  including the legacy `#item` slot and every pinned-card instance) keeps
+   *  today's behaviour byte-for-byte unchanged — no handle of this kind is
+   *  ever rendered. */
+  resizeMode?: 'cssGrid'
+  /** F6 stage 3(a) — only meaningful while `resizeMode === 'cssGrid'`:
+   *  whether THIS card is currently allowed to start a resize (the caller
+   *  has already folded in 鎖定布局 + the pinned/collapsed exceptions via
+   *  dashboardLayout.ts's `isItemResizable` — see
+   *  useCssGridDashboardResize.ts's `isItemResizableNow`). Defaults to
+   *  `true` so a caller that never sets `resizeMode` never needs to think
+   *  about this either; the handle itself is hidden entirely (`v-if`) while
+   *  `false`, mirroring how the legacy renderer just never shows a resize
+   *  handle for a pinned/collapsed card either. */
+  resizable?: boolean
   }>(),
-  { draggable: true },
+  { draggable: true, resizable: true },
 )
 
 const emit = defineEmits<{
@@ -297,6 +316,20 @@ const emit = defineEmits<{
    *  directly here instead of via a synthetic pointercancel to a 3rd-party
    *  library, since there's nothing to fool under this renderer). */
   (e: 'css-grid-drag-end', payload: { committed: boolean }): void
+  /** F6 stage 3(a) (resizeMode="cssGrid" only) — a corner resize started.
+   *  Mouse/pen: immediately on pointerdown; touch: once the long-press hold
+   *  completes, mirroring `css-grid-drag-start`'s own touch gate. */
+  (e: 'css-grid-resize-start', payload: { x: number; y: number }): void
+  /** F6 stage 3(a) — the pointer moved while a resize from THIS card's
+   *  handle is live. Fired for every raw pointermove, same "no throttling
+   *  here" convention `css-grid-drag-move` uses (coalescing happens in
+   *  useCssGridDashboardResize.ts's own rAF loop). */
+  (e: 'css-grid-resize-move', payload: { x: number; y: number }): void
+  /** F6 stage 3(a) — the resize ended. `committed: true` for a genuine
+   *  pointerup; `false` for an abort (a real `pointercancel` — there is no
+   *  B102b two-finger arbitration for this gesture, mirroring the PINNED
+   *  card's own `.pin-resize-handle`, which also has none once armed). */
+  (e: 'css-grid-resize-end', payload: { committed: boolean }): void
 }>()
 
 const { t } = useI18n()
@@ -323,6 +356,13 @@ const dragHandleEl = ref<HTMLElement | null>(null)
 // `PointerEvent`/`currentTarget` to read at arm-time — only mouse/pen's
 // immediate path still had one before this fix.
 const pinResizeHandleEl = ref<HTMLElement | null>(null)
+// F6 stage 3(a) — the CSS Grid renderer's own corner resize handle (a
+// DIFFERENT element from `pinResizeHandleEl` above: that one only ever
+// exists on a PINNED card and resizes it in raw pixels; this one exists on
+// an ordinary (non-pinned) grid-resident card under `resizeMode="cssGrid"`
+// and resizes its grid `w`/`h` in grid units, via the composable one level
+// up). Needed for the same `setPointerCapture` reason `pinResizeHandleEl` is.
+const resizeHandleEl = ref<HTMLElement | null>(null)
 // Transient visual cue: true for a short window right when the long-press
 // completes (see `onTouchDragTimeout`), separate from — and earlier than —
 // grid-layout-plus's own `.vgl-item--dragging` class, which only appears
@@ -788,6 +828,143 @@ function onCssGridDragHandlePointerDown(e: PointerEvent): void {
   cssGridPendingTimer = setTimeout(onCssGridDragTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
 }
 
+// F6 stage 3(a) — CSS Grid corner resize. Self-contained (no grid-layout-plus
+// `.vgl-item__resizer` to theme/reuse — see `resizeMode` prop's own doc):
+// mouse/pen start immediately (§8 layer 2, same rule the drag-handle and the
+// pinned card's own `.pin-resize-handle` already follow), touch reuses the
+// IDENTICAL long-press gate shape as a SEPARATELY tracked gesture (its own
+// pure touchDragDelay.ts state machine instance, so this can never
+// cross-contaminate with the drag-handle's or the pin-resize-handle's own
+// tracking even though only one gesture can physically be live at a time).
+// Deliberately mirrors `.pin-resize-handle`'s B102c treatment exactly (long-
+// press gate + second-pointer-cancels-the-PENDING-hold, but no B102a
+// edge-autoscroll and no B102b abort-while-armed) rather than the
+// drag-handle's fuller B102a/b gesture engine — a corner resize is a much
+// shorter-throw gesture than dragging a card clear across the viewport, so
+// the pinned handle's simpler treatment is the better precedent to copy here,
+// not the drag-handle's.
+let cssGridResizeTouchState: TouchDragDelayState | null = null
+let cssGridResizeTouchTimer: ReturnType<typeof setTimeout> | null = null
+let cssGridResizeTouchStart: { x: number; y: number; pointerId: number } | null = null
+let cssGridResizeTouchLatest: { x: number; y: number } | null = null
+const cssGridResizeTouchArmed = ref(false)
+const cssGridResizeTouchActive = ref(false)
+
+function clearCssGridResizeTouchTracking(): void {
+  if (cssGridResizeTouchTimer != null) {
+    clearTimeout(cssGridResizeTouchTimer)
+    cssGridResizeTouchTimer = null
+  }
+  window.removeEventListener('pointermove', onCssGridResizeTouchMove)
+  window.removeEventListener('pointerup', onCssGridResizeTouchEnd)
+  window.removeEventListener('pointercancel', onCssGridResizeTouchEnd)
+  window.removeEventListener('pointerdown', onCssGridResizeTouchSecondPointer)
+  cssGridResizeTouchState = null
+  cssGridResizeTouchStart = null
+  cssGridResizeTouchLatest = null
+}
+
+function onCssGridResizeTouchMove(e: PointerEvent): void {
+  if (!cssGridResizeTouchState || !cssGridResizeTouchStart || e.pointerId !== cssGridResizeTouchStart.pointerId) return
+  cssGridResizeTouchLatest = { x: e.clientX, y: e.clientY }
+  cssGridResizeTouchState = advanceOnMove(
+    cssGridResizeTouchState,
+    cssGridResizeTouchStart.x,
+    cssGridResizeTouchStart.y,
+    e.clientX,
+    e.clientY,
+  )
+  if (cssGridResizeTouchState === 'cancelled') clearCssGridResizeTouchTracking()
+}
+function onCssGridResizeTouchEnd(e: PointerEvent): void {
+  if (!cssGridResizeTouchStart || e.pointerId !== cssGridResizeTouchStart.pointerId) return
+  clearCssGridResizeTouchTracking()
+}
+function onCssGridResizeTouchSecondPointer(e: PointerEvent): void {
+  if (!cssGridResizeTouchState || !cssGridResizeTouchStart || e.pointerId === cssGridResizeTouchStart.pointerId) return
+  cssGridResizeTouchState = advanceOnSecondPointer(cssGridResizeTouchState)
+  if (cssGridResizeTouchState === 'cancelled') clearCssGridResizeTouchTracking()
+}
+
+// Live (already-armed) gesture tracking — module-level, mirrors
+// `cssGridActivePointerId` above (nothing here needs to be reactive except
+// the two touch-visual refs already declared).
+let cssGridResizeActivePointerId: number | null = null
+
+function onCssGridResizeActiveMove(e: PointerEvent): void {
+  if (e.pointerId !== cssGridResizeActivePointerId) return
+  emit('css-grid-resize-move', { x: e.clientX, y: e.clientY })
+}
+function onCssGridResizeActiveUp(e: PointerEvent): void {
+  if (e.pointerId !== cssGridResizeActivePointerId) return
+  endCssGridResizeActive()
+  emit('css-grid-resize-end', { committed: true })
+}
+function onCssGridResizeActiveCancel(e: PointerEvent): void {
+  if (e.pointerId !== cssGridResizeActivePointerId) return
+  endCssGridResizeActive()
+  emit('css-grid-resize-end', { committed: false })
+}
+
+function startCssGridResizeActive(pointerId: number, x: number, y: number): void {
+  cssGridResizeActivePointerId = pointerId
+  cssGridResizeTouchActive.value = true
+  resizeHandleEl.value?.setPointerCapture?.(pointerId)
+  window.addEventListener('pointermove', onCssGridResizeActiveMove)
+  window.addEventListener('pointerup', onCssGridResizeActiveUp)
+  window.addEventListener('pointercancel', onCssGridResizeActiveCancel)
+  emit('css-grid-resize-start', { x, y })
+}
+
+/** Idempotent — same belt-and-braces reasoning as `endActiveTouchDrag`. Does
+ *  NOT itself emit `css-grid-resize-end` — every caller above emits its own
+ *  `committed` value right after calling this. */
+function endCssGridResizeActive(): void {
+  window.removeEventListener('pointermove', onCssGridResizeActiveMove)
+  window.removeEventListener('pointerup', onCssGridResizeActiveUp)
+  window.removeEventListener('pointercancel', onCssGridResizeActiveCancel)
+  cssGridResizeActivePointerId = null
+  cssGridResizeTouchActive.value = false
+}
+
+function onCssGridResizeTouchTimeout(): void {
+  cssGridResizeTouchTimer = null
+  if (!cssGridResizeTouchState || !cssGridResizeTouchStart) return
+  cssGridResizeTouchState = advanceOnTimeout(cssGridResizeTouchState)
+  if (cssGridResizeTouchState !== 'armed') return
+
+  const { pointerId } = cssGridResizeTouchStart
+  const { x, y } = cssGridResizeTouchLatest ?? cssGridResizeTouchStart
+  clearCssGridResizeTouchTracking()
+
+  cssGridResizeTouchArmed.value = true
+  window.setTimeout(() => {
+    cssGridResizeTouchArmed.value = false
+  }, TOUCH_ARMED_VISUAL_MS)
+
+  startCssGridResizeActive(pointerId, x, y)
+}
+
+/** The `resizeMode === 'cssGrid'` branch — mouse/pen start immediately
+ *  (§8 layer 2), touch runs the long-press gate above before arming. */
+function onCssGridResizeHandlePointerDown(e: PointerEvent): void {
+  if (!props.resizable) return
+  if (e.pointerType !== 'touch') {
+    if (cssGridResizeActivePointerId != null) return // belt-and-braces — a resize is already live
+    startCssGridResizeActive(e.pointerId, e.clientX, e.clientY)
+    return
+  }
+  if (cssGridResizeTouchState) return
+  cssGridResizeTouchState = 'pending'
+  cssGridResizeTouchStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
+  cssGridResizeTouchLatest = null
+  window.addEventListener('pointermove', onCssGridResizeTouchMove)
+  window.addEventListener('pointerup', onCssGridResizeTouchEnd)
+  window.addEventListener('pointercancel', onCssGridResizeTouchEnd)
+  window.addEventListener('pointerdown', onCssGridResizeTouchSecondPointer)
+  cssGridResizeTouchTimer = setTimeout(onCssGridResizeTouchTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
+}
+
 // B18 — pinned cards can be resized by dragging a corner handle (see
 // `.pin-resize-handle` below). This is DELIBERATELY separate from
 // grid-layout-plus's own drag/resize (dashboardLayout.ts's isItemResizable
@@ -1237,6 +1414,11 @@ onBeforeUnmount(() => {
   // own (separately-tracked) pending long-press and live-drag state.
   clearCssGridPendingTracking()
   endCssGridActiveDrag()
+  // F6 stage 3(a) — same belt-and-braces cleanup for the CSS Grid resize
+  // handle's own (separately-tracked) pending long-press and live-resize
+  // state.
+  clearCssGridResizeTouchTracking()
+  endCssGridResizeActive()
 })
 </script>
 
@@ -1323,6 +1505,23 @@ onBeforeUnmount(() => {
       @pointerdown="onPinResizePointerDown"
       @dblclick="onPinResizeReset"
     />
+    <!-- F6 stage 3(a) — CSS Grid renderer's own corner resize handle: only
+         while NOT pinned (a pinned card has no resize mechanism at all under
+         this renderer — see `disable-pin-resize` in AnalyzerView.vue), not
+         collapsed (a header-only card has no body to grow) and `resizable`
+         (the caller has already folded in 鎖定布局 + the pinned/collapsed
+         exceptions — see `resizable` prop's own doc). -->
+    <div
+      v-if="resizeMode === 'cssGrid' && !pinned && !collapsed && resizable"
+      ref="resizeHandleEl"
+      class="css-grid-resize-handle"
+      :class="{ 'touch-armed': cssGridResizeTouchArmed, 'touch-dragging': cssGridResizeTouchActive }"
+      v-tooltip="t('analyzer.layout.cssGridResizeHandle')"
+      :aria-label="t('analyzer.layout.cssGridResizeHandle')"
+      role="separator"
+      aria-orientation="horizontal"
+      @pointerdown="onCssGridResizeHandlePointerDown"
+    />
   </div>
 </template>
 
@@ -1335,6 +1534,13 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   overflow: hidden;
+  /* F6 stage 3(a) — positioning context for `.css-grid-resize-handle`
+     (absolute, bottom-right corner) on an ORDINARY (non-pinned) card. Was
+     previously only added on `.dashboard-card.pinned` (see that rule's own
+     B18 doc) since only the pinned handle existed; harmless on every other
+     card — nothing else in this component relies on `.dashboard-card`
+     itself staying an unestablished positioning context. */
+  position: relative;
   /* B36 — the card body's own horizontal padding, factored out as a custom
      property (rather than hardcoded in `.body`'s `padding` below) so the
      mobile override further down can shrink JUST this axis, and so fill-
@@ -1729,6 +1935,73 @@ onBeforeUnmount(() => {
   }
 }
 .pin-resize-handle::before {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 3px;
+  left: 0;
+  content: '';
+  border: 0 solid var(--vgl-resizer-border-color, var(--color-accent));
+  border-right-width: var(--vgl-resizer-border-width, 2px);
+  border-bottom-width: var(--vgl-resizer-border-width, 2px);
+  border-radius: 0 0 var(--radius) 0;
+}
+
+/* F6 stage 3(a) — CSS Grid renderer's own corner resize handle. Reuses the
+   SAME `--vgl-resizer-size`/`--vgl-resizer-border-color`/`--vgl-resizer-
+   border-width` custom properties `.pin-resize-handle` above does — those are
+   set directly on AnalyzerView.vue's `.analyzer` element (a plain custom
+   property, not a `:deep(.vgl-layout)`-scoped one), which is an ANCESTOR of
+   every DashboardCard instance regardless of which renderer/slot it's
+   currently mounted under, so this handle picks up the exact same themed
+   size/color/mobile-30px-bump with zero new AnalyzerView-side CSS needed.
+   `position: relative` on `.dashboard-card` (the default, non-pinned case)
+   already provides the positioning context this needs — no extra rule
+   required for that, unlike `.pin-resize-handle` which had to add it via
+   `.dashboard-card.pinned`. */
+.css-grid-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  width: var(--vgl-resizer-size, 10px);
+  height: var(--vgl-resizer-size, 10px);
+  cursor: se-resize;
+  /* B102c-style fix, applied from the start here (see this handle's own
+     module doc — mirrors `.pin-resize-handle`'s touch-action treatment
+     exactly): `pan-y` keeps native vertical scroll recovery available while
+     the touch long-press gate is still pending, only committing to
+     `touch-action: none` once the hold is confirmed (`.touch-dragging`
+     below). Mouse/pen are unaffected either way. */
+  touch-action: pan-y;
+}
+.css-grid-resize-handle.touch-armed {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+.css-grid-resize-handle.touch-dragging {
+  touch-action: none;
+}
+/* Same invisible 44px coarse-pointer hit-slop as `.pin-resize-handle::after`
+   (§8 layer 3 policy). */
+:root[data-any-pointer-coarse] .css-grid-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 44px;
+  height: 44px;
+}
+/* B59 — mobile resize is vertical-only under this renderer too (see
+   cssGridResize.ts's `mobile` param) — swap the cursor to `ns-resize` at the
+   same breakpoint the pinned handle's own B99 fix uses, for the same reason:
+   a diagonal `se-resize` cursor would misrepresent a gesture that only ever
+   changes height here. */
+@media (max-width: 768px) {
+  .css-grid-resize-handle {
+    cursor: ns-resize;
+  }
+}
+.css-grid-resize-handle::before {
   position: absolute;
   top: 0;
   right: 3px;

@@ -18,6 +18,7 @@ import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
 import { useGridGutters } from '@/composables/useGridGutters'
 import { useCssGridDashboardDrag } from '@/composables/useCssGridDashboardDrag'
+import { useCssGridDashboardResize } from '@/composables/useCssGridDashboardResize'
 import { useCardVisibility } from '@/composables/useCardVisibility'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
@@ -971,23 +972,117 @@ const cssGridDrag = useCssGridDashboardDrag({
   draggable: isDraggable,
   onCommit: writeBackLayout,
 })
+
+// --- F6 stage 3(a) — CSS Grid corner resize (see
+// useCssGridDashboardResize.ts's own module doc). Chained ON TOP of the drag
+// composable's own preview (`layout: cssGridDrag.previewLayout`, not
+// `cssGridActiveLayout` directly): only one gesture can ever be physically
+// live at a time (a user can't simultaneously drag a card's header AND its
+// own corner handle), so feeding this composable whatever the drag composable
+// currently renders — the settled layout when nothing is dragging, or the
+// live drag preview otherwise — means the SAME single array flows through
+// both gestures without either one needing to know about the other. Wired
+// to the SAME shared `writeBackLayout` as the drag commit — see that
+// function's own doc for why every desktop coordinate change must flow
+// through it (resolveOverlaps/compaction + collapsed-height restore only
+// happen there; this composable's own live preview deliberately does NOT
+// reflow siblings, see its own module doc). ---
+const cssGridResize = useCssGridDashboardResize({
+  layout: cssGridDrag.previewLayout,
+  pinnedIds,
+  collapsedIds,
+  cols: colNum,
+  rowHeight: GRID_ROW_HEIGHT,
+  marginX: computed(() => gridMargin.value[0]),
+  marginY: GRID_MARGIN[1],
+  resizable: isResizable,
+  isMobile,
+  onCommit: writeBackLayout,
+})
+
 // Top-level consts so Vue's `<script setup>` template compiler auto-unwraps
-// these two ComputedRefs the same way `gutters`/`containerWidthPx` above do
-// — a NESTED `cssGridDrag.previewLayout` property access written directly in
+// these ComputedRefs the same way `gutters`/`containerWidthPx` above do — a
+// NESTED `cssGridResize.previewLayout` property access written directly in
 // the template would NOT auto-unwrap (only a top-level script-setup binding
-// does), so the template below reads these two names instead.
-const cssGridDragPreviewLayout = cssGridDrag.previewLayout
+// does), so the template below reads these names instead.
+//
+// `cssGridRenderedLayout` is the SINGLE array both `<CssGridGrid>` itself AND
+// the CSS-grid gutter overlay below consume — B52's own hard-won lesson
+// (gutter overlay and grid must read the exact same DISPLAY layout, or
+// gutters end up at stale positions) generalises here to "every overlay that
+// visually depends on the grid's rendered rects must derive from this one
+// computed, never from `cssGridActiveLayout` directly" — it already carries
+// through both the drag preview AND the resize preview.
+const cssGridRenderedLayout = cssGridResize.previewLayout
 const cssGridDragOffsetPx = cssGridDrag.dragOffsetPx
 // Same component-ref -> composable `containerRef` wiring `gridWrapRef`/
 // `gridGutters.containerRef` use above, pointed at CssGridGrid's own root
 // element instead: the legacy grid-wrap div doesn't exist in the DOM at all
-// while this renderer is active (`v-if="!cssGridEnabled"`), so this
-// renderer's drag needs its OWN width measurement rather than reusing that
-// (stale/absent) ResizeObserver target.
+// while this renderer is active (`v-if="!cssGridEnabled"`), so drag/resize
+// each need their OWN width measurement rather than reusing that (stale/
+// absent) ResizeObserver target. Both composables' `containerRef`s are bound
+// to the SAME element here — two independent ResizeObservers on one node is
+// a cheap, low-risk trade that keeps the two composables independently
+// testable (see useCssGridDashboardResize.ts's own containerRef doc).
 const cssGridGridRef = ref<{ $el: HTMLElement } | null>(null)
 watch(cssGridGridRef, (inst) => {
-  cssGridDrag.containerRef.value = (inst?.$el as HTMLElement | undefined) ?? null
+  const el = (inst?.$el as HTMLElement | undefined) ?? null
+  cssGridDrag.containerRef.value = el
+  cssGridResize.containerRef.value = el
 })
+
+// --- F6 stage 3(b) — CSS Grid gutter-drag. Reuses useGridGutters.ts UNCHANGED
+// (see its own module doc: it's already renderer-agnostic pure Vue wiring —
+// items/geometry/pointer handling, no assumption about grid-layout-plus
+// anywhere in it) — a SECOND independent instance, pointed at this
+// renderer's own wrapping element (`cssGridWrapRef` below) instead of the
+// legacy `gridWrapRef`.
+//
+// B52 — `cssGridGutterItems` derives from `cssGridRenderedLayout` (the EXACT
+// same array fed to `<CssGridGrid :layout="...">`, see that computed's own
+// doc), filtered to drop pinned ids: unlike the legacy renderer (where a
+// pinned card has NO grid slot at all, excluded upstream), a pinned card
+// here keeps its own sticky grid slot — but it still has no resize
+// mechanism (`isItemResizable` returns false while pinned, and
+// `disable-pin-resize` hides its own floating handle), so a gutter must
+// never be offered along its edge either: dragging a vertical gutter
+// changes BOTH neighbours' `w`/`x`, which would silently move a pinned
+// card's supposedly-fixed grid slot out from under it.
+const cssGridGutterItems = computed<DashboardLayoutItem[]>(() =>
+  cssGridRenderedLayout.value.filter((it) => !isPinned(it.i)),
+)
+const cssGridGutterEnabled = computed(() => cssGridEnabled.value && !isMobile.value && !isLocked.value)
+const cssGridGutters = useGridGutters({
+  items: cssGridGutterItems,
+  enabled: cssGridGutterEnabled,
+  collapsedIds,
+  cols: GRID_COLS,
+  rowHeight: GRID_ROW_HEIGHT,
+  marginX: GRID_MARGIN[0],
+  marginY: GRID_MARGIN[1],
+  // Unlike the legacy gutter's own bespoke `onChange` (a plain
+  // mergeLayoutPositions with no resolveOverlaps/compaction — safe there only
+  // because grid-layout-plus's own internal reflow runs a second pass once
+  // the prop changes), this renderer has NOTHING else that will ever
+  // re-pack an overlap CSS Grid never auto-compacts anything on its own — so
+  // routing straight through the shared `writeBackLayout` (which already
+  // restores canonical collapsed heights AND runs resolveOverlaps/compaction)
+  // is both simpler and correct here.
+  onChange: writeBackLayout,
+})
+const cssGridWrapRef = ref<HTMLElement | null>(null)
+watch(cssGridWrapRef, (el) => {
+  cssGridGutters.containerRef.value = el
+})
+// Top-level consts so the template's `v-for`/`:class` reads auto-unwrap these
+// two ComputedRefs — same reasoning as `cssGridDragPreviewLayout`'s own doc
+// above (and the legacy `gutters`/`draggingKey` consts derived from
+// `gridGutters` earlier in this file): a NESTED `cssGridGutters.gutters`
+// property read directly in the template would hand back the Ref object
+// itself, not its unwrapped array. `onGutterPointerDown` doesn't need this —
+// it's INVOKED as a function in the template, never read as a value.
+const cssGridGuttersList = cssGridGutters.gutters
+const cssGridDraggingKey = cssGridGutters.draggingKey
 
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
@@ -1464,42 +1559,53 @@ const cardCtx: AnalyzerCardContext = {
       </div>
 
       <!-- F6 — the new CSS-Grid dashboard renderer (see CssGridGrid.vue's
-           module doc). Stage 1 was render-only; stage 2 adds drag-to-reorder
-           (resize/gutter are still stage 3/4). Reuses the SAME card markup
-           (DashboardCard + AnalyzerCardBody) as the `#item` slot above — this
-           is a new renderer, not a new card system.
+           module doc). Stage 1 was render-only; stage 2 added drag-to-
+           reorder; stage 3 adds corner resize + gutter-drag. Reuses the SAME
+           card markup (DashboardCard + AnalyzerCardBody) as the `#item` slot
+           above — this is a new renderer, not a new card system.
+
+           `cssGridWrapRef` (stage 3) plays the exact same role as the legacy
+           `grid-wrap` div above: a zero-extra-box `position: relative`
+           wrapper whose measured width the CSS-grid gutter overlay's pixel
+           math is built from (see useGridGutters.ts's own `containerRef`
+           doc) — it must wrap `<CssGridGrid>` exactly, no added padding/
+           border, for that measurement to agree with the grid's own.
 
            Pinning here needs no Teleport/anchor at all: `pinned-ids` tells
            CssGridGrid which items to render `position: sticky`, in their OWN
-           grid slot. `aspect-ratio`/`pinned-width-px`/`pinned-height-px` are
+           grid slot (stage 3(c): staggered `top`/z-index when several are
+           pinned at once, see that component's own `pinStackStyle` doc).
+           `aspect-ratio`/`pinned-width-px`/`pinned-height-px` are
            deliberately NOT passed to `<DashboardCard>` — with none of the
            three set, its `cardStyle` computed contributes no inline
            width/height/aspect-ratio at all while pinned (see that
            component's own doc), so the card keeps its NORMAL grid-slot size
            exactly like the task asks, instead of the old floating-anchor
            sizing path. `disable-pin-resize` hides the pinned-card's own
-           floating corner resize handle (DashboardCard.vue), since dragging
-           it would set an explicit pixel size that fights the grid's own
-           sizing — resize entirely is out of scope for this stage anyway.
+           floating corner resize handle (DashboardCard.vue) — a pinned card
+           has no resize mechanism under this renderer at all (its grid slot
+           is fixed at its natural footprint; `resizable` below is already
+           false for it via `isItemResizableNow`, so `resize-mode="cssGrid"`'s
+           own corner handle is hidden for it too).
 
-           F6 stage 2 — `:layout` is now `cssGridDragPreviewLayout` (the
-           settled `cssGridActiveLayout` while nothing is dragging, or the
-           LIVE reflow preview mid-drag — see useCssGridDashboardDrag.ts's
-           `previewLayout` doc) instead of `cssGridActiveLayout` directly, and
-           `:drag-offset-px` carries the dragged card's raw pixel follow-offset
-           through to CssGridGrid's own `dragOffsetFor`. Each card's
-           `drag-mode="cssGrid"` + `:draggable` + the three `@css-grid-drag-*`
-           listeners are what actually drive the composable — see
-           DashboardCard.vue's own module doc for why this renderer's drag
-           has to be entirely self-contained (no interactjs to hand off to,
-           unlike the legacy `#item` slot above). `ref="cssGridGridRef"` feeds
-           the composable's own container-width ResizeObserver (script-side
-           watch, see its own doc) since the legacy grid-wrap div this could
-           otherwise have reused doesn't exist in the DOM under this renderer. -->
+           F6 stage 3 — `:layout` is now `cssGridRenderedLayout` (chains the
+           drag preview INTO the resize preview — see that computed's own
+           doc for why one shared array feeds both the grid and the gutter
+           overlay). `:drag-offset-px` carries the dragged card's raw pixel
+           follow-offset through to CssGridGrid's own `dragOffsetFor`. Each
+           card's `drag-mode="cssGrid"` + `:draggable` + the three
+           `@css-grid-drag-*` listeners drive the drag composable exactly as
+           stage 2 left them; `resize-mode="cssGrid"` + `:resizable` + the
+           three `@css-grid-resize-*` listeners are the NEW stage-3(a)
+           equivalent for the corner handle — see DashboardCard.vue's own
+           module doc for why both gestures are entirely self-contained (no
+           interactjs to hand off to, unlike the legacy `#item` slot above).
+           `ref="cssGridGridRef"` feeds BOTH composables' own container-width
+           ResizeObservers (script-side watch, see its own doc). -->
+      <div v-else ref="cssGridWrapRef" class="css-grid-wrap">
       <CssGridGrid
-        v-else
         ref="cssGridGridRef"
-        :layout="cssGridDragPreviewLayout"
+        :layout="cssGridRenderedLayout"
         :cols="colNum"
         :row-height="GRID_ROW_HEIGHT"
         :margin-x="gridMargin[0]"
@@ -1516,16 +1622,37 @@ const cardCtx: AnalyzerCardContext = {
             :disable-pin-resize="true"
             drag-mode="cssGrid"
             :draggable="cssGridDrag.isItemDraggableNow(String(item.i))"
+            resize-mode="cssGrid"
+            :resizable="cssGridResize.isItemResizableNow(String(item.i))"
             @update:collapsed="toggleCollapsed(String(item.i))"
             @update:pinned="togglePinned(String(item.i))"
             @css-grid-drag-start="cssGridDrag.onCardDragStart(String(item.i), $event.x, $event.y)"
             @css-grid-drag-move="cssGridDrag.onCardDragMove($event.x, $event.y)"
             @css-grid-drag-end="cssGridDrag.onCardDragEnd($event.committed)"
+            @css-grid-resize-start="cssGridResize.onCardResizeStart(String(item.i), $event.x, $event.y)"
+            @css-grid-resize-move="cssGridResize.onCardResizeMove($event.x, $event.y)"
+            @css-grid-resize-end="cssGridResize.onCardResizeEnd($event.committed)"
           >
             <AnalyzerCardBody :id="String(item.i)" :ctx="cardCtx" />
           </DashboardCard>
         </template>
       </CssGridGrid>
+      <!-- F6 stage 3(b) 縫隙拖動 overlay — same purpose/markup as the legacy
+           `.grid-gutter` divs above, wired to the SECOND (CSS-grid-specific)
+           useGridGutters instance instead. Empty on mobile / while locked /
+           while nothing is adjacent, same `enabled` gate. -->
+      <div
+        v-for="g in cssGridGuttersList"
+        :key="g.key"
+        class="grid-gutter"
+        :class="[g.orientation, { dragging: cssGridDraggingKey === g.key }]"
+        :style="{ left: `${g.rect.left}px`, top: `${g.rect.top}px`, width: `${g.rect.width}px`, height: `${g.rect.height}px` }"
+        role="separator"
+        :aria-orientation="g.orientation === 'vertical' ? 'vertical' : 'horizontal'"
+        :aria-label="t(g.orientation === 'vertical' ? 'analyzer.layout.resizeAdjacentWidth' : 'analyzer.layout.resizeAdjacentHeight')"
+        @pointerdown="cssGridGutters.onGutterPointerDown(g, $event)"
+      />
+      </div>
     </template>
   </div>
 </template>
@@ -1656,6 +1783,18 @@ const cardCtx: AnalyzerCardContext = {
    border) so ITS measured width is exactly what grid-layout-plus itself
    lays cards out against. */
 .grid-wrap {
+  position: relative;
+}
+/* F6 stage 3(b) — the SAME positioning-context role as `.grid-wrap` above,
+   for the CSS-grid gutter overlay's own `useGridGutters` instance: must wrap
+   `<CssGridGrid>` with zero extra box (no padding/border) so its measured
+   width matches `CssGridGrid`'s own root element exactly — that root's
+   `clientWidth` (padding included, per how `padding: box-sizing` works) is
+   already the SAME `containerWidthPx` convention gridGutter.ts's
+   `colWidthPx`/`xPx`/`yPx` formulas expect (see cssGridPlacement.ts's own
+   module doc for the algebraic proof that this renderer's CSS Grid padding+
+   gap reproduces grid-layout-plus's pixel geometry exactly). */
+.css-grid-wrap {
   position: relative;
 }
 /* B63 — grid-layout-plus does not write `touch-action` inline: its GridItem
