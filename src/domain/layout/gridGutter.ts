@@ -267,6 +267,56 @@ export function hPx(h: number, m: GridMetrics): number {
   return m.rowHeight * h + Math.max(0, h - 1) * m.marginY
 }
 
+/**
+ * B113 — a PINNED card's DEFAULT (non-dragged) pixel size: the REAL footprint
+ * its grid slot has/would have, not an aspect-ratio-derived stretch (see
+ * DashboardCard.vue's `aspectRatio`/`pinnedWidthPx` prop docs for the bug
+ * this replaces — a wide/short card stretched to its floating anchor's full
+ * width, then grown proportionally taller by the ratio, blowing straight
+ * through the mobile pinned-anchor's height cap).
+ *
+ * Pure function (no Vue/DOM) so this pixel math — the actual bug fix — is
+ * unit-testable directly, same "pure domain function, thin Vue wrapper"
+ * split every other piece of grid geometry in this module already follows.
+ * AnalyzerView.vue's `pinnedGridSizeForItemId` is that thin wrapper: it just
+ * looks the id up in the canonical `layout` and supplies `isMobile`/`metrics`
+ * from its own reactive state.
+ *
+ * Height uses `hPx` directly on `item.h` — identical at both breakpoints,
+ * since a pinned card's mobile-stacked `h` is inherited from the SAME
+ * canonical desktop `h` (see dashboardLayout.ts's `mobileLayout` doc) and
+ * neither `m.rowHeight` nor `m.marginY` vary by breakpoint (only `m.marginX`
+ * does — see useDashboardLayout's `gridMargin`).
+ *
+ * Width uses `wPx` with `item.w` on desktop, but `wPx(1, m)` on mobile
+ * (`isMobile: true`) regardless of the card's canonical desktop `w` — a
+ * mobile grid slot is always the single, full-width column (`colNum: 1`,
+ * `marginX: 0`, see useDashboardLayout's own doc), not a fraction of it, so
+ * using the desktop `w` there would produce a too-narrow sliver rather than
+ * the full-width slot the card actually occupies once stacked. `wPx(1, m)`
+ * at those metrics is mathematically identical to `m.containerWidthPx`
+ * itself (100% width) — the same shape a mobile-stacked, non-pinned card
+ * already gets (see `mobileLayout`'s forced `w:1`).
+ *
+ * Returns `null` for a non-finite/non-positive `w`/`h` (shouldn't happen for
+ * a real layout entry, but guards against garbage input the same way this
+ * module's other pure functions do) or when `m.containerWidthPx` hasn't been
+ * measured yet (`<= 0`, e.g. right after mount before the ResizeObserver's
+ * first callback) — `colWidthPx` would otherwise divide out to a nonsensical
+ * negative/zero width. The caller (DashboardCard's `cardStyle`) falls back to
+ * the old aspect-ratio behaviour in that case.
+ */
+export function pinnedCardPixelSize(
+  item: { w: number; h: number },
+  isMobile: boolean,
+  m: GridMetrics,
+): { width: number; height: number } | null {
+  if (!(item.w > 0) || !(item.h > 0)) return null
+  if (!(m.containerWidthPx > 0)) return null
+  const effectiveW = isMobile ? 1 : item.w
+  return { width: wPx(effectiveW, m), height: hPx(item.h, m) }
+}
+
 /** A gutter's on-screen hit-box, in px, relative to the grid container's
  *  top-left corner — exactly fills the margin gap between the two cards
  *  (see the module doc's formula derivation: the gap between two touching

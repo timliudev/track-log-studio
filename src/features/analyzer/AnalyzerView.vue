@@ -57,6 +57,7 @@ import {
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import { mergeMobileOrder } from '@/domain/layout/panelState'
+import { pinnedCardPixelSize, type GridMetrics } from '@/domain/layout/gridGutter'
 import DashboardCard from '@/components/DashboardCard.vue'
 import CardMenu from './CardMenu.vue'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
@@ -870,6 +871,12 @@ const gridGutters = useGridGutters({
 const gutters = gridGutters.gutters
 const draggingKey = gridGutters.draggingKey
 const onGutterPointerDown = gridGutters.onGutterPointerDown
+// B113 — the grid container's measured width, shared with useGridGutters'
+// OWN `colWidthPx` math (see that composable's `containerWidthPx` doc) so
+// `pinnedGridSizeForItemId` below computes a pinned card's default size from
+// the EXACT same metrics the grid itself is laid out with, without a second
+// ResizeObserver on the same element.
+const containerWidthPx = gridGutters.containerWidthPx
 // A plain local template ref, forwarded into the composable's own
 // containerRef via watch — kept as a separate binding (rather than the
 // template pointing `ref="..."` straight at `gridGutters.containerRef`)
@@ -915,22 +922,70 @@ function titleForItemId(id: string): string {
   return chart ? chartTitle(chart) : ''
 }
 
-/** B112 — the `aspect-ratio` DashboardCard uses to size a PINNED card (see
- *  its own `aspectRatio` prop doc: "keeps roughly the same shape it had in
- *  the grid"). Pinned cards now render via their own dedicated `v-for`
- *  (template, below the grid) rather than inside GridLayout's per-breakpoint
- *  `#item` slot, so there's no `item.w`/`item.h` in scope any more — this
- *  looks the id up directly in the CANONICAL desktop `layout` instead, which
- *  is also the more correct source regardless of breakpoint: the mobile
- *  single-column array always has `w:1` (see mobileLayout), so using IT would
- *  produce a nonsensically tall `w/h` ratio (e.g. a 4-wide/12-tall desktop
- *  card would read as 1/12) — the desktop shape is what "the grid" actually
- *  means here. Falls back to `1` (square) for an id somehow missing from
- *  `layout` (shouldn't happen — reconcileLayout keeps every known id
- *  present). */
+/** B112 — the `aspect-ratio` DashboardCard uses to size a PINNED card as a
+ *  FALLBACK only (see B113 below for the actual default sizing now, and that
+ *  card's own `aspectRatio` prop doc). Pinned cards now render via their own
+ *  dedicated `v-for` (template, below the grid) rather than inside
+ *  GridLayout's per-breakpoint `#item` slot, so there's no `item.w`/`item.h`
+ *  in scope any more — this looks the id up directly in the CANONICAL
+ *  desktop `layout` instead, which is also the more correct source
+ *  regardless of breakpoint: the mobile single-column array always has
+ *  `w:1` (see mobileLayout), so using IT would produce a nonsensically tall
+ *  `w/h` ratio (e.g. a 4-wide/12-tall desktop card would read as 1/12) — the
+ *  desktop shape is what "the grid" actually means here. Falls back to `1`
+ *  (square) for an id somehow missing from `layout` (shouldn't happen —
+ *  reconcileLayout keeps every known id present). */
 function aspectRatioForItemId(id: string): number {
   const it = layout.value.find((entry) => entry.i === id)
   return it && it.h > 0 ? it.w / it.h : 1
+}
+
+/** B113 — the pinned card's DEFAULT (non-dragged) pixel size: the REAL
+ *  footprint its grid slot has/would have, not the aspect-ratio-derived
+ *  "stretch to the anchor's full width, then grow height to match the
+ *  ratio" shape B112 introduced (that regression: a wide/short card, once
+ *  stretched to full page width, grew to a huge height — and on mobile blew
+ *  straight through the pinned anchor's 50vh cap, pushing everything below
+ *  it off screen — see this file's own B113 ISSUES entry).
+ *
+ *  Height is derived purely from `h` rows × `GRID_ROW_HEIGHT` + `GRID_MARGIN`
+ *  (gridGutter.ts's `hPx`) — identical at both breakpoints, since a pinned
+ *  card's mobile-stacked `h` is inherited from the SAME canonical desktop `h`
+ *  (see mobileLayout's own doc) and neither `GRID_ROW_HEIGHT` nor
+ *  `GRID_MARGIN[1]` vary by breakpoint — no container measurement needed for
+ *  this half at all.
+ *
+ *  Width uses `wPx` with `colNum`/`gridMargin[0]` AT THE CURRENT BREAKPOINT,
+ *  not the canonical desktop `w`: on mobile, `colNum` is 1 and `gridMargin[0]`
+ *  is 0 (see useDashboardLayout's own doc), so every card's mobile grid slot
+ *  is genuinely full-width regardless of its desktop column span — passing
+ *  `w:1` into `wPx` at those metrics reproduces exactly that (and happens to
+ *  equal `containerWidthPx` itself, i.e. 100%). On desktop it's the card's
+ *  own canonical `w` at the CURRENT `colWidthPx` — mathematically always
+ *  `<= containerWidthPx` for any `w <= GRID_COLS` (a full 12-wide card still
+ *  leaves the grid's own left/right margin), so no extra clamping is needed
+ *  for that case either.
+ *
+ *  The actual pixel math is gridGutter.ts's pure `pinnedCardPixelSize` (see
+ *  its own doc for the full derivation and the unit tests exercising it
+ *  directly) — this is just the thin Vue wrapper supplying the canonical
+ *  layout entry plus this component's own reactive `isMobile`/metrics.
+ *  Returns `null` — DashboardCard's `cardStyle` then falls back to the old
+ *  aspect-ratio behaviour — when the grid container hasn't been measured yet
+ *  (`containerWidthPx <= 0`, a brief bootstrap window right after mount) or
+ *  the id is somehow missing from `layout` (shouldn't happen, same as
+ *  `aspectRatioForItemId` above). */
+function pinnedGridSizeForItemId(id: string): { width: number; height: number } | null {
+  const it = layout.value.find((entry) => entry.i === id)
+  if (!it) return null
+  const metrics: GridMetrics = {
+    cols: colNum.value,
+    rowHeight: GRID_ROW_HEIGHT,
+    marginX: gridMargin.value[0],
+    marginY: gridMargin.value[1],
+    containerWidthPx: containerWidthPx.value,
+  }
+  return pinnedCardPixelSize(it, isMobile.value, metrics)
 }
 
 // --- F2: the grouped card menu (CardMenu.vue) — presentation-only data built
@@ -1254,12 +1309,13 @@ const cardCtx: AnalyzerCardContext = {
            always-enabled block instead of a conditionally-disabled one
            shared with the grid.
 
-           `aspectRatioForItemId` reads the CANONICAL `layout` (not a
-           per-breakpoint rendered array, since this block no longer has
-           one) — see that function's doc for why this also incidentally
-           fixes the mobile shape (previously `item.w/item.h` came from the
-           1-column mobile array, where `w` is always 1, producing a
-           nonsensically tall aspect-ratio box). -->
+           `aspectRatioForItemId`/`pinnedGridSizeForItemId` both read the
+           CANONICAL `layout` (not a per-breakpoint rendered array, since this
+           block no longer has one) — see those functions' own docs. B113 —
+           `pinned-width-px`/`pinned-height-px` (pinnedGridSizeForItemId) are
+           now the DEFAULT sizing path (the card's actual grid-slot pixel
+           footprint); `aspect-ratio` only remains as DashboardCard's fallback
+           for the brief pre-measurement window (see that function's doc). -->
       <template v-for="id in pinnedIds" :key="id">
         <Teleport to="#dashboard-pinned-anchor">
           <DashboardCard
@@ -1269,6 +1325,8 @@ const cardCtx: AnalyzerCardContext = {
             :pinned="true"
             :pin-order="pinOrderFor(id)"
             :aspect-ratio="aspectRatioForItemId(id)"
+            :pinned-width-px="pinnedGridSizeForItemId(id)?.width"
+            :pinned-height-px="pinnedGridSizeForItemId(id)?.height"
             :show-pin="id === 'suspension' ? isMobile : undefined"
             @update:collapsed="toggleCollapsed(id)"
             @update:pinned="togglePinned(id)"
@@ -1569,18 +1627,34 @@ const cardCtx: AnalyzerCardContext = {
     overflow-y: auto;
   }
 }
-/* B112 — a pinned card now spans the SAME width as the grid/page content, at
-   every breakpoint, exactly like an ordinary card does — reads as "part of
-   this page, stuck to the top" rather than a separate floating panel.
-   Previously desktop capped it at `width: min(560px, 100%)` and centred it
-   (a deliberately floating look); removed per the same user report above.
+/* B112 — a pinned card reads as "part of this page, stuck to the top"
+   rather than a separate floating panel, at every breakpoint — no more
+   desktop `width: min(560px, 100%)` centring (a deliberately floating look);
+   removed per the same user report above.
    `flex-shrink: 0` still applies so a short stack (e.g. one small pinned
    card) is never stretched taller than its natural size by the column flex
    container — a tall stack instead grows past mobile's own `max-height` and
    triggers the anchor's scroll (see that rule's own doc); desktop has no cap
-   to grow past. */
+   to grow past.
+   B113 — `width: 100%` (forcing every pinned card to the anchor's FULL
+   width) was itself the bug this fixes: combined with DashboardCard's own
+   aspect-ratio-derived height, a wide/short card stretched to full page
+   width and grew to a huge height (worse on mobile, where it blew straight
+   through the anchor's 50vh cap above and pushed the rest of the page off
+   screen). DashboardCard now sets its OWN explicit `width`/`height` inline
+   (AnalyzerView's `pinnedGridSizeForItemId` — the card's real grid-slot
+   pixel footprint, `PINNED_WIDTH`/`HEIGHT`px props) or the user's own
+   dragged `pinnedSize`, both of which win the cascade over ANY class rule
+   here regardless of specificity (inline style always does). `max-width:
+   100%` is this rule's only remaining job: an upper-bound safety net for a
+   narrower viewport/anchor than that computed width (never a fixed
+   override) — and, for the rare fallback case where DashboardCard has no
+   computed width/height yet (grid container not measured, or the id is
+   momentarily missing from `layout`), the flex container's own default
+   `align-items: stretch` still fills the card to this cap, same as the old
+   unconditional `width: 100%` did in that narrow window. */
 .pinned-anchor :deep(.dashboard-card) {
-  width: 100%;
+  max-width: 100%;
   margin-bottom: calc(var(--space) * 1.5);
   flex-shrink: 0;
 }

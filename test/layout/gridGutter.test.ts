@@ -14,6 +14,7 @@ import {
   gutterRect,
   pxDeltaToColUnits,
   pxDeltaToRowUnits,
+  pinnedCardPixelSize,
   type GridGutter,
   type GridMetrics,
 } from '@/domain/layout/gridGutter'
@@ -295,6 +296,66 @@ describe('pixel metrics (mirrors grid-layout-plus\'s own calcColWidth/calcPositi
     const rowStep = metrics.rowHeight + metrics.marginY
     expect(pxDeltaToRowUnits(rowStep, metrics)).toBe(1)
     expect(pxDeltaToRowUnits(-rowStep * 1.6, metrics)).toBe(-2)
+  })
+})
+
+describe('pinnedCardPixelSize (B113 — a pinned card keeps its ACTUAL grid-slot pixel size, not an aspect-ratio-derived stretch)', () => {
+  // Same 12-col/12px-margin/24px-row-height desktop metrics the "pixel
+  // metrics" describe block above uses, so a desktop 4-wide/10-tall card's
+  // width is nowhere near the FULL 1224px container — the B112 regression
+  // this fixes was exactly the width ballooning to 100% of the container
+  // regardless of the card's actual grid span.
+  const desktopMetrics: GridMetrics = { cols: 12, rowHeight: 24, marginX: 12, marginY: 12, containerWidthPx: 1224 }
+
+  it('desktop: width derives from the item\'s OWN w (not the full container width)', () => {
+    const size = pinnedCardPixelSize({ w: 4, h: 10 }, false, desktopMetrics)
+    expect(size).not.toBeNull()
+    expect(size!.width).toBeCloseTo(wPx(4, desktopMetrics))
+    expect(size!.height).toBeCloseTo(hPx(10, desktopMetrics))
+    // The actual point of this fix: a 4-of-12-column card is nowhere near
+    // the full container width.
+    expect(size!.width).toBeLessThan(desktopMetrics.containerWidthPx / 2)
+  })
+
+  it('desktop: height depends ONLY on h/rowHeight/marginY — NOT on the container width (no aspect-ratio coupling)', () => {
+    const narrow: GridMetrics = { ...desktopMetrics, containerWidthPx: 400 }
+    const wide: GridMetrics = { ...desktopMetrics, containerWidthPx: 2400 }
+    const atNarrow = pinnedCardPixelSize({ w: 4, h: 10 }, false, narrow)!
+    const atWide = pinnedCardPixelSize({ w: 4, h: 10 }, false, wide)!
+    expect(atNarrow.height).toBeCloseTo(atWide.height)
+    expect(atNarrow.height).toBeCloseTo(hPx(10, desktopMetrics))
+    // Width DOES still scale with the container, unlike height.
+    expect(atNarrow.width).not.toBeCloseTo(atWide.width)
+  })
+
+  it('two different w/h shapes (wide/short control panel vs tall/narrow chart) get genuinely different sizes, not squashed into one box', () => {
+    const controlPanel = pinnedCardPixelSize({ w: 4, h: 5 }, false, desktopMetrics)!
+    const chart = pinnedCardPixelSize({ w: 4, h: 11 }, false, desktopMetrics)!
+    expect(controlPanel.width).toBeCloseTo(chart.width) // same w
+    expect(controlPanel.height).not.toBeCloseTo(chart.height) // different h
+  })
+
+  it('mobile: width is the FULL container width regardless of the canonical desktop w (matches mobileLayout\'s own forced w:1)', () => {
+    // colNum=1, marginX=0 — the exact metrics useDashboardLayout hands the
+    // grid on the mobile breakpoint (see its own gridMargin/colNum doc).
+    const mobileMetrics: GridMetrics = { cols: 1, rowHeight: 24, marginX: 0, marginY: 12, containerWidthPx: 360 }
+    const size = pinnedCardPixelSize({ w: 6, h: 10 }, true, mobileMetrics)
+    expect(size).not.toBeNull()
+    expect(size!.width).toBeCloseTo(360)
+    // Height is still row-derived, same value a desktop item with the same h
+    // would get (mobileLayout inherits the desktop h — see its own doc).
+    expect(size!.height).toBeCloseTo(hPx(10, mobileMetrics))
+  })
+
+  it('returns null when the container has not been measured yet (containerWidthPx <= 0) rather than a negative/nonsensical width', () => {
+    const unmeasured: GridMetrics = { ...desktopMetrics, containerWidthPx: 0 }
+    expect(pinnedCardPixelSize({ w: 4, h: 10 }, false, unmeasured)).toBeNull()
+  })
+
+  it('returns null for a non-positive w or h (garbage/missing layout entry)', () => {
+    expect(pinnedCardPixelSize({ w: 0, h: 10 }, false, desktopMetrics)).toBeNull()
+    expect(pinnedCardPixelSize({ w: 4, h: 0 }, false, desktopMetrics)).toBeNull()
+    expect(pinnedCardPixelSize({ w: -1, h: 10 }, false, desktopMetrics)).toBeNull()
   })
 })
 
