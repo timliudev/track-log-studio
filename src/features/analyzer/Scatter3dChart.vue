@@ -73,6 +73,17 @@ function buildOption(): echarts.EChartsCoreOption {
     animation: false,
     tooltip: {
       trigger: 'item',
+      // B113-follow-up — the chart host (`.scatter-3d`) now has `overflow:
+      // hidden` (see that CSS rule's doc) to break a scrollbar feedback loop.
+      // Without `appendToBody`, echarts' TooltipHTMLContent falls back to
+      // `api.getDom()` (this component's own host div — confirmed by reading
+      // node_modules/echarts/lib/component/tooltip/TooltipHTMLContent.js) as
+      // the tooltip's DOM parent, so a tooltip positioned near the chart's
+      // edge would now get visually clipped by that new `overflow: hidden`.
+      // Appending to `<body>` instead sidesteps the chart host entirely —
+      // the tooltip is positioned in viewport coordinates and is never a
+      // descendant of the (now-clipping) host.
+      appendToBody: true,
       formatter: (p: { seriesName?: string; value?: unknown[] }) => {
         const [x, y, z] = p.value ?? []
         return `${p.seriesName ?? ''}<br/>${props.xName}: ${Number(x).toFixed(2)}<br/>${props.yName}: ${Number(y).toFixed(2)}<br/>${props.zName}: ${Number(z).toFixed(2)}`
@@ -184,6 +195,40 @@ watch(
   /* Let ECharts GL receive one-finger rotation and two-finger zoom directly
      instead of the browser treating the canvas as a page-scroll surface. */
   touch-action: none;
+  /* B113-follow-up — the REAL cause of the reported "亂彈" flicker (B113's
+   * 1px ResizeObserver echo guard was the wrong mechanism for this — that one
+   * targets a sub-pixel relayout echo, but the reported symptom was a much
+   * bigger ~15-17px scrollbar-width oscillation): zrender's Painter appends
+   * its own `domRoot` div as a CHILD of this host with an EXPLICIT inline
+   * pixel `width`/`height` (verified by reading
+   * node_modules/zrender/lib/canvas/Painter.js's `createRoot`/`resize` — it
+   * sets `domRoot.style.cssText`/`.width`/`.height` directly, not a
+   * percentage). That inline size only gets updated when THIS component's own
+   * `resize()` runs; in between (e.g. right after mount, or while a burst of
+   * ResizeObserver callbacks is still rAF-coalesced), it can be briefly
+   * larger than this host's own CSS-flex-computed box. With the default
+   * `overflow: visible`, that mismatch let the oversized domRoot visually
+   * spill outside this box — and since nothing between here and
+   * DashboardCard's `.body` sets `overflow` to anything but the default
+   * either, that spill bubbled all the way up and inflated `.body`'s
+   * `scrollHeight`/`scrollWidth` past its `clientHeight`/`clientWidth`,
+   * showing scrollbars. A vertical+horizontal scrollbar pair removes ~15-17px
+   * from `.body`'s CONTENT box on each axis (scrollbar track width) — the
+   * ResizeObserver here sees that as a genuine (well above the 1px guard's
+   * threshold) resize, shrinks the chart, the scrollbars disappear, the
+   * content box regains that ~15-17px, the observer fires again reporting a
+   * bigger size, and the cycle repeats forever. `overflow: hidden` here
+   * closes the loop at its source: any transient domRoot/box size mismatch,
+   * in EITHER direction, is now clipped to this host's own (correctly
+   * flex-computed) box instead of ever reaching `.body`'s scrollable content
+   * area — `.body`'s scrollbars can no longer be driven by this chart at all,
+   * so the whole feedback path is gone, not just damped. (B113's `.fill`
+   * rule's `min-height: 60px` was re-examined, not just trusted: it is an
+   * EXPLICIT floor, not the implicit `min-height: auto` that causes the
+   * classic flex-overflow trap, so it does not by itself explain this
+   * loop — left unchanged.) See the tooltip's own `appendToBody` doc above
+   * (buildOption()) for the one side effect this required elsewhere. */
+  overflow: hidden;
 }
 .scatter-3d.fill { flex: 1 1 0; min-height: 60px; height: auto; }
 </style>

@@ -1284,6 +1284,20 @@ onBeforeUnmount(() => {
 .body {
   flex: 1 1 auto;
   min-height: 0;
+  /* B113-follow-up (2026-07-31) — this `overflow: auto` is the OTHER half of
+   * the 3D scatter card's scrollbar-feedback flicker (see Scatter3dChart.vue's
+   * `.scatter-3d` doc for the full mechanism): a stray oversized echarts-gl
+   * `domRoot` spilling out of its host used to inflate THIS element's
+   * scrollHeight/scrollWidth, whose resulting scrollbars then ate ~15-17px of
+   * content-box space on each axis, which is what the chart's ResizeObserver
+   * reacted to, round and round. Considered adding `scrollbar-gutter: stable`
+   * here too (it would remove the scrollbar-driven WIDTH swing at its own
+   * source, independent of any one card's content) but deliberately did NOT:
+   * it would permanently reserve gutter space on EVERY card body, including
+   * the many that never scroll, which is a visible regression across the
+   * whole dashboard for a problem that Scatter3dChart's own fix (clip the
+   * overflow before it ever reaches this element) already eliminates
+   * completely on its own. Left as plain `overflow: auto`, unchanged. */
   overflow: auto;
   /* B36 — horizontal padding driven off `--card-body-pad-x` (see
      `.dashboard-card`'s own doc above) so the mobile override can shrink
