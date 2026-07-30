@@ -192,15 +192,33 @@ const props = defineProps<{
   title: string
   collapsed?: boolean
   pinned?: boolean
-  /** #18 fix — the card's own grid slot width/height RATIO (in grid units,
-   *  i.e. `layout item.w / item.h`), used ONLY while `pinned` to size the
-   *  floating card so it keeps roughly the same shape it had in the grid
-   *  instead of every pinned card being squashed into the same fixed
-   *  `max-height: 45vh` regardless of whether it was originally short-and-
-   *  wide (a control panel) or tall-and-narrow (a chart). Optional: when
-   *  omitted (or not finite), falls back to the old fixed-height behaviour —
-   *  see the `.pinned` CSS below. */
+  /** #18 fix, B113 DOWNGRADED TO FALLBACK — the card's own grid slot
+   *  width/height RATIO (in grid units, i.e. `layout item.w / item.h`).
+   *  Originally this drove a pinned card's height directly (CSS
+   *  `aspect-ratio`, see `.pinned` below); B113 replaced that with
+   *  `pinnedWidthPx`/`pinnedHeightPx` below (the card's REAL grid-slot pixel
+   *  size) as the actual default, because sizing purely from a ratio forced
+   *  the card to whatever width its container happened to be (the pinned
+   *  anchor's full width) and then grow/shrink its height to match — for a
+   *  wide/short card that meant "stretch to full page width, then blow up
+   *  proportionally taller", which is the bug B113 fixes. This prop now only
+   *  matters while `pinnedWidthPx`/`pinnedHeightPx` are absent (the grid
+   *  container hasn't been measured yet — see AnalyzerView's
+   *  `pinnedGridSizeForItemId` doc) or not finite, so a pinned card still has
+   *  SOME sane shape in that narrow window rather than collapsing to zero
+   *  height. */
   aspectRatio?: number
+  /** B113 — the card's REAL grid-slot pixel size (AnalyzerView's
+   *  `pinnedGridSizeForItemId`: the exact width/height it had/would have in
+   *  the desktop grid, or the mobile single-column full-width slot — NOT an
+   *  aspect-ratio-derived stretch, see `aspectRatio`'s own doc above), used
+   *  ONLY while `pinned` and only as the DEFAULT — the user's own dragged
+   *  `pinnedSize` (this component's own resize handle, below) always wins
+   *  over both this and `aspectRatio` once set. Both must be finite and
+   *  positive for either to apply (see `cardStyle`); either omitted/invalid
+   *  falls back to `aspectRatio`. */
+  pinnedWidthPx?: number
+  pinnedHeightPx?: number
   /** B111 — this card's position within the pinned STACK (0 = pinned first =
    *  topmost), or -1/undefined when not pinned. Applied as an inline CSS
    *  `order` (see `cardStyle` below) so the visual stacking order in
@@ -780,6 +798,34 @@ const cardStyle = computed(() => {
     }
   }
   if (props.collapsed || pinnedMini.value) return pinOrderStyle.value
+  // B113 — DEFAULT (non-dragged) sizing: the card's REAL grid-slot pixel
+  // footprint (AnalyzerView's `pinnedGridSizeForItemId`), applied as an
+  // explicit inline width+height — NOT the `aspectRatio`-derived shape this
+  // used to fall straight to (see that prop's own B113 doc for the bug this
+  // replaces: stretched to the anchor's full width, then grown taller by
+  // ratio). `maxWidth: '100%'` is the upper-bound safety net for a narrower
+  // viewport/anchor than the computed width — a CAP, never a fixed override
+  // (see AnalyzerView's `.pinned-anchor :deep(.dashboard-card)` doc for the
+  // matching class-level rule this also has to win over, which it does:
+  // inline style always wins the cascade regardless of specificity).
+  if (
+    props.pinnedWidthPx != null &&
+    Number.isFinite(props.pinnedWidthPx) &&
+    props.pinnedWidthPx > 0 &&
+    props.pinnedHeightPx != null &&
+    Number.isFinite(props.pinnedHeightPx) &&
+    props.pinnedHeightPx > 0
+  ) {
+    return {
+      ...pinOrderStyle.value,
+      width: `${props.pinnedWidthPx}px`,
+      height: `${props.pinnedHeightPx}px`,
+      maxWidth: '100%',
+    }
+  }
+  // Fallback — only reached when the grid container hasn't been measured yet
+  // or the id is momentarily missing from the canonical layout (see
+  // AnalyzerView's `pinnedGridSizeForItemId` doc for when it returns null).
   if (props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0) {
     return { ...pinOrderStyle.value, aspectRatio: String(props.aspectRatio) }
   }
@@ -1271,13 +1317,19 @@ onBeforeUnmount(() => {
    pinned card visually overlaps whatever content has scrolled underneath it,
    and a subtle shadow is what keeps its edge legible against that — genuinely
    needed for the sticky affordance, not a "floating card" cue.
-   #18 fix — `aspect-ratio` (set inline via `cardStyle`, from the card's own
-   grid w/h ratio) now drives the card's HEIGHT from its width, so a pinned
-   card keeps roughly the shape it had in the grid instead of every pinned
-   card — short control panel or tall chart alike — being squashed into the
-   exact same box; when `aspectRatio` isn't supplied, this falls back to the
-   old fixed-height-ish behaviour (bounded only by the anchor now — see
-   below).
+   #18 fix, B113 SUPERSEDED — `aspect-ratio` (set inline via `cardStyle`,
+   from the card's own grid w/h ratio) used to drive the card's HEIGHT from
+   its width, so a pinned card kept roughly the shape it had in the grid
+   instead of every pinned card being squashed into the same box. That
+   worked fine only as long as the card's WIDTH itself stayed bounded — once
+   AnalyzerView's `.pinned-anchor :deep(.dashboard-card)` stretched every
+   pinned card to the anchor's full width, this same aspect-ratio then grew
+   the HEIGHT to match that (now much larger) width, producing the reported
+   "pinned card enlarges / swallows the mobile screen" bug. `cardStyle` now
+   sets an explicit `width`+`height` inline instead (AnalyzerView's
+   `pinnedGridSizeForItemId` — the card's REAL grid-slot pixel size), and
+   `aspect-ratio` only remains as a narrow fallback for the brief window
+   before that's computable (see both props' own docs in the script above).
    B111 — this rule USED TO also carry its own `max-height: 45vh` SAFETY
    CEILING (a very tall/narrow card's aspect-ratio-derived height could
    otherwise still push past a comfortable viewport share). That was fine
