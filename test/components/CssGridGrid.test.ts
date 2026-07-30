@@ -128,4 +128,62 @@ describe('CssGridGrid', () => {
       expect(items[2]!.attributes('style')).toContain('position: sticky')
     })
   })
+
+  describe('F6 stage 2 — dragOffsetPx (the dragged card follows the pointer)', () => {
+    it('applies NO transform/dragging class to anything when dragOffsetPx is absent (stage-1 byte-for-byte)', () => {
+      const wrapper = mountGrid({ layout })
+      for (const item of wrapper.findAll('.css-grid-item')) {
+        expect(item.classes()).not.toContain('dragging')
+        expect(item.attributes('style')).not.toContain('transform')
+      }
+    })
+
+    it('applies a translate() transform ONLY to the item matching dragOffsetPx.id', () => {
+      const wrapper = mount(CssGridGrid, {
+        props: {
+          layout,
+          cols: 12,
+          rowHeight: 24,
+          marginX: 12,
+          marginY: 12,
+          dragOffsetPx: { id: 'sectors', dxPx: 37, dyPx: -12 },
+        },
+        slots: { item: '<div class="stub-card">{{ params.item.i }}</div>' },
+      })
+      const items = wrapper.findAll('.css-grid-item')
+      // map (index 0) — untouched.
+      expect(items[0]!.classes()).not.toContain('dragging')
+      expect(items[0]!.attributes('style')).not.toContain('transform')
+      // sectors (index 1) — the dragged one.
+      expect(items[1]!.classes()).toContain('dragging')
+      const style = items[1]!.attributes('style')!
+      expect(style).toContain('transform: translate(37px, -12px)')
+      // Still keeps its own grid-column/row placement underneath the transform.
+      expect(style).toContain('grid-column: 5 / span 4')
+      // chart-1 (index 2) — untouched.
+      expect(items[2]!.classes()).not.toContain('dragging')
+    })
+
+    it('a dragged item still renders correctly even while pinned-ids overlaps other items (pinned + dragging never coincide in practice, but neither should crash if it did)', () => {
+      const wrapper = mount(CssGridGrid, {
+        props: {
+          layout,
+          cols: 12,
+          rowHeight: 24,
+          marginX: 12,
+          marginY: 12,
+          pinnedIds: ['map'],
+          dragOffsetPx: { id: 'sectors', dxPx: 10, dyPx: 10 },
+        },
+        slots: { item: '<div class="stub-card">{{ params.item.i }}</div>' },
+      })
+      const items = wrapper.findAll('.css-grid-item')
+      // map stays sticky/pinned, unaffected by the unrelated drag.
+      expect(items[0]!.classes()).toContain('pinned')
+      expect(items[0]!.attributes('style')).toContain('position: sticky')
+      // sectors is the one dragging.
+      expect(items[1]!.classes()).toContain('dragging')
+      expect(items[1]!.attributes('style')).toContain('transform: translate(10px, 10px)')
+    })
+  })
 })

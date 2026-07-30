@@ -6,12 +6,18 @@ import { itemGridPlacement, gridContainerStyle } from '@/domain/layout/cssGridPl
 /**
  * F6 stage 1 — a CSS-Grid-based dashboard renderer, feature-flag-gated
  * (`cssGridDashboard`, see src/config/featureFlags.ts) alternative to
- * grid-layout-plus's `<GridLayout>`. RENDER ONLY: no drag, no resize, no
- * gutter-dragging (those are stage 2/3 — see docs/ISSUES.md's F6 entry). It
- * draws the exact same `layout` array shape (`DashboardLayoutItem[]`) at the
- * exact same pixel geometry (see cssGridPlacement.ts's module doc for the
- * algebraic proof), via native `grid-column`/`grid-row` placement instead of
- * grid-layout-plus's `position: absolute` + `transform: translate3d`.
+ * grid-layout-plus's `<GridLayout>`. Stage 1 was RENDER ONLY; stage 2 (see
+ * `dragOffsetPx`'s doc below, and useCssGridDashboardDrag.ts) adds drag-to-
+ * reorder on top — resize and gutter-dragging are still stage 3/4 (see
+ * docs/ISSUES.md's F6 entry). This component still just draws WHATEVER
+ * `layout` array it's handed (drag preview or settled) at the exact same
+ * pixel geometry (see cssGridPlacement.ts's module doc for the algebraic
+ * proof), via native `grid-column`/`grid-row` placement instead of
+ * grid-layout-plus's `position: absolute` + `transform: translate3d` — the
+ * actual drag MECHANICS (pointer tracking, collision/compaction, commit) all
+ * live one level up, in AnalyzerView.vue + useCssGridDashboardDrag.ts; this
+ * component only renders the resulting layout array plus one extra pixel
+ * `translate()` for whichever single item is currently being dragged.
  *
  * THE POINT of this migration: `position: sticky` never applies to an
  * absolutely-positioned element, which is exactly why the old "pin a card so
@@ -60,6 +66,18 @@ const props = defineProps<{
    *  which used `pinOrder` to drive CSS `order` in a flex column) since each
    *  pinned card keeps its own grid slot instead of joining a shared stack. */
   pinnedIds?: string[]
+  /** F6 stage 2 — the card currently being dragged, plus its RAW pixel offset
+   *  from its rest position since the drag started (useCssGridDashboardDrag's
+   *  `dragOffsetPx`; NOT grid-cell-snapped — `layout` itself already reflects
+   *  the discrete drop-target preview via the caller swapping in
+   *  `previewLayout`, see AnalyzerView's wiring). Applied as an EXTRA
+   *  `translate()` on top of the dragged item's own `grid-column`/`grid-row`
+   *  placement so the card visually follows the pointer smoothly while every
+   *  OTHER card only reflows in whole-cell steps — the same "smooth dragged
+   *  item, discrete everything else" split most drag-reorder implementations
+   *  use. `null`/omitted (every stage-1 caller, and stage 2 whenever nothing
+   *  is being dragged) leaves every item's style exactly as stage 1 had it. */
+  dragOffsetPx?: { id: string; dxPx: number; dyPx: number } | null
 }>()
 
 const pinnedSet = computed(() => new Set(props.pinnedIds ?? []))
@@ -84,6 +102,15 @@ const containerStyle = computed(() =>
  *  `#dashboard-pinned-anchor` used (`position: sticky; top: 0`), just without
  *  a dedicated container: this wrapper itself IS the sticky element, still
  *  sitting in its ordinary grid cell. */
+/** F6 stage 2 — the raw pixel `translate()` to layer on top of the dragged
+ *  item's own grid placement (see the `dragOffsetPx` prop's own doc); `null`
+ *  for every other item, or whenever nothing is being dragged. */
+function dragTransformFor(item: DashboardLayoutItem): string | null {
+  const offset = props.dragOffsetPx
+  if (!offset || offset.id !== item.i) return null
+  return `translate(${offset.dxPx}px, ${offset.dyPx}px)`
+}
+
 function styleFor(item: DashboardLayoutItem): CSSProperties {
   // Destructured into a fresh object literal at each `return` (rather than
   // spreading the `itemGridPlacement` result variable directly) so Vue's
@@ -93,6 +120,13 @@ function styleFor(item: DashboardLayoutItem): CSSProperties {
   // (`--foo`) index signature, which would be an odd thing for a plain
   // domain type to carry just to satisfy this component's own template.
   const { gridColumn, gridRow } = itemGridPlacement(item)
+  const transform = dragTransformFor(item)
+  // F6 stage 2 — a card mid-drag gets a raised z-index (above even a sticky
+  // pinned card's own 20 — see below — though the two never coincide in
+  // practice: a pinned card is never draggable, see dashboardLayout.ts's
+  // `isItemDraggable`) so it visually floats above whatever it's passing over
+  // while following the pointer.
+  if (transform) return { gridColumn, gridRow, transform, zIndex: 30, position: 'relative' }
   if (!isPinnedId(item.i)) return { gridColumn, gridRow }
   return { gridColumn, gridRow, position: 'sticky', top: '0px', zIndex: 20 }
 }
@@ -104,7 +138,7 @@ function styleFor(item: DashboardLayoutItem): CSSProperties {
       v-for="item in layout"
       :key="item.i"
       class="css-grid-item"
-      :class="{ pinned: isPinnedId(item.i) }"
+      :class="{ pinned: isPinnedId(item.i), dragging: dragOffsetPx?.id === item.i }"
       :style="styleFor(item)"
     >
       <slot name="item" :item="item" />
@@ -134,5 +168,15 @@ function styleFor(item: DashboardLayoutItem): CSSProperties {
    since there's no separate floating anchor to distinguish it from anymore). */
 .css-grid-item.pinned {
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
+}
+/* F6 stage 2 — the dragged card itself (see `dragOffsetPx`'s doc): a slightly
+   stronger shadow than the pinned affordance so it visually lifts off the
+   grid while following the pointer, and `cursor: grabbing` for mouse/pen
+   (harmless no-op on touch). No `transition` here — the whole point of
+   `dragOffsetPx` is a 1:1, un-smoothed follow of the live pointer position;
+   animating it would introduce lag between the finger/cursor and the card. */
+.css-grid-item.dragging {
+  cursor: grabbing;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
 }
 </style>
