@@ -167,6 +167,8 @@ export default {
     addChart: '新增圖表',
     addScatterChart: '新增散佈圖',
     removeChart: '移除',
+    mapPlay: '播放軌跡',
+    mapPause: '暫停播放',
     lapCount: '圈數：{n}',
     lapCountExcluded: '圈數：{n}（已排除 {x}）',
     lapBand: '有效圈速區間（秒）',
@@ -647,9 +649,8 @@ export default {
       cardScatterChart: '散佈圖 {n}',
       collapse: '收合',
       expand: '展開',
-      pin: '釘選（捲動頁面時固定於頂部，同時僅能釘選一張卡片）',
+      pin: '釘選（捲動頁面時固定於頂部）',
       unpin: '取消釘選',
-      pinnedPlaceholder: '📌 已釘選於頂部',
       pinnedResizeHandle: '拖曳調整大小（點兩下重設）',
       minimizePinned: '迷你模式（只顯示標題）',
       expandPinned: '展開釘選卡片',
@@ -725,6 +726,12 @@ export default {
   centreCursor: {
     label: '固定中線游標模式',
     hint: '圖表中央固定一條垂直線；可用滾輪或雙指縮放，再拖曳圖表捲動資料。中線上的數值會成為目前游標（連動地圖／目前數值卡／其他圖表）。',
+  },
+  trackLineSmoothing: {
+    label: '軌跡線平滑',
+    faithful: '忠實呈現',
+    smooth: '平順',
+    hint: '讓地圖上繪製的軌跡線在 GPS 取樣點之間更圓滑（以同樣的點擬合曲線，不會移動任何取樣點），取代原本的直線段。純屬視覺呈現——預設關閉，既有紀錄的外觀不會因此改變。',
   },
   converter: {
     suspensionToggle: '避震校正（點擊展開）',

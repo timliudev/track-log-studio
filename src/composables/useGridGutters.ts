@@ -25,10 +25,12 @@ export interface UseGridGuttersOptions {
   /** Cards to detect shared edges between. The CALLER is responsible for
    *  filtering this down to whatever's actually draggable-via-gutter in its
    *  context — same contract gridGutter.ts's `detectGutters` documents.
-   *  AnalyzerView passes the visible desktop layout with the currently-
-   *  pinned card's placeholder excluded (its slot is an inert Teleport
-   *  target, not a real card — see dashboardLayout.ts's `isItemDraggable`
-   *  for the equivalent rule on the library's own corner-resize handle). */
+   *  AnalyzerView passes the visible desktop layout with any currently-
+   *  pinned card already excluded entirely (B112 — a pinned card has no grid
+   *  slot at all any more, not even an inert placeholder; see
+   *  AnalyzerView's `desktopVisibleLayout`/`gutterItems` doc and
+   *  dashboardLayout.ts's `isItemDraggable` for the equivalent rule on the
+   *  library's own corner-resize handle). */
   items: Ref<DashboardLayoutItem[]> | ComputedRef<DashboardLayoutItem[]>
   /** Whether gutter dragging is allowed at all right now — false while the
    *  dashboard is locked (useLayoutLock) or on the mobile single-column
@@ -72,6 +74,15 @@ export interface UseGridGuttersReturn {
    *  positioned hit-boxes to line up). Its measured width feeds the same
    *  `colWidthPx` formula grid-layout-plus itself uses. */
   containerRef: Ref<HTMLElement | null>
+  /** B113 — the SAME measured width `gutters`'s own `colWidthPx` math uses
+   *  internally (see the ResizeObserver wiring below), exposed so a caller
+   *  can derive OTHER pixel geometry from the identical grid metrics without
+   *  standing up a second ResizeObserver on the same element — AnalyzerView
+   *  uses this to compute a pinned card's real grid-slot pixel size (see
+   *  `pinnedGridSizeForItemId`), which needs the exact same `containerWidthPx`
+   *  `wPx`/`hPx` (gridGutter.ts) are built on. 0 before the container has been
+   *  measured (see `containerRef`'s own doc). */
+  containerWidthPx: Ref<number>
   /** Every currently-draggable gutter, with its hit-box rect in px relative
    *  to `containerRef`. Empty whenever `enabled` is false or the container
    *  hasn't been measured yet. */
@@ -243,5 +254,5 @@ export function useGridGutters(options: UseGridGuttersOptions): UseGridGuttersRe
 
   onBeforeUnmount(() => endActiveDrag?.())
 
-  return { containerRef, gutters, draggingKey, onGutterPointerDown }
+  return { containerRef, containerWidthPx, gutters, draggingKey, onGutterPointerDown }
 }

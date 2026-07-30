@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sizeChangedEnoughToApply } from '@/features/analyzer/GgChart.vue'
+import { sizeChangedEnoughToApply } from '@/domain/analysis/chartResize'
 
 /**
  * ResizeObserver feedback-loop fix — 1:1 (equalAspect) G-G/scatter charts
@@ -14,6 +14,10 @@ import { sizeChangedEnoughToApply } from '@/features/analyzer/GgChart.vue'
  * the size last actually APPLIED to the chart and reports "no" for anything
  * under a 1px-per-axis threshold (the echo), "yes" for anything at or above
  * it (a genuine resize).
+ *
+ * The guard itself now lives in `src/domain/analysis/chartResize.ts` — it's
+ * shared verbatim with Scatter3dChart.vue's WebGL XYZ scatter, which never
+ * got this fix when it originally landed for the 2D chart only.
  */
 describe('sizeChangedEnoughToApply (ResizeObserver feedback-loop guard)', () => {
   it('always applies when there is no prior applied size (first measurement)', () => {

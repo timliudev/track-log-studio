@@ -47,6 +47,7 @@ describe('mergeAppearanceSettings (B19 shared sanitizer)', () => {
         tzOverride: 480,
         inputModePref: 'touch',
         centreCursorMode: true,
+        trackLineSmoothing: 0.5,
       }),
     ).toEqual({
       themePref: 'dark',
@@ -54,6 +55,7 @@ describe('mergeAppearanceSettings (B19 shared sanitizer)', () => {
       tzOverride: 480,
       inputModePref: 'touch',
       centreCursorMode: true,
+      trackLineSmoothing: 0.5,
     })
   })
 
@@ -65,8 +67,16 @@ describe('mergeAppearanceSettings (B19 shared sanitizer)', () => {
         tzOverride: 60,
         inputModePref: 'not-a-mode' as never,
         centreCursorMode: 'not-a-bool' as never,
+        trackLineSmoothing: 'not-a-number' as never,
       }),
-    ).toEqual({ themePref: 'auto', localePref: 'en', tzOverride: 60, inputModePref: 'auto', centreCursorMode: false })
+    ).toEqual({
+      themePref: 'auto',
+      localePref: 'en',
+      tzOverride: 60,
+      inputModePref: 'auto',
+      centreCursorMode: false,
+      trackLineSmoothing: 0,
+    })
   })
 
   it('accepts a boolean centreCursorMode and rejects non-boolean garbage to its default', () => {
@@ -80,6 +90,21 @@ describe('mergeAppearanceSettings (B19 shared sanitizer)', () => {
     expect(mergeAppearanceSettings({ tzOverride: -300 }).tzOverride).toBe(-300)
     expect(mergeAppearanceSettings({ tzOverride: 'nonsense' as never }).tzOverride).toBe('auto')
   })
+
+  it('defaults trackLineSmoothing to 0 (忠實呈現 — unchanged behaviour for existing users)', () => {
+    expect(defaultAppearanceSettings().trackLineSmoothing).toBe(0)
+    expect(mergeAppearanceSettings(undefined).trackLineSmoothing).toBe(0)
+  })
+
+  it('clamps trackLineSmoothing into [0, 1] and rejects non-finite/non-number garbage', () => {
+    expect(mergeAppearanceSettings({ trackLineSmoothing: 0.5 }).trackLineSmoothing).toBe(0.5)
+    expect(mergeAppearanceSettings({ trackLineSmoothing: 1 }).trackLineSmoothing).toBe(1)
+    expect(mergeAppearanceSettings({ trackLineSmoothing: -3 }).trackLineSmoothing).toBe(0)
+    expect(mergeAppearanceSettings({ trackLineSmoothing: 3 }).trackLineSmoothing).toBe(1)
+    expect(mergeAppearanceSettings({ trackLineSmoothing: NaN }).trackLineSmoothing).toBe(0)
+    expect(mergeAppearanceSettings({ trackLineSmoothing: 'lots' as never }).trackLineSmoothing).toBe(0)
+    expect(mergeAppearanceSettings({ trackLineSmoothing: undefined }).trackLineSmoothing).toBe(0)
+  })
 })
 
 describe('settingsStore persistence', () => {
@@ -90,6 +115,7 @@ describe('settingsStore persistence', () => {
     expect(s.tzOverride).toBe('auto')
     expect(s.inputModePref).toBe('auto')
     expect(s.centreCursorMode).toBe(false)
+    expect(s.trackLineSmoothing).toBe(0)
   })
 
   it('auto-saves changes to localStorage', async () => {
@@ -122,7 +148,7 @@ describe('settingsStore persistence', () => {
     expect(s.themePref).toBe('auto')
   })
 
-  it('applyAppearance (B19 import) replaces all five fields and persists once', async () => {
+  it('applyAppearance (B19 import) replaces all six fields and persists once', async () => {
     const s = useSettingsStore()
     s.applyAppearance({
       themePref: 'dark',
@@ -130,12 +156,14 @@ describe('settingsStore persistence', () => {
       tzOverride: 60,
       inputModePref: 'pointer',
       centreCursorMode: true,
+      trackLineSmoothing: 0.75,
     })
     expect(s.themePref).toBe('dark')
     expect(s.localePref).toBe('en')
     expect(s.tzOverride).toBe(60)
     expect(s.inputModePref).toBe('pointer')
     expect(s.centreCursorMode).toBe(true)
+    expect(s.trackLineSmoothing).toBe(0.75)
 
     await nextTick()
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -145,7 +173,20 @@ describe('settingsStore persistence', () => {
       tzOverride: 60,
       inputModePref: 'pointer',
       centreCursorMode: true,
+      trackLineSmoothing: 0.75,
     })
+  })
+
+  it('trackLineSmoothing auto-saves and round-trips through localStorage independently', async () => {
+    const s = useSettingsStore()
+    s.trackLineSmoothing = 0.25
+    await nextTick()
+    const raw = localStorage.getItem(STORAGE_KEY)
+    expect(JSON.parse(raw as string).trackLineSmoothing).toBe(0.25)
+
+    setActivePinia(createPinia())
+    const s2 = useSettingsStore()
+    expect(s2.trackLineSmoothing).toBe(0.25)
   })
 
   it('centreCursorMode auto-saves and round-trips through localStorage independently', async () => {

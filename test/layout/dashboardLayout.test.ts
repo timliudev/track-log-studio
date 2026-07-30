@@ -23,6 +23,7 @@ import {
   compactVertical,
   applyCollapsedHeights,
   sameLayoutPositions,
+  packExcluding,
   COLLAPSED_ROWS,
   STATIC_CARD_TITLE_KEYS,
 } from '@/domain/layout/dashboardLayout'
@@ -976,6 +977,112 @@ describe('mergeLayoutPositions (#1 fix — layout-updated write-back)', () => {
       if (it.i === STATIC_CARD_IDS.gear) continue
       expect(it).toEqual(base.find((b) => b.i === it.i))
     }
+  })
+})
+
+describe('packExcluding (B112 — pinned cards stay inert during a geometry pass)', () => {
+  it('passes the layout straight through transform when excludeIds is empty', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 4 },
+      { i: 'b', x: 4, y: 0, w: 4, h: 4 },
+    ]
+    const transform = vi.fn((items: typeof layout) => items)
+    const result = packExcluding(layout, new Set(), transform)
+    expect(transform).toHaveBeenCalledWith(layout)
+    expect(result).toEqual(layout)
+  })
+
+  it('excludes the given ids from what transform sees, then splices them back unchanged', () => {
+    // B pinned: sits at y:10..20 in the canonical layout. C was dragged
+    // UP into the space B visually vacated (the grid no longer renders a
+    // slot for B at all) — a real geometry pass (compactLayoutTopLeft/
+    // resolveOverlaps) run over the FULL array would see B's still-present
+    // canonical rect and shove C right back below it. packExcluding must
+    // keep B out of what `transform` reasons about entirely.
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 10 },
+      { i: 'b', x: 0, y: 10, w: 4, h: 10 }, // pinned — stale canonical rect
+      { i: 'c', x: 0, y: 5, w: 4, h: 5 }, // dragged to overlap b's old rect
+    ]
+    const transform = vi.fn((items: typeof layout) => items) // identity — just records what it saw
+    const result = packExcluding(layout, new Set(['b']), transform)
+    expect(transform).toHaveBeenCalledWith([layout[0], layout[2]])
+    expect(result).toEqual(expect.arrayContaining(layout))
+    expect(result.find((it) => it.i === 'b')).toEqual(layout[1])
+  })
+
+  it('runs a real packer (compactLayoutTopLeft) around an excluded id without disturbing it', () => {
+    const layout = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 10 },
+      { i: 'b', x: 0, y: 10, w: 4, h: 10 }, // pinned, would otherwise block c from rising
+      { i: 'c', x: 0, y: 25, w: 4, h: 5 },
+    ]
+    const packed = packExcluding(layout, new Set(['b']), compactLayoutTopLeft)
+    // b is untouched, at its exact original rect.
+    expect(packed.find((it) => it.i === 'b')).toEqual(layout[1])
+    // c is free to rise all the way to y:10 (right under a) since b was never
+    // part of what compactLayoutTopLeft saw as an obstacle.
+    expect(packed.find((it) => it.i === 'c')).toEqual({ i: 'c', x: 0, y: 10, w: 4, h: 5 })
+  })
+})
+
+describe('B112 integration — pinned-card filtering mirrors AnalyzerView\'s wiring', () => {
+  const canonical = () => [
+    { i: 'a', x: 0, y: 0, w: 4, h: 10 },
+    { i: 'b', x: 0, y: 10, w: 4, h: 10 },
+    { i: 'c', x: 0, y: 20, w: 4, h: 10 },
+  ]
+
+  it('rendered/display layout omits a pinned id and closes the gap; canonical layout keeps its rect untouched', () => {
+    const layout = canonical()
+    const isPinned = (id: string) => id === 'b'
+    // Mirrors AnalyzerView's desktopVisibleLayout -> desktopDisplayLayout
+    // composition: filter pinned ids out BEFORE the collapse-reflow overlay
+    // runs its (vertical-only) compaction, so a same-column card below the
+    // pinned one rises to fill the freed rows.
+    const visible = layout.filter((it) => !isPinned(it.i))
+    const display = applyCollapsedHeights(visible, new Set())
+    expect(display.map((it) => it.i)).toEqual(['a', 'c'])
+    expect(display.find((it) => it.i === 'c')).toEqual({ i: 'c', x: 0, y: 10, w: 4, h: 10 })
+    // The persisted/canonical array is a completely separate value — pinning
+    // never touches it, so it still has b at its original rect.
+    expect(layout.find((it) => it.i === 'b')).toEqual({ i: 'b', x: 0, y: 10, w: 4, h: 10 })
+  })
+
+  it('unpinning restores the card to its exact original slot with no drift', () => {
+    const layout = canonical()
+    const displayFor = (pinned: ReadonlySet<string>) =>
+      applyCollapsedHeights(
+        layout.filter((it) => !pinned.has(it.i)),
+        new Set(),
+      )
+    const whilePinned = displayFor(new Set(['b']))
+    expect(whilePinned.find((it) => it.i === 'b')).toBeUndefined()
+    const afterUnpin = displayFor(new Set())
+    expect(afterUnpin.find((it) => it.i === 'b')).toEqual(layout.find((it) => it.i === 'b'))
+    // Identity-preserving fixed point: nothing else drifted either — this IS
+    // just the original canonical layout again (a/b/c already stack with no
+    // gaps, so compactVertical is a no-op on it).
+    expect(afterUnpin).toEqual(layout)
+  })
+
+  it('a drag/resize write-back while b is pinned does not drop, reorder, or corrupt its persisted entry', () => {
+    const layout = canonical()
+    const pinnedIds = new Set(['b'])
+    // grid-layout-plus's emitted payload while b is pinned NEVER mentions it
+    // (it isn't one of the items fed to <GridLayout> at all — see
+    // desktopVisibleLayout) — here the user resized c.
+    const emitted = [
+      { i: 'a', x: 0, y: 0, w: 4, h: 10 },
+      { i: 'c', x: 0, y: 10, w: 6, h: 8 },
+    ]
+    const merged = mergeLayoutPositions(layout, emitted)
+    const packed = packExcluding(merged, pinnedIds, (items) =>
+      compactLayoutTopLeft(resolveOverlaps(items)),
+    )
+    expect(packed.find((it) => it.i === 'b')).toEqual(layout.find((it) => it.i === 'b'))
+    expect(packed.find((it) => it.i === 'c')).toEqual({ i: 'c', x: 0, y: 10, w: 6, h: 8 })
+    expect(packed).toHaveLength(layout.length)
   })
 })
 

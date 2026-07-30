@@ -173,6 +173,8 @@ export default {
     addChart: 'Add chart',
     addScatterChart: 'Add scatter chart',
     removeChart: 'Remove',
+    mapPlay: 'Play track',
+    mapPause: 'Pause playback',
     lapCount: 'Laps: {n}',
     lapCountExcluded: 'Laps: {n} ({x} excluded)',
     lapBand: 'Valid lap-time band (s)',
@@ -656,9 +658,8 @@ export default {
       cardScatterChart: 'Scatter {n}',
       collapse: 'Collapse',
       expand: 'Expand',
-      pin: 'Pin (stays fixed at the top while scrolling — only one card at a time)',
+      pin: 'Pin (stays fixed at the top while scrolling)',
       unpin: 'Unpin',
-      pinnedPlaceholder: '📌 Pinned at top',
       pinnedResizeHandle: 'Drag to resize (double-click to reset)',
       minimizePinned: 'Minimize (show title only)',
       expandPinned: 'Expand pinned card',
@@ -734,6 +735,12 @@ export default {
   centreCursor: {
     label: 'Fixed centre-needle mode',
     hint: 'Charts show a fixed vertical line at their centre. Zoom with the wheel or a two-finger pinch, then drag the data underneath it; the value on the needle becomes the current cursor (synced to the map / current-values card / other charts).',
+  },
+  trackLineSmoothing: {
+    label: 'Track line smoothing',
+    faithful: 'Faithful',
+    smooth: 'Smooth',
+    hint: 'Rounds the drawn track line between GPS samples (a curve fitted through the same points, never moving them) instead of the raw straight segments. Purely visual — off by default so existing recordings look exactly as before.',
   },
   converter: {
     suspensionToggle: 'Suspension calibration (click to expand)',

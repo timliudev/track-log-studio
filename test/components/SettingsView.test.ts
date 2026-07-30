@@ -167,7 +167,7 @@ describe('SettingsView', () => {
 
       const wrapper = mountSettings()
       const bundle = buildExportBundle({
-        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto', centreCursorMode: false },
+        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto', centreCursorMode: false, trackLineSmoothing: 0 },
         drivetrain: {
           kind: 'mt',
           mt: {
@@ -206,7 +206,7 @@ describe('SettingsView', () => {
 
       const wrapper = mountSettings()
       const bundle = buildExportBundle({
-        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto', centreCursorMode: false },
+        appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto', centreCursorMode: false, trackLineSmoothing: 0 },
         drivetrain: {
           kind: 'mt',
           mt: {

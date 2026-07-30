@@ -166,6 +166,10 @@ Go to the "Analyzer" tab and use the "Load files" control at the top to pick a `
 - **Reset view**: one click restores the default zoom and position (double-click the map also resets it).
 - **Start/finish line**: drag the two endpoints on the track to set the start/finish line used for lap splitting; "Reset line" restores the default position.
 - **Track channel markers**: see section 4.6 — track colouring and extrema marking are now a single "pick a channel" control.
+- **Play ▶**: a play/pause button above the map, available on **both desktop and mobile**. It advances the cursor at **1×** along the recording's own timing, replaying the run along the track; **every card shares that one cursor**, so the time-series charts, current values, and the rest follow along.
+  - Playback range: the **single selected lap** if exactly one is selected, otherwise the whole recording. It stops at the end (no wrap-around); pressing play again resumes from where it stopped.
+  - Changing the lap selection, switching recordings, or leaving the Analyzer stops playback automatically.
+  - During playback the cursor **interpolates smoothly between adjacent GPS samples** instead of hopping sample to sample (a 10 Hz recording otherwise steps only every 100 ms). If your system has "reduce motion" enabled, it steps discretely on a fixed interval instead.
 
 ### 4.3 Lap table
 
@@ -340,14 +344,18 @@ On wider screens (desktop), every Analyzer panel — the track map, lap table, s
 
 #### Mobile: single column + collapse + pin
 
-Below roughly 768px wide, the Analyzer layout collapses to a single column, ordered by the logical order derived from the desktop layout, with **dragging/resizing disabled** (rearranging doesn't apply in a fixed single-column order). This view additionally offers:
+Below roughly 768px wide, the Analyzer layout collapses to a single column, ordered by the logical order derived from the desktop layout. This view additionally offers:
+
+- **Long-press to reorder**: press and hold a card's title bar for about 0.3 s, then drag to change its position in the single column (an ordinary swipe still scrolls the page, so this can't be triggered by accident). Dragging to the top or bottom edge **auto-scrolls**, so a card can be moved to a position that's currently off-screen; if a second finger lands mid-drag, the drag is **aborted** (so the two gestures can't fight).
+- **Card resizing**: in the mobile single column only the **height** can be adjusted (width is always full-bleed, so dragging width would be meaningless).
+- When "Lock layout" is on, dragging and resizing are disabled entirely (desktop and mobile alike).
 
 - **Collapsing a card**: same as desktop — tap a card's chevron to collapse/expand its content, handy for skipping past sections you don't need right now in the single column.
-- **Pinning a card**: on mobile, every card's title bar also has a pin button. Tap it and that card becomes **stuck to the top of the screen** (sticky) while the rest of the cards keep scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table.
-  - Only **one card can be pinned at a time** — pinning a different card automatically unpins the previous one.
-  - A pinned card's height is capped at roughly 45% of the screen (`max-height: 45vh`) so it doesn't take over the whole screen and block scrolling to the rest of the content.
-  - Tap the pin button again to unpin.
-  - Collapse and pin state are each saved in the browser (localStorage) and persist across reloads and closed tabs.
+- **Pinning a card**: every card's title bar has a pin button (usable on both desktop and mobile, though it's primarily a stopgap designed for the mobile single-column view). Tap it and that card becomes **stuck to the top of the page** (sticky) — it reads as "this card is stuck to the top of this page", not as a separate floating window. Its original slot in the grid is released immediately, and the card(s) below it (or in the same column) automatically **close the gap** — no empty placeholder is left behind. The rest of the content keeps scrolling normally underneath it — for example, pin the "Track map" card so it stays visible while you scroll down to check the XY scatter chart or the lap table. **A pinned card keeps the exact size it had in the grid** (both width and height — it is not stretched to fill the page); if the current viewport is narrower than the card's original width (e.g. on a phone, or a narrowed desktop window), only the width shrinks to fit — height is unaffected. If you've previously dragged the resize handle in the card's bottom-right corner to set a custom size while pinned, that custom size takes priority until you double-click the handle to reset it.
+  - **Several cards can be pinned at once**: they stack top to bottom in the order you pinned them (the first one pinned stays on top). Tapping a pinned card's pin button again unpins just that one — the rest of the stack and its order are unaffected.
+  - **On mobile**, the pinned cards' **combined** height is capped at roughly 50% of the screen — beyond that, the pinned stack itself scrolls up/down internally rather than shrinking any individual card, so the (unpinned) content below always keeps roughly half the screen scrollable, no matter how many cards you pin. **Desktop has no such height cap** — the pinned stack simply grows to fit its cards, with no extra inner scrollbar.
+  - Tap the pin button again to unpin — the card returns to exactly its original position and size in the grid.
+  - Collapse and pin state are each saved in the browser (localStorage) and persist across reloads and closed tabs; an older single-pin save is automatically upgraded to the new format without losing the existing pin.
 
 ### 4.11 GPS session merge
 
@@ -390,7 +398,16 @@ Beyond comparing laps within a single recording (see 4.4), the Analyzer also sup
 
 Times shown in the Analyzer and Converter are converted according to the time zone set here: choose "Auto (browser)," or pick a whole-hour zone manually from UTC-12 to UTC+14.
 
-> Suspension calibration and saving a modified `.loga` have moved to the Converter tab (see sections 3.4 and 3.6) — Settings now only holds general app settings such as theme, language, and time zone.
+### 5.3 Track line smoothing
+
+GPS samples at a fixed rate (10 Hz, for example), and the track map connects adjacent samples with **straight** lines by default, so corners render with a polygonal, faceted look. This slider adjusts how much the track line is **smoothed**:
+
+- **Far left = faithful (default)**: no smoothing at all — exactly the line formed by the raw GPS samples. At this setting the display is **identical** to how it looked before this feature existed.
+- **Toward the right = smoother**: the line is resampled along a centripetal Catmull-Rom curve through the original samples, reading closer to the real path travelled.
+
+> **Smoothing is purely visual.** It never alters the underlying data: lap times, distances, channel values, the cursor↔sample mapping, and the sample snapping when you hover or scrub on the map (which always snaps to a **real sample**, never to an interpolated point on the curve) are all unaffected. Gaps caused by lost GPS fixes are preserved as breaks in the line rather than being bridged by the curve.
+
+> Suspension calibration and saving a modified `.loga` have moved to the Converter tab (see sections 3.4 and 3.6).
 
 ---
 
