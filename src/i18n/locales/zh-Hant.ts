@@ -656,6 +656,7 @@ export default {
       pin: '釘選（捲動頁面時固定於頂部）',
       unpin: '取消釘選',
       pinnedResizeHandle: '拖曳調整大小（點兩下重設）',
+      cssGridResizeHandle: '拖曳調整卡片尺寸',
       minimizePinned: '迷你模式（只顯示標題）',
       expandPinned: '展開釘選卡片',
     },

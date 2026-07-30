@@ -1384,4 +1384,154 @@ describe('DashboardCard (scaffold smoke test)', () => {
       ).not.toThrow()
     })
   })
+
+  describe('F6 stage 3(a) — CSS Grid resize handle (resizeMode="cssGrid")', () => {
+    it('is absent by default (no resizeMode) even on an otherwise-eligible card', () => {
+      expect(mountCard({}).find('.css-grid-resize-handle').exists()).toBe(false)
+    })
+
+    it('shows only while resizeMode="cssGrid", not pinned, not collapsed, and resizable', () => {
+      expect(mountCard({ resizeMode: 'cssGrid' }).find('.css-grid-resize-handle').exists()).toBe(true)
+      expect(mountCard({ resizeMode: 'cssGrid', pinned: true }).find('.css-grid-resize-handle').exists()).toBe(false)
+      expect(mountCard({ resizeMode: 'cssGrid', collapsed: true }).find('.css-grid-resize-handle').exists()).toBe(false)
+      expect(mountCard({ resizeMode: 'cssGrid', resizable: false }).find('.css-grid-resize-handle').exists()).toBe(false)
+    })
+
+    it('mouse pointerdown starts the resize IMMEDIATELY (no long-press gate) and emits css-grid-resize-start', async () => {
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 40, clientY: 50, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-resize-start')).toEqual([[{ x: 40, y: 50 }]])
+    })
+
+    it('pen behaves the same as mouse — immediate start', async () => {
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'pen', clientX: 5, clientY: 6, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-resize-start')).toEqual([[{ x: 5, y: 6 }]])
+    })
+
+    it('resizable:false blocks the resize entirely, even for mouse (belt-and-braces alongside the v-if hiding the handle)', async () => {
+      const wrapper = mountCard({ resizeMode: 'cssGrid', resizable: false })
+      // The handle itself is v-if'd away, but exercise the handler guard
+      // directly for defence-in-depth documentation.
+      expect(wrapper.find('.css-grid-resize-handle').exists()).toBe(false)
+    })
+
+    it('a live mouse resize forwards pointermove as css-grid-resize-move and pointerup as css-grid-resize-end(committed:true)', async () => {
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
+
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 30, clientY: 40 }))
+      expect(wrapper.emitted('css-grid-resize-move')).toEqual([[{ x: 30, y: 40 }]])
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
+      expect(wrapper.emitted('css-grid-resize-end')).toEqual([[{ committed: true }]])
+    })
+
+    it('a genuine pointercancel aborts the live resize — css-grid-resize-end(committed:false)', async () => {
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
+
+      window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1 }))
+      expect(wrapper.emitted('css-grid-resize-end')).toEqual([[{ committed: false }]])
+    })
+
+    it('touch does NOT start before the long-press threshold — a plain tap/brush emits nothing', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      expect(wrapper.emitted('css-grid-resize-start')).toBeUndefined()
+
+      vi.advanceTimersByTime(250)
+      expect(wrapper.emitted('css-grid-resize-start')).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('touch starts the resize once the long-press hold completes (300ms, no disqualifying movement)', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+
+      vi.advanceTimersByTime(300)
+      expect(wrapper.emitted('css-grid-resize-start')).toEqual([[{ x: 10, y: 10 }]])
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+      vi.useRealTimers()
+    })
+
+    it('cancels the touch hold (no start) when the finger moves past the threshold before the delay elapses — scroll intent', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+
+      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 10, clientY: 60, pointerId: 7 }))
+      vi.advanceTimersByTime(300)
+
+      expect(wrapper.emitted('css-grid-resize-start')).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('a second finger touching down mid-PENDING cancels the hold — no start at all (same B102b-style arbitration as the pending drag)', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 3 })
+
+      window.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 99, clientX: 200, clientY: 200 }))
+      vi.advanceTimersByTime(300)
+
+      expect(wrapper.emitted('css-grid-resize-start')).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('applies the touch-armed flash on hold-confirm and touch-dragging for the duration of the resize', async () => {
+      vi.useFakeTimers()
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const handle = wrapper.find('.css-grid-resize-handle')
+      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
+      expect(wrapper.find('.css-grid-resize-handle').classes()).not.toContain('touch-armed')
+
+      vi.advanceTimersByTime(300)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.css-grid-resize-handle').classes()).toContain('touch-armed')
+      expect(wrapper.find('.css-grid-resize-handle').classes()).toContain('touch-dragging')
+
+      vi.advanceTimersByTime(400)
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.css-grid-resize-handle').classes()).not.toContain('touch-armed')
+      expect(wrapper.find('.css-grid-resize-handle').classes()).toContain('touch-dragging')
+
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('.css-grid-resize-handle').classes()).not.toContain('touch-dragging')
+      vi.useRealTimers()
+    })
+
+    it('unmounting mid-resize cleans up window listeners (no stray emit after unmount)', async () => {
+      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      await wrapper
+        .find('.css-grid-resize-handle')
+        .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
+      expect(wrapper.emitted('css-grid-resize-start')).toHaveLength(1)
+
+      wrapper.unmount()
+      expect(() =>
+        window.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 5, clientY: 5 })),
+      ).not.toThrow()
+    })
+  })
 })

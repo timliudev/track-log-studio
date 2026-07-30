@@ -7,17 +7,20 @@ import { itemGridPlacement, gridContainerStyle } from '@/domain/layout/cssGridPl
  * F6 stage 1 — a CSS-Grid-based dashboard renderer, feature-flag-gated
  * (`cssGridDashboard`, see src/config/featureFlags.ts) alternative to
  * grid-layout-plus's `<GridLayout>`. Stage 1 was RENDER ONLY; stage 2 (see
- * `dragOffsetPx`'s doc below, and useCssGridDashboardDrag.ts) adds drag-to-
- * reorder on top — resize and gutter-dragging are still stage 3/4 (see
- * docs/ISSUES.md's F6 entry). This component still just draws WHATEVER
- * `layout` array it's handed (drag preview or settled) at the exact same
- * pixel geometry (see cssGridPlacement.ts's module doc for the algebraic
- * proof), via native `grid-column`/`grid-row` placement instead of
+ * `dragOffsetPx`'s doc below, and useCssGridDashboardDrag.ts) added drag-to-
+ * reorder; stage 3 adds corner resize + gutter-drag (both live one level up,
+ * in useCssGridDashboardResize.ts / AnalyzerView's reuse of useGridGutters.ts
+ * — this component itself is unaware of either gesture) and the multi-pin
+ * stacking treatment documented at `pinStackStyle` below (see docs/ISSUES.md's
+ * F6 entry for what's left for stage 4). This component still just draws
+ * WHATEVER `layout` array it's handed (drag/resize preview or settled) at the
+ * exact same pixel geometry (see cssGridPlacement.ts's module doc for the
+ * algebraic proof), via native `grid-column`/`grid-row` placement instead of
  * grid-layout-plus's `position: absolute` + `transform: translate3d` — the
- * actual drag MECHANICS (pointer tracking, collision/compaction, commit) all
- * live one level up, in AnalyzerView.vue + useCssGridDashboardDrag.ts; this
- * component only renders the resulting layout array plus one extra pixel
- * `translate()` for whichever single item is currently being dragged.
+ * actual gesture MECHANICS (pointer tracking, collision/compaction, commit)
+ * all live one level up; this component only renders the resulting layout
+ * array plus one extra pixel `translate()` for whichever single item is
+ * currently being dragged.
  *
  * THE POINT of this migration: `position: sticky` never applies to an
  * absolutely-positioned element, which is exactly why the old "pin a card so
@@ -26,11 +29,11 @@ import { itemGridPlacement, gridContainerStyle } from '@/domain/layout/cssGridPl
  * user explicitly rejected that ("不該拉出獨立空間，這無論都無法接受").
  * Because every card here is an ordinary IN-FLOW CSS Grid item (explicit
  * `grid-column`/`grid-row`, not absolute positioning), a pinned card can
- * simply get `position: sticky; top: 0` and stick EXACTLY where it already
- * sits — no Teleport, no placeholder, no separate anchor. Multiple pinned
- * cards each get their own sticky wrapper and "stack" naturally as the page
- * scrolls (no combined-height cap / cross-card offset math is attempted here
- * — see the `#item` slot's own doc for why that's fine for this stage).
+ * simply get `position: sticky` and stick EXACTLY where it already sits — no
+ * Teleport, no placeholder, no separate anchor. Multiple pinned cards each
+ * get their own sticky wrapper; stage 3(c) gives them a small staggered
+ * `top` offset + pin-order-driven z-index (see `pinStackStyle` below) rather
+ * than leaving every one at an identical `top: 0`.
  *
  * AnalyzerView.vue owns the actual data (persisted `layout`, `panelState`'s
  * `pinnedIds`, collapse, visibility) — this component only lays out
@@ -60,11 +63,13 @@ const props = defineProps<{
   marginX: number
   /** Vertical gutter/inset in px — `gridMargin[1]`. */
   marginY: number
-  /** Ids currently pinned (`panelState.pinnedIds`) — rendered with
-   *  `position: sticky` instead of grid-layout-plus's Teleport-to-anchor
-   *  trick. Order doesn't matter here (unlike the old renderer's pin STACK,
-   *  which used `pinOrder` to drive CSS `order` in a flex column) since each
-   *  pinned card keeps its own grid slot instead of joining a shared stack. */
+  /** Ids currently pinned (`panelState.pinnedIds`), ALREADY in pin order
+   *  (index 0 = pinned first — same convention AnalyzerView's `pinOrderFor`
+   *  documents for the legacy renderer) — rendered with `position: sticky`
+   *  instead of grid-layout-plus's Teleport-to-anchor trick. F6 stage 3(c) —
+   *  this array's INDEX also drives the staggered `top` offset + z-index a
+   *  pinned card gets when several are pinned at once, see `pinOrderFor`/
+   *  `styleFor` below for the "why". */
   pinnedIds?: string[]
   /** F6 stage 2 — the card currently being dragged, plus its RAW pixel offset
    *  from its rest position since the drag started (useCssGridDashboardDrag's
@@ -84,6 +89,60 @@ const pinnedSet = computed(() => new Set(props.pinnedIds ?? []))
 
 function isPinnedId(id: string): boolean {
   return pinnedSet.value.has(id)
+}
+
+/** F6 stage 3(c) — this item's position within the pin STACK (0 = pinned
+ *  first), or -1 if not pinned/not found — same meaning as AnalyzerView's own
+ *  `pinOrderFor` for the legacy renderer, just derived locally here since
+ *  `pinnedIds` is already handed to this component in pin order (see that
+ *  prop's own doc). */
+function pinOrderFor(id: string): number {
+  return props.pinnedIds?.indexOf(id) ?? -1
+}
+
+/** F6 stage 3(c) — multi-pin stacking. Unlike the legacy renderer (where
+ *  EVERY pinned card left the grid entirely and joined one shared flex-column
+ *  anchor, so `pinOrder` could drive a plain CSS `order`), a pinned card here
+ *  stays in its OWN grid cell — "stacking order" has no flex-column
+ *  equivalent to reuse. Two things can go wrong with several simultaneously-
+ *  sticky cards left at an identical `top: 0`:
+ *
+ *   1. Cross-browser handling of a grid item's sticky "containing block" has
+ *      historically not been fully consistent (some engines confine a sticky
+ *      grid item's stuck range to its own grid AREA, which would make two
+ *      cards stacked in the same column hand off cleanly with no special
+ *      case needed at all; others have been observed treating the whole grid
+ *      container as the containing block instead, which would let two
+ *      same-column pinned cards' stuck ranges genuinely overlap).
+ *   2. Even where handoff is clean, an instant identical `top` for several
+ *      pinned cards gives zero visual cue that more than one thing is
+ *      pinned at all until you actually scroll into the overlap.
+ *
+ *  This can't be verified pixel-for-pixel in this headless environment (no
+ *  real paint/scroll — see this migration's own honest-limitation note), so
+ *  the fix here is deliberately simple and safe rather than trying to
+ *  precisely compute real card heights: a small per-slot `top` CASCADE (a
+ *  later-pinned card's sticky position sits a little further down than an
+ *  earlier one's) so even a worst-case full overlap still shows a "stacked
+ *  cards" edge peeking out underneath, plus a z-index that puts the
+ *  EARLIEST-pinned card (index 0 — "pinned first", same ordering
+ *  AnalyzerView's own pinOrderFor documents) on TOP of later ones, mirroring
+ *  which card a user would expect to stay most visible. A single pinned card
+ *  (by far the common case) gets `top: 0`/its existing z-index exactly as
+ *  before — zero visual change from stage 1/2. */
+const PIN_STACK_OFFSET_PX = 8
+const PIN_BASE_Z_INDEX = 20
+
+function pinStackStyle(order: number): { top: string; zIndex: number } {
+  return {
+    top: `${order * PIN_STACK_OFFSET_PX}px`,
+    // Earlier pin order (0) renders ABOVE later ones; never dips below the
+    // base 20 even if an implausibly large number of cards were ever pinned
+    // at once, and always stays under the actively-dragged item's z-index 30
+    // (see `styleFor`'s own dragging branch) since a pinned card is never
+    // draggable in the first place (dashboardLayout.ts's `isItemDraggable`).
+    zIndex: Math.max(PIN_BASE_Z_INDEX, PIN_BASE_Z_INDEX + 9 - order),
+  }
 }
 
 const containerStyle = computed(() =>
@@ -128,7 +187,8 @@ function styleFor(item: DashboardLayoutItem): CSSProperties {
   // while following the pointer.
   if (transform) return { gridColumn, gridRow, transform, zIndex: 30, position: 'relative' }
   if (!isPinnedId(item.i)) return { gridColumn, gridRow }
-  return { gridColumn, gridRow, position: 'sticky', top: '0px', zIndex: 20 }
+  const { top, zIndex } = pinStackStyle(pinOrderFor(item.i))
+  return { gridColumn, gridRow, position: 'sticky', top, zIndex }
 }
 </script>
 

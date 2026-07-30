@@ -129,6 +129,51 @@ describe('CssGridGrid', () => {
     })
   })
 
+  describe('F6 stage 3(c) — multi-pin stacking (staggered top offset + pin-order z-index)', () => {
+    it('a single pinned card is unaffected — top:0px, same as stage 1/2', () => {
+      const wrapper = mountGrid({ layout, pinnedIds: ['sectors'] })
+      const style = wrapper.findAll('.css-grid-item')[1]!.attributes('style')!
+      expect(style).toContain('top: 0px')
+    })
+
+    it('the FIRST-pinned id (index 0) gets top:0px and the HIGHEST z-index among pinned cards', () => {
+      const wrapper = mountGrid({ layout, pinnedIds: ['map', 'chart-1'] })
+      const items = wrapper.findAll('.css-grid-item')
+      const mapStyle = items[0]!.attributes('style')! // map, pinnedIds index 0
+      const chartStyle = items[2]!.attributes('style')! // chart-1, pinnedIds index 1
+      expect(mapStyle).toContain('top: 0px')
+      expect(chartStyle).toContain('top: 8px')
+      const mapZ = Number(/z-index:\s*(\d+)/.exec(mapStyle)![1])
+      const chartZ = Number(/z-index:\s*(\d+)/.exec(chartStyle)![1])
+      expect(mapZ).toBeGreaterThan(chartZ)
+    })
+
+    it('a THIRD simultaneously-pinned card cascades further down and lower in z-order still', () => {
+      const wrapper = mountGrid({ layout, pinnedIds: ['map', 'sectors', 'chart-1'] })
+      const items = wrapper.findAll('.css-grid-item')
+      const styles = items.map((it) => it.attributes('style')!)
+      expect(styles[0]).toContain('top: 0px') // map, index 0
+      expect(styles[1]).toContain('top: 8px') // sectors, index 1
+      expect(styles[2]).toContain('top: 16px') // chart-1, index 2
+      const z = styles.map((s) => Number(/z-index:\s*(\d+)/.exec(s)![1]))
+      expect(z[0]).toBeGreaterThan(z[1])
+      expect(z[1]).toBeGreaterThan(z[2])
+      // Every pinned card's z-index still stays below an actively-dragged
+      // item's own 30 (see the dragOffsetPx describe block below).
+      expect(Math.max(...z)).toBeLessThan(30)
+    })
+
+    it('pin order (not array/DOM order) drives the stack — a later id pinned FIRST still gets top:0px', () => {
+      // 'chart-1' is pinned first (index 0 in pinnedIds) even though it's the
+      // LAST item in `layout`/DOM order — pinOrderFor must read from
+      // pinnedIds, not from the item's own position in `layout`.
+      const wrapper = mountGrid({ layout, pinnedIds: ['chart-1', 'map'] })
+      const items = wrapper.findAll('.css-grid-item')
+      expect(items[2]!.attributes('style')).toContain('top: 0px') // chart-1
+      expect(items[0]!.attributes('style')).toContain('top: 8px') // map
+    })
+  })
+
   describe('F6 stage 2 — dragOffsetPx (the dragged card follows the pointer)', () => {
     it('applies NO transform/dragging class to anything when dragOffsetPx is absent (stage-1 byte-for-byte)', () => {
       const wrapper = mountGrid({ layout })
