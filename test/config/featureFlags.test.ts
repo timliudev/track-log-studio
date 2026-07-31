@@ -28,20 +28,11 @@ describe('FEATURE_FLAGS registry', () => {
     expect(FEATURE_FLAGS.cvtDynamics.default).toBe(false)
     expect(FEATURE_FLAGS.cvtDynamics.labelKey).toBeTruthy()
   })
-
-  // F6 stage 1 — the new CSS-Grid dashboard renderer, off by default like
-  // every other not-yet-field-tested flag (see cvtDynamics above).
-  it('registers cssGridDashboard, off by default, with a label and description key', () => {
-    expect(FEATURE_FLAGS.cssGridDashboard.default).toBe(false)
-    expect(FEATURE_FLAGS.cssGridDashboard.labelKey).toBeTruthy()
-    expect(FEATURE_FLAGS.cssGridDashboard.descriptionKey).toBeTruthy()
-  })
 })
 
 describe('isFeatureFlagName', () => {
   it('accepts a registered flag name', () => {
     expect(isFeatureFlagName('cvtDynamics')).toBe(true)
-    expect(isFeatureFlagName('cssGridDashboard')).toBe(true)
   })
   it('rejects an unknown name', () => {
     expect(isFeatureFlagName('notARealFlag')).toBe(false)

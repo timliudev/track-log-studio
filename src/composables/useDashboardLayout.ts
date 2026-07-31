@@ -1,5 +1,4 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, type Ref } from 'vue'
-import type { Breakpoints } from 'grid-layout-plus'
 import {
   GRID_COLS,
   GRID_MARGIN,
@@ -33,6 +32,18 @@ const BREAKPOINTS: Breakpoints = {
   xxs: 0,
 }
 const COLS: Breakpoints = { lg: GRID_COLS, md: GRID_COLS, sm: GRID_COLS, xs: 1, xxs: 1 }
+
+/** F6 — the responsive breakpoint/column record shape. Was imported as
+ *  `Breakpoints` from grid-layout-plus; that dependency is gone (F6 stage 4)
+ *  and the shape is a plain 5-key record, so it's declared locally rather
+ *  than keeping a dependency alive for one type. */
+export interface Breakpoints {
+  lg: number
+  md: number
+  sm: number
+  xs: number
+  xxs: number
+}
 
 /**
  * #8 — analyzer dashboard grid layout: owns the persisted layout array (see

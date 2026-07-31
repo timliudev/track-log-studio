@@ -129,13 +129,19 @@ export function playFlipTransition(
   }
 }
 
-/** grid-layout-plus's own modifier classes on a card's `.vgl-item` wrapper
- *  while ITS OWN drag/resize gesture is live (see node_modules/grid-layout-
- *  plus's `className` computed: `${ns}-item--dragging` / `--resizing`) — the
- *  card is following the pointer 1:1 during these, so a FLIP animation must
- *  NOT kick in (it would visibly fight the drag); only the eventual SETTLE
- *  (compaction closing a hole left by the drag, e.g.) should be animated. */
-const DEFAULT_SKIP_CLASSES = ['vgl-item--dragging', 'vgl-item--resizing']
+/** Marker classes present on a card (or its wrapper) while ITS OWN drag or
+ *  resize gesture is live — the card follows the pointer 1:1 during these, so
+ *  a FLIP animation must NOT kick in (it would visibly fight the gesture);
+ *  only the eventual SETTLE (compaction closing the hole the drag left, say)
+ *  should be animated. F6 stage 4: the old grid-layout-plus modifier names
+ *  (`vgl-item--dragging`/`--resizing`) are kept alongside the CSS Grid
+ *  renderer's own so any stale markup still short-circuits correctly. */
+const DEFAULT_SKIP_CLASSES = [
+  'css-grid-item--dragging',
+  'css-grid-item--resizing',
+  'vgl-item--dragging',
+  'vgl-item--resizing',
+]
 
 export interface AutoFlipOptions {
   /** When provided and `false`, the observer is fully disabled — used by

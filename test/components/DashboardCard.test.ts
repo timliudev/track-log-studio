@@ -270,483 +270,6 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
   })
 
-  describe('aspectRatio (#18 fix — pinned card keeps its original grid shape)', () => {
-    it('applies aspect-ratio inline style when pinned with a valid ratio', () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 10 })
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.4')
-    })
-
-    it('does NOT apply aspect-ratio when the card is not pinned, even if a ratio is given', () => {
-      const wrapper = mountCard({ pinned: false, aspectRatio: 4 / 10 })
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('does NOT apply aspect-ratio when pinned but no ratio is given (falls back to fixed max-height)', () => {
-      const wrapper = mountCard({ pinned: true })
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('ignores a non-finite/zero/negative ratio rather than emitting an invalid style', () => {
-      for (const bad of [0, -1, NaN, Infinity]) {
-        const wrapper = mountCard({ pinned: true, aspectRatio: bad })
-        expect(wrapper.attributes('style')).toBeUndefined()
-      }
-    })
-
-    it('a wide/short card (e.g. a control panel, w:h=4:5) gets a different ratio than a tall/narrow one (e.g. a chart, w:h=4:11)', () => {
-      const wide = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      const tall = mountCard({ pinned: true, aspectRatio: 4 / 11 })
-      expect(wide.attributes('style')).not.toBe(tall.attributes('style'))
-    })
-  })
-
-  describe('B113 — pinnedWidthPx/pinnedHeightPx (the card\'s ACTUAL grid-slot pixel size is now the DEFAULT, not aspect-ratio-derived stretch)', () => {
-    it('applies an explicit pixel width+height, capped by max-width:100%, when both are supplied — this is what AnalyzerView.vue\'s pinnedGridSizeForItemId feeds in', () => {
-      const wrapper = mountCard({ pinned: true, pinnedWidthPx: 360, pinnedHeightPx: 252 })
-      const style = wrapper.attributes('style')
-      expect(style).toContain('width: 360px')
-      expect(style).toContain('height: 252px')
-      expect(style).toContain('max-width: 100%')
-      // NOT the old aspect-ratio-derived shape — this is the actual bug fix:
-      // a pinned card no longer stretches to its container then grows taller
-      // by ratio.
-      expect(style).not.toContain('aspect-ratio')
-    })
-
-    it('takes precedence over aspectRatio when both are supplied (the grid-slot size wins over the fallback ratio)', () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5, pinnedWidthPx: 300, pinnedHeightPx: 400 })
-      const style = wrapper.attributes('style')
-      expect(style).toContain('width: 300px')
-      expect(style).toContain('height: 400px')
-      expect(style).not.toContain('aspect-ratio')
-    })
-
-    it('falls back to aspectRatio when pinnedWidthPx/pinnedHeightPx are absent (grid container not measured yet)', () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
-      expect(wrapper.attributes('style')).not.toContain('width:')
-    })
-
-    it('falls back to aspectRatio when only ONE of pinnedWidthPx/pinnedHeightPx is supplied (partial/invalid geometry)', () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5, pinnedWidthPx: 300 })
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
-      expect(wrapper.attributes('style')).not.toContain('width:')
-    })
-
-    it('ignores a non-finite/zero/negative pinnedWidthPx or pinnedHeightPx rather than emitting an invalid style', () => {
-      for (const bad of [0, -1, NaN, Infinity]) {
-        const wrapper = mountCard({ pinned: true, pinnedWidthPx: bad, pinnedHeightPx: 200 })
-        expect(wrapper.attributes('style')).toBeUndefined()
-      }
-    })
-
-    it('does NOT apply pinnedWidthPx/pinnedHeightPx when the card is not pinned', () => {
-      const wrapper = mountCard({ pinned: false, pinnedWidthPx: 360, pinnedHeightPx: 252 })
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('the user\'s own dragged pinnedSize (B18 resize handle) STILL takes precedence over pinnedWidthPx/pinnedHeightPx — the default never overrides an explicit user resize', async () => {
-      const wrapper = mountCard({ pinned: true, pinnedWidthPx: 360, pinnedHeightPx: 252 })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 300,
-        height: 200,
-        right: 300,
-        bottom: 200,
-        x: 0,
-        y: 0,
-        toJSON() {
-          return this
-        },
-      } as DOMRect)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-
-      // The drag's own size (+50/+60 from the stubbed 300x200 start) wins,
-      // NOT the 360/252 pinnedWidthPx/pinnedHeightPx default.
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-    })
-  })
-
-  describe('B111 — pinOrder (multi-pin stack position, applied as CSS `order`)', () => {
-    it('applies an inline `order` style when pinned with a pinOrder', () => {
-      const wrapper = mountCard({ pinned: true, pinOrder: 2 })
-      expect(wrapper.attributes('style')).toContain('order: 2')
-    })
-
-    it('does NOT apply order when the card is not pinned, even if pinOrder is given', () => {
-      const wrapper = mountCard({ pinned: false, pinOrder: 2 })
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('does NOT apply order when pinned but pinOrder is omitted (single-pin-like usage)', () => {
-      const wrapper = mountCard({ pinned: true })
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('ignores a negative pinOrder (not currently in the pinned stack)', () => {
-      const wrapper = mountCard({ pinned: true, pinOrder: -1 })
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('combines with aspectRatio — both order and aspect-ratio land in the same inline style', () => {
-      const wrapper = mountCard({ pinned: true, pinOrder: 1, aspectRatio: 4 / 5 })
-      expect(wrapper.attributes('style')).toContain('order: 1')
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
-    })
-
-    it('combines with a dragged pixel width/height', async () => {
-      const wrapper = mountCard({ pinned: true, pinOrder: 0 })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width: 300,
-        height: 200,
-        right: 300,
-        bottom: 200,
-        x: 0,
-        y: 0,
-        toJSON() {
-          return this
-        },
-      } as DOMRect)
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toContain('order: 0')
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-    })
-  })
-
-  describe('B18 — pinned-card resize handle', () => {
-    function stubRect(el: HTMLElement, width: number, height: number): void {
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width,
-        height,
-        right: width,
-        bottom: height,
-        x: 0,
-        y: 0,
-        toJSON() {
-          return this
-        },
-      } as DOMRect)
-    }
-
-    it('shows the resize handle only while pinned and not collapsed', () => {
-      expect(mountCard({ pinned: false }).find('.pin-resize-handle').exists()).toBe(false)
-      expect(mountCard({ pinned: true }).find('.pin-resize-handle').exists()).toBe(true)
-      // Preserves the pre-existing "collapsed cards aren't resizable" rule.
-      expect(mountCard({ pinned: true, collapsed: true }).find('.pin-resize-handle').exists()).toBe(false)
-    })
-
-    it('F6 stage 1 — disablePinResize hides the handle even while pinned and not collapsed', () => {
-      expect(mountCard({ pinned: true, disablePinResize: true }).find('.pin-resize-handle').exists()).toBe(false)
-      // Default (omitted) is unaffected — existing callers keep the handle.
-      expect(mountCard({ pinned: true, disablePinResize: false }).find('.pin-resize-handle').exists()).toBe(true)
-    })
-
-    it('dragging the handle sets an explicit pixel width/height, overriding the aspect-ratio default', async () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      // Not part of a real layout in happy-dom, so getBoundingClientRect
-      // needs a stub to report a starting size for the drag delta.
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-
-      // +50 width, +60 height from the drag delta above.
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-      expect(wrapper.attributes('style')).not.toContain('aspect-ratio')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-    })
-
-    it('clamps the dragged size to a sane minimum (does not shrink to near-zero)', async () => {
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: -1000, clientY: -1000 }))
-      await wrapper.vm.$nextTick()
-
-      expect(wrapper.attributes('style')).toContain('width: 220px')
-      expect(wrapper.attributes('style')).toContain('height: 140px')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-    })
-
-    it('double-clicking the handle resets to the automatic aspect-ratio size', async () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 400, clientY: 300 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toContain('width: 400px')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-
-      await handle.trigger('dblclick')
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
-      expect(wrapper.attributes('style')).not.toContain('width:')
-    })
-
-    it('ignores pointermove/up once no drag is in progress (no stray state from a prior drag)', async () => {
-      const wrapper = mountCard({ pinned: true })
-      // No pointerdown at all — a move/up pair should be a complete no-op.
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 999, clientY: 999 }))
-      window.dispatchEvent(new PointerEvent('pointerup'))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-  })
-
-  describe('B99 — pinned-card resize handle locks WIDTH on mobile (full-bleed, only height resizes)', () => {
-    function stubRect(el: HTMLElement, width: number, height: number): void {
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width,
-        height,
-        right: width,
-        bottom: height,
-        x: 0,
-        y: 0,
-        toJSON() {
-          return this
-        },
-      } as DOMRect)
-    }
-    // happy-dom's default innerWidth is 1024 (desktop) — every OTHER test in
-    // this file relies on that default, so a test here that switches to a
-    // mobile width must restore it, or later tests (run in the same happy-dom
-    // window) would silently start seeing a mobile viewport too.
-    afterEach(() => {
-      window.innerWidth = 1024
-    })
-
-    it('dragging horizontally on mobile (<=768px) does NOT change width — only height moves', async () => {
-      window.innerWidth = 400
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      // The card's current full-bleed width at gesture start (e.g. the
-      // viewport-derived rendered width on a phone) — kept under
-      // clampPinnedSize's 96vw ceiling (384px at this viewport) so the
-      // assertion below is testing the dx-zeroing, not the pre-existing
-      // clamp.
-      stubRect(el, 350, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 350, clientY: 200, pointerId: 1 })
-      // +150 horizontal, +60 vertical — only the vertical delta should apply.
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-    })
-
-    it('dragging horizontally on desktop (>768px) still resizes width — unchanged behaviour', async () => {
-      window.innerWidth = 1280
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-    })
-
-    it('treats EXACTLY 768px as mobile (matches the app-wide `max-width: 768px` breakpoint)', async () => {
-      window.innerWidth = 768
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 400, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 400, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 500, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-
-      expect(wrapper.attributes('style')).toContain('width: 400px')
-      window.dispatchEvent(new PointerEvent('pointerup'))
-    })
-
-    it('double-click reset still works on mobile — drops back to automatic (no forced width/height)', async () => {
-      window.innerWidth = 400
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 400, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 400, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 550, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-      window.dispatchEvent(new PointerEvent('pointerup'))
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-
-      await handle.trigger('dblclick')
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
-      expect(wrapper.attributes('style')).not.toContain('width:')
-      expect(wrapper.attributes('style')).not.toContain('height:')
-    })
-  })
-
-  describe('B100 — collapsed pinned card shrinks to header height (drops body-sizing styles)', () => {
-    function stubRect(el: HTMLElement, width: number, height: number): void {
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width,
-        height,
-        right: width,
-        bottom: height,
-        x: 0,
-        y: 0,
-        toJSON() {
-          return this
-        },
-      } as DOMRect)
-    }
-
-    it('does NOT apply aspect-ratio while collapsed, so CSS `.pinned.collapsed` auto-height can shrink it to the header', () => {
-      const wrapper = mountCard({ pinned: true, collapsed: true, aspectRatio: 4 / 5 })
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('re-applies aspect-ratio once expanded again', async () => {
-      const wrapper = mountCard({ pinned: true, collapsed: true, aspectRatio: 4 / 5 })
-      expect(wrapper.attributes('style')).toBeUndefined()
-      await wrapper.setProps({ collapsed: false })
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
-    })
-
-    it('drops the explicit height (but keeps the user-dragged width) while collapsed, and restores the height on expand', async () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-      window.dispatchEvent(new PointerEvent('pointerup'))
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-
-      // Collapse — the dragged HEIGHT must no longer be forced inline (that's
-      // what used to keep the floating container occupying its full
-      // pre-collapse footprint), but the WIDTH stays so only the vertical
-      // footprint shrinks, same as a grid card's collapse.
-      await wrapper.setProps({ collapsed: true })
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).not.toContain('height:')
-
-      // Expand again — the user's dragged size is remembered, not lost.
-      await wrapper.setProps({ collapsed: false })
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-    })
-
-    it('the pinned-card resize handle stays hidden while collapsed, even with a dragged pinnedSize in memory', async () => {
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-      window.dispatchEvent(new PointerEvent('pointerup'))
-
-      await wrapper.setProps({ collapsed: true })
-      expect(wrapper.find('.pin-resize-handle').exists()).toBe(false)
-    })
-  })
-
-  describe('B64 — mini (compact) pinned card drops body-sizing styles like collapse', () => {
-    function stubRect(el: HTMLElement, width: number, height: number): void {
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width,
-        height,
-        right: width,
-        bottom: height,
-        x: 0,
-        y: 0,
-        toJSON() {
-          return this
-        },
-      } as DOMRect)
-    }
-
-    it('does NOT apply aspect-ratio once toggled to mini, so CSS `.pinned` auto-height can shrink it to the header', async () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      await wrapper.find('.mini-btn').trigger('click')
-      expect(wrapper.attributes('style')).toBeUndefined()
-    })
-
-    it('re-applies aspect-ratio once toggled back out of mini', async () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      await wrapper.find('.mini-btn').trigger('click')
-      expect(wrapper.attributes('style')).toBeUndefined()
-      await wrapper.find('.mini-btn').trigger('click')
-      expect(wrapper.attributes('style')).toContain('aspect-ratio: 0.8')
-    })
-
-    it('drops the explicit height (but keeps the user-dragged width) while mini, and restores the height when un-mini-ed', async () => {
-      const wrapper = mountCard({ pinned: true, aspectRatio: 4 / 5 })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260 }))
-      await wrapper.vm.$nextTick()
-      window.dispatchEvent(new PointerEvent('pointerup'))
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-
-      // Toggle mini — the dragged HEIGHT must no longer be forced inline
-      // (that's what used to keep the floating container occupying its full
-      // pre-mini footprint), but the WIDTH stays so only the vertical
-      // footprint shrinks, same as collapse.
-      await wrapper.find('.mini-btn').trigger('click')
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).not.toContain('height:')
-
-      // Toggle mini off again — the user's dragged size is remembered, not lost.
-      await wrapper.find('.mini-btn').trigger('click')
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-    })
-  })
-
   describe('B61 — touch long-press gate before drag-reorder starts', () => {
     // grid-layout-plus's own interactjs listens for pointerdown on
     // `document`, in the bubble phase (verified by reading its source — see
@@ -784,22 +307,6 @@ describe('DashboardCard (scaffold smoke test)', () => {
       expect(parentSpy).toHaveBeenCalledTimes(1)
     })
 
-    it('touch pointerdown is blocked from the ancestor while pending, then a synthetic pointerdown reaches it once the hold completes', async () => {
-      vi.useFakeTimers()
-      const { wrapper, parentSpy } = mountWithParentSpy()
-      await wrapper
-        .find('.drag-handle')
-        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
-      expect(parentSpy).not.toHaveBeenCalled()
-
-      vi.advanceTimersByTime(300)
-      expect(parentSpy).toHaveBeenCalledTimes(1)
-      const handoff = parentSpy.mock.calls[0][0] as PointerEvent
-      expect(handoff.pointerId).toBe(7)
-      expect(handoff.pointerType).toBe('touch')
-      vi.useRealTimers()
-    })
-
     it('cancels (no hand-off) when the finger moves past the threshold before the delay elapses — scroll intent', async () => {
       vi.useFakeTimers()
       const { wrapper, parentSpy } = mountWithParentSpy()
@@ -811,20 +318,6 @@ describe('DashboardCard (scaffold smoke test)', () => {
       vi.advanceTimersByTime(300)
 
       expect(parentSpy).not.toHaveBeenCalled()
-      vi.useRealTimers()
-    })
-
-    it('tolerates small jitter under the threshold while pending — still arms', async () => {
-      vi.useFakeTimers()
-      const { wrapper, parentSpy } = mountWithParentSpy()
-      await wrapper
-        .find('.drag-handle')
-        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 4 })
-
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 13, clientY: 11, pointerId: 4 }))
-      vi.advanceTimersByTime(300)
-
-      expect(parentSpy).toHaveBeenCalledTimes(1)
       vi.useRealTimers()
     })
 
@@ -1012,38 +505,6 @@ describe('DashboardCard (scaffold smoke test)', () => {
       expect(parentSpy).not.toHaveBeenCalled()
     })
 
-    it('B102b: a second finger touching down mid-drag aborts it via a synthetic pointercancel (same pointerId) and never touches the new touch itself', async () => {
-      const wrapper = mountArmed()
-      const handle = wrapper.find('.drag-handle').element as HTMLElement
-      const cancelSpy = vi.fn()
-      handle.addEventListener('pointercancel', cancelSpy)
-
-      await wrapper
-        .find('.drag-handle')
-        .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
-      vi.advanceTimersByTime(300)
-      expect(cancelSpy).not.toHaveBeenCalled()
-
-      const secondFingerDown = new PointerEvent('pointerdown', {
-        pointerId: 55,
-        clientX: 300,
-        clientY: 300,
-        cancelable: true,
-      })
-      const preventDefaultSpy = vi.spyOn(secondFingerDown, 'preventDefault')
-      window.dispatchEvent(secondFingerDown)
-
-      expect(cancelSpy).toHaveBeenCalledTimes(1)
-      const cancelEvt = cancelSpy.mock.calls[0][0] as PointerEvent
-      expect(cancelEvt.pointerId).toBe(7)
-      // The second finger's own event is never touched — free to drive
-      // native scrolling from the moment it lands.
-      expect(preventDefaultSpy).not.toHaveBeenCalled()
-      expect(cancelledFrameIds).toContain(42)
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-dragging')
-    })
-
     it('ignores its own synthetic hand-off pointerdown (same pointerId) — does not mistake it for a second finger', async () => {
       const wrapper = mountArmed()
       const handle = wrapper.find('.drag-handle').element as HTMLElement
@@ -1062,139 +523,9 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
   })
 
-  describe('B102c (F1 phase 5) — pin-resize-handle touch long-press gate', () => {
-    function stubRect(el: HTMLElement, width: number, height: number): void {
-      vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
-        left: 0,
-        top: 0,
-        width,
-        height,
-        right: width,
-        bottom: height,
-        x: 0,
-        y: 0,
-        toJSON() {
-          return this
-        },
-      } as DOMRect)
-    }
-
-    it('does NOT start resizing immediately on touch — a plain tap/brush leaves size untouched', async () => {
-      vi.useFakeTimers()
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
-      // Immediately (no hold yet) — unlike the mouse/pen path, no resize has
-      // started, so a move right now must not change anything.
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toBeUndefined()
-
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
-      vi.useRealTimers()
-    })
-
-    it('starts resizing once the touch hold completes (300ms, no disqualifying movement)', async () => {
-      vi.useFakeTimers()
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
-      vi.advanceTimersByTime(300)
-
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
-      vi.useRealTimers()
-    })
-
-    it('cancels (no resize) when the touch moves past the threshold before the hold completes — scroll intent', async () => {
-      vi.useFakeTimers()
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 260, pointerId: 1 }))
-      vi.advanceTimersByTime(300)
-
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 300, pointerId: 1 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toBeUndefined()
-      vi.useRealTimers()
-    })
-
-    it('a second finger touching down mid-hold cancels it (B102b, same arbitration as the drag-handle)', async () => {
-      vi.useFakeTimers()
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 88, clientX: 500, clientY: 500 }))
-      vi.advanceTimersByTime(300)
-
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toBeUndefined()
-      vi.useRealTimers()
-    })
-
-    it('mouse/pen keep the original immediate-start behaviour, byte-for-byte (pointerType unset defaults away from touch)', async () => {
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { pointerType: 'mouse', clientX: 300, clientY: 200, pointerId: 1 })
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 260, pointerId: 1 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.attributes('style')).toContain('width: 350px')
-      expect(wrapper.attributes('style')).toContain('height: 260px')
-
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
-    })
-
-    it('shows the `touch-armed` flash on hold-confirm and `touch-dragging` for the duration of the resize', async () => {
-      vi.useFakeTimers()
-      const wrapper = mountCard({ pinned: true })
-      const el = wrapper.find('.dashboard-card').element as HTMLElement
-      stubRect(el, 300, 200)
-
-      const handle = wrapper.find('.pin-resize-handle')
-      await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 300, clientY: 200, pointerId: 1 })
-      expect(handle.classes()).not.toContain('touch-armed')
-
-      vi.advanceTimersByTime(300)
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('.pin-resize-handle').classes()).toContain('touch-armed')
-      expect(wrapper.find('.pin-resize-handle').classes()).toContain('touch-dragging')
-
-      vi.advanceTimersByTime(400)
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('.pin-resize-handle').classes()).not.toContain('touch-armed')
-      expect(wrapper.find('.pin-resize-handle').classes()).toContain('touch-dragging')
-
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
-      await wrapper.vm.$nextTick()
-      expect(wrapper.find('.pin-resize-handle').classes()).not.toContain('touch-dragging')
-      vi.useRealTimers()
-    })
-  })
-
-  describe('F6 stage 2 — CSS Grid drag mode (dragMode="cssGrid", self-contained: no interactjs hand-off)', () => {
+  describe('F6 — CSS Grid drag (self-contained: no interactjs hand-off)', () => {
     it('mouse pointerdown starts the drag IMMEDIATELY (no long-press gate) and emits css-grid-drag-start', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 40, clientY: 50, pointerId: 1 })
@@ -1203,7 +534,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('pen behaves the same as mouse — immediate start', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'pen', clientX: 5, clientY: 6, pointerId: 1 })
@@ -1211,7 +542,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('draggable:false blocks the drag entirely, even for mouse', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid', draggable: false })
+      const wrapper = mountCard({ draggable: false })
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 10, clientY: 10, pointerId: 1 })
@@ -1219,7 +550,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('does not intercept a pointerdown on the header action buttons (pin/collapse keep their plain tap)', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.pin-btn')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 10, clientY: 10, pointerId: 1 })
@@ -1227,7 +558,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('a live mouse drag forwards pointermove as css-grid-drag-move and pointerup as css-grid-drag-end(committed:true)', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
@@ -1240,7 +571,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('a genuine pointercancel aborts the live drag — css-grid-drag-end(committed:false)', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
@@ -1250,7 +581,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('a second pointer landing mid-drag aborts it (committed:false) without touching the new pointer', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
@@ -1270,7 +601,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('touch does NOT start before the long-press threshold — a plain tap/brush emits nothing', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
@@ -1284,7 +615,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('touch starts the drag once the long-press hold completes (300ms, no disqualifying movement)', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
@@ -1298,7 +629,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('cancels the touch hold (no start) when the finger moves past the threshold before the delay elapses — scroll intent', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
@@ -1312,7 +643,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('B102b: a second finger touching down mid-PENDING cancels the hold — no start at all', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 3 })
@@ -1326,7 +657,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('B102b: a second finger touching down mid-drag (armed) aborts it directly (committed:false) — no synthetic pointercancel needed', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
@@ -1341,7 +672,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('applies the touch-dragging class for the duration of an armed touch drag, same visual cue the legacy mode uses', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       const handle = wrapper.find('.drag-handle')
       await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
       expect(wrapper.find('.drag-handle').classes()).not.toContain('touch-dragging')
@@ -1356,14 +687,14 @@ describe('DashboardCard (scaffold smoke test)', () => {
       vi.useRealTimers()
     })
 
-    it('does not fall through to the legacy TOUCH_HANDOFF_MARKER/interactjs branch at all under dragMode="cssGrid"', async () => {
+    it('does not fall through to any legacy TOUCH_HANDOFF_MARKER/interactjs branch', async () => {
       // Legacy mode's own synthetic hand-off pointerdown carries a private
-      // marker; under `dragMode="cssGrid"` there is no hand-off at all, so a
+      // marker; there is no hand-off at all any more, so a
       // pointerdown carrying that marker (which should never happen in
       // practice under this mode) is simply treated as an ordinary mouse/pen
       // start rather than specially ignored — this just documents that the
       // two branches are mutually exclusive, not a real user scenario.
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 1, clientY: 2, pointerId: 1 })
@@ -1371,7 +702,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('unmounting mid-drag cleans up window listeners (no stray emit after unmount)', async () => {
-      const wrapper = mountCard({ dragMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.drag-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
@@ -1385,20 +716,16 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
   })
 
-  describe('F6 stage 3(a) — CSS Grid resize handle (resizeMode="cssGrid")', () => {
-    it('is absent by default (no resizeMode) even on an otherwise-eligible card', () => {
-      expect(mountCard({}).find('.css-grid-resize-handle').exists()).toBe(false)
-    })
-
-    it('shows only while resizeMode="cssGrid", not pinned, not collapsed, and resizable', () => {
-      expect(mountCard({ resizeMode: 'cssGrid' }).find('.css-grid-resize-handle').exists()).toBe(true)
-      expect(mountCard({ resizeMode: 'cssGrid', pinned: true }).find('.css-grid-resize-handle').exists()).toBe(false)
-      expect(mountCard({ resizeMode: 'cssGrid', collapsed: true }).find('.css-grid-resize-handle').exists()).toBe(false)
-      expect(mountCard({ resizeMode: 'cssGrid', resizable: false }).find('.css-grid-resize-handle').exists()).toBe(false)
+  describe('F6 — CSS Grid resize handle', () => {
+    it('shows when not pinned, not collapsed, and resizable', () => {
+      expect(mountCard({}).find('.css-grid-resize-handle').exists()).toBe(true)
+      expect(mountCard({ pinned: true }).find('.css-grid-resize-handle').exists()).toBe(false)
+      expect(mountCard({ collapsed: true }).find('.css-grid-resize-handle').exists()).toBe(false)
+      expect(mountCard({ resizable: false }).find('.css-grid-resize-handle').exists()).toBe(false)
     })
 
     it('mouse pointerdown starts the resize IMMEDIATELY (no long-press gate) and emits css-grid-resize-start', async () => {
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 40, clientY: 50, pointerId: 1 })
@@ -1406,7 +733,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('pen behaves the same as mouse — immediate start', async () => {
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'pen', clientX: 5, clientY: 6, pointerId: 1 })
@@ -1414,14 +741,14 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('resizable:false blocks the resize entirely, even for mouse (belt-and-braces alongside the v-if hiding the handle)', async () => {
-      const wrapper = mountCard({ resizeMode: 'cssGrid', resizable: false })
+      const wrapper = mountCard({ resizable: false })
       // The handle itself is v-if'd away, but exercise the handler guard
       // directly for defence-in-depth documentation.
       expect(wrapper.find('.css-grid-resize-handle').exists()).toBe(false)
     })
 
     it('a live mouse resize forwards pointermove as css-grid-resize-move and pointerup as css-grid-resize-end(committed:true)', async () => {
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
@@ -1434,7 +761,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('a genuine pointercancel aborts the live resize — css-grid-resize-end(committed:false)', async () => {
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })
@@ -1445,7 +772,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('touch does NOT start before the long-press threshold — a plain tap/brush emits nothing', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
@@ -1458,7 +785,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('touch starts the resize once the long-press hold completes (300ms, no disqualifying movement)', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
@@ -1472,7 +799,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('cancels the touch hold (no start) when the finger moves past the threshold before the delay elapses — scroll intent', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
@@ -1486,7 +813,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('a second finger touching down mid-PENDING cancels the hold — no start at all (same B102b-style arbitration as the pending drag)', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 3 })
@@ -1500,7 +827,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
 
     it('applies the touch-armed flash on hold-confirm and touch-dragging for the duration of the resize', async () => {
       vi.useFakeTimers()
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       const handle = wrapper.find('.css-grid-resize-handle')
       await handle.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10, pointerId: 7 })
       expect(wrapper.find('.css-grid-resize-handle').classes()).not.toContain('touch-armed')
@@ -1522,7 +849,7 @@ describe('DashboardCard (scaffold smoke test)', () => {
     })
 
     it('unmounting mid-resize cleans up window listeners (no stray emit after unmount)', async () => {
-      const wrapper = mountCard({ resizeMode: 'cssGrid' })
+      const wrapper = mountCard({})
       await wrapper
         .find('.css-grid-resize-handle')
         .trigger('pointerdown', { pointerType: 'mouse', clientX: 0, clientY: 0, pointerId: 1 })

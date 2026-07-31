@@ -24,7 +24,6 @@
     "echarts": "^6.1.0",
     "echarts-gl": "2.1.0",
     "fflate": "^0.8.3",
-    "grid-layout-plus": "^1.1.1",
     "idb": "^8.0.3",
     "pinia": "^4.0.2",
     "sql.js": "^1.14.1",

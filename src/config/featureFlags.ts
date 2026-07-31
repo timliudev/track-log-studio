@@ -51,19 +51,10 @@ const FEATURE_FLAG_REGISTRY = {
     labelKey: 'settings.devOptions.flags.cvtDynamics.label',
     descriptionKey: 'settings.devOptions.flags.cvtDynamics.description',
   },
-  // F6 stage 1 — the new CSS-Grid-based dashboard renderer (CssGridGrid.vue),
-  // read-only for now (no drag/resize/gutter — see docs/ISSUES.md's F6
-  // entry): OFF by default so ordinary users keep the existing
-  // grid-layout-plus rendering until the staged migration is far enough
-  // along to flip the default. Enabling it lets a tester see the new
-  // renderer's geometry AND its payoff — a pinned card stays in its own grid
-  // slot and becomes genuinely `position: sticky`, instead of being
-  // Teleported into a separate floating anchor.
-  cssGridDashboard: {
-    default: false,
-    labelKey: 'settings.devOptions.flags.cssGridDashboard.label',
-    descriptionKey: 'settings.devOptions.flags.cssGridDashboard.description',
-  },
+  // F6 — the CSS-Grid dashboard renderer (CssGridGrid.vue) went through
+  // stages 1-4 behind this flag; stage 4 promoted it to the ONLY renderer
+  // (grid-layout-plus removed entirely — see docs/ISSUES.md's F6 entry), so
+  // the flag itself no longer has anything to gate and was removed here.
 } as const satisfies Record<string, FeatureFlagDef>
 
 export type FeatureFlagName = keyof typeof FEATURE_FLAG_REGISTRY
