@@ -51,10 +51,6 @@ export default {
           label: 'CVT 動態模型卡片',
           description: '在分析頁顯示 CVT 動態模型卡片；功能已完成但尚未經過完整場地測試。',
         },
-        cssGridDashboard: {
-          label: 'CSS Grid 版面渲染器',
-          description: '分析頁儀表板改用 CSS Grid 渲染(取代 grid-layout-plus);目前僅唯讀顯示,不含拖曳/縮放,釘選卡片改為原地 sticky。仍在分階段開發中。',
-        },
       },
     },
   },
@@ -81,7 +77,6 @@ export default {
       viewLink: '查看',
       notes: {
         vitePluginPwa: '用於產生 PWA 離線快取用的 Service Worker（基於 Workbox）。',
-        interactjs: '透過 grid-layout-plus 間接引入，用於分析頁儀表板卡片的拖曳／縮放互動。',
       },
     },
   },
@@ -655,7 +650,6 @@ export default {
       expand: '展開',
       pin: '釘選（捲動頁面時固定於頂部）',
       unpin: '取消釘選',
-      pinnedResizeHandle: '拖曳調整大小（點兩下重設）',
       cssGridResizeHandle: '拖曳調整卡片尺寸',
       minimizePinned: '迷你模式（只顯示標題）',
       expandPinned: '展開釘選卡片',
