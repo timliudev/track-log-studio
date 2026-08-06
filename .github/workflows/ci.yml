@@ -24,9 +24,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Security audit (fail on high/critical)
-        run: npm audit --audit-level=high
-
       - name: Type-check
         run: npm run typecheck
 
@@ -35,3 +32,10 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+      # Runs LAST on purpose: it fails the job exactly as before, but a newly
+      # published advisory in a dev/build-time dependency no longer aborts the
+      # run before type-check/tests/build have reported. (Advisories land on
+      # npm's schedule, not ours — see docs/ISSUES.md M11/M12/M13/M15.)
+      - name: Security audit (fail on high/critical)
+        run: npm audit --audit-level=high
