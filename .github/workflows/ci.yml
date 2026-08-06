@@ -8,6 +8,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # Manual trigger — lets the gate be re-run on demand (e.g. to re-check a
+  # dependency advisory) without pushing an empty commit.
+  workflow_dispatch:
 
 jobs:
   build-and-test:
