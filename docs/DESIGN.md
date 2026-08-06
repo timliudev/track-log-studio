@@ -350,9 +350,11 @@ attribution。Mapbox key 不會進入設定匯出或我方後端，僅在使用�
     間的分隔線），卡片本體從「浮起的卡」變成「滿版區段」；`--card-body-pad-x`（卡片內距的水平
     分量，factor 成 CSS 變數）同時縮到 4px 的最小值——非零，讓文字類卡片（控制面板、圈表、
     band 篩選輸入）仍保有可讀的呼吸空間。**釘選 (pinned) 卡片排除在外**：pinned 是刻意浮動的
-    元素（Teleport 到獨立 sticky anchor），手機下仍保留完整卡片外觀（border/圓角/較寬內距）；
+    元素（**F6 之後改為原地 `position: sticky`，不再 Teleport 到獨立 anchor**），手機下仍保留
+    完整卡片外觀（border/圓角/較寬內距）；
     `AnalyzerView.vue` 的 `.pinned-anchor` 相應補回一點水平內距，避免 pinned 卡片邊框貼齊真實
-    螢幕邊緣。(3) grid-layout-plus 的 `margin[0]`（`GRID_MARGIN`）本身就內建成整個網格的左右邊緣
+    螢幕邊緣。(3) 網格的 `margin[0]`（`GRID_MARGIN`，F6 前由 grid-layout-plus 內建、之後由
+    `CssGridGrid.vue` 以 `padding`+`gap` 等價重現）本身就內建成整個網格的左右邊緣
     inset，不只是卡片間的溝——`useDashboardLayout.ts` 新增 `gridMargin` computed，手機單欄下把
     水平分量歸零（垂直分量、也就是堆疊卡片間的縱向間距，維持不變），桌面 2-D 網格完全不受影響。
     (4) 圖表/地圖本體貼邊：`UPlotChart.vue` 的 `.uplot-wrap.fill` 與 `TrackMap.vue` 的
@@ -372,8 +374,10 @@ attribution。Mapbox key 不會進入設定匯出或我方後端，僅在使用�
   - **實作註記（B61/B63 觸控長按拖卡，2026-07-16/17）**：卡片標題（拖曳把手）上的 `touch`
     pointer 走 300ms/10px 長按閘門（純狀態機 `domain/layout/touchDragDelay.ts`：pending→armed/
     cancelled，位移超閾值=捲動意圖即取消）；把手 `touch-action: pan-y` 讓 pending 期間垂直滑動
-    交還原生捲動；長按成立後以同 pointerId 的合成 pointerdown 轉交 grid-layout-plus 的
-    interactjs（其監聽在 document bubble 階段、無 isTrusted 檢查 — 已讀源碼佐證），
+    交還原生捲動；長按成立後啟動拖曳（**F6 前**：以同 pointerId 的合成 pointerdown 轉交
+    grid-layout-plus 的 interactjs——其監聽在 document bubble 階段、無 isTrusted 檢查，已讀源碼
+    佐證；**F6 之後**：兩者皆已卸載，長按閘門改直接驅動 `useCssGridDashboardDrag.ts` 的
+    pointer 事件路徑，`advanceOnSecondPointer` 的二指中止仍在），
     `mouse`/`pen` 維持按下即拖（§8 層2）。B63 修正：確保 interactjs 不以 inline
     `touch-action: none` 蓋掉把手的 pan-y（`668aba0`）。
   - **實作註記（圖表觸控與固定中線重寫，2026-07-17 `e0d02d2`）**：固定中線約束在 plot 矩形內、
