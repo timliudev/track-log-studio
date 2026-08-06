@@ -77,7 +77,6 @@ export default {
       viewLink: '查看',
       notes: {
         vitePluginPwa: '用於產生 PWA 離線快取用的 Service Worker（基於 Workbox）。',
-        interactjs: '透過 grid-layout-plus 間接引入，用於分析頁儀表板卡片的拖曳／縮放互動。',
       },
     },
   },
@@ -651,7 +650,7 @@ export default {
       expand: '展開',
       pin: '釘選（捲動頁面時固定於頂部）',
       unpin: '取消釘選',
-      pinnedResizeHandle: '拖曳調整大小（點兩下重設）',
+      cssGridResizeHandle: '拖曳調整卡片尺寸',
       minimizePinned: '迷你模式（只顯示標題）',
       expandPinned: '展開釘選卡片',
     },

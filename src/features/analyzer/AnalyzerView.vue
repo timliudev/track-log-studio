@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { GridLayout } from 'grid-layout-plus'
 import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useActiveSession } from '@/composables/useActiveSession'
@@ -17,6 +16,8 @@ import { useDashboardLayout } from '@/composables/useDashboardLayout'
 import { usePanelState } from '@/composables/usePanelState'
 import { useLayoutLock } from '@/composables/useLayoutLock'
 import { useGridGutters } from '@/composables/useGridGutters'
+import { useCssGridDashboardDrag } from '@/composables/useCssGridDashboardDrag'
+import { useCssGridDashboardResize } from '@/composables/useCssGridDashboardResize'
 import { useCardVisibility } from '@/composables/useCardVisibility'
 import { useLapStore } from '@/stores/lapStore'
 import { useSectorStore } from '@/stores/sectorStore'
@@ -42,10 +43,6 @@ import {
   GRID_MARGIN,
   chartItemId,
   mobileLayout,
-  minSizeFor,
-  isItemDraggable,
-  isItemResizable,
-  resizeOptionFor,
   mergeLayoutPositions,
   compactLayoutTopLeft,
   compactVertical,
@@ -53,14 +50,13 @@ import {
   applyCollapsedHeights,
   sameLayoutPositions,
   packExcluding,
-  COLLAPSED_ROWS,
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import { mergeMobileOrder } from '@/domain/layout/panelState'
-import { pinnedCardPixelSize, type GridMetrics } from '@/domain/layout/gridGutter'
 import DashboardCard from '@/components/DashboardCard.vue'
 import CardMenu from './CardMenu.vue'
 import AnalyzerCardBody from './AnalyzerCardBody.vue'
+import CssGridGrid from './CssGridGrid.vue'
 import type { AnalyzerCardContext } from './analyzerCardContext'
 
 const { t } = useI18n()
@@ -505,30 +501,19 @@ const sectorAllFailed = computed(() => lapStore.sectorAllFailed)
 // useDashboardLayout so its isDraggable/isResizable already reflect it. ---
 const { isLocked, toggleLocked } = useLayoutLock()
 
-// --- #8: draggable/resizable dashboard grid (grid-layout-plus) ---
+// --- #8: draggable/resizable dashboard grid (CSS Grid — CssGridGrid.vue) ---
 const chartIds = computed(() => charts.value.map((c) => c.id))
 const { layout, colNum, isMobile, isDraggable, isResizable, gridMargin, resetLayout } =
   useDashboardLayout(chartIds, isLocked)
 
-// --- #9: per-card collapse (all breakpoints) + cross-breakpoint pin (釘選 —
-// see DashboardCard's module doc for the Teleport-based redesign) + mobile
-// drag-to-reorder order. B111 — pin is now a STACK (`pinnedIds`, pin order
-// preserved), not a single card; `pinOrder` below feeds each pinned card's
-// position in that stack to DashboardCard via CSS `order` (see the template's
-// `#dashboard-pinned-anchor` doc for why explicit ordering, not DOM/Teleport
-// insertion order, drives the visual stack). ---
+// --- #9: per-card collapse (all breakpoints) + cross-breakpoint pin (釘選 — a
+// pinned card stays in its own grid slot and becomes `position: sticky`, see
+// CssGridGrid's module doc) + mobile drag-to-reorder order. B111 — pin is a
+// STACK (`pinnedIds`, pin order preserved), not a single card; CssGridGrid's
+// own `pinOrderFor`/`pinStackStyle` derive each pinned card's stagger/z-index
+// directly from this array's order. ---
 const { state: panelState, isCollapsed, isPinned, pinnedIds, toggleCollapsed, togglePinned, mobileOrder, setMobileOrder } =
   usePanelState(chartIds)
-
-/** B111 — this card's position within the pinned stack (0 = pinned first =
- *  topmost), or -1 when not pinned. Bound to DashboardCard's `pin-order` prop,
- *  which turns it into an inline `order` style — see that prop's doc for why
- *  CSS order (not relying on Teleport's own DOM insertion order) is what
- *  actually keeps the stack in pin order regardless of the cards' grid
- *  positions or the order they happened to mount in. */
-function pinOrderFor(id: string): number {
-  return pinnedIds.value.indexOf(id)
-}
 
 // The set of currently-collapsed card ids, fed into the collapse-reflow overlay
 // (applyCollapsedHeights) so a collapsed card shrinks its grid slot and its
@@ -580,313 +565,252 @@ function isVisibleId(id: string): boolean {
   return cardVisibility.isVisible(id)
 }
 
-// --- Desktop layout (2-D, persisted to dashboardLayout.v1) ---
-// `desktopVisibleLayout` filters the hidden align cards out of what's PASSED
-// to GridLayout while `layout` itself (the persisted array) keeps their saved
-// position so it's there again the next time laps get selected. GridLayout's
-// `update:layout` (drag/resize/compact) fires with the full array of items IT
-// knows about (i.e. already only the visible ones), so writing straight back
-// into `layout` would drop the hidden entries — instead we merge: keep every
-// hidden item from `layout` unchanged, and take every visible item's new
-// position from the emitted array.
-//
-// B112 — ALSO filters out any currently-PINNED id, for the same reason and
-// via the same mechanism: a pinned card's real content is Teleported out of
-// the grid entirely (see the template's `#dashboard-pinned-anchor` doc and
-// the dedicated pinned-cards `v-for` below the grid), so its grid slot must
-// not exist at all any more — this is what lets grid-layout-plus's own
-// vertical compaction close the gap left behind, instead of an inert
-// placeholder reserving the space (the reported "empty hole" bug). This is
-// the ONE place desktop pinned-filtering happens; `desktopDisplayLayout` and
-// `gutterItems` below both derive from THIS computed, so the grid and the
-// gutter overlay can never disagree about which cards are actually on
-// screen (same B52 lesson the collapse-reflow overlay already had to learn).
-// `layout.value` itself (the persisted array) is untouched — a pinned card's
-// real position/size stays there exactly as it was, so unpinning restores it
-// with no special-case "remembered slot" bookkeeping (see `packExcluding`'s
-// doc for how the write-back path avoids corrupting it in the meantime).
-const desktopVisibleLayout = computed<typeof layout.value>(() =>
-  layout.value.filter((it) => isVisibleId(it.i) && !isPinned(it.i)),
-)
+/**
+ * The shared write-back path for a "here is a full array of items with new
+ * coordinates" event — the CSS Grid drag-to-reorder commit
+ * (`onCssGridDragCommit`, see useCssGridDashboardDrag.ts's `onCommit` option)
+ * and the corner-resize/gutter-drag commits below all flow through this SAME
+ * function so every desktop coordinate change shares the EXACT same
+ * invariants — B52's display-vs-canonical layout split, the echo/no-op guard
+ * (`sameLayoutPositions`) that prevents an update→compact→update loop,
+ * `packExcluding` keeping pinned cards out of the geometry pass, and
+ * `mergeMobileOrder` protecting a pinned card's remembered mobile slot —
+ * rather than several independently-maintained copies of this logic silently
+ * drifting apart.
+ */
+function writeBackLayout(next: DashboardLayoutItem[]): void {
+  if (isMobile.value) {
+    // Mobile drag-to-reorder: derive the new top-to-bottom order from the
+    // emitted items (sorted by y, then x for determinism) and merge it back
+    // into the full persisted order — an id absent from `next` (a hidden
+    // align card, or B112: a currently-PINNED card) keeps its own exact array
+    // slot rather than being bumped to the end, so reordering two OTHER cards
+    // while a third stays pinned can never silently move the pinned card's
+    // remembered position (see mergeMobileOrder's doc).
+    const orderedVisible = [...next]
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+      .map((it) => it.i)
+    setMobileOrder(mergeMobileOrder(mobileOrder.value, orderedVisible))
+    return
+  }
+  // Desktop: merge visible items' new positions back into the full layout,
+  // preserving hidden items untouched (pure function — only coordinates
+  // are copied — see mergeLayoutPositions's doc).
+  //
+  // Grid-compact fix — this is the ONE code path every desktop coordinate
+  // change flows through (a CSS Grid drag-to-reorder commit, a corner-resize
+  // commit, or a gutter drag's eventual settle — see useGridGutters' onChange
+  // doc), so running compactLayoutTopLeft here closes whatever hole moving/
+  // resizing a card just left behind, on both axes, right after the gesture
+  // ends. Composing
+  // two identity-preserving pure functions keeps the whole chain a genuine
+  // no-op once positions converge (same invariant #4's crash fix relies on —
+  // see mergeLayoutPositions's doc): an already-compacted layout makes
+  // compactLayoutTopLeft hand back the exact same array it was given, so a
+  // `layout.value` assignment that changed nothing never re-triggers a
+  // pointless re-render.
+  //
+  // Collapse-reflow: `next` carries collapsed cards at their DISPLAY height
+  // (COLLAPSED_ROWS). Revert those to the canonical (expanded) height held in
+  // `layout` before persisting, so dragging while a card is collapsed never
+  // freezes its header-only height into the saved arrangement — expanding
+  // still restores the full height. resolveOverlaps then re-seats the
+  // just-restored full-height cards below their neighbours before
+  // compaction closes any gap.
+  //
+  // Which packer runs here matters: while ANY card is collapsed, this write-
+  // back path is also where the collapse-reflow display (built by
+  // applyCollapsedHeights/compactVertical, see `cssGridDesktopLayout`/
+  // `cssGridMobileLayout` below) echoes back through a drag/resize/gutter
+  // commit — so it must use the SAME vertical-only packer, or the echo would horizontally
+  // re-pack the canonical layout with compactLayoutTopLeft and reintroduce
+  // the reported bug (collapsing a row-2 card sideways-yanking a row-3
+  // card from a different column). When nothing is collapsed this is just
+  // the ordinary drag/resize/delete write-back, which keeps the existing
+  // top-left (vertical+horizontal) compaction unchanged.
+  const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
+  const restored = collapsedIds.value.size
+    ? next.map((it) =>
+        collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it,
+      )
+    : next
+  const pack = collapsedIds.value.size > 0 ? compactVertical : compactLayoutTopLeft
+  const merged = mergeLayoutPositions(layout.value, restored)
+  // B112 — a currently-pinned card is never draggable/resizable (see
+  // dashboardLayout.ts's isItemDraggable/isItemResizable), so `next`/
+  // `restored` never mentions one — `merged` already carries its rect through completely untouched
+  // (mergeLayoutPositions's "absent = keep unchanged" guarantee). It must
+  // ALSO sit out of resolveOverlaps/`pack` themselves: both process the
+  // FULL array by reading order and can push a just-dragged card away from
+  // a spot that's visually free purely because the pinned card's stale
+  // rect still "collides" with it on paper — see packExcluding's doc.
+  const packed = packExcluding(merged, new Set(pinnedIds.value), (items) => pack(resolveOverlaps(items)))
+  // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
+  // display we fed it, which `packed` reconstructs back into the current
+  // canonical layout — assigning a fresh-but-equal array would re-run the
+  // getter and spin the update→compact→update loop DashboardCard's #9 warns
+  // of. resolveOverlaps always allocates, so this value comparison (not a
+  // reference check) is what actually breaks the cycle.
+  if (!sameLayoutPositions(packed, layout.value)) layout.value = packed
+}
 
-// B52 fix — the collapse-reflow DISPLAY layout (see applyCollapsedHeights),
-// shared by `activeLayout`'s getter below AND `gutterItems`: the gutter
-// overlay must be detected/positioned from the exact same rects the grid
-// actually renders, not the canonical (pre-collapse) `desktopVisibleLayout`.
-// Before this fix, `gutterItems` was built straight from
-// `desktopVisibleLayout`, so once any card collapsed, every gutter below/
-// beside it stayed at its stale pre-collapse position/size — the reported
-// "pink gutter indicator doesn't follow a collapsed card" bug.
-const desktopDisplayLayout = computed<typeof layout.value>(() =>
-  applyCollapsedHeights(desktopVisibleLayout.value, collapsedIds.value),
-)
-
-// --- Mobile layout (1-D order, persisted to panelState.v1's mobileOrder) ---
-// The mobile single-column layout is built by US (not the library's responsive
-// reflow) from the persisted `mobileOrder`, filtered to the visible cards and
-// with each card's DESKTOP height inherited (see mobileLayout). Because the
-// mobile path only ever writes back into `mobileOrder` (never `layout`),
-// reordering on a phone can NEVER corrupt the desktop dashboardLayout.v1 — the
-// two arrangements are fully independent.
+// --- F6 — the CSS Grid dashboard renderer (see CssGridGrid.vue's own module
+// doc for the full "why": grid-layout-plus's `position: absolute` items were
+// incompatible with `position: sticky`, which is why pinning used to fake it
+// via Teleport into a separate anchor — the user explicitly rejected that.
+// grid-layout-plus is gone entirely now (F6 stage 4) — this is the ONLY
+// dashboard renderer.
 //
-// B112 — also excludes pinned ids, same reason/mechanism as
-// `desktopVisibleLayout` above (pinned cards render via the dedicated
-// `v-for` below the grid instead, at every breakpoint — the pin STACK is not
-// per-breakpoint). `mobileOrder.value` itself (persisted) is untouched.
-const mobileVisibleLayout = computed<typeof layout.value>(() =>
-  mobileLayout(
-    mobileOrder.value.filter((id) => isVisibleId(id) && !isPinned(id)),
-    layout.value,
+// Unlike the removed legacy renderer's own visible-layout computeds, pinned
+// ids are NOT filtered out here — CssGridGrid.vue keeps a pinned card in its
+// own grid slot (no Teleport, no reserved-then-reclaimed gap) and makes IT
+// `position: sticky` there instead. The collapse-reflow overlay
+// (applyCollapsedHeights) still applies uniformly to every visible card
+// (pinned or not). ---
+const cssGridDesktopLayout = computed<DashboardLayoutItem[]>(() =>
+  applyCollapsedHeights(
+    layout.value.filter((it) => isVisibleId(it.i)),
+    collapsedIds.value,
   ),
 )
-
-// Per-item props the library's OWN GridItem needs (we no longer render a
-// GridItem ourselves — see the `#item` slot note). grid-layout-plus spreads
-// each layout entry as props onto the GridItem it wraps around the slot, so
-// carrying these on the item is how the drag handle / ignore region / the
-// pinned-card non-draggable-non-resizable exception reach that internal
-// GridItem.
-interface GridItemDecoration {
-  dragAllowFrom: string
-  dragIgnoreFrom: string
-  isDraggable: boolean
-  isResizable: boolean
-  minW: number
-  minH: number
-  /** B59 — 手機單欄下鎖成只能改高度的 resize 邊界設定;桌面 `undefined`(用
-   *  GridItem 自己的預設,四邊都可拖)。見 dashboardLayout.ts 的
-   *  `resizeOptionFor`/`VERTICAL_ONLY_RESIZE_OPTION` doc。 */
-  resizeOption?: Record<string, unknown>
-}
-// B6 — per-card minimum size (see dashboardLayout.ts's minSizeFor) is carried
-// on the layout item the same way drag config is, so grid-layout-plus's OWN
-// resize handle refuses to shrink a card past the point a chart/map/table
-// stops being usable.
-//
-// isDraggable/isResizable per item fold in BOTH the grid-wide toggle (isDraggable/
-// isResizable from useDashboardLayout, which already account for 鎖定布局 and
-// the current breakpoint — mobile resize is now allowed too, see that
-// composable's doc) AND the pinned-card exception (isItemDraggable/
-// isItemResizable, dashboardLayout.ts): a pinned card's real content has been
-// Teleported out of the grid (see the template's pinned-anchor note), so its
-// slot is just an empty placeholder that shouldn't be draggable or resizable.
-function decorateForGrid(
-  items: DashboardLayoutItem[],
-  mobile: boolean,
-): (DashboardLayoutItem & GridItemDecoration)[] {
-  // B59 — computed ONCE per call (not per item): the same vertical-only
-  // resize-edge override applies to every card on mobile, none on desktop.
-  const resizeOption = resizeOptionFor(mobile)
-  return items.map((it) => {
-    const collapsed = isCollapsed(it.i)
-    const min = minSizeFor(it.i)
-    return {
-      ...it,
-      dragAllowFrom: '.drag-handle',
-      dragIgnoreFrom: '.actions',
-      isDraggable: isItemDraggable(isDraggable.value, isPinned(it.i)),
-      // A collapsed card is header-only: resizing a headerbar is meaningless,
-      // and (more importantly) letting the grid clamp its height back up to the
-      // card's normal minH would defeat the reflow — so collapsed cards are not
-      // resizable and their minH drops to the collapsed row count.
-      isResizable: isItemResizable(isResizable.value, isPinned(it.i)) && !collapsed,
-      minW: min.minW,
-      minH: collapsed ? COLLAPSED_ROWS : min.minH,
-      resizeOption,
-    }
-  })
-}
-
-// The single array bound to GridLayout via v-model: desktop 2-D on wide
-// screens, our 1-column mobileLayout below MOBILE_BREAKPOINT_PX. The getter
-// decorates items with the per-GridItem drag props above; the setter reads
-// back only `{ i, x, y, w, h }` (the decorations are ignored) and routes the
-// library's `update:layout` emission to the RIGHT persistence path for the
-// current breakpoint so the other one is never touched.
-const activeLayout = computed<(DashboardLayoutItem & GridItemDecoration)[]>({
-  get: () =>
-    // Collapse-reflow overlay: collapsed cards shrink to COLLAPSED_ROWS and the
-    // layout re-packs top-left so neighbours fill the reclaimed rows (補位). The
-    // canonical (expanded) heights stay in `layout` — this is display-only.
-    // Desktop reuses `desktopDisplayLayout` (also fed to `gutterItems` below)
-    // so the grid and the gutter overlay never disagree on where a card
-    // actually is.
-    decorateForGrid(
-      isMobile.value
-        ? applyCollapsedHeights(mobileVisibleLayout.value, collapsedIds.value)
-        : desktopDisplayLayout.value,
-      isMobile.value,
+const cssGridMobileLayout = computed<DashboardLayoutItem[]>(() =>
+  applyCollapsedHeights(
+    mobileLayout(
+      mobileOrder.value.filter((id) => isVisibleId(id)),
+      layout.value,
     ),
-  set: (next) => {
-    if (isMobile.value) {
-      // Mobile drag-to-reorder: derive the new top-to-bottom order from the
-      // emitted items (sorted by y, then x for determinism) and merge it back
-      // into the full persisted order — an id absent from `next` (a hidden
-      // align card, or B112: a currently-PINNED card, Teleported out of the
-      // grid entirely) keeps its own exact array slot rather than being
-      // bumped to the end, so reordering two OTHER cards while a third stays
-      // pinned can never silently move the pinned card's remembered position
-      // (see mergeMobileOrder's doc).
-      const orderedVisible = [...next]
-        .sort((a, b) => a.y - b.y || a.x - b.x)
-        .map((it) => it.i)
-      setMobileOrder(mergeMobileOrder(mobileOrder.value, orderedVisible))
-      return
-    }
-    // Desktop: merge visible items' new positions back into the full layout,
-    // preserving hidden items untouched (pure function — only coordinates
-    // are copied, decoration fields like dragAllowFrom/minW never leak into
-    // the persisted array — see mergeLayoutPositions's doc).
-    //
-    // Grid-compact fix — this is the ONE code path every desktop coordinate
-    // change flows through (native drag/resize end via onLayoutUpdated below,
-    // AND a gutter drag's eventual settle — see useGridGutters' onChange doc),
-    // so running compactLayoutTopLeft here closes whatever hole moving/
-    // resizing a card just left behind, on both axes, right after the
-    // gesture ends. Composing two identity-preserving pure functions keeps
-    // the whole chain a genuine no-op once positions converge (same
-    // invariant #4's crash fix relies on — see mergeLayoutPositions's doc):
-    // an already-compacted layout makes compactLayoutTopLeft hand back the
-    // exact same array it was given, so a `layout.value` assignment that
-    // changed nothing never re-triggers GridLayout's own prop watcher.
-    //
-    // Collapse-reflow: `next` carries collapsed cards at their DISPLAY height
-    // (COLLAPSED_ROWS). Revert those to the canonical (expanded) height held in
-    // `layout` before persisting, so dragging while a card is collapsed never
-    // freezes its header-only height into the saved arrangement — expanding
-    // still restores the full height. resolveOverlaps then re-seats the
-    // just-restored full-height cards below their neighbours before
-    // compaction closes any gap.
-    //
-    // Which packer runs here matters: while ANY card is collapsed, this write-
-    // back path is also where the collapse-reflow display (built by
-    // applyCollapsedHeights/compactVertical, see the getter above) echoes back
-    // through the grid's `update:layout`/`layout-updated` events — so it must
-    // use the SAME vertical-only packer, or the echo would horizontally
-    // re-pack the canonical layout with compactLayoutTopLeft and reintroduce
-    // the reported bug (collapsing a row-2 card sideways-yanking a row-3
-    // card from a different column). When nothing is collapsed this is just
-    // the ordinary drag/resize/delete write-back, which keeps the existing
-    // top-left (vertical+horizontal) compaction unchanged.
-    const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
-    const restored = collapsedIds.value.size
-      ? next.map((it) =>
-          collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it,
-        )
-      : next
-    const pack = collapsedIds.value.size > 0 ? compactVertical : compactLayoutTopLeft
-    const merged = mergeLayoutPositions(layout.value, restored)
-    // B112 — `next`/`restored` never mentions a currently-pinned card (it's
-    // excluded from what's fed to the grid — see desktopVisibleLayout), so
-    // `merged` already carries its rect through completely untouched
-    // (mergeLayoutPositions's "absent = keep unchanged" guarantee). It must
-    // ALSO sit out of resolveOverlaps/`pack` themselves: both process the
-    // FULL array by reading order and can push a just-dragged card away from
-    // a spot that's visually free purely because the pinned card's stale
-    // rect still "collides" with it on paper — see packExcluding's doc.
-    const packed = packExcluding(merged, new Set(pinnedIds.value), (items) => pack(resolveOverlaps(items)))
-    // Echo/no-op guard: a collapse toggle makes the grid re-emit the very
-    // display we fed it, which `packed` reconstructs back into the current
-    // canonical layout — assigning a fresh-but-equal array would re-run the
-    // getter and spin the update→compact→update loop DashboardCard's #9 warns
-    // of. resolveOverlaps always allocates, so this value comparison (not a
-    // reference check) is what actually breaks the cycle.
-    if (!sameLayoutPositions(packed, layout.value)) layout.value = packed
-  },
+    collapsedIds.value,
+  ),
+)
+/** The single layout array fed to `<CssGridGrid>` — desktop 2-D on wide
+ *  screens, the mobile 1-column build below the breakpoint. This computed
+ *  itself has no setter — mutation happens via `writeBackLayout` above,
+ *  called from the drag/resize/gutter composables' own commit hooks below. */
+const cssGridActiveLayout = computed<DashboardLayoutItem[]>(() =>
+  isMobile.value ? cssGridMobileLayout.value : cssGridDesktopLayout.value,
+)
+
+// --- F6 stage 2 — CSS Grid drag-to-reorder (see useCssGridDashboardDrag.ts's
+// own module doc for the full design: pixel measurement + pointer-event
+// coalescing live there, collision/compaction is the SAME pure
+// dashboardLayout.ts functions `writeBackLayout` already uses). Wired
+// directly to `writeBackLayout` above so a CSS-grid drag commits through the
+// EXACT same persistence path every other coordinate change does — same B52
+// display/canonical split, echo guard, and pinned/mobile-order handling.
+const cssGridDrag = useCssGridDashboardDrag({
+  layout: cssGridActiveLayout,
+  pinnedIds,
+  cols: colNum,
+  rowHeight: GRID_ROW_HEIGHT,
+  marginX: computed(() => gridMargin.value[0]),
+  marginY: GRID_MARGIN[1],
+  draggable: isDraggable,
+  onCommit: writeBackLayout,
 })
 
-// #1 fix — grid-layout-plus's `update:layout` (our v-model, handled by
-// activeLayout's setter above) only fires on initial MOUNT and on a
-// responsive BREAKPOINT change. A drag or resize ENDING instead fires
-// `layout-updated` (confirmed by reading grid-layout-plus's own source:
-// dragend/resizeend call `emit("layout-updated", ...)`, never
-// `emit("update:layout", ...)`) — so without this listener, a drag/resize's
-// new position was rendered by the library's OWN internal state but never
-// written back into `layout.value` (and so never persisted to
-// localStorage). The very next action that makes `activeLayout`'s getter
-// re-run (鎖定布局/釘選/收合/新增圖表/斷點切換all change SOMETHING that
-// activeLayout's getter reads) would then re-derive `:layout` from that
-// STALE `layout.value`, and grid-layout-plus's own `watch(() => [a.layout,
-// ...])` would forcibly reset its internal state back to it — the "layout
-// resets itself" bug. Routing this event through the SAME writable
-// `activeLayout` computed as the v-model reuses its existing merge/mobile-
-// order logic, so there's exactly one code path deciding how a raw
-// grid-layout-plus payload gets persisted, regardless of which event fired.
-function onLayoutUpdated(next: (DashboardLayoutItem & GridItemDecoration)[]): void {
-  activeLayout.value = next
-}
+// --- F6 stage 3(a) — CSS Grid corner resize (see
+// useCssGridDashboardResize.ts's own module doc). Chained ON TOP of the drag
+// composable's own preview (`layout: cssGridDrag.previewLayout`, not
+// `cssGridActiveLayout` directly): only one gesture can ever be physically
+// live at a time (a user can't simultaneously drag a card's header AND its
+// own corner handle), so feeding this composable whatever the drag composable
+// currently renders — the settled layout when nothing is dragging, or the
+// live drag preview otherwise — means the SAME single array flows through
+// both gestures without either one needing to know about the other. Wired
+// to the SAME shared `writeBackLayout` as the drag commit — see that
+// function's own doc for why every desktop coordinate change must flow
+// through it (resolveOverlaps/compaction + collapsed-height restore only
+// happen there; this composable's own live preview deliberately does NOT
+// reflow siblings, see its own module doc). ---
+const cssGridResize = useCssGridDashboardResize({
+  layout: cssGridDrag.previewLayout,
+  pinnedIds,
+  collapsedIds,
+  cols: colNum,
+  rowHeight: GRID_ROW_HEIGHT,
+  marginX: computed(() => gridMargin.value[0]),
+  marginY: GRID_MARGIN[1],
+  resizable: isResizable,
+  isMobile,
+  onCommit: writeBackLayout,
+})
 
-// --- #2/#5: draggable gutters between adjacent cards — dragging a gap
-// resizes the card whose edge that gap is. A left/right gap exchanges width
-// with its adjacent right card; a top/bottom gap retains the existing reflow
-// model. See gridGutter.ts for the domain math. useGridGutters.ts owns DOM/pointer wiring
-// this just calls into. Desktop-only (isMobile has no side-by-side pairs)
-// and disabled while the dashboard is locked, same two conditions that
-// already gate the grid's own drag/resize (isDraggable/isResizable in
-// useDashboardLayout). A currently-pinned card no longer has ANY grid slot at
-// all (see desktopVisibleLayout's B112 doc) — it's excluded there, upstream
-// of `desktopDisplayLayout`, so it's already absent by the time it reaches
-// here; a gutter overlay built from this computed can never target it.
+// Top-level consts so Vue's `<script setup>` template compiler auto-unwraps
+// these ComputedRefs — a NESTED `cssGridResize.previewLayout` property access written directly in
+// the template would NOT auto-unwrap (only a top-level script-setup binding
+// does), so the template below reads these names instead.
 //
-// B52 fix — built from `desktopDisplayLayout` (the collapse-reflow DISPLAY
-// layout, same one fed to `<GridLayout>` by `activeLayout`'s getter), not the
-// canonical `desktopVisibleLayout`, so the gutter overlay is positioned from
-// the EXACT same rects the grid actually renders (matters for a collapsed
-// card's reflowed neighbours, same lesson as `desktopDisplayLayout`'s own
-// doc above).
-const gutterItems = computed<DashboardLayoutItem[]>(() => desktopDisplayLayout.value)
-const gutterEnabled = computed(() => !isMobile.value && !isLocked.value)
-const gridGutters = useGridGutters({
-  items: gutterItems,
-  enabled: gutterEnabled,
-  // B52 — lets useGridGutters drop a gutter along a collapsed card's DISPLAY-
-  // only bottom edge (see gridGutter.ts's filterCollapsedGutters) so dragging
-  // never targets a height that's about to be reverted below.
+// `cssGridRenderedLayout` is the SINGLE array both `<CssGridGrid>` itself AND
+// the CSS-grid gutter overlay below consume — B52's own hard-won lesson
+// (gutter overlay and grid must read the exact same DISPLAY layout, or
+// gutters end up at stale positions) generalises here to "every overlay that
+// visually depends on the grid's rendered rects must derive from this one
+// computed, never from `cssGridActiveLayout` directly" — it already carries
+// through both the drag preview AND the resize preview.
+const cssGridRenderedLayout = cssGridResize.previewLayout
+const cssGridDragOffsetPx = cssGridDrag.dragOffsetPx
+// A plain component-ref -> composable `containerRef` wiring, pointed at
+// CssGridGrid's own root element: drag/resize each need their OWN width
+// measurement. Both composables' `containerRef`s are bound to the SAME
+// element here — two independent ResizeObservers on one node is a cheap,
+// low-risk trade that keeps the two composables independently testable (see
+// useCssGridDashboardResize.ts's own containerRef doc).
+const cssGridGridRef = ref<{ $el: HTMLElement } | null>(null)
+watch(cssGridGridRef, (inst) => {
+  const el = (inst?.$el as HTMLElement | undefined) ?? null
+  cssGridDrag.containerRef.value = el
+  cssGridResize.containerRef.value = el
+})
+
+// --- F6 stage 3(b) — CSS Grid gutter-drag. Reuses useGridGutters.ts UNCHANGED
+// (see its own module doc: it's already renderer-agnostic pure Vue wiring —
+// items/geometry/pointer handling, no assumption about grid-layout-plus
+// anywhere in it), pointed at this renderer's own wrapping element
+// (`cssGridWrapRef` below).
+//
+// B52 — `cssGridGutterItems` derives from `cssGridRenderedLayout` (the EXACT
+// same array fed to `<CssGridGrid :layout="...">`, see that computed's own
+// doc), filtered to drop pinned ids: a pinned card here keeps its own sticky
+// grid slot (unlike the removed legacy renderer, where a pinned card had NO
+// grid slot at all) — but it still has no resize mechanism (`isItemResizable`
+// returns false while pinned, and `disable-pin-resize` hides its own floating
+// handle), so a gutter must never be offered along its edge either: dragging
+// a vertical gutter changes BOTH neighbours' `w`/`x`, which would silently
+// move a pinned card's supposedly-fixed grid slot out from under it.
+const cssGridGutterItems = computed<DashboardLayoutItem[]>(() =>
+  cssGridRenderedLayout.value.filter((it) => !isPinned(it.i)),
+)
+const cssGridGutterEnabled = computed(() => !isMobile.value && !isLocked.value)
+const cssGridGutters = useGridGutters({
+  items: cssGridGutterItems,
+  enabled: cssGridGutterEnabled,
   collapsedIds,
   cols: GRID_COLS,
   rowHeight: GRID_ROW_HEIGHT,
   marginX: GRID_MARGIN[0],
   marginY: GRID_MARGIN[1],
-  // Same persistence path as onLayoutUpdated above (#1's fix). A vertical
-  // split already supplies both changed cards, so it reaches GridLayout as a
-  // non-overlapping layout and the right card stays on its row. Horizontal
-  // gutters keep their existing reflow through the normal grid round trip.
-  //
-  // B52 fix — `next` is the FULL `gutterItems` array (display heights), so
-  // EVERY currently-collapsed card in it still carries its COLLAPSED_ROWS
-  // display height, not just the one card the drag actually resized. Without
-  // restoring those back to `layout.value`'s canonical height first,
-  // `mergeLayoutPositions` would see every collapsed card's `h` "changed"
-  // (COLLAPSED_ROWS vs. its real height) and freeze COLLAPSED_ROWS into the
-  // persisted layout for ALL of them — same canonical-height restore
-  // `activeLayout`'s setter already does for the native drag/resize path.
-  onChange: (next) => {
-    const canonicalH = new Map(layout.value.map((it) => [it.i, it.h]))
-    const restored = collapsedIds.value.size
-      ? next.map((it) => (collapsedIds.value.has(it.i) ? { ...it, h: canonicalH.get(it.i) ?? it.h } : it))
-      : next
-    layout.value = mergeLayoutPositions(layout.value, restored)
-  },
+  // Unlike the legacy gutter's own bespoke `onChange` (a plain
+  // mergeLayoutPositions with no resolveOverlaps/compaction — safe there only
+  // because grid-layout-plus's own internal reflow runs a second pass once
+  // the prop changes), this renderer has NOTHING else that will ever
+  // re-pack an overlap CSS Grid never auto-compacts anything on its own — so
+  // routing straight through the shared `writeBackLayout` (which already
+  // restores canonical collapsed heights AND runs resolveOverlaps/compaction)
+  // is both simpler and correct here.
+  onChange: writeBackLayout,
 })
-const gutters = gridGutters.gutters
-const draggingKey = gridGutters.draggingKey
-const onGutterPointerDown = gridGutters.onGutterPointerDown
-// B113 — the grid container's measured width, shared with useGridGutters'
-// OWN `colWidthPx` math (see that composable's `containerWidthPx` doc) so
-// `pinnedGridSizeForItemId` below computes a pinned card's default size from
-// the EXACT same metrics the grid itself is laid out with, without a second
-// ResizeObserver on the same element.
-const containerWidthPx = gridGutters.containerWidthPx
-// A plain local template ref, forwarded into the composable's own
-// containerRef via watch — kept as a separate binding (rather than the
-// template pointing `ref="..."` straight at `gridGutters.containerRef`)
-// because a template ref attribute must name a binding vue-tsc can see
-// genuinely READ somewhere in this component's own <script>; the watch
-// below is that read.
-const gridWrapRef = ref<HTMLElement | null>(null)
-watch(gridWrapRef, (el) => {
-  gridGutters.containerRef.value = el
+const cssGridWrapRef = ref<HTMLElement | null>(null)
+watch(cssGridWrapRef, (el) => {
+  cssGridGutters.containerRef.value = el
 })
+// Top-level consts so the template's `v-for`/`:class` reads auto-unwrap these
+// two ComputedRefs — same reasoning as `cssGridRenderedLayout`'s own doc
+// above: a NESTED `cssGridGutters.gutters` property read directly in the
+// template would hand back the Ref object itself, not its unwrapped array.
+// `onGutterPointerDown` doesn't need this — it's INVOKED as a function in the
+// template, never read as a value.
+const cssGridGuttersList = cssGridGutters.gutters
+const cssGridDraggingKey = cssGridGutters.draggingKey
 
 function onResetLayout(): void {
   if (window.confirm(t('analyzer.layout.resetLayoutConfirm'))) resetLayout()
@@ -920,72 +844,6 @@ function titleForItemId(id: string): string {
   if (key) return t(key)
   const chart = charts.value.find((c) => chartItemId(c.id) === id)
   return chart ? chartTitle(chart) : ''
-}
-
-/** B112 — the `aspect-ratio` DashboardCard uses to size a PINNED card as a
- *  FALLBACK only (see B113 below for the actual default sizing now, and that
- *  card's own `aspectRatio` prop doc). Pinned cards now render via their own
- *  dedicated `v-for` (template, below the grid) rather than inside
- *  GridLayout's per-breakpoint `#item` slot, so there's no `item.w`/`item.h`
- *  in scope any more — this looks the id up directly in the CANONICAL
- *  desktop `layout` instead, which is also the more correct source
- *  regardless of breakpoint: the mobile single-column array always has
- *  `w:1` (see mobileLayout), so using IT would produce a nonsensically tall
- *  `w/h` ratio (e.g. a 4-wide/12-tall desktop card would read as 1/12) — the
- *  desktop shape is what "the grid" actually means here. Falls back to `1`
- *  (square) for an id somehow missing from `layout` (shouldn't happen —
- *  reconcileLayout keeps every known id present). */
-function aspectRatioForItemId(id: string): number {
-  const it = layout.value.find((entry) => entry.i === id)
-  return it && it.h > 0 ? it.w / it.h : 1
-}
-
-/** B113 — the pinned card's DEFAULT (non-dragged) pixel size: the REAL
- *  footprint its grid slot has/would have, not the aspect-ratio-derived
- *  "stretch to the anchor's full width, then grow height to match the
- *  ratio" shape B112 introduced (that regression: a wide/short card, once
- *  stretched to full page width, grew to a huge height — and on mobile blew
- *  straight through the pinned anchor's 50vh cap, pushing everything below
- *  it off screen — see this file's own B113 ISSUES entry).
- *
- *  Height is derived purely from `h` rows × `GRID_ROW_HEIGHT` + `GRID_MARGIN`
- *  (gridGutter.ts's `hPx`) — identical at both breakpoints, since a pinned
- *  card's mobile-stacked `h` is inherited from the SAME canonical desktop `h`
- *  (see mobileLayout's own doc) and neither `GRID_ROW_HEIGHT` nor
- *  `GRID_MARGIN[1]` vary by breakpoint — no container measurement needed for
- *  this half at all.
- *
- *  Width uses `wPx` with `colNum`/`gridMargin[0]` AT THE CURRENT BREAKPOINT,
- *  not the canonical desktop `w`: on mobile, `colNum` is 1 and `gridMargin[0]`
- *  is 0 (see useDashboardLayout's own doc), so every card's mobile grid slot
- *  is genuinely full-width regardless of its desktop column span — passing
- *  `w:1` into `wPx` at those metrics reproduces exactly that (and happens to
- *  equal `containerWidthPx` itself, i.e. 100%). On desktop it's the card's
- *  own canonical `w` at the CURRENT `colWidthPx` — mathematically always
- *  `<= containerWidthPx` for any `w <= GRID_COLS` (a full 12-wide card still
- *  leaves the grid's own left/right margin), so no extra clamping is needed
- *  for that case either.
- *
- *  The actual pixel math is gridGutter.ts's pure `pinnedCardPixelSize` (see
- *  its own doc for the full derivation and the unit tests exercising it
- *  directly) — this is just the thin Vue wrapper supplying the canonical
- *  layout entry plus this component's own reactive `isMobile`/metrics.
- *  Returns `null` — DashboardCard's `cardStyle` then falls back to the old
- *  aspect-ratio behaviour — when the grid container hasn't been measured yet
- *  (`containerWidthPx <= 0`, a brief bootstrap window right after mount) or
- *  the id is somehow missing from `layout` (shouldn't happen, same as
- *  `aspectRatioForItemId` above). */
-function pinnedGridSizeForItemId(id: string): { width: number; height: number } | null {
-  const it = layout.value.find((entry) => entry.i === id)
-  if (!it) return null
-  const metrics: GridMetrics = {
-    cols: colNum.value,
-    rowHeight: GRID_ROW_HEIGHT,
-    marginX: gridMargin.value[0],
-    marginY: gridMargin.value[1],
-    containerWidthPx: containerWidthPx.value,
-  }
-  return pinnedCardPixelSize(it, isMobile.value, metrics)
 }
 
 // --- F2: the grouped card menu (CardMenu.vue) — presentation-only data built
@@ -1026,9 +884,7 @@ function onCardMenuToggle(id: string, value: boolean): void {
 }
 
 /** 定位 — scroll a card's DOM element (tagged `data-card-id`, see the
- *  template) into view and briefly pulse-highlight it. A pinned card's real
- *  content lives in `#dashboard-pinned-anchor` (Teleported — see that div's
- *  doc), so this query finds it there too, same `data-card-id` attribute. */
+ *  template) into view and briefly pulse-highlight it. */
 function locateCard(id: string): void {
   const el = document.querySelector<HTMLElement>(`[data-card-id="${CSS.escape(id)}"]`)
   if (!el) return
@@ -1187,170 +1043,96 @@ const cardCtx: AnalyzerCardContext = {
         </div>
       </div>
 
-      <!-- 釘選 (pin) anchor: a single sticky slot that EVERY pinned card's
-           markup is Teleported into (see the dedicated pinned-cards `v-for`
-           below the grid, and DashboardCard's module doc). Placed here —
-           right after the toolbar, before the grid — so at scroll position 0
-           it just sits inline (no visual jump), then sticks to the viewport
-           top once the page scrolls past it, exactly like the card's own
-           former mobile-only sticky trick, generalised to work regardless of
-           the grid's absolute-positioned desktop items. `:empty` hides it
-           when nothing is pinned so it never reserves space or shows a stray
-           border. Works identically at both breakpoints — this IS the
-           mobile pin mechanism now, not a duplicate of it (see
-           DashboardCard's module doc for the consolidation rationale).
+      <!-- F6 — the CSS-Grid dashboard renderer (see CssGridGrid.vue's module
+           doc). Reuses the SAME card markup (DashboardCard + AnalyzerCardBody)
+           the grid always has — this is a new renderer, not a new card system.
 
-           B111 — multiple cards can be pinned at once now (a stand-in for a
-           proper mobile split view — see panelState.ts's `pinnedIds` doc).
-           Each pinned card's own `<Teleport>` (below) still targets this
-           SAME anchor independently, so this element becomes a `display:
-           flex; flex-direction: column` STACK once more than one card lands
-           in it; visual order is driven by each card's `pin-order` CSS
-           `order` (see `pinOrderFor` above and DashboardCard's `pinOrder`
-           prop) rather than relying on Teleport's own DOM-insertion order,
-           which follows grid/mount position, not pin sequence.
+           `cssGridWrapRef` (stage 3) plays the exact same role as the legacy
+           `grid-wrap` div above: a zero-extra-box `position: relative`
+           wrapper whose measured width the CSS-grid gutter overlay's pixel
+           math is built from (see useGridGutters.ts's own `containerRef`
+           doc) — it must wrap `<CssGridGrid>` exactly, no added padding/
+           border, for that measurement to agree with the grid's own.
 
-           B112 — the combined-stack `max-height: 50vh` + `overflow-y: auto`
-           (see the CSS below) is now MOBILE-ONLY: it was a phone-UI stopgap
-           (B111), and on desktop it produced an unwanted inner scrollbar on
-           a floating card with plenty of room below it — see that CSS
-           rule's own doc. Desktop has no height cap at all now. -->
-      <div id="dashboard-pinned-anchor" class="pinned-anchor" />
+           Pinning here needs no Teleport/anchor at all: `pinned-ids` tells
+           CssGridGrid which items to render `position: sticky`, in their OWN
+           grid slot (stage 3(c): staggered `top`/z-index when several are
+           pinned at once, see that component's own `pinStackStyle` doc).
+           `aspect-ratio`/`pinned-width-px`/`pinned-height-px` are
+           deliberately NOT passed to `<DashboardCard>` — with none of the
+           three set, its `cardStyle` computed contributes no inline
+           width/height/aspect-ratio at all while pinned (see that
+           component's own doc), so the card keeps its NORMAL grid-slot size
+           exactly like the task asks, instead of the old floating-anchor
+           sizing path. `disable-pin-resize` hides the pinned-card's own
+           floating corner resize handle (DashboardCard.vue) — a pinned card
+           has no resize mechanism under this renderer at all (its grid slot
+           is fixed at its natural footprint; `resizable` below is already
+           false for it via `isItemResizableNow`, so `resize-mode="cssGrid"`'s
+           own corner handle is hidden for it too).
 
-      <!-- #8/#9: draggable dashboard grid (grid-layout-plus). Drag is restricted
-           to each card's own `.drag-handle` header (DashboardCard's title bar)
-           via `dragAllowFrom`, and the header's own buttons (pin/collapse, in
-           `.actions`) are excluded via `dragIgnoreFrom` so tapping them toggles
-           state instead of starting a drag. `colNum` is driven explicitly by
-           breakpoint (GRID_COLS on desktop, 1 on mobile) — we build BOTH the
-           desktop 2-D layout and the mobile 1-column layout ourselves (see
-           activeLayout), so the library's own `responsive` reflow is off and
-           can never write a 1-column arrangement back into dashboardLayout.v1.
-           Desktop: free 2-D drag + resize. Mobile: vertical drag-to-REORDER +
-           resize (height only — a full-width card can't usefully resize its
-           width). A pinned card's own slot is always non-draggable/
-           non-resizable regardless of breakpoint (decorateForGrid). -->
-      <!-- #2 縫隙拖動: gridWrapRef is the positioning context (`position:
-           relative`) the gutter overlay's absolutely-positioned hit-boxes
-           are placed relative to — it must wrap `<GridLayout>` exactly (no
-           extra padding/border) so its measured width matches the library's
-           own colWidth math (see useGridGutters.ts's `containerRef` doc). -->
-      <div ref="gridWrapRef" class="grid-wrap">
-      <GridLayout
-        v-model:layout="activeLayout"
-        :col-num="colNum"
-        :is-draggable="isDraggable"
-        :is-resizable="isResizable"
-        :responsive="false"
+           F6 stage 3 — `:layout` is now `cssGridRenderedLayout` (chains the
+           drag preview INTO the resize preview — see that computed's own
+           doc for why one shared array feeds both the grid and the gutter
+           overlay). `:drag-offset-px` carries the dragged card's raw pixel
+           follow-offset through to CssGridGrid's own `dragOffsetFor`. Each
+           card's `drag-mode="cssGrid"` + `:draggable` + the three
+           `@css-grid-drag-*` listeners drive the drag composable exactly as
+           stage 2 left them; `resize-mode="cssGrid"` + `:resizable` + the
+           three `@css-grid-resize-*` listeners are the NEW stage-3(a)
+           equivalent for the corner handle — see DashboardCard.vue's own
+           module doc for why both gestures are entirely self-contained (no
+           external library to hand off to).
+           `ref="cssGridGridRef"` feeds BOTH composables' own container-width
+           ResizeObservers (script-side watch, see its own doc). -->
+      <div ref="cssGridWrapRef" class="css-grid-wrap">
+      <CssGridGrid
+        ref="cssGridGridRef"
+        :layout="cssGridRenderedLayout"
+        :cols="colNum"
         :row-height="GRID_ROW_HEIGHT"
-        :margin="gridMargin"
-        :vertical-compact="true"
-        :use-css-transforms="true"
-        @layout-updated="onLayoutUpdated"
+        :margin-x="gridMargin[0]"
+        :margin-y="gridMargin[1]"
+        :pinned-ids="pinnedIds"
+        :drag-offset-px="cssGridDragOffsetPx"
       >
         <template #item="{ item }">
-          <!-- IMPORTANT: the `#item` slot renders ONLY the card content —
-               grid-layout-plus wraps each layout entry in its OWN internal
-               GridItem (it iterates `layout` and provides `item`). Nesting a
-               second <GridItem> here double-wraps every card in TWO stacked
-               .vgl-item elements, compounding their translate3d transforms so
-               cards land at ~2× their slot offset while the (single) library
-               placeholder stays at the correct slot — the "placeholder wildly
-               offset from the card" bug. Per-item drag config
-               (drag-allow-from/-ignore-from + the pinned non-draggable/
-               non-resizable exception) is carried on each layout item instead
-               (see `activeLayout` getter's decoration), which the library
-               spreads onto the GridItem it creates.
-
-               B112 — a currently-PINNED card's id never reaches this slot at
-               all any more: desktopVisibleLayout/mobileVisibleLayout filter
-               pinned ids out of what's fed to `<GridLayout>` (so the library's
-               own compaction closes the gap instead of an inert placeholder
-               reserving it — the reported "empty hole" bug). Pinned cards
-               render via their OWN dedicated `v-for` below instead — see that
-               block's doc for why it can no longer share this exact template
-               location. -->
           <DashboardCard
             :data-card-id="String(item.i)"
             :title="titleForItemId(String(item.i))"
             :collapsed="isCollapsed(String(item.i))"
             :pinned="isPinned(String(item.i))"
-            :aspect-ratio="item.w / item.h"
-            :show-pin="String(item.i) === 'suspension' ? isMobile : undefined"
+            :draggable="cssGridDrag.isItemDraggableNow(String(item.i))"
+            :resizable="cssGridResize.isItemResizableNow(String(item.i))"
             @update:collapsed="toggleCollapsed(String(item.i))"
             @update:pinned="togglePinned(String(item.i))"
+            @css-grid-drag-start="cssGridDrag.onCardDragStart(String(item.i), $event.x, $event.y)"
+            @css-grid-drag-move="cssGridDrag.onCardDragMove($event.x, $event.y)"
+            @css-grid-drag-end="cssGridDrag.onCardDragEnd($event.committed)"
+            @css-grid-resize-start="cssGridResize.onCardResizeStart(String(item.i), $event.x, $event.y)"
+            @css-grid-resize-move="cssGridResize.onCardResizeMove($event.x, $event.y)"
+            @css-grid-resize-end="cssGridResize.onCardResizeEnd($event.committed)"
           >
             <AnalyzerCardBody :id="String(item.i)" :ctx="cardCtx" />
           </DashboardCard>
         </template>
-      </GridLayout>
-      <!-- 釘選 (pin) cards — rendered OUTSIDE `<GridLayout>` entirely (they are
-           NOT one of its items any more, see desktopVisibleLayout's B112 doc)
-           and Teleported into `#dashboard-pinned-anchor` above. Keyed by id
-           via `pinnedIds` (already in pin order, see `pinOrderFor`) so a
-           card's identity is stable across re-pins.
-
-           This used to be the SAME template location as a grid-resident card
-           (one `<DashboardCard>`, wrapped in a `<Teleport :disabled>` that
-           just toggled), which is why pin/unpin used to visually SLIDE (#19's
-           FLIP transition on the one persisted DOM node Teleport relocated,
-           never remounted). Now that a pinned card's grid slot must not exist
-           at all — the whole point of this fix — the two can no longer be
-           the same template instance: pinning UNMOUNTS the card from the
-           grid's `#item` slot and mounts a fresh one here (unpinning is the
-           reverse). The slide animation therefore no longer plays across
-           that specific transition, and any of DashboardCard's own
-           pin-session-only local state (`pinnedSize`, `pinnedMini`, …)
-           simply restarts — harmless, since none of it is meaningful outside
-           an active pin anyway. Teleport itself is still exactly what solves
-           the underlying problem this component's module doc explains
-           (`position: sticky` does nothing inside grid-layout-plus's
-           transformed grid items) — it is just hosted from this dedicated,
-           always-enabled block instead of a conditionally-disabled one
-           shared with the grid.
-
-           `aspectRatioForItemId`/`pinnedGridSizeForItemId` both read the
-           CANONICAL `layout` (not a per-breakpoint rendered array, since this
-           block no longer has one) — see those functions' own docs. B113 —
-           `pinned-width-px`/`pinned-height-px` (pinnedGridSizeForItemId) are
-           now the DEFAULT sizing path (the card's actual grid-slot pixel
-           footprint); `aspect-ratio` only remains as DashboardCard's fallback
-           for the brief pre-measurement window (see that function's doc). -->
-      <template v-for="id in pinnedIds" :key="id">
-        <Teleport to="#dashboard-pinned-anchor">
-          <DashboardCard
-            :data-card-id="id"
-            :title="titleForItemId(id)"
-            :collapsed="isCollapsed(id)"
-            :pinned="true"
-            :pin-order="pinOrderFor(id)"
-            :aspect-ratio="aspectRatioForItemId(id)"
-            :pinned-width-px="pinnedGridSizeForItemId(id)?.width"
-            :pinned-height-px="pinnedGridSizeForItemId(id)?.height"
-            :show-pin="id === 'suspension' ? isMobile : undefined"
-            @update:collapsed="toggleCollapsed(id)"
-            @update:pinned="togglePinned(id)"
-          >
-            <AnalyzerCardBody :id="id" :ctx="cardCtx" />
-          </DashboardCard>
-        </Teleport>
-      </template>
-      <!-- #2 縫隙拖動 overlay: one thin hit-box per shared card edge, drawn
+      </CssGridGrid>
+      <!-- 縫隙拖動 overlay: one thin hit-box per shared card edge, drawn
            exactly over the margin gap between two adjacent cards (see
            gridGutter.ts's `gutterRect`) — never over any card's own content,
            so it can't intercept clicks meant for the dashboard. Empty
            (nothing rendered) on mobile / while locked / while nothing is
            adjacent — see useGridGutters's `enabled` gate. -->
       <div
-        v-for="g in gutters"
+        v-for="g in cssGridGuttersList"
         :key="g.key"
         class="grid-gutter"
-        :class="[g.orientation, { dragging: draggingKey === g.key }]"
+        :class="[g.orientation, { dragging: cssGridDraggingKey === g.key }]"
         :style="{ left: `${g.rect.left}px`, top: `${g.rect.top}px`, width: `${g.rect.width}px`, height: `${g.rect.height}px` }"
         role="separator"
         :aria-orientation="g.orientation === 'vertical' ? 'vertical' : 'horizontal'"
         :aria-label="t(g.orientation === 'vertical' ? 'analyzer.layout.resizeAdjacentWidth' : 'analyzer.layout.resizeAdjacentHeight')"
-        @pointerdown="onGutterPointerDown(g, $event)"
+        @pointerdown="cssGridGutters.onGutterPointerDown(g, $event)"
       />
       </div>
     </template>
@@ -1364,8 +1146,8 @@ const cardCtx: AnalyzerCardContext = {
   gap: calc(var(--space) * 2);
 }
 /* B36 — App.vue's `.content` zeroes its own horizontal padding on mobile so
-   the dashboard grid below (`.grid-wrap`/`.pinned-anchor`, i.e. the actual
-   DashboardCard content) can go edge-to-edge — see that file's own comment.
+   the dashboard grid below (`.css-grid-wrap`, i.e. the actual DashboardCard
+   content) can go edge-to-edge — see that file's own comment.
    Loose (non-card) rows that sit directly in `.analyzer` — the toolbar and
    the "no files" message — aren't cards at all, just text/buttons, so they
    get a small inset of their own back rather than sitting flush against the
@@ -1477,25 +1259,15 @@ const cardCtx: AnalyzerCardContext = {
   color: var(--color-accent-text);
   border-color: var(--color-accent);
 }
-/* #2 縫隙拖動 — the positioning context the gutter overlay's absolutely-
-   positioned hit-boxes are placed relative to (see the template's doc on
-   gridWrapRef). Must wrap `<GridLayout>` with zero extra box (no padding/
-   border) so ITS measured width is exactly what grid-layout-plus itself
-   lays cards out against. */
-.grid-wrap {
+/* F6 — the positioning context the gutter overlay's absolutely-positioned
+   hit-boxes are placed relative to: must wrap `<CssGridGrid>` with zero extra
+   box (no padding/border) so its measured width matches `CssGridGrid`'s own
+   root element exactly — that root's `clientWidth` (padding included, per how
+   `padding: box-sizing` works) is already the SAME `containerWidthPx`
+   convention gridGutter.ts's `colWidthPx`/`xPx`/`yPx` formulas expect (see
+   cssGridPlacement.ts's own module doc for the pixel-geometry derivation). */
+.css-grid-wrap {
   position: relative;
-}
-/* B63 — grid-layout-plus does not write `touch-action` inline: its GridItem
-   adds `.vgl-item--no-touch` on Android whenever an item is draggable or
-   resizable, and the library's injected stylesheet gives that ancestor
-   `touch-action: none`. The browser intersects a target's touch-action with
-   every ancestor, so DashboardCard's `pan-y` header rule could never restore
-   native scrolling during B61's pending long-press window. Scope the override
-   to dashboard grid items. Explicit gesture surfaces (map/chart) and the
-   resize handle retain their own `touch-action: none`, while a fast swipe
-   beginning on a title can once again be claimed by native vertical scroll. */
-.grid-wrap :deep(.vgl-item--no-touch) {
-  touch-action: pan-y;
 }
 /* One draggable hit-box per shared card edge, sized/positioned to exactly
    fill the margin gap between two touching cards (gridGutter.ts's
@@ -1568,169 +1340,33 @@ const cardCtx: AnalyzerCardContext = {
   transform: translateY(-50%);
 }
 
-/* #8 — snap grid items to position instead of easing the library's default
-   200ms `transform: translate3d(…)` transition on `.vgl-item`.
-
-   NOTE: this is NOT what fixed the "placeholder wildly offset from the card"
-   bug — that was a DOM-structure bug (a redundant <GridItem> nested inside the
-   library's `#item` slot double-wrapped every card, compounding its transform;
-   see the `#item` slot note in the template). The real fix removed the inner
-   GridItem, so item transforms are now single and correct.
-
-   This rule is kept only for its independent cosmetic benefit: the analyzer
-   mounts inside App.vue's <Transition mode="out-in"> view slide, and the grid's
-   mount-time width-measure → re-layout can land mid-slide; with the 200ms
-   transform ease, freshly-mounted items briefly animate from their pre-measure
-   position to their final slot, reading as a small "settle" jitter on tab
-   entry. Snapping removes that flicker. Drag/resize were never meant to ease
-   anyway. `:deep` because .vgl-item is the library's element, out of scope. */
-.analyzer :deep(.vgl-item) {
-  transition: none;
-}
-
-/* 釘選 (pin) anchor — see the template's doc comments above the anchor div
-   and the dedicated pinned-cards `v-for` below the grid for the full
-   mechanism. No placeholder rule any more (B112 removed it along with the
-   grid slot it used to fill — see desktopVisibleLayout's doc): a pinned
-   card's original spot is no longer reserved at all, so the cards below it
-   simply close up.
-
-   B111 — multiple cards can land here at once (one per pinned card's own
-   Teleport), so this is a flex COLUMN stack rather than a single-card slot:
-   `flex-direction: column` lays pinned cards top-to-bottom in the order set
-   by each card's `pin-order`-driven CSS `order` (see `pinOrderFor` in the
-   template's script, and DashboardCard's `.dashboard-card.pinned`'s own CSS
-   `order` — NOT this file's).
-
-   B112 — `max-height: 50vh` + `overflow-y: auto` (capping the COMBINED
-   height of the whole stack, not any one card) is now MOBILE-ONLY (see the
-   `@media` block below): it was a B111 phone-UI stopgap so pinning several
-   tall cards never swallows the whole small screen, but on a wide desktop
-   viewport that same cap forced an unwanted inner scrollbar on a floating
-   card that had plenty of room below it — reported as "the pinned card acts
-   like a separate framed panel". Desktop now has no height cap at all; the
-   stack simply grows to whatever height its (now unpinned-width, see below)
-   cards need. */
-.pinned-anchor {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  display: flex;
-  flex-direction: column;
-}
-.pinned-anchor:empty {
-  display: none;
-}
-@media (max-width: 768px) {
-  .pinned-anchor {
-    max-height: 50vh;
-    overflow-y: auto;
-  }
-}
-/* B112 — a pinned card reads as "part of this page, stuck to the top"
-   rather than a separate floating panel, at every breakpoint — no more
-   desktop `width: min(560px, 100%)` centring (a deliberately floating look);
-   removed per the same user report above.
-   `flex-shrink: 0` still applies so a short stack (e.g. one small pinned
-   card) is never stretched taller than its natural size by the column flex
-   container — a tall stack instead grows past mobile's own `max-height` and
-   triggers the anchor's scroll (see that rule's own doc); desktop has no cap
-   to grow past.
-   B113 — `width: 100%` (forcing every pinned card to the anchor's FULL
-   width) was itself the bug this fixes: combined with DashboardCard's own
-   aspect-ratio-derived height, a wide/short card stretched to full page
-   width and grew to a huge height (worse on mobile, where it blew straight
-   through the anchor's 50vh cap above and pushed the rest of the page off
-   screen). DashboardCard now sets its OWN explicit `width`/`height` inline
-   (AnalyzerView's `pinnedGridSizeForItemId` — the card's real grid-slot
-   pixel footprint, `PINNED_WIDTH`/`HEIGHT`px props) or the user's own
-   dragged `pinnedSize`, both of which win the cascade over ANY class rule
-   here regardless of specificity (inline style always does). `max-width:
-   100%` is this rule's only remaining job: an upper-bound safety net for a
-   narrower viewport/anchor than that computed width (never a fixed
-   override) — and, for the rare fallback case where DashboardCard has no
-   computed width/height yet (grid container not measured, or the id is
-   momentarily missing from `layout`), the flex container's own default
-   `align-items: stretch` still fills the card to this cap, same as the old
-   unconditional `width: 100%` did in that narrow window. */
-.pinned-anchor :deep(.dashboard-card) {
-  max-width: 100%;
-  margin-bottom: calc(var(--space) * 1.5);
-  flex-shrink: 0;
-}
-
-/* #3 — theme the resize handle (grid-layout-plus's `.vgl-item__resizer`,
-   bottom-right corner of every card). The library draws it as a plain
-   right-angle "⌐" made of two straight border edges (`border-right-width` +
-   `border-bottom-width` on its `:before`, see grid-layout-plus's built-in
-   CSS) in a hardcoded dark grey (`--vgl-resizer-border-color: #444`) — this
-   reads as an abrupt, unstyled corner against the rest of the app's rounded,
-   theme-colored chrome (same mismatch the tooltip directive fixed for the
-   native `title` box). Recolor to the theme accent and round the corner
-   where the two border edges meet (`border-radius` on the bottom-right,
-   matching the card's own `--radius`) so it reads as a deliberate grab
-   affordance rather than a stray box corner.
-
-   B18b — these three `--vgl-resizer-*` values are also the shared "resize
-   handle" design tokens DashboardCard.vue's `.pin-resize-handle` reuses (see
-   its own CSS doc) so the pinned floating card's resize grip looks and sizes
-   IDENTICALLY to every grid card's, instead of the bespoke 90°-corner icon it
-   used to draw. grid-layout-plus's own `.vgl-layout{...}` rule sets its OWN
-   `--vgl-resizer-size`/`--vgl-resizer-border-color`/`--vgl-resizer-border-
-   width` directly on that element, which shadows whatever `.analyzer` would
-   otherwise inherit down to it — so the `:deep(.vgl-layout)` overrides below
-   stay (they're what the GRID's own resizer actually sees). The pinned card
-   lives in `#dashboard-pinned-anchor`, a SIBLING of `.vgl-layout` (see the
-   template, above the grid) rather than a descendant of it, so it can't pick
-   up those `:deep(.vgl-layout)`-scoped values through inheritance either —
-   this second copy on plain `.analyzer` (an ancestor of BOTH the grid and the
-   pinned anchor) is what the pinned handle actually inherits. Duplicated
-   rather than restructured because overriding a value a descendant element
-   re-declares itself isn't expressible as a single CSS custom-property rule. */
+/* CSS Grid renderer's own corner resize handle (DashboardCard.vue's
+   `.css-grid-resize-handle`) is themed off these three custom properties,
+   declared here on `.analyzer` (an ancestor of every DashboardCard instance
+   regardless of grid position) so every card's handle picks up the same
+   size/color/mobile touch-target bump with zero per-card CSS. Named
+   `--vgl-resizer-*` for historical continuity with the grid-layout-plus
+   `.vgl-item__resizer` these tokens used to theme (removed in the F6 stage 4
+   migration) — kept as-is rather than renamed, since the css-grid resize
+   handle's own `<style>` already references these exact names. */
 .analyzer {
   --vgl-resizer-size: 10px;
   --vgl-resizer-border-color: var(--color-accent);
   --vgl-resizer-border-width: 2px;
 }
-.analyzer :deep(.vgl-layout) {
-  --vgl-resizer-border-color: var(--color-accent);
-  --vgl-resizer-border-width: 2px;
-}
-.analyzer :deep(.vgl-item__resizer)::before {
-  border-radius: 0 0 var(--radius) 0;
-}
-
-/* Touch resize (mobile task): the resize handle is grid-layout-plus's own
-   `.vgl-item__resizer` (bottom-right corner), sized via its `--vgl-resizer-
-   size` CSS var (10px default — comfortable with a mouse, far too small a
-   touch target on a phone). Mobile resize is now enabled (see
-   useDashboardLayout's isResizable), so the handle needs to actually be
-   tappable there; `touch-action: none` stops the browser's own scroll
-   gesture from hijacking the drag before interactjs sees it (grid-layout-plus
-   only sets this at the ITEM level for Android — see grid-item.vue's
-   `no-touch` class — not on the resizer itself, and not for iOS at all).
-   B18b — the plain `.analyzer` override (not just `:deep(.vgl-layout)`) is
-   what lets the pinned handle grow to the same 30px touch target here too.
-
-   B110 — this used to be a `@media (max-width: 768px)` WIDTH breakpoint, but
-   the handle's real audience is whatever pointer is actually driving the
-   drag, not the viewport size: a desktop mouse user who narrows the window
-   below 768px got the chunky 30px target for no reason, while a touch tablet
-   wider than 768px was stuck with the 10px mouse-sized one — untappable.
-   §8/B35 already solved exactly this class of problem for `.grid-gutter`
-   above via the `any-pointer: coarse` capability signal mirrored onto
-   `<html>` by useInputCapabilities.ts; reuse the same `:root[data-any-
-   pointer-coarse]` selector here instead — NEVER wrap that `:root[...]`
-   prefix in the Vue scoped-CSS global-escape helper (see B92: doing so drops
-   scoping for the WHOLE selector, not just the `:root[...]` part). */
+/* B110 — the handle's real audience is whatever pointer is actually driving
+   the drag, not the viewport size: a desktop mouse user who narrows the
+   window below 768px shouldn't get the chunky 30px target, while a touch
+   tablet running the full desktop layout (coarse pointer, but wide viewport)
+   still needs it. §8/B35 solved exactly this class of problem for
+   `.grid-gutter` above via the `any-pointer: coarse` capability signal
+   mirrored onto `<html>` by useInputCapabilities.ts; reuse the same
+   `:root[data-any-pointer-coarse]` selector here — NEVER wrap that
+   `:root[...]` prefix in the Vue scoped-CSS global-escape helper (see B92:
+   doing so drops scoping for the WHOLE selector, not just the `:root[...]`
+   part). */
 :root[data-any-pointer-coarse] .analyzer {
   --vgl-resizer-size: 30px;
-}
-:root[data-any-pointer-coarse] .analyzer :deep(.vgl-layout) {
-  --vgl-resizer-size: 30px;
-}
-:root[data-any-pointer-coarse] .analyzer :deep(.vgl-item__resizer) {
-  touch-action: none;
 }
 
 /* F2 — card-menu 定位 (locate): a brief outline pulse on the card the user
@@ -1740,8 +1376,8 @@ const cardCtx: AnalyzerCardContext = {
    lives in AnalyzerView's OWN scoped style block because a parent's scoped
    CSS reaches a directly-instantiated child component's ROOT element (every
    DashboardCard tag here IS such a child), same reasoning as this file's
-   other `:deep`-free rules that theme DashboardCard/grid-layout-plus
-   elements. `prefers-reduced-motion: reduce` swaps the animated fade for a
+   other `:deep`-free rules that theme DashboardCard elements. `prefers-
+   reduced-motion: reduce` swaps the animated fade for a
    static outline shown for the same duration (see `locateCard`'s timeout) —
    matches this app's existing reduced-motion convention (useFlipAnimation.ts,
    App.vue, CurrentValuesPanel.vue). */

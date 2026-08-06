@@ -33,246 +33,220 @@ import { edgeAutoscrollVelocity } from '@/domain/layout/edgeAutoscroll'
  * plus's own vertical-compaction pass moving OTHER items into the reclaimed
  * space on every collapse/expand — body-hide sidesteps both problems.
  *
- * 釘選 (pin) — redesigned to work at BOTH breakpoints (previously mobile-only,
- * CSS `position: sticky`, which only worked because mobile's single-column
- * layout is normal document flow; desktop's grid items are absolutely
- * positioned via CSS transforms, where `position: sticky` does nothing).
- * Pin is now purely a "which card is this" flag: `pinned` only drives this
- * component's OWN chrome (button active-state, `.pinned` size/shadow
- * styling) — the actual sticky-while-scrolling behaviour lives one level up,
- * in AnalyzerView, which Teleports a pinned card's markup out of the grid
- * into a single sticky anchor and leaves an empty placeholder in the card's
- * original grid slot (so the layout doesn't jump). This component has no
- * idea whether it's currently rendering inside the grid or inside that
- * anchor — same props/emits either way, which is what makes the Teleport
- * possible without DashboardCard itself changing. B111 — SEVERAL cards may
- * now be pinned at once (a stand-in for a proper mobile split view until one
- * exists — see panelState.ts's `pinnedIds` doc); this component still has no
- * idea how many other cards are ALSO pinned, it only knows its own `pinned`
- * flag and its `pinOrder` (stack position, purely a CSS `order` value — see
- * that prop's doc below). The combined-height cap now lives on
- * AnalyzerView's shared anchor (`max-height: 50vh` + internal scroll), not on
- * this component's own `.pinned` rule (see that CSS's B111 note) — several
- * pinned cards must share one ~half-screen budget, not each get their own.
+ * 釘選 (pin) — works at BOTH breakpoints via genuine CSS `position: sticky`:
+ * the F6 migration made every dashboard card an ordinary in-flow CSS Grid
+ * item (CssGridGrid.vue), so a pinned card just gets `position: sticky` and
+ * sticks EXACTLY where it already sits in the grid — no Teleport, no
+ * separate anchor, no placeholder. `pinned` drives this component's OWN
+ * chrome (button active-state, `.pinned` size/shadow styling); the sticky
+ * positioning itself and the multi-pin stacking stagger/z-index are
+ * CssGridGrid's own job (see that component's `pinStackStyle`). B111 —
+ * SEVERAL cards may be pinned at once (a stand-in for a proper mobile split
+ * view — see panelState.ts's `pinnedIds` doc); this component only knows its
+ * own `pinned` flag, not how many others are also pinned.
  *
- * #19 — the Teleport move itself is otherwise an instant DOM jump (Vue's own
- * `<Transition>` can't help here — see flip.ts's module doc for why), so
- * `onTogglePinned` below hand-animates it with FLIP: measure this card's rect
- * synchronously BEFORE emitting (still at its pre-toggle position), then
- * once Vue has relocated it (`nextTick`), invert from the new rect back to
- * the old one and transition to identity — the card visibly slides (and, if
- * its size also changed, resizes) between the grid slot and the pinned
- * anchor instead of teleporting instantly. Skipped entirely under
- * `prefers-reduced-motion: reduce`.
+ * #19 — pin/unpin toggling `pinned` no longer moves this card's DOM node at
+ * all (no Teleport any more), so there's nothing to FLIP-animate for THAT
+ * transition specifically; `onTogglePinned` below still measures/inverts the
+ * rect for belt-and-braces safety, but in practice the card stays put and
+ * only its `.pinned` chrome (shadow/sticky) changes.
  *
- * #20 — two more instant-jump spots, now smoothed the same way:
- *  - Collapse/expand's own height change (the BODY hide/show — see #9's note
- *    above; the card's grid slot itself still doesn't move, only the body's
- *    own visible height does) is animated via the `<Transition>` JS hooks
- *    below (`onBodyEnter`/`onBodyLeave`), rather than the instant `v-if`
- *    mount/unmount this had before.
- *  - Any OTHER cause of this card's grid slot moving — grid-layout-plus's
- *    compaction settling after a drag/resize/delete, or a breakpoint switch —
- *    is picked up generically by `useAutoFlip` (see useFlipAnimation.ts's
- *    module doc): it watches this card's own `.vgl-item` parent for the
- *    library rewriting its position/size, and FLIP-animates the move the
- *    same way #19's pin-toggle does. It's turned OFF while `pinned` (the
- *    Teleport move above already animates that case explicitly; running
- *    both here would double-animate the same transform).
+ * #20 — Collapse/expand's own height change (the BODY hide/show — see #9's
+ * note above; the card's grid slot itself still doesn't move, only the
+ * body's own visible height does) is animated via the `<Transition>` JS
+ * hooks below (`onBodyEnter`/`onBodyLeave`). Any OTHER cause of this card's
+ * grid slot moving (a drag/resize/gutter settle, delete-compaction, or a
+ * breakpoint switch) is picked up generically by `useAutoFlip` (see
+ * useFlipAnimation.ts's module doc): it watches this card's own `.css-grid-
+ * item` parent for CssGridGrid rewriting its position/size, and FLIP-
+ * animates the move. It's turned OFF while `pinned` (a sticky card's own
+ * scroll-driven "stuck" position isn't a layout move to FLIP) and while this
+ * card's OWN collapse/expand body transition is running (`selfReflowing`).
  *
- * B61 — touch on `.drag-handle` used to hand off straight to grid-layout-
- * plus's own interactjs-driven drag exactly like a mouse press, which fights
- * a finger trying to SCROLL the page starting from a card's title (a natural
- * place to start a scroll swipe once cards stack full-width on mobile — see
- * B36). Mouse/pen still start dragging immediately (`onDragHandlePointerDown`
- * returns early for anything but `pointerType === 'touch'` — §8 layer 2:
- * branch per-event on pointerType, never on breakpoint/device). For touch,
- * this component now runs its own long-press gate BEFORE grid-layout-plus's
- * interactjs ever sees the gesture:
+ * B61/F6 stage 2 — a touch press on `.drag-handle` runs a long-press gate
+ * BEFORE this component's own self-contained CSS-grid drag starts (there is
+ * no third-party drag library to hand off to — CssGridGrid.vue's items are
+ * ordinary in-flow grid cells, and the drag/resize MECHANICS (pointer
+ * tracking, collision/compaction, commit) all live one level up in
+ * useCssGridDashboardDrag.ts/useCssGridDashboardResize.ts; this component
+ * only reports raw pointer coordinates via `css-grid-drag-*`/`css-grid-
+ * resize-*` events). Mouse/pen start immediately
+ * (`onCssGridDragHandlePointerDown` returns early for anything but
+ * `pointerType === 'touch'` — §8 layer 2: branch per-event on pointerType,
+ * never on breakpoint/device). For touch:
  *
- *  1. `touch-action` on `.drag-handle` was `none` (blocks ALL native touch
- *     handling unconditionally, including scroll) — changed to `pan-y` below
- *     so a finger that starts moving vertically before the hold completes
- *     scrolls the page completely natively (we never call `preventDefault`
- *     during the pending window, so the browser is free to do so).
- *  2. `onDragHandlePointerDown` calls `event.stopPropagation()` on a
- *     qualifying touch pointerdown — verified by reading interactjs's own
- *     source (node_modules/interactjs/dist/interact.js): it listens for
- *     `pointerdown` on `document`, in the BUBBLE phase (`onDocSignal`'s
- *     `eventMethod(doc, type, listener, eventOptions)`, no `capture: true`
- *     anywhere in that path) — a `stopPropagation()` called on this
- *     DESCENDANT element during the event's target phase therefore keeps the
- *     event from ever reaching interactjs's listener at all, regardless of
- *     Vue's own (deferred-by-a-tick) reactivity timing. Interactjs simply
- *     never learns this touch happened until step 4.
+ *  1. `touch-action` on `.drag-handle` is `pan-y` (not `none`) so a finger
+ *     that starts moving vertically before the hold completes scrolls the
+ *     page completely natively (no `preventDefault()` during the pending
+ *     window).
+ *  2. `e.stopPropagation()` on a qualifying touch pointerdown keeps the tap
+ *     from being misread as anything else while the hold is pending.
  *  3. A `setTimeout(DEFAULT_TOUCH_DRAG_DELAY.delayMs)` starts, tracked
  *     against real `pointermove`/`pointerup`/`pointercancel` on `window` and
  *     fed through touchDragDelay.ts's pure state machine
  *     (`advanceOnMove`/`advanceOnTimeout`) — movement past the threshold
- *     cancels (this was scroll intent all along, and since step 1 never
- *     blocked native scrolling, the page is already scrolling normally by
- *     this point); an early `pointerup` cancels too (a tap, not a hold).
- *  4. If the timer wins (finger held still long enough): a synthetic
- *     `pointerdown` `PointerEvent`, carrying the SAME `pointerId` and the
- *     latest tracked coordinates, is dispatched on the drag handle itself —
- *     this time WITHOUT `stopPropagation()`, so it bubbles normally and
- *     interactjs (confirmed via the same source read to have no `isTrusted`
- *     check anywhere) picks it up as a brand-new drag candidate for that
- *     pointerId. The REAL subsequent `pointermove`/`pointerup` for the same
- *     finger (still physically down) then reach interactjs's own document
- *     listeners normally and it drives the drag exactly like the mouse path
- *     — including flipping grid-layout-plus's own `.vgl-item--dragging`
- *     class (opacity/z-index) once it recognises the drag, which doubles as
- *     this feature's "you're now dragging" visual cue. A short-lived local
- *     `touchArmed` class on the header additionally highlights the INSTANT
- *     the hold completes (before any further finger movement), so a
- *     still-finger long-press gets feedback even before that library class
- *     would appear.
+ *     cancels (scroll intent all along); an early `pointerup` cancels too (a
+ *     tap, not a hold).
+ *  4. If the timer wins (finger held still long enough): the drag ARMS
+ *     directly — `startCssGridActiveDrag` begins tracking the SAME
+ *     `pointerId`'s subsequent `pointermove`/`pointerup` on `window` and
+ *     emits `css-grid-drag-move`/`css-grid-drag-end`. A short-lived local
+ *     `touchArmed` class on the header highlights the INSTANT the hold
+ *     completes; `touchDragActive`/`.touch-dragging` stays set for the FULL
+ *     duration of the armed drag.
  *
  * This has NOT been exercised on a real touchscreen (this project's dev/test
  * environment cannot paint/dispatch genuine touch input — see #20/B32's own
  * notes on the same limitation) — the state machine itself is unit-tested
- * offline (touchDragDelay.test.ts), but the synthetic-pointerdown handoff to
- * interactjs is a structural fix that needs a real Android/iOS device to
- * confirm end-to-end (see the acceptance checklist wherever this ships).
+ * offline (touchDragDelay.test.ts), but the long-press-then-drag handoff is a
+ * structural design that needs a real Android/iOS device to confirm
+ * end-to-end (see the acceptance checklist wherever this ships).
  *
- * F1 phase 5 (B102a/b/c, 2026-07-23) — the rest of the gesture engine for
- * this SAME long-press-then-drag gesture, once armed:
+ * F1 phase 5 (B102a/b, originally built 2026-07-23 against the legacy
+ * renderer, carried over unchanged to the CSS-grid drag path in F6 stage 2 —
+ * `startCssGridActiveDrag`/`runCssGridEdgeAutoscroll`/
+ * `onCssGridActiveSecondPointer` below):
  *
  *  - **B102a edge-autoscroll**: the full-dashboard mobile grid has no
  *    internal scroll container — the whole PAGE scrolls a tall content-sized
- *    grid. A card drag is otherwise capped to whatever fits in one screenful — you
- *    can't drag a card to a position currently off-screen. Fixed by a plain
- *    `requestAnimationFrame` loop (`runEdgeAutoscroll`), started the instant
- *    the drag arms and stopped the instant it ends, that reads the latest
- *    tracked pointer Y every frame and calls `window.scrollBy` with whatever
- *    `edgeAutoscroll.ts`'s pure `edgeAutoscrollVelocity` says for that Y (0
- *    in the vertical middle, ramping up near the top/bottom edge) — the ramp
- *    MATH is what's unit-tested offline; the rAF loop itself, like the
- *    touch-action handoff below, needs a real device to confirm the actual
- *    scroll feels smooth and controllable while a finger is also mid-drag.
+ *    grid. A card drag is otherwise capped to whatever fits in one screenful
+ *    — you can't drag a card to a position currently off-screen. Fixed by a
+ *    plain `requestAnimationFrame` loop (`runCssGridEdgeAutoscroll`), started
+ *    the instant the drag arms and stopped the instant it ends, that reads
+ *    the latest tracked pointer Y every frame and calls `window.scrollBy`
+ *    with whatever `edgeAutoscroll.ts`'s pure `edgeAutoscrollVelocity` says
+ *    for that Y (0 in the vertical middle, ramping up near the top/bottom
+ *    edge) — the ramp MATH is what's unit-tested offline; the rAF loop
+ *    itself, like the touch-action handoff below, needs a real device to
+ *    confirm the actual scroll feels smooth and controllable while a finger
+ *    is also mid-drag.
  *  - **B102b two-finger scroll during drag**: once armed, a SECOND real
- *    finger touching down anywhere (`onActiveDragSecondPointer`, a `window`
- *    `pointerdown` listener active only while a drag is live) means the user
- *    wants to do something else with that hand — most commonly scroll with
- *    the free hand while the other still has a card mid-reorder. Resolved by
- *    dispatching a synthetic `pointercancel` (same pointerId the drag
- *    started with) at the drag handle: interactjs's own source treats any
- *    event whose type matches `/cancel$/i` as ending that pointer's
- *    interaction (same "read the actual source" verification the original
- *    hand-off pointerdown above already relies on), so this cleanly aborts
- *    the in-flight drag. The new touch itself is never touched (no
- *    `preventDefault`/`stopPropagation`) — it's free to drive native
- *    scrolling from the moment it lands.
- *  - **Clean touch-action handoff on arm**: `.drag-handle.touch-dragging` (a
- *    NEW class, `touchDragActive` below — deliberately separate from the
- *    existing 400ms `touchArmed` cosmetic flash, which stays exactly as it
- *    was and still drives its own `.touch-armed` class/test) sets
- *    `touch-action: none` for the handle the moment a drag arms, so a fast
- *    "hold then immediately swipe" right after the hold completes has the
- *    best chance of being read as further drag movement rather than getting
- *    re-captured by the browser's own native vertical pan. CAVEAT, stated
- *    plainly rather than overclaimed: `touch-action` is generally resolved by
- *    the browser once per touch sequence at its very first contact point,
- *    and several engines do NOT retroactively honour a CSS change made mid-
- *    sequence for that SAME physical touch (this is a known, long-standing
- *    web-platform rough edge, not something this codebase can control) — so
- *    this class swap is a best-effort layer, not a guarantee, ON TOP OF
- *    B102b's two-finger abort and the existing move-threshold/long-press
- *    gate, which are the parts that ARE reliably enforceable from JS alone.
- *    Real-device testing is the only way to know whether the residual "hold
- *    then immediately fling" race is fully closed or just narrowed.
+ *    finger touching down anywhere (`onCssGridActiveSecondPointer`, a
+ *    `window` `pointerdown` listener active only while a drag is live) means
+ *    the user wants to do something else with that hand — most commonly
+ *    scroll with the free hand while the other still has a card mid-reorder.
+ *    Resolved by DIRECTLY aborting the drag (`css-grid-drag-end` with
+ *    `committed: false`) — no synthetic event needed (nothing to fool, since
+ *    this renderer has no third-party library tracking the gesture). The new
+ *    touch itself is never touched (no `preventDefault`/`stopPropagation`) —
+ *    it's free to drive native scrolling from the moment it lands.
+ *  - **Clean touch-action handoff on arm**: `.drag-handle.touch-dragging`
+ *    (`touchDragActive` below — deliberately separate from the existing
+ *    400ms `touchArmed` cosmetic flash) sets `touch-action: none` for the
+ *    handle the moment a drag arms, so a fast "hold then immediately swipe"
+ *    right after the hold completes has the best chance of being read as
+ *    further drag movement rather than getting re-captured by the browser's
+ *    own native vertical pan. CAVEAT, stated plainly rather than overclaimed:
+ *    `touch-action` is generally resolved by the browser once per touch
+ *    sequence at its very first contact point, and several engines do NOT
+ *    retroactively honour a CSS change made mid-sequence for that SAME
+ *    physical touch (a known, long-standing web-platform rough edge, not
+ *    something this codebase can control) — so this class swap is a
+ *    best-effort layer, not a guarantee, ON TOP OF B102b's two-finger abort
+ *    and the existing move-threshold/long-press gate, which are the parts
+ *    that ARE reliably enforceable from JS alone. Real-device testing is the
+ *    only way to know whether the residual "hold then immediately fling"
+ *    race is fully closed or just narrowed.
  *
  * The exact same long-press-then-touch-action-none shape (reusing the same
  * pure `touchDragDelay.ts` state machine, a separate tracked gesture) is
- * ALSO applied to `.pin-resize-handle` below — see that handle's own B102c
- * doc for why.
+ * ALSO applied to `.css-grid-resize-handle` below — see that handle's own
+ * B102c-style doc for why.
  */
-const props = defineProps<{
+// `withDefaults` (rather than plain `defineProps`) ONLY because `draggable`/
+// `resizable` need a TRUE default: Vue's compiler-generated runtime prop
+// declaration applies "boolean casting" (see
+// https://vuejs.org/guide/components/props.html#boolean-casting) to any
+// prop typed as `boolean | undefined` — an OMITTED boolean prop resolves to
+// `false`, not `undefined`, unless a default is given. Every OTHER
+// boolean-typed prop below (`collapsed`/`pinned`/etc.) already wants that
+// same false-when-omitted behaviour, so only these two need an explicit
+// entry here.
+const props = withDefaults(
+  defineProps<{
   title: string
   collapsed?: boolean
   pinned?: boolean
-  /** #18 fix, B113 DOWNGRADED TO FALLBACK — the card's own grid slot
-   *  width/height RATIO (in grid units, i.e. `layout item.w / item.h`).
-   *  Originally this drove a pinned card's height directly (CSS
-   *  `aspect-ratio`, see `.pinned` below); B113 replaced that with
-   *  `pinnedWidthPx`/`pinnedHeightPx` below (the card's REAL grid-slot pixel
-   *  size) as the actual default, because sizing purely from a ratio forced
-   *  the card to whatever width its container happened to be (the pinned
-   *  anchor's full width) and then grow/shrink its height to match — for a
-   *  wide/short card that meant "stretch to full page width, then blow up
-   *  proportionally taller", which is the bug B113 fixes. This prop now only
-   *  matters while `pinnedWidthPx`/`pinnedHeightPx` are absent (the grid
-   *  container hasn't been measured yet — see AnalyzerView's
-   *  `pinnedGridSizeForItemId` doc) or not finite, so a pinned card still has
-   *  SOME sane shape in that narrow window rather than collapsing to zero
-   *  height. */
-  aspectRatio?: number
-  /** B113 — the card's REAL grid-slot pixel size (AnalyzerView's
-   *  `pinnedGridSizeForItemId`: the exact width/height it had/would have in
-   *  the desktop grid, or the mobile single-column full-width slot — NOT an
-   *  aspect-ratio-derived stretch, see `aspectRatio`'s own doc above), used
-   *  ONLY while `pinned` and only as the DEFAULT — the user's own dragged
-   *  `pinnedSize` (this component's own resize handle, below) always wins
-   *  over both this and `aspectRatio` once set. Both must be finite and
-   *  positive for either to apply (see `cardStyle`); either omitted/invalid
-   *  falls back to `aspectRatio`. */
-  pinnedWidthPx?: number
-  pinnedHeightPx?: number
-  /** B111 — this card's position within the pinned STACK (0 = pinned first =
-   *  topmost), or -1/undefined when not pinned. Applied as an inline CSS
-   *  `order` (see `cardStyle` below) so the visual stacking order in
-   *  AnalyzerView's shared `#dashboard-pinned-anchor` always matches PIN
-   *  order, regardless of each card's own grid position or the order its
-   *  `<Teleport>` happened to mount in (Vue's Teleport otherwise follows
-   *  source/DOM order, which is the grid's arrangement, not pin sequence).
-   *  Ignored while `!pinned` — only meaningful once this card's markup is
-   *  actually inside the shared anchor. */
-  pinOrder?: number
-}>()
+  /** Whether THIS card is currently allowed to start a drag (the caller has
+   *  already folded in 鎖定布局 + the pinned-card exception via
+   *  dashboardLayout.ts's `isItemDraggable` — see
+   *  useCssGridDashboardDrag.ts's `isItemDraggableNow`). Defaults to `true`
+   *  so a caller that never sets this never needs to think about it. */
+  draggable?: boolean
+  /** Whether THIS card is currently allowed to start a resize (the caller
+   *  has already folded in 鎖定布局 + the pinned/collapsed exceptions via
+   *  dashboardLayout.ts's `isItemResizable` — see
+   *  useCssGridDashboardResize.ts's `isItemResizableNow`). Defaults to
+   *  `true`; the corner handle itself is hidden entirely (`v-if`) while
+   *  `false`, or while `pinned`/`collapsed` (a pinned card has no resize
+   *  mechanism at all, a collapsed one has no body to grow). */
+  resizable?: boolean
+  }>(),
+  { draggable: true, resizable: true },
+)
 
 const emit = defineEmits<{
   (e: 'update:collapsed', value: boolean): void
   (e: 'update:pinned', value: boolean): void
+  /** F6 stage 2 — a drag started (mouse/pen: immediately on pointerdown;
+   *  touch: once the long-press hold completes). `x`/`y` are the pointer's
+   *  CLIENT coordinates at that instant. */
+  (e: 'css-grid-drag-start', payload: { x: number; y: number }): void
+  /** F6 stage 2 — the pointer moved while a drag from THIS card is live.
+   *  Fired for every raw pointermove (no throttling here — see
+   *  useCssGridDashboardDrag.ts's own rAF-coalescing doc for where that
+   *  happens instead, mirroring how `touch-dragging`'s B102a edge-autoscroll
+   *  loop already just records the latest coordinate on every move too). */
+  (e: 'css-grid-drag-move', payload: { x: number; y: number }): void
+  /** F6 stage 2 — the drag ended. `committed: true` for a genuine pointerup
+   *  (the caller should persist the settled preview); `false` for an abort
+   *  (a real `pointercancel`, or a second pointer landing mid-drag — B102b's
+   *  two-finger arbitration, resolved directly here since there's no
+   *  third-party library tracking the gesture). */
+  (e: 'css-grid-drag-end', payload: { committed: boolean }): void
+  /** F6 stage 3(a) — a corner resize started. Mouse/pen: immediately on
+   *  pointerdown; touch: once the long-press hold completes, mirroring
+   *  `css-grid-drag-start`'s own touch gate. */
+  (e: 'css-grid-resize-start', payload: { x: number; y: number }): void
+  /** F6 stage 3(a) — the pointer moved while a resize from THIS card's
+   *  handle is live. Fired for every raw pointermove, same "no throttling
+   *  here" convention `css-grid-drag-move` uses (coalescing happens in
+   *  useCssGridDashboardResize.ts's own rAF loop). */
+  (e: 'css-grid-resize-move', payload: { x: number; y: number }): void
+  /** F6 stage 3(a) — the resize ended. `committed: true` for a genuine
+   *  pointerup; `false` for an abort (a real `pointercancel` — there is no
+   *  B102b two-finger arbitration for this gesture). */
+  (e: 'css-grid-resize-end', payload: { committed: boolean }): void
 }>()
 
 const { t } = useI18n()
 
-// #19 — FLIP transition for the pin/unpin Teleport move (see flip.ts's
-// module doc for why this can't just be a `<Transition>` around the
-// `<Teleport>`, and for the maths this delegates to). `rootEl` is the same
-// physical DOM node whether it's currently rendered in the grid slot or
-// inside #dashboard-pinned-anchor — Teleport relocates it, never remounts
-// it, so one ref keeps working across the move. Declared here (rather than
-// just above `onTogglePinned` below) because B18's resize handle also reads
-// it, above that.
+// #19 — FLIP transition for the pin/unpin toggle (see flip.ts's module doc
+// for the maths this delegates to). `rootEl` is this card's own root
+// element — declared here (rather than just above `onTogglePinned` below)
+// because it's also read elsewhere above that.
 const rootEl = ref<HTMLElement | null>(null)
 
 // B61 — long-press-to-drag gate for touch pointers on the header — see this
 // component's module doc above for the full design/why. `dragHandleEl` is
-// where the pointerdown listener lives AND where the synthetic hand-off
-// pointerdown gets (re-)dispatched from once armed.
+// where the pointerdown listener lives.
 const dragHandleEl = ref<HTMLElement | null>(null)
-// B102c (F1 phase 5) — same role as `dragHandleEl` above, for the pin-resize
-// corner handle's own touch long-press gate (see that handle's B102c doc):
-// needed to call `setPointerCapture` from `startPinResize` when the gesture
-// began from the DELAYED (post-timer) touch path, which has no live
-// `PointerEvent`/`currentTarget` to read at arm-time — only mouse/pen's
-// immediate path still had one before this fix.
-const pinResizeHandleEl = ref<HTMLElement | null>(null)
+// F6 stage 3(a) — the CSS Grid renderer's own corner resize handle. Needed to
+// call `setPointerCapture` from the DELAYED (post-timer) touch path, which
+// has no live `PointerEvent`/`currentTarget` to read at arm-time — only
+// mouse/pen's immediate path still has one.
+const resizeHandleEl = ref<HTMLElement | null>(null)
 // Transient visual cue: true for a short window right when the long-press
-// completes (see `onTouchDragTimeout`), separate from — and earlier than —
-// grid-layout-plus's own `.vgl-item--dragging` class, which only appears
-// once interactjs actually recognises the handed-off drag on the NEXT
-// finger movement.
+// completes (see `onCssGridDragTimeout`), separate from — and earlier than —
+// `touchDragActive`'s own full-duration `.touch-dragging` class below.
 const touchArmed = ref(false)
 const TOUCH_ARMED_VISUAL_MS = 400
 
 // F1 phase 5 (B102a/b) — true from the instant a drag arms until it ends
 // (real pointerup/pointercancel, OR a B102b two-finger abort) — separate from
-// `touchArmed`'s brief 400ms cosmetic flash above (kept byte-identical, see
-// module doc), drives `.drag-handle.touch-dragging`'s `touch-action: none`
-// for the FULL duration of the handed-off drag, not just the confirm flash.
+// `touchArmed`'s brief 400ms cosmetic flash above, drives
+// `.drag-handle.touch-dragging`'s `touch-action: none` for the FULL duration
+// of the armed drag, not just the confirm flash.
 const touchDragActive = ref(false)
 
 // B64/B99 — same 768px cutover useDashboardLayout.ts's MOBILE_BREAKPOINT_PX
@@ -304,533 +278,310 @@ watch(() => props.pinned, (isPinned) => {
   if (!isPinned) pinnedMini.value = false
 })
 
-let touchDragState: TouchDragDelayState | null = null
-let touchDragTimer: ReturnType<typeof setTimeout> | null = null
-let touchDragStart: { x: number; y: number; pointerId: number } | null = null
-let touchDragLatest: { x: number; y: number } | null = null
+// F6 stage 2 — CSS Grid drag-to-reorder. Self-contained (no library hand-off
+// — there is no third-party drag library at all under this renderer): mouse/
+// pen start immediately (§8 layer 2), touch runs a long-press gate (its own
+// separately-tracked gesture state) before starting, with B102a/b's
+// edge-autoscroll + two-finger-abort behaviour layered on top of the ARMED
+// drag — a real pointerup DIRECTLY commits (`css-grid-drag-end` with
+// `committed: true`), a real pointercancel or a second pointer DIRECTLY
+// aborts (`committed: false`), no synthetic event needed since there's
+// nothing to fool.
+let cssGridPendingState: TouchDragDelayState | null = null
+let cssGridPendingTimer: ReturnType<typeof setTimeout> | null = null
+let cssGridPendingStart: { x: number; y: number; pointerId: number } | null = null
+let cssGridPendingLatest: { x: number; y: number } | null = null
 
-/** Tears down whatever's left of an in-flight (or just-finished) long-press
- *  tracking session — timer, window listeners, local state. Safe to call
- *  from any point (idempotent: a second call with nothing pending is a
- *  no-op), which is why every exit path below (cancel, arm, unmount) just
- *  calls this rather than duplicating the cleanup. */
-function clearTouchDragTracking(): void {
-  if (touchDragTimer != null) {
-    clearTimeout(touchDragTimer)
-    touchDragTimer = null
+function clearCssGridPendingTracking(): void {
+  if (cssGridPendingTimer != null) {
+    clearTimeout(cssGridPendingTimer)
+    cssGridPendingTimer = null
   }
-  window.removeEventListener('pointermove', onTouchDragMove)
-  window.removeEventListener('pointerup', onTouchDragEnd)
-  window.removeEventListener('pointercancel', onTouchDragEnd)
-  window.removeEventListener('pointerdown', onTouchDragSecondPointer)
-  touchDragState = null
-  touchDragStart = null
-  touchDragLatest = null
+  window.removeEventListener('pointermove', onCssGridPendingMove)
+  window.removeEventListener('pointerup', onCssGridPendingEnd)
+  window.removeEventListener('pointercancel', onCssGridPendingEnd)
+  window.removeEventListener('pointerdown', onCssGridPendingSecondPointer)
+  cssGridPendingState = null
+  cssGridPendingStart = null
+  cssGridPendingLatest = null
 }
 
-function onTouchDragMove(e: PointerEvent): void {
-  if (!touchDragState || !touchDragStart || e.pointerId !== touchDragStart.pointerId) return
-  touchDragLatest = { x: e.clientX, y: e.clientY }
-  touchDragState = advanceOnMove(touchDragState, touchDragStart.x, touchDragStart.y, e.clientX, e.clientY)
-  if (touchDragState === 'cancelled') clearTouchDragTracking()
+function onCssGridPendingMove(e: PointerEvent): void {
+  if (!cssGridPendingState || !cssGridPendingStart || e.pointerId !== cssGridPendingStart.pointerId) return
+  cssGridPendingLatest = { x: e.clientX, y: e.clientY }
+  cssGridPendingState = advanceOnMove(cssGridPendingState, cssGridPendingStart.x, cssGridPendingStart.y, e.clientX, e.clientY)
+  if (cssGridPendingState === 'cancelled') clearCssGridPendingTracking()
+}
+function onCssGridPendingEnd(e: PointerEvent): void {
+  if (!cssGridPendingStart || e.pointerId !== cssGridPendingStart.pointerId) return
+  clearCssGridPendingTracking()
+}
+function onCssGridPendingSecondPointer(e: PointerEvent): void {
+  if (!cssGridPendingState || !cssGridPendingStart || e.pointerId === cssGridPendingStart.pointerId) return
+  cssGridPendingState = advanceOnSecondPointer(cssGridPendingState)
+  if (cssGridPendingState === 'cancelled') clearCssGridPendingTracking()
 }
 
-function onTouchDragEnd(e: PointerEvent): void {
-  if (!touchDragStart || e.pointerId !== touchDragStart.pointerId) return
-  clearTouchDragTracking()
-}
+// Tracking for the LIVE, already-armed CSS-grid drag — module-level (not
+// refs) exactly like `activeDragPointerId`/`activeDragLatestY` above, since
+// nothing here needs to be reactive except `touchDragActive` (reused as-is:
+// same `.drag-handle.touch-dragging` visual cue applies to EITHER drag mode,
+// they're mutually exclusive per instance).
+let cssGridActivePointerId: number | null = null
+let cssGridActiveLatestY: number | null = null
+let cssGridActiveRafId: number | null = null
 
-// B102b — a genuine SECOND finger touching down anywhere while the FIRST is
-// still only 'pending' (hasn't held long enough to arm yet) means this was
-// never a plain single-finger long-press to begin with — most commonly a
-// second hand starting to scroll while the first still rests on a card
-// title. Hard-cancels via the same pure state machine `advanceOnMove` uses;
-// deliberately does NOT touch the second pointerdown itself (no
-// preventDefault/stopPropagation) so whatever that finger is doing proceeds
-// completely natively.
-function onTouchDragSecondPointer(e: PointerEvent): void {
-  if (!touchDragState || !touchDragStart || e.pointerId === touchDragStart.pointerId) return
-  touchDragState = advanceOnSecondPointer(touchDragState)
-  if (touchDragState === 'cancelled') clearTouchDragTracking()
-}
-
-// F1 phase 5 (B102a/b) — tracking for the LIVE, already-armed drag (after
-// hand-off to grid-layout-plus/interactjs), separate from the pending-phase
-// state above (which is fully torn down the instant a drag arms — see
-// `onTouchDragTimeout`). Module-level (not refs): nothing here needs to be
-// reactive, only `touchDragActive` above does.
-let activeDragPointerId: number | null = null
-let activeDragLatestY: number | null = null
-let activeDragRafId: number | null = null
-
-/** B102a — runs every animation frame for the duration of a live touch drag,
- *  applying whatever `edgeAutoscroll.ts`'s pure ramp function says for the
- *  latest tracked pointer Y. Self-reschedules via `requestAnimationFrame`
- *  until `endActiveTouchDrag` clears `activeDragPointerId`, which is this
- *  loop's own stop condition (checked at the TOP of each frame, not via a
- *  cancelled rAF id, so a stray already-queued frame from the instant right
- *  before `endActiveTouchDrag` ran is still a safe no-op). */
-function runEdgeAutoscroll(): void {
-  if (activeDragPointerId == null) {
-    activeDragRafId = null
+/** Same rAF edge-autoscroll loop as the legacy path's `runEdgeAutoscroll` —
+ *  the math is mode-agnostic (just reads window.innerHeight + the latest
+ *  tracked pointer Y), so this is a separate loop only because it has its own
+ *  separate pointerId/rafId bookkeeping, not because the ramp itself differs. */
+function runCssGridEdgeAutoscroll(): void {
+  if (cssGridActivePointerId == null) {
+    cssGridActiveRafId = null
     return
   }
-  if (activeDragLatestY != null) {
-    const velocity = edgeAutoscrollVelocity(activeDragLatestY, 0, window.innerHeight)
+  if (cssGridActiveLatestY != null) {
+    const velocity = edgeAutoscrollVelocity(cssGridActiveLatestY, 0, window.innerHeight)
     if (velocity !== 0) window.scrollBy(0, velocity)
   }
-  activeDragRafId = window.requestAnimationFrame(runEdgeAutoscroll)
+  cssGridActiveRafId = window.requestAnimationFrame(runCssGridEdgeAutoscroll)
 }
 
-function onActiveDragMove(e: PointerEvent): void {
-  if (e.pointerId !== activeDragPointerId) return
-  activeDragLatestY = e.clientY
+function onCssGridActiveMove(e: PointerEvent): void {
+  if (e.pointerId !== cssGridActivePointerId) return
+  cssGridActiveLatestY = e.clientY
+  emit('css-grid-drag-move', { x: e.clientX, y: e.clientY })
+}
+function onCssGridActiveUp(e: PointerEvent): void {
+  if (e.pointerId !== cssGridActivePointerId) return
+  endCssGridActiveDrag()
+  emit('css-grid-drag-end', { committed: true })
+}
+// A genuine `pointercancel` (OS-level interruption — e.g. a system gesture
+// stealing the pointer) is an ABORT, unlike a real pointerup — this renderer
+// has no library to defer that distinction to, so it has to make the call
+// itself (the legacy path never needed to: interactjs's own drag/resize
+// completion is what decides commit-vs-cancel there, via `layout-updated`).
+function onCssGridActiveCancel(e: PointerEvent): void {
+  if (e.pointerId !== cssGridActivePointerId) return
+  endCssGridActiveDrag()
+  emit('css-grid-drag-end', { committed: false })
+}
+// B102b — same two-finger arbitration as the legacy path's
+// `onActiveDragSecondPointer`, but resolved directly (no synthetic
+// pointercancel needed — nothing to fool) by just aborting this drag.
+function onCssGridActiveSecondPointer(e: PointerEvent): void {
+  if (cssGridActivePointerId == null || e.pointerId === cssGridActivePointerId) return
+  endCssGridActiveDrag()
+  emit('css-grid-drag-end', { committed: false })
 }
 
-function onActiveDragEnd(e: PointerEvent): void {
-  if (e.pointerId !== activeDragPointerId) return
-  endActiveTouchDrag()
-}
-
-// B102b — the SAME second-finger arbitration as the pending phase above, but
-// for an ALREADY-ARMED (handed-off-to-interactjs) drag: abort it via a
-// synthetic `pointercancel` (see this component's module doc for why that
-// reliably ends interactjs's own tracking of the ORIGINAL pointerId) and let
-// the new touch drive native scrolling completely unobstructed.
-function onActiveDragSecondPointer(e: PointerEvent): void {
-  if (activeDragPointerId == null || e.pointerId === activeDragPointerId) return
-  const handle = dragHandleEl.value
-  const pointerId = activeDragPointerId
-  endActiveTouchDrag()
-  if (!handle) return
-  const cancelEvt = new PointerEvent('pointercancel', {
-    bubbles: true,
-    cancelable: false,
-    pointerId,
-    pointerType: 'touch',
-  })
-  handle.dispatchEvent(cancelEvt)
-}
-
-function startActiveTouchDrag(pointerId: number, y: number): void {
-  activeDragPointerId = pointerId
-  activeDragLatestY = y
+function startCssGridActiveDrag(pointerId: number, x: number, y: number): void {
+  cssGridActivePointerId = pointerId
+  cssGridActiveLatestY = y
   touchDragActive.value = true
-  window.addEventListener('pointermove', onActiveDragMove)
-  window.addEventListener('pointerdown', onActiveDragSecondPointer)
-  window.addEventListener('pointerup', onActiveDragEnd)
-  window.addEventListener('pointercancel', onActiveDragEnd)
-  activeDragRafId = window.requestAnimationFrame(runEdgeAutoscroll)
+  window.addEventListener('pointermove', onCssGridActiveMove)
+  window.addEventListener('pointerdown', onCssGridActiveSecondPointer)
+  window.addEventListener('pointerup', onCssGridActiveUp)
+  window.addEventListener('pointercancel', onCssGridActiveCancel)
+  cssGridActiveRafId = window.requestAnimationFrame(runCssGridEdgeAutoscroll)
+  emit('css-grid-drag-start', { x, y })
 }
 
-/** Idempotent — safe to call from any exit path (real end, B102b abort,
- *  unmount) exactly like `clearTouchDragTracking` above. */
-function endActiveTouchDrag(): void {
-  if (activeDragRafId != null) {
-    window.cancelAnimationFrame(activeDragRafId)
-    activeDragRafId = null
+/** Idempotent — same belt-and-braces reasoning as `endActiveTouchDrag`: safe
+ *  to call from any exit path (real end, B102b abort, unmount). Does NOT
+ *  itself emit `css-grid-drag-end` — every caller above emits its own
+ *  `committed` value right after calling this. */
+function endCssGridActiveDrag(): void {
+  if (cssGridActiveRafId != null) {
+    window.cancelAnimationFrame(cssGridActiveRafId)
+    cssGridActiveRafId = null
   }
-  window.removeEventListener('pointermove', onActiveDragMove)
-  window.removeEventListener('pointerdown', onActiveDragSecondPointer)
-  window.removeEventListener('pointerup', onActiveDragEnd)
-  window.removeEventListener('pointercancel', onActiveDragEnd)
-  activeDragPointerId = null
-  activeDragLatestY = null
+  window.removeEventListener('pointermove', onCssGridActiveMove)
+  window.removeEventListener('pointerdown', onCssGridActiveSecondPointer)
+  window.removeEventListener('pointerup', onCssGridActiveUp)
+  window.removeEventListener('pointercancel', onCssGridActiveCancel)
+  cssGridActivePointerId = null
+  cssGridActiveLatestY = null
   touchDragActive.value = false
 }
 
-// B61 — marks the synthetic hand-off pointerdown (see `onTouchDragTimeout`)
-// so `onDragHandlePointerDown` — bound to the SAME `.drag-handle` element
-// this gets dispatched on — recognises and ignores its own hand-off rather
-// than treating it as a brand-new touch and re-arming a second long-press
-// cycle around it (which would stopPropagation() it right back out, and
-// grid-layout-plus's document-level listener would never see it at all).
-const TOUCH_HANDOFF_MARKER = '__b61TouchHandoff'
+function onCssGridDragTimeout(): void {
+  cssGridPendingTimer = null
+  if (!cssGridPendingState || !cssGridPendingStart) return
+  cssGridPendingState = advanceOnTimeout(cssGridPendingState)
+  if (cssGridPendingState !== 'armed') return
 
-function onTouchDragTimeout(): void {
-  touchDragTimer = null
-  if (!touchDragState || !touchDragStart) return
-  touchDragState = advanceOnTimeout(touchDragState)
-  if (touchDragState !== 'armed') return
-
-  const { pointerId } = touchDragStart
-  const { x, y } = touchDragLatest ?? touchDragStart
-  const handle = dragHandleEl.value
-  // Our own job (deciding pending/cancelled) is done — stop tracking so a
-  // REAL pointermove/up from here on reaches interactjs's own listeners
-  // unobstructed (see step 4 of the module doc above) instead of also being
-  // consumed here.
-  window.removeEventListener('pointermove', onTouchDragMove)
-  window.removeEventListener('pointerup', onTouchDragEnd)
-  window.removeEventListener('pointercancel', onTouchDragEnd)
-  window.removeEventListener('pointerdown', onTouchDragSecondPointer)
-  touchDragState = null
-  touchDragStart = null
-  touchDragLatest = null
+  const { pointerId } = cssGridPendingStart
+  const { x, y } = cssGridPendingLatest ?? cssGridPendingStart
+  clearCssGridPendingTracking()
 
   touchArmed.value = true
   window.setTimeout(() => {
     touchArmed.value = false
   }, TOUCH_ARMED_VISUAL_MS)
 
-  if (!handle) return
-  // F1 phase 5 — start B102a/b's live-drag tracking (edge-autoscroll +
-  // two-finger abort) BEFORE dispatching the hand-off below, so it's already
-  // watching by the time interactjs's own listeners run synchronously inside
-  // that dispatch. Ignores its own hand-off dispatch (same pointerId as
-  // `activeDragPointerId`, see `onActiveDragSecondPointer`'s guard) so this
-  // never mistakes the synthetic pointerdown for a second finger.
-  startActiveTouchDrag(pointerId, y)
-  // Hand off to grid-layout-plus: this touch's ORIGINAL pointerdown was
-  // never seen by interactjs (stopPropagation'd in
-  // onDragHandlePointerDown) — a fresh synthetic one, same pointerId so the
-  // REAL subsequent move/up events (still the same physical finger) are
-  // correctly attributed to the interaction this starts.
-  const synthetic = new PointerEvent('pointerdown', {
-    bubbles: true,
-    cancelable: true,
-    pointerId,
-    pointerType: 'touch',
-    clientX: x,
-    clientY: y,
-    isPrimary: true,
-    button: 0,
-    buttons: 1,
-  })
-  ;(synthetic as PointerEvent & Record<string, boolean>)[TOUCH_HANDOFF_MARKER] = true
-  handle.dispatchEvent(synthetic)
+  dragHandleEl.value?.setPointerCapture?.(pointerId)
+  startCssGridActiveDrag(pointerId, x, y)
 }
 
-function onDragHandlePointerDown(e: PointerEvent): void {
-  // Our own synthetic hand-off, arriving back at the very listener that
-  // dispatched it (same element) — let it through untouched so it can
-  // bubble on to grid-layout-plus, see TOUCH_HANDOFF_MARKER's doc above.
-  if ((e as PointerEvent & Record<string, boolean>)[TOUCH_HANDOFF_MARKER]) return
-  // Mouse/pen keep today's behaviour — start dragging immediately via
-  // grid-layout-plus's own interactjs handling, untouched by anything below
-  // (§8 layer 2: branch on the EVENT's pointerType, never on device/width).
-  if (e.pointerType !== 'touch') return
-  // Header buttons (pin/collapse, `.actions`) must keep their plain tap
-  // behaviour — same region grid-layout-plus's own `dragIgnoreFrom` already
-  // excludes from ITS drag recognition; excluded here too so this gate
-  // never eats their click.
+/** The `.drag-handle` header's pointerdown handler — mouse/pen start the drag
+ *  immediately (no long-press gate — §8 layer 2); touch runs a long-press
+ *  gate before arming, driving this renderer's own direct pointer tracking. */
+function onCssGridDragHandlePointerDown(e: PointerEvent): void {
+  if (!props.draggable) return
   if ((e.target as HTMLElement).closest('.actions')) return
-  // Belt-and-braces: a second finger touching the handle while one gesture
-  // is already pending/tracked should not stomp on it.
-  if (touchDragState) return
-
-  // The key move: block this pointerdown from ever reaching interactjs
-  // (which listens on `document`, bubble phase — see module doc) so it
-  // cannot start a drag from this touch at all. No `preventDefault()` here,
-  // so the browser's native vertical pan (`touch-action: pan-y`, see the
-  // style below) is completely free to take over if this turns out to be a
-  // scroll gesture.
+  if (e.pointerType !== 'touch') {
+    if (cssGridActivePointerId != null) return // belt-and-braces: a drag is already live
+    dragHandleEl.value?.setPointerCapture?.(e.pointerId)
+    startCssGridActiveDrag(e.pointerId, e.clientX, e.clientY)
+    return
+  }
+  if (cssGridPendingState) return
   e.stopPropagation()
-
-  touchDragState = 'pending'
-  touchDragStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
-  touchDragLatest = null
-
-  window.addEventListener('pointermove', onTouchDragMove)
-  window.addEventListener('pointerup', onTouchDragEnd)
-  window.addEventListener('pointercancel', onTouchDragEnd)
-  window.addEventListener('pointerdown', onTouchDragSecondPointer)
-  touchDragTimer = setTimeout(onTouchDragTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
+  cssGridPendingState = 'pending'
+  cssGridPendingStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
+  cssGridPendingLatest = null
+  window.addEventListener('pointermove', onCssGridPendingMove)
+  window.addEventListener('pointerup', onCssGridPendingEnd)
+  window.addEventListener('pointercancel', onCssGridPendingEnd)
+  window.addEventListener('pointerdown', onCssGridPendingSecondPointer)
+  cssGridPendingTimer = setTimeout(onCssGridDragTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
 }
 
-// B18 — pinned cards can be resized by dragging a corner handle (see
-// `.pin-resize-handle` below). This is DELIBERATELY separate from
-// grid-layout-plus's own drag/resize (dashboardLayout.ts's isItemResizable
-// still returns false while pinned): a pinned card's real content has been
-// Teleported OUT of the grid into AnalyzerView's sticky pinned anchor (see
-// this component's module doc), so its grid slot is just an inert
-// placeholder — the grid library has nothing meaningful to resize there.
-// This handle instead resizes the ACTUAL floating card directly, in plain
-// pixels, independent of the grid's column/row units. A collapsed card has
-// no body to make bigger, so the handle only shows while `!collapsed` — the
-// existing "collapsed cards aren't resizable" rule is preserved.
-const PINNED_MIN_W = 220
-const PINNED_MIN_H = 140
-const PINNED_MAX_W_VW = 96
-const PINNED_MAX_H_VH = 90
-const pinnedSize = ref<{ w: number; h: number } | null>(null)
+// F6 stage 3(a) — CSS Grid corner resize. Self-contained (no third-party
+// library resize handle to theme/reuse): mouse/pen start immediately (§8
+// layer 2, same rule the drag-handle follows), touch reuses the IDENTICAL
+// long-press gate shape as a SEPARATELY tracked gesture (its own pure
+// touchDragDelay.ts state machine instance, so this can never
+// cross-contaminate with the drag-handle's own tracking even though only one
+// gesture can physically be live at a time). Deliberately a SIMPLER B102c-
+// style treatment (long-press gate + second-pointer-cancels-the-PENDING-hold,
+// but no B102a edge-autoscroll and no B102b abort-while-armed) than the
+// drag-handle's fuller B102a/b gesture engine — a corner resize is a much
+// shorter-throw gesture than dragging a card clear across the viewport.
+let cssGridResizeTouchState: TouchDragDelayState | null = null
+let cssGridResizeTouchTimer: ReturnType<typeof setTimeout> | null = null
+let cssGridResizeTouchStart: { x: number; y: number; pointerId: number } | null = null
+let cssGridResizeTouchLatest: { x: number; y: number } | null = null
+const cssGridResizeTouchArmed = ref(false)
+const cssGridResizeTouchActive = ref(false)
 
-function clampPinnedSize(w: number, h: number): { w: number; h: number } {
-  const maxW = (window.innerWidth * PINNED_MAX_W_VW) / 100
-  const maxH = (window.innerHeight * PINNED_MAX_H_VH) / 100
-  return {
-    w: Math.min(Math.max(w, PINNED_MIN_W), Math.max(maxW, PINNED_MIN_W)),
-    h: Math.min(Math.max(h, PINNED_MIN_H), Math.max(maxH, PINNED_MIN_H)),
+function clearCssGridResizeTouchTracking(): void {
+  if (cssGridResizeTouchTimer != null) {
+    clearTimeout(cssGridResizeTouchTimer)
+    cssGridResizeTouchTimer = null
   }
+  window.removeEventListener('pointermove', onCssGridResizeTouchMove)
+  window.removeEventListener('pointerup', onCssGridResizeTouchEnd)
+  window.removeEventListener('pointercancel', onCssGridResizeTouchEnd)
+  window.removeEventListener('pointerdown', onCssGridResizeTouchSecondPointer)
+  cssGridResizeTouchState = null
+  cssGridResizeTouchStart = null
+  cssGridResizeTouchLatest = null
 }
 
-let pinResizeStart: { x: number; y: number; w: number; h: number } | null = null
-
-// B102c investigation (F1 phase 5) — the mobile FULL-dashboard single-column
-// grid has NO pink split-resize gutter overlay at all: `AnalyzerView.vue`'s
-// `gutterEnabled` is `!isMobile && !isLocked`, and `useGridGutters.ts`'s own
-// `gutters` computed returns an empty array (and its `onGutterPointerDown` is
-// a no-op) whenever `enabled` is false — confirmed by reading both, not
-// reproducible on a real `isMobile===true` (<=768px) viewport. So B102's "背景
-// 的粉紅色 gutter grip 塊...與拖卡片搶手勢" cannot literally be the B90/B93
-// gutter strips in the scope this task is about (the legacy full-dashboard
-// mobile mode). The best evidence-backed match found instead: THIS handle.
-// `.pin-resize-handle` is a small "corner grip" — B18b's own doc above
-// already calls it exactly that — 10×10 CSS px on desktop, 30×30 on mobile
-// (`--vgl-resizer-size`'s own `@media (max-width:768px)` bump, AnalyzerView's
-// `.analyzer` rule — still short of §8's 44px coarse-pointer minimum) — that
-// lives at the bottom-right corner of a PINNED card, which on mobile is the
-// sticky, full-bleed, ALWAYS-VISIBLE floating card (B64) — i.e. it sits right
-// at the boundary where a thumb naturally lands to scroll past that sticky
-// card into whatever's below, at any breakpoint, on every device that has a
-// pinned card. It used to start resizing on the VERY FIRST touch contact
-// (`onPinResizePointerDown` ran unconditionally for every pointerType) with
-// `touch-action: none` unconditionally blocking any native-scroll recovery —
-// a real, un-gated mis-touch trap sitting exactly where accidental contact is
-// likely, with zero forgiveness. Its accent-tinted 2px border
-// (`--color-accent`, a saturated red — see theme.css — reads as pink/rose
-// once color-mixed at low opacity, matching "粉紅色") only reinforces the
-// visual-language mix-up with the ALSO-accent-tinted, ALSO-"grip"-named B90
-// gutter strip. Fixed the same B61 way the drag-handle gates: touch gets the
-// SAME pure long-press state machine (a separate tracked gesture below) and
-// `touch-action` starts as `pan-y` (scroll-recoverable) instead of `none`
-// until the hold is confirmed — see the `.pin-resize-handle` CSS block for
-// the touch-action side and its own coarse-pointer 44px hit-slop (previously
-// missing entirely, unlike every OTHER touch target this size in this file —
-// see §8's `:root[data-any-pointer-coarse]` policy). Mouse/pen are BYTE-
-// IDENTICAL to before (still start resizing on the very first pointerdown,
-// no gate, no behaviour change) — only real touch input goes through the new
-// gate below.
-// `viaTouch` drives `.pin-resize-handle.touch-dragging`'s `touch-action:
-// none` (see this handle's CSS block) for the FULL duration of a
-// touch-originated resize — separate from `pinResizeTouchArmed`'s brief
-// cosmetic flash, exactly mirroring `touchDragActive` vs `touchArmed` above.
-function startPinResize(x: number, y: number, pointerId: number, viaTouch = false): void {
-  const el = rootEl.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
-  pinResizeStart = { x, y, w: rect.width, h: rect.height }
-  pinResizeHandleEl.value?.setPointerCapture?.(pointerId)
-  if (viaTouch) pinResizeTouchActive.value = true
-  window.addEventListener('pointermove', onPinResizePointerMove)
-  window.addEventListener('pointerup', onPinResizePointerUp)
-}
-
-let pinResizeTouchState: TouchDragDelayState | null = null
-let pinResizeTouchTimer: ReturnType<typeof setTimeout> | null = null
-let pinResizeTouchStart: { x: number; y: number; pointerId: number } | null = null
-let pinResizeTouchLatest: { x: number; y: number } | null = null
-const pinResizeTouchArmed = ref(false)
-const pinResizeTouchActive = ref(false)
-
-function clearPinResizeTouchTracking(): void {
-  if (pinResizeTouchTimer != null) {
-    clearTimeout(pinResizeTouchTimer)
-    pinResizeTouchTimer = null
-  }
-  window.removeEventListener('pointermove', onPinResizeTouchMove)
-  window.removeEventListener('pointerup', onPinResizeTouchEnd)
-  window.removeEventListener('pointercancel', onPinResizeTouchEnd)
-  window.removeEventListener('pointerdown', onPinResizeTouchSecondPointer)
-  pinResizeTouchState = null
-  pinResizeTouchStart = null
-  pinResizeTouchLatest = null
-}
-
-function onPinResizeTouchMove(e: PointerEvent): void {
-  if (!pinResizeTouchState || !pinResizeTouchStart || e.pointerId !== pinResizeTouchStart.pointerId) return
-  pinResizeTouchLatest = { x: e.clientX, y: e.clientY }
-  pinResizeTouchState = advanceOnMove(
-    pinResizeTouchState,
-    pinResizeTouchStart.x,
-    pinResizeTouchStart.y,
+function onCssGridResizeTouchMove(e: PointerEvent): void {
+  if (!cssGridResizeTouchState || !cssGridResizeTouchStart || e.pointerId !== cssGridResizeTouchStart.pointerId) return
+  cssGridResizeTouchLatest = { x: e.clientX, y: e.clientY }
+  cssGridResizeTouchState = advanceOnMove(
+    cssGridResizeTouchState,
+    cssGridResizeTouchStart.x,
+    cssGridResizeTouchStart.y,
     e.clientX,
     e.clientY,
   )
-  if (pinResizeTouchState === 'cancelled') clearPinResizeTouchTracking()
+  if (cssGridResizeTouchState === 'cancelled') clearCssGridResizeTouchTracking()
+}
+function onCssGridResizeTouchEnd(e: PointerEvent): void {
+  if (!cssGridResizeTouchStart || e.pointerId !== cssGridResizeTouchStart.pointerId) return
+  clearCssGridResizeTouchTracking()
+}
+function onCssGridResizeTouchSecondPointer(e: PointerEvent): void {
+  if (!cssGridResizeTouchState || !cssGridResizeTouchStart || e.pointerId === cssGridResizeTouchStart.pointerId) return
+  cssGridResizeTouchState = advanceOnSecondPointer(cssGridResizeTouchState)
+  if (cssGridResizeTouchState === 'cancelled') clearCssGridResizeTouchTracking()
 }
 
-function onPinResizeTouchEnd(e: PointerEvent): void {
-  if (!pinResizeTouchStart || e.pointerId !== pinResizeTouchStart.pointerId) return
-  clearPinResizeTouchTracking()
+// Live (already-armed) gesture tracking — module-level, mirrors
+// `cssGridActivePointerId` above (nothing here needs to be reactive except
+// the two touch-visual refs already declared).
+let cssGridResizeActivePointerId: number | null = null
+
+function onCssGridResizeActiveMove(e: PointerEvent): void {
+  if (e.pointerId !== cssGridResizeActivePointerId) return
+  emit('css-grid-resize-move', { x: e.clientX, y: e.clientY })
+}
+function onCssGridResizeActiveUp(e: PointerEvent): void {
+  if (e.pointerId !== cssGridResizeActivePointerId) return
+  endCssGridResizeActive()
+  emit('css-grid-resize-end', { committed: true })
+}
+function onCssGridResizeActiveCancel(e: PointerEvent): void {
+  if (e.pointerId !== cssGridResizeActivePointerId) return
+  endCssGridResizeActive()
+  emit('css-grid-resize-end', { committed: false })
 }
 
-function onPinResizeTouchSecondPointer(e: PointerEvent): void {
-  if (!pinResizeTouchState || !pinResizeTouchStart || e.pointerId === pinResizeTouchStart.pointerId) return
-  pinResizeTouchState = advanceOnSecondPointer(pinResizeTouchState)
-  if (pinResizeTouchState === 'cancelled') clearPinResizeTouchTracking()
+function startCssGridResizeActive(pointerId: number, x: number, y: number): void {
+  cssGridResizeActivePointerId = pointerId
+  cssGridResizeTouchActive.value = true
+  resizeHandleEl.value?.setPointerCapture?.(pointerId)
+  window.addEventListener('pointermove', onCssGridResizeActiveMove)
+  window.addEventListener('pointerup', onCssGridResizeActiveUp)
+  window.addEventListener('pointercancel', onCssGridResizeActiveCancel)
+  emit('css-grid-resize-start', { x, y })
 }
 
-function onPinResizeTouchTimeout(): void {
-  pinResizeTouchTimer = null
-  if (!pinResizeTouchState || !pinResizeTouchStart) return
-  pinResizeTouchState = advanceOnTimeout(pinResizeTouchState)
-  if (pinResizeTouchState !== 'armed') return
+/** Idempotent — same belt-and-braces reasoning as `endActiveTouchDrag`. Does
+ *  NOT itself emit `css-grid-resize-end` — every caller above emits its own
+ *  `committed` value right after calling this. */
+function endCssGridResizeActive(): void {
+  window.removeEventListener('pointermove', onCssGridResizeActiveMove)
+  window.removeEventListener('pointerup', onCssGridResizeActiveUp)
+  window.removeEventListener('pointercancel', onCssGridResizeActiveCancel)
+  cssGridResizeActivePointerId = null
+  cssGridResizeTouchActive.value = false
+}
 
-  const { pointerId } = pinResizeTouchStart
-  const { x, y } = pinResizeTouchLatest ?? pinResizeTouchStart
-  clearPinResizeTouchTracking()
+function onCssGridResizeTouchTimeout(): void {
+  cssGridResizeTouchTimer = null
+  if (!cssGridResizeTouchState || !cssGridResizeTouchStart) return
+  cssGridResizeTouchState = advanceOnTimeout(cssGridResizeTouchState)
+  if (cssGridResizeTouchState !== 'armed') return
 
-  pinResizeTouchArmed.value = true
+  const { pointerId } = cssGridResizeTouchStart
+  const { x, y } = cssGridResizeTouchLatest ?? cssGridResizeTouchStart
+  clearCssGridResizeTouchTracking()
+
+  cssGridResizeTouchArmed.value = true
   window.setTimeout(() => {
-    pinResizeTouchArmed.value = false
+    cssGridResizeTouchArmed.value = false
   }, TOUCH_ARMED_VISUAL_MS)
 
-  // No library hand-off needed here (unlike the drag-handle's interactjs
-  // hand-off) — the resize gesture is entirely this component's own
-  // `onPinResizePointerMove`/`onPinResizePointerUp` logic, so once the hold
-  // is confirmed this just starts it directly at the latest tracked point.
-  startPinResize(x, y, pointerId, true)
+  startCssGridResizeActive(pointerId, x, y)
 }
 
-function onPinResizePointerDown(e: PointerEvent): void {
-  // Mouse/pen: unchanged, immediate start — §8 layer 2, same pointerType
-  // branch the drag-handle above already uses.
+/** The corner resize handle's pointerdown handler — mouse/pen start
+ *  immediately (§8 layer 2), touch runs the long-press gate above before
+ *  arming. */
+function onCssGridResizeHandlePointerDown(e: PointerEvent): void {
+  if (!props.resizable) return
   if (e.pointerType !== 'touch') {
-    startPinResize(e.clientX, e.clientY, e.pointerId)
+    if (cssGridResizeActivePointerId != null) return // belt-and-braces — a resize is already live
+    startCssGridResizeActive(e.pointerId, e.clientX, e.clientY)
     return
   }
-  if (pinResizeTouchState) return
-  pinResizeTouchState = 'pending'
-  pinResizeTouchStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
-  pinResizeTouchLatest = null
-  window.addEventListener('pointermove', onPinResizeTouchMove)
-  window.addEventListener('pointerup', onPinResizeTouchEnd)
-  window.addEventListener('pointercancel', onPinResizeTouchEnd)
-  window.addEventListener('pointerdown', onPinResizeTouchSecondPointer)
-  pinResizeTouchTimer = setTimeout(onPinResizeTouchTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
+  if (cssGridResizeTouchState) return
+  cssGridResizeTouchState = 'pending'
+  cssGridResizeTouchStart = { x: e.clientX, y: e.clientY, pointerId: e.pointerId }
+  cssGridResizeTouchLatest = null
+  window.addEventListener('pointermove', onCssGridResizeTouchMove)
+  window.addEventListener('pointerup', onCssGridResizeTouchEnd)
+  window.addEventListener('pointercancel', onCssGridResizeTouchEnd)
+  window.addEventListener('pointerdown', onCssGridResizeTouchSecondPointer)
+  cssGridResizeTouchTimer = setTimeout(onCssGridResizeTouchTimeout, DEFAULT_TOUCH_DRAG_DELAY.delayMs)
 }
-// B99 — on mobile the floating pinned card is full-bleed (B64/B36: the
-// anchor's `width: 100%` media-query override, AnalyzerView.vue), so a
-// user-draggable WIDTH is both pointless (there's no room to grow into) and
-// visually broken (an explicit inline pixel width — set the moment this
-// handle produces a non-null `pinnedSize`, see `cardStyle` above — overrides
-// that `100%` and desyncs from the viewport on rotate/resize). Mirrors B59's
-// grid-side fix for the identical problem one layer down (see
-// dashboardLayout.ts's `VERTICAL_ONLY_RESIZE_OPTION` doc): rather than
-// special-casing `cardStyle` to omit width, the horizontal delta is zeroed
-// right here so `pinResizeStart.w` (the rect width measured at
-// `onPinResizePointerDown` — already the current full-bleed width, since no
-// inline width was applied before this gesture started) is what
-// `pinnedSize.value.w` gets pinned to for the whole gesture, same as B59's
-// `lastW` being re-pinned to the current x every move so `deltaX` is always
-// zero. Desktop (`!isMobileWidth()`) is completely untouched — full free
-// width+height resize, byte-for-byte the same as before this fix.
-function onPinResizePointerMove(e: PointerEvent): void {
-  if (!pinResizeStart) return
-  const dx = isMobileWidth() ? 0 : e.clientX - pinResizeStart.x
-  const dy = e.clientY - pinResizeStart.y
-  pinnedSize.value = clampPinnedSize(pinResizeStart.w + dx, pinResizeStart.h + dy)
-}
-function onPinResizePointerUp(): void {
-  pinResizeStart = null
-  pinResizeTouchActive.value = false
-  window.removeEventListener('pointermove', onPinResizePointerMove)
-  window.removeEventListener('pointerup', onPinResizePointerUp)
-  window.removeEventListener('resize', resetPinnedMiniOutsideMobile)
-}
-/** Double-clicking the handle drops the manual size and reverts to the
- *  automatic aspect-ratio sizing — an easy way back after an experimental drag. */
-function onPinResizeReset(): void {
-  pinnedSize.value = null
-}
-
-// Only feed a POSITIVE finite ratio through to CSS — an unset/zero/NaN
-// aspectRatio (e.g. a card whose layout entry momentarily has h:0) must not
-// produce an invalid `aspect-ratio: NaN` or a divide-by-zero shape.
-//
-// B100 fix — while `collapsed`, neither of the two height-forcing branches
-// below (`pinnedSize`'s explicit pixel height, or the `aspectRatio`-derived
-// CSS `aspect-ratio`) may apply: both are body-sizing rules, and a collapsed
-// card has no body (`v-if="!collapsed && !pinnedMini"` on `.body` below,
-// same as a grid card's collapse). Left unguarded, the floating Teleported
-// card kept its full pre-collapse footprint — `.pinned.collapsed`'s CSS
-// `height: auto` (see that rule's own doc) never got a chance to size the
-// card down to its header, because an INLINE `style` height/aspect-ratio
-// always wins the cascade over any class rule regardless of specificity.
-// `pinnedSize.value` itself is left completely untouched here (only this
-// computed's OUTPUT while collapsed changes) — expanding again re-reads it
-// and restores the exact user-dragged size, mirroring how a grid card's
-// collapse never forgets its own pre-collapse `h`. WIDTH is kept (via
-// `pinnedSize`, when the user has dragged one) so collapsing only shrinks
-// the card vertically, matching grid-card collapse's own "slot width stays,
-// only height react to the header" behaviour.
-// B64 — `pinnedMini` (the phone-only compact toggle above) hides the SAME
-// `.body` via the identical `v-if="!collapsed && !pinnedMini"` condition, so
-// it is exactly as much a "no body" state as `collapsed` from this
-// computed's point of view — both guards below therefore check
-// `props.collapsed || pinnedMini.value`, not `props.collapsed` alone, so
-// toggling mini shrinks the floating card's footprint the same way
-// collapsing it does (and un-mini-ing restores it the same way expanding
-// does), without needing any dedicated `.pinned-mini` CSS rule — `.pinned`'s
-// own `height: auto` already does the work once the inline style stops
-// forcing a height.
-// B111 — this card's `order` within the shared pinned-anchor flex stack (see
-// AnalyzerView's `pinOrderFor`/`.pinned-anchor` doc), merged into whichever
-// branch below `cardStyle` returns. Only meaningful while pinned; a
-// negative/non-finite value (not currently in the stack, or prop omitted)
-// contributes nothing so an unpinned card's style is unaffected.
-const pinOrderStyle = computed(() => {
-  if (!props.pinned || props.pinOrder == null || !Number.isFinite(props.pinOrder) || props.pinOrder < 0) {
-    return {}
-  }
-  return { order: props.pinOrder }
-})
-
-const cardStyle = computed(() => {
-  if (!props.pinned) return undefined
-  if (pinnedSize.value) {
-    if (props.collapsed || pinnedMini.value) {
-      return { ...pinOrderStyle.value, width: `${pinnedSize.value.w}px`, maxWidth: 'none' }
-    }
-    // A user-dragged size overrides both the aspect-ratio default AND the
-    // anchor's `width: min(560px, 100%)` cap — clampPinnedSize already
-    // bounds it sensibly, so those class-level ceilings would otherwise
-    // silently fight this. (Height itself is no longer separately capped
-    // per-card — see `.dashboard-card.pinned`'s B111 doc — the shared anchor
-    // scrolls past its own combined `max-height` instead.)
-    return {
-      ...pinOrderStyle.value,
-      width: `${pinnedSize.value.w}px`,
-      height: `${pinnedSize.value.h}px`,
-      maxWidth: 'none',
-      maxHeight: 'none',
-    }
-  }
-  if (props.collapsed || pinnedMini.value) return pinOrderStyle.value
-  // B113 — DEFAULT (non-dragged) sizing: the card's REAL grid-slot pixel
-  // footprint (AnalyzerView's `pinnedGridSizeForItemId`), applied as an
-  // explicit inline width+height — NOT the `aspectRatio`-derived shape this
-  // used to fall straight to (see that prop's own B113 doc for the bug this
-  // replaces: stretched to the anchor's full width, then grown taller by
-  // ratio). `maxWidth: '100%'` is the upper-bound safety net for a narrower
-  // viewport/anchor than the computed width — a CAP, never a fixed override
-  // (see AnalyzerView's `.pinned-anchor :deep(.dashboard-card)` doc for the
-  // matching class-level rule this also has to win over, which it does:
-  // inline style always wins the cascade regardless of specificity).
-  if (
-    props.pinnedWidthPx != null &&
-    Number.isFinite(props.pinnedWidthPx) &&
-    props.pinnedWidthPx > 0 &&
-    props.pinnedHeightPx != null &&
-    Number.isFinite(props.pinnedHeightPx) &&
-    props.pinnedHeightPx > 0
-  ) {
-    return {
-      ...pinOrderStyle.value,
-      width: `${props.pinnedWidthPx}px`,
-      height: `${props.pinnedHeightPx}px`,
-      maxWidth: '100%',
-    }
-  }
-  // Fallback — only reached when the grid container hasn't been measured yet
-  // or the id is momentarily missing from the canonical layout (see
-  // AnalyzerView's `pinnedGridSizeForItemId` doc for when it returns null).
-  if (props.aspectRatio != null && Number.isFinite(props.aspectRatio) && props.aspectRatio > 0) {
-    return { ...pinOrderStyle.value, aspectRatio: String(props.aspectRatio) }
-  }
-  return pinOrderStyle.value
-})
 
 function onToggleCollapsed(): void {
   emit('update:collapsed', !props.collapsed)
@@ -858,43 +609,41 @@ function onTogglePinned(): void {
 // not app-specific, by testing on a blank `about:blank`-equivalent page too).
 //
 // Collapse/expand used to be a pure body-height change (see #9's doc above:
-// the card's own GridItem `h` was deliberately left untouched specifically
+// the card's own grid-slot `h` was deliberately left untouched specifically
 // to avoid fighting anything). `dece43d` (collapse-reflow overlay,
 // `applyCollapsedHeights`/`compactVertical`) later made a collapsing card
-// shrink its OWN grid slot too (補位) — grid-layout-plus has NO built-in CSS
-// transition for a width/height change (only `left/top/right`/`transform`,
-// i.e. POSITION, are in its `transition-property` list — see
-// node_modules/grid-layout-plus's injected `.vgl-item{...}` rule), so that
-// slot resize lands INSTANTLY, and `.dashboard-card.collapsed{height:100%}`
-// means THIS card's root element snaps to the new size in the very same
-// frame. `useAutoFlip` (#20, generic "my grid slot moved" watcher) sees
-// exactly that instant snap on its OWN `.vgl-item` parent and — correctly by
-// its own contract, but WRONGLY for this specific case — FLIP-animates the
-// WHOLE root element (header included) with a non-uniform `scale()` (see
-// flip.ts's `computeFlipInvert`) from the old box to the new one, AT THE
-// SAME TIME `onBodyEnter`/`onBodyLeave` below are already animating the
-// BODY's real height. Two competing animations fire on the same toggle: one
-// correct (body height), one wrong (a whole-card squish that scales the
-// header too, since `scale()` isn't body-only) — which is what reads as
-// "the transition is gone/broken" rather than a clean height collapse.
+// shrink its OWN grid slot too (補位) — CssGridGrid.vue has no built-in CSS
+// transition for a grid-column/grid-row placement change, so that slot
+// resize lands INSTANTLY, and `.dashboard-card.collapsed{height:100%}` means
+// THIS card's root element snaps to the new size in the very same frame.
+// `useAutoFlip` (#20, generic "my grid slot moved" watcher) sees exactly that
+// instant snap on its OWN `.css-grid-item` parent and — correctly by its own
+// contract, but WRONGLY for this specific case — FLIP-animates the WHOLE
+// root element (header included) with a non-uniform `scale()` (see flip.ts's
+// `computeFlipInvert`) from the old box to the new one, AT THE SAME TIME
+// `onBodyEnter`/`onBodyLeave` below are already animating the BODY's real
+// height. Two competing animations fire on the same toggle: one correct
+// (body height), one wrong (a whole-card squish that scales the header too,
+// since `scale()` isn't body-only) — which is what reads as "the transition
+// is gone/broken" rather than a clean height collapse.
 //
 // Fix: suppress the generic auto-flip specifically while THIS card's own
 // body-transition is in flight (`selfReflowing`, set for the exact duration
 // `animateBodyHeight` runs) — same treatment #20 already gives `pinned`
-// (whose Teleport move is animated explicitly elsewhere, so the generic
-// watcher must stay out of its way). A NEIGHBOUR card that gets pushed up to
-// fill the reclaimed rows (dece43d's 補位) has `selfReflowing === false` (it
-// didn't toggle its own collapse), so its OWN useAutoFlip still plays
-// normally — only the card that's the CAUSE of its own resize skips the
-// generic watcher, not every card the reflow touches.
+// (a sticky card's own scroll-driven "stuck" position isn't a layout move to
+// FLIP, so the generic watcher must stay out of its way). A NEIGHBOUR card
+// that gets pushed up to fill the reclaimed rows (dece43d's 補位) has
+// `selfReflowing === false` (it didn't toggle its own collapse), so its OWN
+// useAutoFlip still plays normally — only the card that's the CAUSE of its
+// own resize skips the generic watcher, not every card the reflow touches.
 const selfReflowing = ref(false)
 
 // #20 — generic FLIP for any OTHER cause of this card's grid slot moving
 // (compaction settle, drag/resize settle, delete-compaction, breakpoint
-// switch) — see useFlipAnimation.ts's module doc. Disabled while pinned (the
-// Teleport move above is already animated explicitly, and the pinned anchor
-// isn't part of the compacted grid anyway) and while this card's OWN
-// collapse/expand body transition is running (see `selfReflowing` above).
+// switch) — see useFlipAnimation.ts's module doc. Disabled while pinned (a
+// sticky card's position change is scroll-driven, not a layout move) and
+// while this card's OWN collapse/expand body transition is running (see
+// `selfReflowing` above).
 useAutoFlip(rootEl, { enabled: computed(() => !props.pinned && !selfReflowing.value) })
 
 // #20 — smooth height transition for the collapse/expand body hide/show
@@ -970,29 +719,29 @@ function onBodyAfterTransition(el: Element): void {
 
 onBeforeUnmount(() => {
   cleanupPinFlip?.()
-  // Belt-and-braces: a card can be unmounted (or unpinned mid-drag by some
-  // other interaction) while a resize gesture is in flight — these listeners
-  // are on `window`, not this component's own DOM, so Vue's own teardown
-  // would never remove them on its own.
-  window.removeEventListener('pointermove', onPinResizePointerMove)
-  window.removeEventListener('pointerup', onPinResizePointerUp)
-  // B61 — same belt-and-braces reasoning: the long-press tracking listeners
-  // are also on `window`, not this component's own DOM.
-  clearTouchDragTracking()
-  // F1 phase 5 — same reasoning again for the live-drag (B102a/b) and
-  // pin-resize-touch-pending tracking, both also window-level.
-  endActiveTouchDrag()
-  clearPinResizeTouchTracking()
+  window.removeEventListener('resize', resetPinnedMiniOutsideMobile)
+  // Belt-and-braces: a card can be unmounted while a drag/resize gesture is
+  // in flight — these listeners are on `window`, not this component's own
+  // DOM, so Vue's own teardown would never remove them on its own.
+  // F6 stage 2 — cleanup for the CSS Grid drag gesture's own (separately-
+  // tracked) pending long-press and live-drag state.
+  clearCssGridPendingTracking()
+  endCssGridActiveDrag()
+  // F6 stage 3(a) — same belt-and-braces cleanup for the CSS Grid resize
+  // handle's own (separately-tracked) pending long-press and live-resize
+  // state.
+  clearCssGridResizeTouchTracking()
+  endCssGridResizeActive()
 })
 </script>
 
 <template>
-  <div ref="rootEl" class="dashboard-card" :class="{ pinned, collapsed, 'pinned-mini': pinnedMini }" :style="cardStyle">
+  <div ref="rootEl" class="dashboard-card" :class="{ pinned, collapsed, 'pinned-mini': pinnedMini }">
     <header
       ref="dragHandleEl"
       class="drag-handle"
       :class="{ 'touch-armed': touchArmed, 'touch-dragging': touchDragActive }"
-      @pointerdown="onDragHandlePointerDown"
+      @pointerdown="onCssGridDragHandlePointerDown"
     >
       <span class="title">{{ title }}</span>
       <span class="actions">
@@ -1054,20 +803,22 @@ onBeforeUnmount(() => {
         <slot />
       </div>
     </Transition>
-    <!-- B18 — pinned-card resize handle: only while pinned (nothing to
-         resize otherwise) and not collapsed (a header-only card has no body
-         to grow — see this handle's module doc above `pinnedSize`). -->
+    <!-- CSS Grid renderer's own corner resize handle: only while NOT pinned
+         (a pinned card has no resize mechanism at all — it's `position:
+         sticky` in its own grid cell, see CssGridGrid.vue's module doc), not
+         collapsed (a header-only card has no body to grow) and `resizable`
+         (the caller has already folded in 鎖定布局 + the pinned/collapsed
+         exceptions — see `resizable` prop's own doc). -->
     <div
-      ref="pinResizeHandleEl"
-      v-if="pinned && !collapsed && !pinnedMini"
-      class="pin-resize-handle"
-      :class="{ 'touch-armed': pinResizeTouchArmed, 'touch-dragging': pinResizeTouchActive }"
-      v-tooltip="t('analyzer.layout.pinnedResizeHandle')"
-      :aria-label="t('analyzer.layout.pinnedResizeHandle')"
+      v-if="!pinned && !collapsed && resizable"
+      ref="resizeHandleEl"
+      class="css-grid-resize-handle"
+      :class="{ 'touch-armed': cssGridResizeTouchArmed, 'touch-dragging': cssGridResizeTouchActive }"
+      v-tooltip="t('analyzer.layout.cssGridResizeHandle')"
+      :aria-label="t('analyzer.layout.cssGridResizeHandle')"
       role="separator"
       aria-orientation="horizontal"
-      @pointerdown="onPinResizePointerDown"
-      @dblclick="onPinResizeReset"
+      @pointerdown="onCssGridResizeHandlePointerDown"
     />
   </div>
 </template>
@@ -1081,6 +832,13 @@ onBeforeUnmount(() => {
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   overflow: hidden;
+  /* F6 stage 3(a) — positioning context for `.css-grid-resize-handle`
+     (absolute, bottom-right corner) on an ORDINARY (non-pinned) card. Was
+     previously only added on `.dashboard-card.pinned` (see that rule's own
+     B18 doc) since only the pinned handle existed; harmless on every other
+     card — nothing else in this component relies on `.dashboard-card`
+     itself staying an unestablished positioning context. */
+  position: relative;
   /* B36 — the card body's own horizontal padding, factored out as a custom
      property (rather than hardcoded in `.body`'s `padding` below) so the
      mobile override further down can shrink JUST this axis, and so fill-
@@ -1323,61 +1081,17 @@ onBeforeUnmount(() => {
    dominate the screen). Applies identically at both breakpoints now.
 
    B112 — this rule deliberately does NOT add its own border/radius/width
-   chrome any more (a pinned card now reads as "part of this page, stuck to
-   the top", not a separate floating panel — the old distinct look was
-   AnalyzerView's own `width: min(560px, 100%)` centring on the anchor,
-   removed there; see that file's `.pinned-anchor :deep(.dashboard-card)`
-   doc). The one thing kept here on purpose is the `box-shadow` below: a
-   pinned card visually overlaps whatever content has scrolled underneath it,
-   and a subtle shadow is what keeps its edge legible against that — genuinely
-   needed for the sticky affordance, not a "floating card" cue.
-   #18 fix, B113 SUPERSEDED — `aspect-ratio` (set inline via `cardStyle`,
-   from the card's own grid w/h ratio) used to drive the card's HEIGHT from
-   its width, so a pinned card kept roughly the shape it had in the grid
-   instead of every pinned card being squashed into the same box. That
-   worked fine only as long as the card's WIDTH itself stayed bounded — once
-   AnalyzerView's `.pinned-anchor :deep(.dashboard-card)` stretched every
-   pinned card to the anchor's full width, this same aspect-ratio then grew
-   the HEIGHT to match that (now much larger) width, producing the reported
-   "pinned card enlarges / swallows the mobile screen" bug. `cardStyle` now
-   sets an explicit `width`+`height` inline instead (AnalyzerView's
-   `pinnedGridSizeForItemId` — the card's REAL grid-slot pixel size), and
-   `aspect-ratio` only remains as a narrow fallback for the brief window
-   before that's computable (see both props' own docs in the script above).
-   B111 — this rule USED TO also carry its own `max-height: 45vh` SAFETY
-   CEILING (a very tall/narrow card's aspect-ratio-derived height could
-   otherwise still push past a comfortable viewport share). That was fine
-   when only one card could ever be pinned — the per-card cap WAS the
-   combined cap — but once several cards can be pinned at once, each one
-   separately capping at 45vh would let just TWO pins alone swallow 90% of
-   the viewport, defeating "the rest of the dashboard keeps roughly half the
-   screen". The combined-height ceiling now lives ONE level up, on
-   AnalyzerView's shared `#dashboard-pinned-anchor` (`max-height: 50vh` +
-   `overflow-y: auto` on the STACK, not any individual card) — see that
-   rule's own doc. This card simply sizes to its natural (aspect-ratio-
-   derived, or drag-resized) height and lets the anchor's scroll handle
-   anything past the shared budget.
-   B100 fix — this rule's `height: auto` also has to WIN while `.collapsed`
-   is ALSO present (a pinned card can be collapsed, same header-only chevron
-   as a grid card): both classes carry equal (two-class) specificity, and
-   this rule is declared AFTER `.dashboard-card.collapsed`'s own `height:
-   100%` (the `@media (min-width: 769px)` one, near that class's doc above),
-   so source order alone already made `auto` win here — the part that
-   ACTUALLY needed fixing was `cardStyle`'s own inline `height`/`aspect-ratio`
-   (see its computed's B100 doc), since an inline style always beats any
-   class rule regardless of specificity or order, and used to keep forcing
-   the pre-collapse footprint even with this rule correctly saying `auto`. */
+   chrome (a pinned card reads as "part of this page, stuck to the top", not
+   a separate floating panel). The one thing kept here on purpose is the
+   `box-shadow` below: a pinned card visually overlaps whatever content has
+   scrolled underneath it, and a subtle shadow is what keeps its edge legible
+   against that — genuinely needed for the sticky affordance, not a
+   "floating card" cue. */
 .dashboard-card.pinned {
-  /* Override the base rule's `height: 100%` — that fills the (100%-height)
-     GRID slot the un-pinned card normally lives in, but the pinned anchor
-     it's Teleported into has no fixed height of its own, and `height: 100%`
-     would otherwise WIN over `aspect-ratio` (a percentage height is a used
-     value the aspect-ratio calculation must respect, not override) and
-     silently defeat the whole fix above. */
+  /* Override the base rule's `height: 100%` — a sticky card should size to
+     its natural content height, not stretch to fill its grid cell. */
   height: auto;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
-  /* B18 — positioning context for `.pin-resize-handle` below. */
-  position: relative;
 }
 .dashboard-card.pinned .body {
   /* Cap the body so the whole sticky card respects max-height instead of
@@ -1387,35 +1101,13 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-/* B18b — pinned-card resize handle: bottom-right corner grip, shown only
-   while pinned + not collapsed (see the template's `v-if`). Dragging it sets
-   an explicit pixel width/height on the card (`pinnedSize`/`cardStyle`
-   above), overriding both the aspect-ratio default and the anchor's own
-   `width: min(560px, 100%)` ceiling — `clampPinnedSize` keeps the result
-   sane instead. (B111: height is no longer separately capped per-card here —
-   see `.dashboard-card.pinned`'s own doc — a manually-resized-tall card just
-   makes the shared anchor's stack scroll further.)
-   Previously this drew its OWN bespoke 90°-corner icon (fixed 18px box,
-   plain `--color-text-muted` border, hover-only opacity) — a different
-   affordance from the one every GRID card already has for the exact same
-   gesture (grid-layout-plus's own `.vgl-item__resizer`, themed in
-   AnalyzerView.vue). Restyled to be henceforth STRUCTURALLY the same element
-   grid-layout-plus draws (position/size via the identical `--vgl-resizer-*`
-   custom properties, a `::before`-drawn corner via the same
-   border-right/border-bottom-on-an-inset-box technique, same accent color,
-   same rounded corner) rather than reinventing it — the resize gesture itself
-   stays this component's own pointerdown/move/up handlers (a pinned card's
-   real content has been Teleported out of the grid entirely — see this
-   file's module doc — so there's no grid-layout-plus resize algorithm here
-   to plug into, only its VISUAL affordance is shared). AnalyzerView.vue
-   defines `--vgl-resizer-size`/`--vgl-resizer-border-color`/`--vgl-resizer-
-   border-width` on `.analyzer` (an ancestor of both the grid and the pinned
-   anchor this card Teleports into) specifically so this rule and the grid's
-   own resizer read the SAME values, including the mobile 30px touch-target
-   bump — see that file's own comment for why the value has to be declared
-   twice. Falls back to grid-layout-plus's own un-themed defaults (10px /
-   `--color-accent` / 2px) if ever rendered outside `.analyzer`. */
-.pin-resize-handle {
+/* F6 stage 3(a) — CSS Grid renderer's own corner resize handle. `position:
+   relative` on `.dashboard-card` (the base rule, above) already provides the
+   positioning context this needs. Sized/themed via the `--vgl-resizer-*`
+   custom properties declared on AnalyzerView.vue's `.analyzer` (an ANCESTOR
+   of every DashboardCard instance) — see that file's own doc for why the
+   name is kept despite grid-layout-plus's removal. */
+.css-grid-resize-handle {
   position: absolute;
   right: 0;
   bottom: 0;
@@ -1423,36 +1115,23 @@ onBeforeUnmount(() => {
   width: var(--vgl-resizer-size, 10px);
   height: var(--vgl-resizer-size, 10px);
   cursor: se-resize;
-  /* B102c fix — was unconditionally `none` (blocks ALL native scroll
-     recovery from the very first touch contact, with no long-press gate at
-     all — see this handle's own module doc above for why that made it a real
-     mis-touch trap). `pan-y` mirrors the drag-handle's own B61 fix: keeps
-     native vertical scrolling available while `onPinResizePointerDown`'s
-     touch long-press gate is still 'pending', only committing to
-     `touch-action: none` (below, `.touch-dragging`) once the hold is
-     confirmed. Mouse/pen are unaffected either way. */
+  /* B102c-style fix, applied from the start here (see this handle's own
+     module doc — mirrors `.pin-resize-handle`'s touch-action treatment
+     exactly): `pan-y` keeps native vertical scroll recovery available while
+     the touch long-press gate is still pending, only committing to
+     `touch-action: none` once the hold is confirmed (`.touch-dragging`
+     below). Mouse/pen are unaffected either way. */
   touch-action: pan-y;
 }
-/* B102c — brief highlight the instant a touch long-press is confirmed,
-   mirroring `.drag-handle.touch-armed` exactly (own ref, own timer — see
-   `pinResizeTouchArmed`). */
-.pin-resize-handle.touch-armed {
+.css-grid-resize-handle.touch-armed {
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
-/* B102c — set for the full duration of a touch-originated resize (own ref,
-   `pinResizeTouchActive` — mirrors `.drag-handle.touch-dragging`); same
-   mid-gesture-reliability caveat as that rule's own doc. */
-.pin-resize-handle.touch-dragging {
+.css-grid-resize-handle.touch-dragging {
   touch-action: none;
 }
-/* B102c — invisible 44px hit-slop for any coarse pointer (§8 layer 3, the
-   SAME policy every other touch target in this file already gets — this
-   handle was the one exception), anchored to the SAME bottom-right corner so
-   it extends inward over the card rather than outward past it. Gated to
-   `:root[data-any-pointer-coarse]` exactly like B93's gutter hit-slop, so a
-   pure-mouse desktop machine renders NOTHING extra here — zero visual or hit-
-   test change for that case. */
-:root[data-any-pointer-coarse] .pin-resize-handle::after {
+/* Same invisible 44px coarse-pointer hit-slop as `.pin-resize-handle::after`
+   (§8 layer 3 policy). */
+:root[data-any-pointer-coarse] .css-grid-resize-handle::after {
   content: '';
   position: absolute;
   right: 0;
@@ -1460,21 +1139,17 @@ onBeforeUnmount(() => {
   width: 44px;
   height: 44px;
 }
-/* B99 — the drag gesture itself only changes height on mobile (see
-   `onPinResizePointerMove`'s doc above `isMobileWidth`), so the diagonal
-   `se-resize` cursor (implies "both axes move") would misrepresent what
-   dragging actually does here — swapped for `ns-resize` (vertical-only,
-   the same cursor a plain top/bottom edge drag handle would use) at the same
-   768px cutover the gesture logic itself checks. Purely a hint cursor; the
-   handle's position/size/hit target are unchanged, still governed by
-   `--vgl-resizer-size` (see AnalyzerView.vue's own mobile 30px bump for that
-   var, a separate touch-target concern from this cursor swap). */
+/* B59 — mobile resize is vertical-only under this renderer too (see
+   cssGridResize.ts's `mobile` param) — swap the cursor to `ns-resize` at the
+   same breakpoint the pinned handle's own B99 fix uses, for the same reason:
+   a diagonal `se-resize` cursor would misrepresent a gesture that only ever
+   changes height here. */
 @media (max-width: 768px) {
-  .pin-resize-handle {
+  .css-grid-resize-handle {
     cursor: ns-resize;
   }
 }
-.pin-resize-handle::before {
+.css-grid-resize-handle::before {
   position: absolute;
   top: 0;
   right: 3px;

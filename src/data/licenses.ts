@@ -4,14 +4,10 @@
  * Curated manually (not from memory) by reading each package's own
  * `node_modules/<pkg>/package.json` `license` field. Covers every entry in
  * this repo's package.json `dependencies` (the app's actual runtime
- * dependencies) plus two build-time packages whose generated code still
+ * dependencies) plus one build-time package whose generated code still
  * ships into the production output:
  *   - vite-plugin-pwa: generates the Workbox-based service worker that
  *     ships with every build (App.vue's PWA install/offline support).
- *   - interactjs: pulled in transitively by grid-layout-plus to power the
- *     dashboard's drag/resize interactions (see AnalyzerView's dashboard
- *     grid, #8) — its runtime code is genuinely bundled and exercised, just
- *     not `import`ed directly by our own source.
  *
  * Maintenance: when a listed package is upgraded (or a new runtime
  * dependency is added to package.json), update the matching entry's
@@ -55,12 +51,6 @@ export const thirdPartyLicenses: ThirdPartyLicense[] = [
   },
   { name: 'uplot', version: '1.6.32', license: 'MIT', url: 'https://www.npmjs.com/package/uplot' },
   {
-    name: 'grid-layout-plus',
-    version: '1.1.1',
-    license: 'MIT',
-    url: 'https://www.npmjs.com/package/grid-layout-plus',
-  },
-  {
     name: 'sql.js',
     version: '1.14.1',
     license: 'MIT',
@@ -79,12 +69,5 @@ export const thirdPartyLicenses: ThirdPartyLicense[] = [
     license: 'MIT',
     url: 'https://www.npmjs.com/package/vite-plugin-pwa',
     noteKey: 'vitePluginPwa',
-  },
-  {
-    name: 'interactjs',
-    version: '1.10.27',
-    license: 'MIT',
-    url: 'https://www.npmjs.com/package/interactjs',
-    noteKey: 'interactjs',
   },
 ]

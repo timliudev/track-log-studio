@@ -82,8 +82,6 @@ export default {
       viewLink: 'View',
       notes: {
         vitePluginPwa: 'Generates the Workbox-based service worker used for PWA offline caching.',
-        interactjs:
-          'Pulled in transitively via grid-layout-plus, powering drag/resize on the analyzer dashboard cards.',
       },
     },
   },
@@ -660,7 +658,7 @@ export default {
       expand: 'Expand',
       pin: 'Pin (stays fixed at the top while scrolling)',
       unpin: 'Unpin',
-      pinnedResizeHandle: 'Drag to resize (double-click to reset)',
+      cssGridResizeHandle: 'Drag to resize card',
       minimizePinned: 'Minimize (show title only)',
       expandPinned: 'Expand pinned card',
     },
