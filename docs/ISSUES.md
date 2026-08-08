@@ -224,6 +224,48 @@ Test assets: user placed `bbbb(22).loga` + `bbbb(22)set.json` (his manual gates 
 ## User report — 釘選卡片自行放大/手機超版擠掉內容 (B114)
 - [x] **B114** 使用者回報兩個症狀、同一根因(user:「釘選的卡片要維持原本大小，不要自己放大」、「手機板上的卡片釘選後會超過尺寸? 底下全不見」):B112 把桌面版 `.pinned-anchor :deep(.dashboard-card)` 從 `width: min(560px, 100%)` 改成 `width: 100%`,搭配 `DashboardCard.vue` 既有的 `aspect-ratio`(由卡片格線 `w/h` 推導)機制,使釘選卡片變成「整頁寬 × 原比例」而自行放大;手機上更因此輕易撐爆釘選區 `max-height: 50vh` 的上限,把下方內容全部擠出畫面。**修法**:釘選卡片改用它在格線中的**實際像素尺寸**作為預設大小,而非由寬度反推的比例形狀。高度純粹由 `h`(列數)× `GRID_ROW_HEIGHT` + `GRID_MARGIN[1]` 推得(`gridGutter.ts` 既有的 `hPx`),兩個斷點的公式完全相同、不受容器寬度影響(手機釘選卡的 `h` 本來就繼承自桌面版,`mobileLayout` 早已如此設計);寬度則用 `wPx` 搭配**當前斷點**的 `colNum`/`gridMargin[0]`(桌面用卡片自己的 `w`,手機固定視為 `w:1`——手機本來就只有一欄、`marginX:0`,與非釘選卡片在手機單欄下永遠滿版同一套邏輯),數學上桌面 `w<=12` 時必然 `<= 容器寬度`(12 欄滿版都還留格線自己的左右邊界),不需額外夾限。新增純函式 `pinnedCardPixelSize(item, isMobile, metrics)`(`src/domain/layout/gridGutter.ts`),`AnalyzerView.vue` 的 `pinnedGridSizeForItemId` 只是查出 canonical `layout` 條目後轉呼叫的薄包裝;`useGridGutters.ts` 額外導出原本就有量測的 `containerWidthPx`(單一 ResizeObserver 共用,不重複量測)。`DashboardCard.vue` 新增 `pinnedWidthPx`/`pinnedHeightPx` prop,`cardStyle` 計算屬性的優先順序:①使用者手動拖曳的 `pinnedSize`(B18 拖曳把手)最優先、不受影響;②新的 `pinnedWidthPx`/`pinnedHeightPx`(本次新預設,`maxWidth: '100%'` 作為上限安全網、不是強制寬度)次之;③容器尚未量測完成或 id 意外不在 `layout` 中時,才退回舊的 `aspectRatio` 行為(現在純屬邊界情況的保底)。`AnalyzerView.vue` 的 `.pinned-anchor :deep(.dashboard-card)` 也把 `width: 100%` 改為 `max-width: 100%`(inline style 本來就會贏過 class,此變更主要是讓 CSS 意圖與新行為一致)。新增測試:`gridGutter.test.ts` 的 `pinnedCardPixelSize` 純函式(桌面寬度來自卡片自身 w、高度與容器寬度無關、不同形狀卡片尺寸不同、手機寬度等於容器滿版、容器未量測/非法 w-h 回傳 null,共 6 項)+ `DashboardCard.test.ts` 的 `pinnedWidthPx`/`pinnedHeightPx`(套用/優先於 aspectRatio/缺一退回 fallback/非法值忽略/非釘選不套用/使用者拖曳仍優先,共 7 項)。typecheck 乾淨、**2216/2216 綠**(基準 2203)、lint 0 error(既有 4 個警告與本次無關)、scoped-css-lint 過、build 31 entries、audit 0。⚠️ 視覺結果(釘選卡片實際看起來是否等於格線中原尺寸、手機是否不再擠掉下方內容)headless 無法繪製,待使用者裝置實測。 — `fb4b817`/merge `ab8f1b3`
 
+## 設計審查 — Apple 流體介面準則 (B115–B119, M17)
+一次以 Apple《Designing Fluid Interfaces》/《Principles of Great Design》準則對全 `src/` 做的設計審查
+(觸發:user「審查一次目前專案的設計」)。審查結論:工程紀律高(1:1 拖曳追蹤保留抓取偏移、rAF 合併輸入、
+FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策用能力偵測而非視窗寬度),缺口集中在
+**設計語言未系統化**與**動效全部是固定時長 CSS transition**兩件事。以下五條為審查產出的可執行條目。
+
+- [ ] **B115** 全 app 幾乎沒有「按下」回饋。整個 `src/` 只有 `BottomNav.vue` 一個檔案有 `:active`
+  (69 處互動狀態其餘全是 `:hover`,而 hover 在觸控裝置上不存在)——手機使用者按下 FileBar 匯入鈕、
+  CardMenu `.menu-toggle`/`.row-name`、rcnx session 選擇鈕、DashboardCard `.icon-btn`(26×26)、
+  Settings/Converter 表單按鈕時,從按下到動作完成之間畫面完全無反應,違反「回饋發生在 pointer-down
+  而非 release」。同一組問題:`:focus-visible` 也只有 `BottomNav.vue`/`PwaUpdateToast.vue` 兩檔有,
+  其餘控制項靠瀏覽器預設 outline,與自訂 accent 焦點環不一致。
+- [ ] **B116** `LapTable.vue` 與 `SessionLapComparison.vue` 缺 `font-variant-numeric: tabular-nums`。
+  `AccelTestPanel`/`CurrentValuesPanel`/`SectorPanel`/`GearPanel`/`CvtDynamicsCard` 都已有,但**圈速表
+  是本 app 最重要的數字表**——比例寬度數字使同位數欄位對不齊、切換圈次時數字左右跳動。
+- [ ] **B117** 手勢缺物理:(a) `useCssGridDashboardDrag.onCardDragEnd` 一 commit 就把 `active` 設 null,
+  `dragOffsetPx` 立刻變 null → 卡片從手指位置**瞬間跳**到格線位置,剛剛的物理操作在放手瞬間消失;
+  (b) `DashboardCard` 的 `.touch-armed` 只換背景色,缺 iOS 拖曳排序那個「拿起來」的 lift;
+  (c) 全庫無任何指標速度追蹤(`edgeAutoscrollVelocity` 是捲動速度不是手勢速度)→ `TrackMap` 平移放手
+  即停、`UPlotChart` 觸控 pan 同理,而地圖類元件的肌肉記憶預期會滑行;
+  (d) `xRangeGesture.clampRange` 與 `TrackMap` 的 `MIN_ZOOM`/`MAX_ZOOM` 到邊界硬夾,讀起來像「當掉了」
+  而不是「到底了」,缺 rubber-banding 漸進阻力。
+- [ ] **B118** 浮層行為不一致且缺空間連續性:(a) `CardMenu` 的 `.popover` 直接 `v-if` 出現/消失,無進出
+  動畫、`transform-origin` 未錨定觸發按鈕;手機版 `@media (max-width:768px)` 已經把它變成 `position:
+  fixed` 貼底的 bottom sheet 形狀,卻沒有 sheet 的任何行為(不從底部滑入、不能下拉關閉);
+  (b) `FileBar` 三個 `role="dialog" aria-modal="true"` 的 rcnx 選擇器有 scrim 卻**沒有 Escape 關閉、
+  沒有焦點陷阱、沒有進出動畫**,而同一個 app 裡 `CardMenu` 有 Escape——看起來一樣的東西行為不一樣,
+  且 aria 宣告與實際行為不符。
+- [ ] **B119** 深色模式下陰影實質失效 + 材質層只做了一處。全庫 10 種 `box-shadow` 全部硬寫
+  `rgba(0,0,0,α)`,`rgba(0,0,0,0.18)` 疊在深色 `--color-surface: #181b21` 上幾乎看不見 → 暗色主題的
+  層級感塌掉。另:`backdrop-filter` 只有 `BottomNav` 一處(且做得正確:88% surface + blur 14 + saturate
+  150% + 亮上緣),topbar/tabs/FileBar 都是不透明實色橫條;且全庫 0 處 `prefers-reduced-transparency`
+  與 `prefers-contrast`,半透明材質要往外鋪之前必須先補這兩個分支,否則是可及性倒退。
+- [ ] **M17** 設計 token 未系統化。`theme.css` 只有 7 個顏色 token + `--radius` + `--space`,其餘全部硬寫:
+  **字級** 216 處 `font-size`、**23 種不同值**(0.85/0.8/0.9/0.78/0.82/0.75/0.72/0.7/0.68/0.65/0.64/0.62rem…),
+  `.85rem` 與 `0.85rem` 兩種寫法混用,0.62rem≈9.9px 實質不可讀,另有 2 處硬像素破壞 Dynamic Type
+  (`CvtDynamicsCard` 的 `.cvt-svg text`、`TrackMap` 的 `.osm-attribution`);**陰影** 10 種值(見 [[B119]]);
+  **動效** `cubic-bezier(0.22,1,0.36,1)` 在 `App.vue` 與 `flip.ts` 各寫一份字串常數,時長有
+  0.1/0.12/0.15/0.25/0.32/0.4/1s 無規則。**排版基準**亦缺:`body` 沒有全域 `line-height`(theme.css 的
+  1.35 是掛在 `.app-tooltip` 上),全庫只有 1 處 `letter-spacing`,而 tracking 本應隨字級變化
+  (大標收緊、密集小字略放)。
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `83fc12a`
