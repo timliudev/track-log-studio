@@ -127,16 +127,19 @@
    實測對比(WCAG relative luminance,見 PR 說明對應腳本):
      淺色 --color-text-muted #40444d vs --color-bg #f7f8fa → 9.18:1(AAA 一般文字門檻 7:1)
      淺色 --color-text-muted #40444d vs --color-surface #ffffff → 9.76:1
-     淺色 --color-border      #8b92a0 vs --color-bg #f7f8fa → 2.94:1
-     淺色 --color-border      #8b92a0 vs --color-surface #ffffff → 3.13:1(UI 元件非文字對比門檻 3:1)
+     淺色 --color-border      #828a99 vs --color-bg #f7f8fa → 3.27:1(UI 元件非文字對比門檻 3:1)
+     淺色 --color-border      #828a99 vs --color-surface #ffffff → 3.47:1
      深色 --color-text-muted #c3c8d1 vs --color-bg #0f1115 → 11.25:1
      深色 --color-text-muted #c3c8d1 vs --color-surface #181b21 → 10.27:1
      深色 --color-border      #6b7382 vs --color-bg #0f1115 → 3.96:1
-     深色 --color-border      #6b7382 vs --color-surface #181b21 → 3.61:1 */
+     深色 --color-border      #6b7382 vs --color-surface #181b21 → 3.61:1
+   （淺色 border 原本試過 #8b92a0,對 --color-bg 只有 2.94:1、沒過 3:1 門檻——
+   一個專門為了「提高對比」而存在的分支不能自己不達標,改深一階到 #828a99,
+   兩個背景都有安全餘裕。） */
 @media (prefers-contrast: more) {
   :root {
     --color-text-muted: #40444d;
-    --color-border: #8b92a0;
+    --color-border: #828a99;
   }
 }
 
@@ -206,11 +209,23 @@ button {
    B35/B110 教訓的同一類「不小心創造新的定位基準」錯誤,只是這次的成因是
    transform 而不是 :global())。實際稽核結果見批次 commit 說明:本庫目前
    所有拖曳/縮放把手都是 <div>,不是 <button>,天生不會被這條規則命中;
-   唯一需要顯式排除的是 BottomNav.vue 的分頁鈕,見該檔案自己的說明。 */
+   唯一需要顯式排除的是 BottomNav.vue 的分頁鈕,見該檔案自己的說明。
+   `transition` 刻意宣告在「不含 :active」的基礎規則上,`transform` 才留在
+   :active 裡 —— 兩者不能寫在同一條 :active 規則裡。原因::active 規則只
+   在按住當下才會命中,放開的瞬間瀏覽器改套用「不含 :active」的規則來算
+   新的 computed style,如果 transition 只存在於 :active 規則本身,那條
+   規則放手當下已經不再命中、根本沒被拿來用,目的地(base 規則)沒有
+   transition 可套,transform 只能直接跳回 none —— 結果是「按下有動畫、
+   放開瞬間瞬跳」的不對稱,讀起來像掉幀而不是回彈。把 transition 放在兩種
+   狀態都會命中的基礎規則上,進場(套用 :active 的 transform)、退場(移除
+   :active、transform 變回預設)才會共用同一份 transition 定義,兩個方向
+   都能動畫。 */
 @media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled):not(.no-press) {
+    transition: transform var(--dur-instant) ease-out;
+  }
   button:not(:disabled):not(.no-press):active {
     transform: scale(0.97);
-    transition: transform var(--dur-instant) ease-out;
   }
 }
 
