@@ -227,7 +227,7 @@ function styleFor(item: DashboardLayoutItem): CSSProperties {
    breakpoint (not just mobile — stage 1 has no separate desktop treatment
    since there's no separate floating anchor to distinguish it from anymore). */
 .css-grid-item.pinned {
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
+  box-shadow: var(--shadow-2);
 }
 /* F6 stage 2 — the dragged card itself (see `dragOffsetPx`'s doc): a slightly
    stronger shadow than the pinned affordance so it visually lifts off the
@@ -237,6 +237,6 @@ function styleFor(item: DashboardLayoutItem): CSSProperties {
    animating it would introduce lag between the finger/cursor and the card. */
 .css-grid-item.dragging {
   cursor: grabbing;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+  box-shadow: var(--shadow-3);
 }
 </style>

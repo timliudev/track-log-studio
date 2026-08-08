@@ -116,7 +116,7 @@ const suspensionOpen = ref(false)
 .suspension-section summary {
   cursor: pointer;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
 }
 .suspension-section summary::-webkit-details-marker {
   color: var(--color-text-muted);

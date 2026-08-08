@@ -93,7 +93,7 @@ function selected(index: number): boolean {
 <style scoped>
 .empty {
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   margin: 0;
 }
 /* Horizontal scroll so extra channel/pick/offset columns scroll instead of
@@ -106,7 +106,7 @@ function selected(index: number): boolean {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 th,
 td {
@@ -124,6 +124,16 @@ tbody td {
 th:first-child,
 td:first-child {
   text-align: left;
+}
+/* B116 — 圈速表是本 app 最重要的數字表:比例寬度數字會讓同位數欄位對不齊、
+   切換圈次時數字左右跳動。這裡是 LapTable.vue 與 SessionLapComparison.vue
+   共用的唯一渲染路徑(見本檔案模組文件),補一次就同時修好兩邊——套用範圍
+   跟既有的 `td:first-child` 靠左例外互補:第一欄(lead slot,主表是排除切換
+   鈕+圈號、比較表是選色點)本來就不是要對齊的等寬數字欄,其餘每一欄
+   (圈速/圈距/每個自訂數值欄)都是,比照 SectorPanel.vue/CurrentValuesPanel.vue
+   逐一 class 套用的慣例,只挑數字欄而非整張表籠統套用。 */
+tbody td:not(:first-child) {
+  font-variant-numeric: tabular-nums;
 }
 th {
   color: var(--color-text-muted);

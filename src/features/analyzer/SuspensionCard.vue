@@ -74,7 +74,7 @@ function channelPresent(part: SuspensionPart): boolean {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text);
 }
 .status-line strong {
@@ -82,7 +82,7 @@ function channelPresent(part: SuspensionPart): boolean {
 }
 .warn {
   color: var(--color-text-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .edit-toggle {
   align-self: flex-start;
@@ -102,7 +102,7 @@ function channelPresent(part: SuspensionPart): boolean {
 }
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 </style>

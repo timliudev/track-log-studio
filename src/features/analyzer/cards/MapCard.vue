@@ -410,7 +410,7 @@ onBeforeUnmount(() => stopPlay())
   align-items: center;
   gap: 8px;
   margin-top: var(--space);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .tc-bar {
@@ -424,7 +424,7 @@ onBeforeUnmount(() => stopPlay())
 }
 .line-hint {
   margin: calc(var(--space) * 1.5) 0 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .comparison-swatch {
@@ -446,7 +446,7 @@ onBeforeUnmount(() => stopPlay())
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   background: var(--color-bg);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .map-comparison-align summary {
   cursor: pointer;
@@ -492,7 +492,7 @@ onBeforeUnmount(() => stopPlay())
   justify-content: space-between;
   gap: 12px;
   margin-top: var(--space);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 .reset {
@@ -514,7 +514,7 @@ onBeforeUnmount(() => stopPlay())
   align-items: center;
   gap: 8px;
   margin-top: var(--space);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 .band-label {

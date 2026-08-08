@@ -992,22 +992,22 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 }
 .heading {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   color: var(--color-text);
 }
 .sub-heading {
   margin: 8px 0 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .sub-sub-heading {
   margin: 8px 0 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .intro {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .row {
@@ -1029,7 +1029,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   border: none;
   padding: 6px 12px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .kind-toggle button.active {
@@ -1048,7 +1048,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   border-radius: var(--radius);
   padding: 3px 8px;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .mode-toggle button.active {
@@ -1058,10 +1058,10 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 }
 .mode-toggle.small button {
   padding: 2px 6px;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
 }
 .mode-label {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .sub-block {
@@ -1078,7 +1078,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   display: inline-flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .field input,
@@ -1102,7 +1102,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   border-radius: var(--radius);
   padding: 4px 10px;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .apply-btn:hover:not(:disabled) {
@@ -1122,8 +1122,8 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
    highlight fades out instead of snapping. */
 .circumference-input {
   transition:
-    border-color 0.3s ease,
-    box-shadow 0.3s ease;
+    border-color var(--dur-slow) ease,
+    box-shadow var(--dur-slow) ease;
 }
 .circumference-input.auto-applied {
   border-color: var(--color-accent);
@@ -1139,7 +1139,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .gear-row-label {
   width: 110px;
@@ -1163,12 +1163,12 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 }
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .results-table {
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
 }
 .results-table th {
@@ -1183,7 +1183,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 }
 .summary {
   margin: 4px 0 0;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text);
   font-weight: 600;
 }
@@ -1193,7 +1193,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   gap: 8px 16px;
 }
 .summary-item {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -1232,7 +1232,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   border-radius: var(--radius);
   padding: 5px 8px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .note-remove {
   background: transparent;
@@ -1257,7 +1257,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   border-radius: var(--radius);
   padding: 5px 10px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .note-add:hover {
@@ -1267,7 +1267,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 .notes-export-hint {
   margin: 2px 0 0;
   color: var(--color-text-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .notes-export-link {
   align-self: flex-start;
@@ -1278,7 +1278,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
   min-height: 32px;
   padding: 5px 10px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 @media (any-pointer: coarse) {

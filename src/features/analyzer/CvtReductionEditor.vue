@@ -86,7 +86,7 @@ function removeStage(index: number): void {
   border-radius: var(--radius);
 }
 legend { padding: 0 5px; font-weight: 600; }
-label { display: grid; gap: 5px; min-width: 0; font-size: 0.78rem; color: var(--color-text-muted); }
+label { display: grid; gap: 5px; min-width: 0; font-size: var(--text-md); color: var(--color-text-muted); }
 select, input {
   min-width: 0;
   min-height: 36px;

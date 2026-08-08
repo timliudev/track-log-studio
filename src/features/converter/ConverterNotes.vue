@@ -45,12 +45,12 @@ const IMPORT_GUIDE_URL = 'https://racechrono.com/article/2572'
 }
 .note {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   line-height: 1.6;
 }
 .note.muted {
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 a {
   color: var(--color-accent);

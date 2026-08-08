@@ -1172,7 +1172,7 @@ const cardCtx: AnalyzerCardContext = {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 .record select {
@@ -1210,7 +1210,7 @@ const cardCtx: AnalyzerCardContext = {
   flex-wrap: wrap;
 }
 .drag-hint {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .reset-layout {
@@ -1295,7 +1295,7 @@ const cardCtx: AnalyzerCardContext = {
   touch-action: pan-y;
   background: transparent;
   border-radius: calc(var(--radius) * 1.5);
-  transition: background-color 0.1s ease;
+  transition: background-color var(--dur-instant) ease;
 }
 .grid-gutter.vertical {
   cursor: col-resize;
@@ -1381,6 +1381,11 @@ const cardCtx: AnalyzerCardContext = {
    static outline shown for the same duration (see `locateCard`'s timeout) —
    matches this app's existing reduced-motion convention (useFlipAnimation.ts,
    App.vue, CurrentValuesPanel.vue). */
+/* M17 — 1s 沒有對應的 --dur-* token(最長的 --dur-slow 只有 320ms),這是刻意
+   的例外而非漏改:這個脈動是「定位提示」,要讓使用者的眼睛有時間找到、看清
+   閃爍的卡片,時間軸跟一般互動回饋(按下/懸浮/開合)完全不是同一種東西,
+   硬套最接近的 token 只會讓提示變得太快、失去作用。與 CurrentValuesPanel.vue
+   的 400ms 數值變更脈動同理,見該檔案對應註解。 */
 .analyzer :deep(.card-locate-pulse) {
   animation: card-locate-pulse 1s ease-out;
 }

@@ -68,12 +68,12 @@ const { toast, reload, dismiss } = usePwaUpdate()
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-3);
 }
 
 .pwa-toast-message {
-  font-size: 0.88rem;
-  line-height: 1.35;
+  font-size: var(--text-lg);
+  line-height: var(--leading-normal);
 }
 
 .pwa-toast-actions {
@@ -91,7 +91,7 @@ const { toast, reload, dismiss } = usePwaUpdate()
   color: var(--color-accent-text);
   font: inherit;
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -113,7 +113,7 @@ const { toast, reload, dismiss } = usePwaUpdate()
   border-radius: var(--radius);
   background: none;
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1;
   cursor: pointer;
 }
@@ -129,8 +129,8 @@ const { toast, reload, dismiss } = usePwaUpdate()
 .pwa-toast-enter-active,
 .pwa-toast-leave-active {
   transition:
-    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    transform var(--dur-base) var(--ease-standard),
+    opacity var(--dur-base) var(--ease-standard);
 }
 .pwa-toast-enter-from,
 .pwa-toast-leave-to {
@@ -141,7 +141,7 @@ const { toast, reload, dismiss } = usePwaUpdate()
 @media (prefers-reduced-motion: reduce) {
   .pwa-toast-enter-active,
   .pwa-toast-leave-active {
-    transition: opacity 0.15s linear;
+    transition: opacity var(--dur-fast) linear;
   }
   .pwa-toast-enter-from,
   .pwa-toast-leave-to {

@@ -65,15 +65,15 @@ const channelCount = computed(
 }
 h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
 }
 .count {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 .muted {
@@ -93,7 +93,7 @@ h3 {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 thead th {
   position: sticky;
@@ -127,7 +127,7 @@ tr.gps td {
   display: inline-block;
   padding: 1px 7px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
   white-space: nowrap;

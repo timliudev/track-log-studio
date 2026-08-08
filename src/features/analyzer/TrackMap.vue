@@ -1778,8 +1778,8 @@ watch(background.image, () => draw())
   border-radius: var(--radius);
 }
 .background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 3px 6px; }
-.align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
-.osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: 10px; }
+.align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: var(--text-md); }
+.osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: var(--text-2xs); }
 :root[data-any-pointer-coarse] .align-background { min-height: 44px; display: flex; align-items: center; }
 /* ⑤ follow-up — shared top-right overlay row (reset-view + host slot, e.g.
    MapCard's play/pause button). `pointer-events: none` on the row itself so
@@ -1808,7 +1808,7 @@ watch(background.image, () => draw())
   align-items: center;
   min-height: 32px;
   padding: 4px 10px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
@@ -1845,7 +1845,7 @@ watch(background.image, () => draw())
   width: 32px;
   height: 32px;
   padding: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   line-height: 1;
   background: var(--color-surface);
   color: var(--color-text);

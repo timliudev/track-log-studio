@@ -861,7 +861,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   pointer-events: none;
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--color-accent);
 }
 .load-btn {
@@ -875,7 +875,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   background: var(--color-accent);
   color: var(--color-accent-text);
   border-radius: var(--radius);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   white-space: nowrap;
 }
 .hidden {
@@ -887,7 +887,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
 .info-btn {
   cursor: pointer;
   list-style: none;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   color: var(--color-text-muted);
   user-select: none;
 }
@@ -913,8 +913,8 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-accent);
   border-radius: var(--radius);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-  font-size: 0.82rem;
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-md);
 }
 .src-title {
   margin: 0 0 6px;
@@ -955,7 +955,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   padding: 3px 8px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   background: var(--color-bg);
 }
 .pill.ready {
@@ -999,7 +999,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-accent) 15%, transparent);
   color: var(--color-accent);
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 .make-primary-btn {
@@ -1040,7 +1040,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
 }
 .pill-meta {
   color: var(--color-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 .pill-meta.err {
   color: var(--color-accent);
@@ -1069,7 +1069,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   max-width: 140px;
   padding: 1px 3px;
   font: inherit;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
@@ -1087,19 +1087,19 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
 }
 .rcnx-switch-status {
   color: var(--color-text-muted);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 .rcnx-switch-err {
   color: var(--color-accent);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
 }
 .pill-x {
   background: none;
   border: none;
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   line-height: 1;
   padding: 0 2px;
 }
@@ -1112,7 +1112,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   color: var(--color-text-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   padding: 0;
 }
 .clear-btn:hover {
@@ -1135,7 +1135,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-3);
 }
 .rcnx-picker-title {
   margin: 0 0 4px;
@@ -1144,7 +1144,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
 .rcnx-picker-file {
   margin: 0 0 10px;
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   word-break: break-all;
 }
 .rcnx-picker-list {
@@ -1177,11 +1177,11 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
 .rcnx-recommended {
   color: var(--color-accent);
   font-weight: 400;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .rcnx-session-meta {
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: var(--text-md);
 }
 .rcnx-picker-cancel {
   margin-top: 12px;
@@ -1190,7 +1190,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   color: var(--color-text-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   padding: 0;
 }
 .rcnx-picker-cancel:hover {
@@ -1262,7 +1262,7 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   border: none;
   border-radius: var(--radius);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .composite-confirm-btn:disabled {
@@ -1276,14 +1276,14 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   margin: 0 0 0 8px;
   padding: 3px 8px;
   color: var(--color-accent);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .composite-result-dismiss {
   background: none;
   border: none;
   color: inherit;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   line-height: 1;
   padding: 0 2px;
 }
