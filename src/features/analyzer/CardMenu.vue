@@ -14,6 +14,27 @@
  */
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { prefersReducedMotion } from '@/composables/useFlipAnimation'
+import {
+  primeOverlayEnter,
+  playOverlayTransition,
+  OVERLAY_DURATION_MS,
+  OVERLAY_EASING,
+  SHEET_ENTER_DURATION_MS,
+  SHEET_ENTER_EASING,
+  SHEET_LEAVE_DURATION_MS,
+  SHEET_RETURN_DURATION_MS,
+  REDUCED_MOTION_DURATION_MS,
+  type OverlayMotionStep,
+} from '@/composables/useOverlayMotion'
+import {
+  pushSample,
+  estimateVelocityPxPerSec,
+  dragTranslateY,
+  shouldDismissSheet,
+  parseTranslateY,
+  type PointerSample,
+} from '@/domain/interaction/sheetPhysics'
 
 export interface CardMenuStaticEntry {
   id: string
@@ -79,6 +100,199 @@ function onMobileMqlChange(e: MediaQueryListEvent): void {
 }
 mobileMql.addEventListener('change', onMobileMqlChange)
 onBeforeUnmount(() => mobileMql.removeEventListener('change', onMobileMqlChange))
+
+// ---------------------------------------------------------------------
+// B118(a) — enter/exit motion + mobile drag-to-dismiss.
+//
+// Desktop: a critically-damped scale+opacity pop anchored to `.menu-toggle`
+// (`transform-origin: top left` in the style block below — static, since
+// the popover is always anchored flush to the button's top-left corner, no
+// per-open measurement needed). No overshoot: there is no gesture momentum
+// behind opening/closing a menu by click/Escape, so overshoot would read as
+// unmotivated wobble rather than physical response.
+//
+// Mobile: the popover is already a `position: fixed`, bottom-pinned panel
+// (see the existing `@media (max-width: 768px)` block) — a bottom sheet in
+// everything but behaviour. It now slides up on enter (with a small,
+// deliberate overshoot — a surface arriving under its own momentum) and
+// down on exit (no overshoot — see useOverlayMotion.ts's doc for why leave
+// and enter deliberately use different easings), and can be dragged down by
+// its `.sheet-grab` handle to dismiss.
+//
+// `<Transition :css="false">` drives both cases through the SAME three
+// hooks below (`onBeforeEnter`/`onEnter`/`onLeave`) rather than declarative
+// CSS transition classes, for two reasons: (1) desktop and mobile need
+// different target styles/easings/durations picked at runtime off
+// `isMobileViewport`/`prefersReducedMotion()`, which plain CSS classes
+// can't branch on; (2) the mobile LEAVE path is shared with drag-dismiss
+// (see `onGrabPointerUp` below) — a drag that crosses the dismiss threshold
+// simply sets `open.value = false` and lets `onLeave` take it the rest of
+// the way from WHEREVER the drag left the sheet (it reads the element's
+// current transform as its own starting point, same as any other close),
+// rather than drag-dismiss needing its own separate exit animation to keep
+// in sync with the "normal" close path.
+// ---------------------------------------------------------------------
+
+/** Canceller for whatever `useOverlayMotion.ts` transition is CURRENTLY
+ *  animating the popover (an enter, a leave, or a drag's "spring back to
+ *  rest") — always cancelled before starting a new one, which is what makes
+ *  grabbing a mid-animation sheet (or double-toggling the menu button
+ *  quickly) pick up from wherever the sheet visually is rather than
+ *  fighting or restarting from a stale baseline. */
+let cancelOverlayAnim: () => void = () => {}
+
+function overlayHiddenStep(): OverlayMotionStep {
+  if (prefersReducedMotion()) return { opacity: '0' }
+  if (isMobileViewport.value) return { transform: 'translateY(100%)' }
+  return { transform: 'scale(0.92)', opacity: '0' }
+}
+function overlayRestStep(): OverlayMotionStep {
+  if (prefersReducedMotion()) return { opacity: '1' }
+  if (isMobileViewport.value) return { transform: 'translateY(0)' }
+  return { transform: 'scale(1)', opacity: '1' }
+}
+
+function onBeforeEnter(el: Element): void {
+  cancelOverlayAnim()
+  primeOverlayEnter(el as HTMLElement, overlayHiddenStep())
+}
+function onEnter(el: Element, done: () => void): void {
+  const reduced = prefersReducedMotion()
+  const mobile = isMobileViewport.value
+  const durationMs = reduced ? REDUCED_MOTION_DURATION_MS : mobile ? SHEET_ENTER_DURATION_MS : OVERLAY_DURATION_MS
+  const easing = reduced ? OVERLAY_EASING : mobile ? SHEET_ENTER_EASING : OVERLAY_EASING
+  cancelOverlayAnim = playOverlayTransition(el as HTMLElement, overlayRestStep(), { durationMs, easing, onDone: done })
+}
+function onLeave(el: Element, done: () => void): void {
+  cancelOverlayAnim()
+  const reduced = prefersReducedMotion()
+  const mobile = isMobileViewport.value
+  const durationMs = reduced ? REDUCED_MOTION_DURATION_MS : mobile ? SHEET_LEAVE_DURATION_MS : OVERLAY_DURATION_MS
+  cancelOverlayAnim = playOverlayTransition(el as HTMLElement, overlayHiddenStep(), {
+    durationMs,
+    easing: OVERLAY_EASING,
+    onDone: done,
+  })
+}
+
+onBeforeUnmount(() => cancelOverlayAnim())
+
+// --- Mobile drag-to-dismiss (grab handle only; see the `.sheet-grab`
+// element in the template, rendered mobile-only) --------------------------
+
+interface DragState {
+  pointerId: number
+  startClientY: number
+  startTranslateY: number
+  sheetHeightPx: number
+  samples: PointerSample[]
+}
+let drag: DragState | null = null
+
+function onGrabPointerDown(e: PointerEvent): void {
+  const el = popoverEl.value
+  if (!el) return
+  const reduced = prefersReducedMotion()
+  let startTranslateY = 0
+  if (!reduced) {
+    // Interruption: freeze wherever the sheet currently is — mid enter/
+    // leave/spring-back animation, or simply at rest — before taking over
+    // with 1:1 pointer tracking. Reads the CURRENT computed transform
+    // rather than assuming 0, exactly so a grab mid-animation doesn't snap.
+    cancelOverlayAnim()
+    startTranslateY = parseTranslateY(getComputedStyle(el).transform)
+    el.style.transition = 'none'
+    el.style.transform = `translateY(${startTranslateY}px)`
+  }
+  drag = {
+    pointerId: e.pointerId,
+    startClientY: e.clientY,
+    startTranslateY,
+    sheetHeightPx: el.getBoundingClientRect().height,
+    samples: pushSample([], { t: performance.now(), y: startTranslateY }),
+  }
+  el.setPointerCapture(e.pointerId)
+  el.addEventListener('pointermove', onGrabPointerMove)
+  el.addEventListener('pointerup', onGrabPointerUp)
+  el.addEventListener('pointercancel', onGrabPointerUp)
+}
+
+function onGrabPointerMove(e: PointerEvent): void {
+  if (!drag || e.pointerId !== drag.pointerId) return
+  const el = popoverEl.value
+  if (!el) return
+  const raw = drag.startTranslateY + (e.clientY - drag.startClientY)
+  const y = dragTranslateY(raw, drag.sheetHeightPx)
+  drag.samples = pushSample(drag.samples, { t: performance.now(), y })
+  // Under reduced motion the sheet never visually follows the finger (see
+  // this function's caller doc) — samples are still recorded so the
+  // dismiss-vs-return DECISION on release stays identical either way, only
+  // the live visual feedback is skipped.
+  if (!prefersReducedMotion()) el.style.transform = `translateY(${y}px)`
+}
+
+function endDragListeners(el: HTMLElement, pointerId: number): void {
+  try {
+    el.releasePointerCapture(pointerId)
+  } catch {
+    // Already released (e.g. the pointer left the element on its own) — the
+    // browser throws in that case; nothing left to clean up.
+  }
+  el.removeEventListener('pointermove', onGrabPointerMove)
+  el.removeEventListener('pointerup', onGrabPointerUp)
+  el.removeEventListener('pointercancel', onGrabPointerUp)
+}
+
+function onGrabPointerUp(e: PointerEvent): void {
+  if (!drag || e.pointerId !== drag.pointerId) return
+  const el = popoverEl.value
+  const finished = drag
+  drag = null
+  if (!el) return
+  endDragListeners(el, finished.pointerId)
+
+  const lastSample = finished.samples[finished.samples.length - 1]
+  const releaseOffsetPx = lastSample?.y ?? 0
+  const velocityPxPerSec = estimateVelocityPxPerSec(finished.samples)
+  const dismiss = shouldDismissSheet({ releaseOffsetPx, velocityPxPerSec, sheetHeightPx: finished.sheetHeightPx })
+
+  if (dismiss) {
+    // Hand off to the normal close path — `onLeave` reads whatever
+    // transform the drag left on `el` as ITS starting point (see this
+    // section's top-of-file doc), so nothing further needs to happen here.
+    open.value = false
+    return
+  }
+
+  if (prefersReducedMotion()) {
+    // Nothing was ever visually moved (onGrabPointerMove's guard) — no
+    // spring-back animation to play, just clear the inline styles primed
+    // in onGrabPointerDown.
+    el.style.transition = ''
+    el.style.transform = ''
+    return
+  }
+  cancelOverlayAnim = playOverlayTransition(
+    el,
+    { transform: 'translateY(0)' },
+    {
+      durationMs: SHEET_RETURN_DURATION_MS,
+      easing: OVERLAY_EASING,
+      onDone: () => {
+        el.style.transition = ''
+        el.style.transform = ''
+      },
+    },
+  )
+}
+
+onBeforeUnmount(() => {
+  if (drag) {
+    const el = popoverEl.value
+    if (el) endDragListeners(el, drag.pointerId)
+    drag = null
+  }
+})
 
 function onDocumentPointerDown(e: PointerEvent): void {
   if (!open.value) return
@@ -147,72 +361,90 @@ function onLocate(id: string, locatable: boolean): void {
          CvtProfileEditor.vue's identical Teleport-to-body for the same
          reason. -->
     <Teleport to="body" :disabled="!isMobileViewport">
-      <div v-if="open" ref="popoverEl" class="popover" role="menu">
-        <section v-for="group in groups" :key="group.id" class="group" role="group" :aria-label="group.label">
-          <h3 class="group-heading">{{ group.label }}</h3>
-          <div v-for="item in group.items" :key="item.id" class="row">
-            <input
-              :id="`card-menu-check-${item.id}`"
-              type="checkbox"
-              class="row-check"
-              :checked="item.checked"
-              @change="onToggleInput(item.id, $event)"
-            />
-            <label :for="`card-menu-check-${item.id}`" class="visually-hidden">{{
-              t('analyzer.cardMenu.toggleAria', { name: item.title })
-            }}</label>
-            <button
-              type="button"
-              class="row-name"
-              :disabled="!item.locatable"
-              :title="item.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
-              @click="onLocate(item.id, item.locatable)"
-            >
-              {{ item.title }}
-            </button>
+      <!-- B118(a) — `:css="false"` hands enter/exit entirely to the JS hooks
+           above (onBeforeEnter/onEnter/onLeave), which pick desktop-pop vs.
+           mobile-sheet target styles/easings off `isMobileViewport` — see
+           this component's script-side comment block for why plain CSS
+           transition classes can't do that branching. -->
+      <Transition :css="false" @before-enter="onBeforeEnter" @enter="onEnter" @leave="onLeave">
+        <div v-if="open" ref="popoverEl" class="popover" role="menu">
+          <!-- Mobile-only grab handle — see onGrabPointerDown/Move/Up above.
+               Confined to this small strip (rather than the whole sheet) so
+               it never fights `.popover-scroll`'s own overflow-y:auto below
+               it; `touch-action: none` (in the mobile media query) stops the
+               browser's own scroll/refresh gestures from competing with our
+               pointer tracking here. -->
+          <div v-if="isMobileViewport" class="sheet-grab" @pointerdown="onGrabPointerDown">
+            <span class="sheet-grab-bar" aria-hidden="true" />
           </div>
-        </section>
+          <div class="popover-scroll">
+            <section v-for="group in groups" :key="group.id" class="group" role="group" :aria-label="group.label">
+              <h3 class="group-heading">{{ group.label }}</h3>
+              <div v-for="item in group.items" :key="item.id" class="row">
+                <input
+                  :id="`card-menu-check-${item.id}`"
+                  type="checkbox"
+                  class="row-check"
+                  :checked="item.checked"
+                  @change="onToggleInput(item.id, $event)"
+                />
+                <label :for="`card-menu-check-${item.id}`" class="visually-hidden">{{
+                  t('analyzer.cardMenu.toggleAria', { name: item.title })
+                }}</label>
+                <button
+                  type="button"
+                  class="row-name"
+                  :disabled="!item.locatable"
+                  :title="item.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
+                  @click="onLocate(item.id, item.locatable)"
+                >
+                  {{ item.title }}
+                </button>
+              </div>
+            </section>
 
-        <section class="group charts-group" role="group" :aria-label="chartsGroupLabel">
-          <h3 class="group-heading">{{ chartsGroupLabel }}</h3>
-          <p v-if="charts.length === 0" class="empty-hint">{{ t('analyzer.cardMenu.noCharts') }}</p>
-          <div v-for="c in charts" :key="c.id" class="row">
-            <input
-              :id="`card-menu-check-${c.itemId}`"
-              type="checkbox"
-              class="row-check"
-              :checked="c.checked"
-              @change="onToggleInput(c.itemId, $event)"
-            />
-            <label :for="`card-menu-check-${c.itemId}`" class="visually-hidden">{{
-              t('analyzer.cardMenu.toggleAria', { name: c.title })
-            }}</label>
-            <button
-              type="button"
-              class="row-name"
-              :disabled="!c.locatable"
-              :title="c.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
-              @click="onLocate(c.itemId, c.locatable)"
-            >
-              {{ c.title }}
-            </button>
-            <button
-              type="button"
-              class="row-delete"
-              :aria-label="t('analyzer.removeChart') + ' — ' + c.title"
-              @click="emit('remove-chart', c.id)"
-            >
-              ✕
-            </button>
+            <section class="group charts-group" role="group" :aria-label="chartsGroupLabel">
+              <h3 class="group-heading">{{ chartsGroupLabel }}</h3>
+              <p v-if="charts.length === 0" class="empty-hint">{{ t('analyzer.cardMenu.noCharts') }}</p>
+              <div v-for="c in charts" :key="c.id" class="row">
+                <input
+                  :id="`card-menu-check-${c.itemId}`"
+                  type="checkbox"
+                  class="row-check"
+                  :checked="c.checked"
+                  @change="onToggleInput(c.itemId, $event)"
+                />
+                <label :for="`card-menu-check-${c.itemId}`" class="visually-hidden">{{
+                  t('analyzer.cardMenu.toggleAria', { name: c.title })
+                }}</label>
+                <button
+                  type="button"
+                  class="row-name"
+                  :disabled="!c.locatable"
+                  :title="c.locatable ? undefined : t('analyzer.cardMenu.notShownHint')"
+                  @click="onLocate(c.itemId, c.locatable)"
+                >
+                  {{ c.title }}
+                </button>
+                <button
+                  type="button"
+                  class="row-delete"
+                  :aria-label="t('analyzer.removeChart') + ' — ' + c.title"
+                  @click="emit('remove-chart', c.id)"
+                >
+                  ✕
+                </button>
+              </div>
+              <button type="button" class="add-row" @click="emit('add-timeseries')">
+                ＋ {{ t('analyzer.addChart') }}
+              </button>
+              <button type="button" class="add-row" @click="emit('add-scatter')">
+                ＋ {{ t('analyzer.addScatterChart') }}
+              </button>
+            </section>
           </div>
-          <button type="button" class="add-row" @click="emit('add-timeseries')">
-            ＋ {{ t('analyzer.addChart') }}
-          </button>
-          <button type="button" class="add-row" @click="emit('add-scatter')">
-            ＋ {{ t('analyzer.addScatterChart') }}
-          </button>
-        </section>
-      </div>
+        </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
@@ -252,15 +484,41 @@ function onLocate(id: string, locatable: boolean): void {
   left: 0;
   width: min(320px, calc(100vw - 32px));
   max-height: min(70vh, 560px);
-  overflow-y: auto;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
   box-shadow: 0 8px 24px color-mix(in srgb, black 25%, transparent);
+  display: flex;
+  flex-direction: column;
+  /* B118(a) — enter/exit scales the panel out of/into `.menu-toggle`, which
+     sits at this popover's own top-left corner (it's anchored `top`/`left`
+     flush to the button above), so a STATIC `top left` origin is correct
+     without measuring the button's position in JS. */
+  transform-origin: top left;
+}
+/* Scrollable content lives one level deeper than `.popover` itself now —
+   `.popover`'s own box needs to stay a plain flex column so the mobile
+   `.sheet-grab` handle (a sibling, not part of this scrolling region) can
+   sit above it without the drag handle's pointer events fighting this
+   element's `overflow-y: auto` (B118(a)'s "confine the drag handling to a
+   grab area" requirement). The padding/gap that used to live on `.popover`
+   itself moved here unchanged, so desktop's rendered spacing (no grab
+   handle, this is the popover's only content) is pixel-identical to before. */
+.popover-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
   padding: calc(var(--space) * 1.5);
   display: flex;
   flex-direction: column;
   gap: calc(var(--space) * 1.5);
+}
+/* Hidden on desktop by default; only ever rendered (v-if) on mobile anyway
+   — this is belt-and-braces in case that ever changes, matching the
+   `:root[data-any-pointer-coarse]` rules' own "CSS agrees with the JS gate"
+   convention elsewhere in this file. */
+.sheet-grab {
+  display: none;
 }
 
 /* Q5/B105 follow-up — B105 anchored the popover to the button's right edge
@@ -289,6 +547,28 @@ function onLocate(id: string, locatable: boolean): void {
     right: 16px;
     width: auto;
     bottom: calc(var(--bottom-nav-height, 56px) + 16px + env(safe-area-inset-bottom, 0px));
+  }
+  /* B118(a) — the grab strip drag-to-dismiss is confined to (see
+     onGrabPointerDown/Move/Up in the script block, and .popover-scroll's
+     own doc above for why it's a SEPARATE element from the scrollable
+     content). `touch-action: none` stops the browser's own scroll/pull-
+     to-refresh gesture recognizers from contesting the pointer with our own
+     tracking — same convention as B36's edge-swipe dead zone
+     (edgeGesture.ts) and UPlotChart's touch-pan handling. */
+  .sheet-grab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    height: 22px;
+    touch-action: none;
+    cursor: grab;
+  }
+  .sheet-grab-bar {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--color-border);
   }
 }
 
