@@ -328,7 +328,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
 <style scoped>
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .row {
@@ -344,7 +344,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   border-radius: var(--radius);
   padding: 5px 10px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   cursor: pointer;
   align-self: flex-start;
 }
@@ -365,7 +365,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   border: none;
   padding: 5px 10px;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -406,7 +406,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   right: 8px;
   max-width: 42px;
   color: var(--color-text-muted);
-  font-size: 0.62rem;
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
@@ -423,7 +423,11 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
 }
 /* B44 — low-contrast "value changed" pulse, see the `pulse()` doc above for
    why this is a plain CSS animation retriggered by a class toggle rather
-   than a JS-driven per-frame effect. */
+   than a JS-driven per-frame effect. M17 — 400ms 沒有精確對應的 --dur-*
+   token(在 --dur-base 250ms 與 --dur-slow 320ms 之外),刻意保留原值不硬套:
+   這個值高頻觸發(數值每次變動都可能重播),調快容易讓密集更新的儀表看起來
+   閃爍,調慢又會拖慢下一次脈動的節奏,兩個既有 token 都不是為這種「高頻率
+   微光反饋」設計的,見 AnalyzerView.vue 定位提示脈動的同款保留理由。 */
 .value-cell--pulse {
   animation: value-cell-pulse 400ms ease-out;
 }
@@ -441,14 +445,14 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   }
 }
 .value-label {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .value-number {
-  font-size: 1.1rem;
+  font-size: var(--text-2xl);
   font-weight: 600;
   color: var(--color-text);
   font-variant-numeric: tabular-nums;
@@ -459,7 +463,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
 }
 .value-unit {
   color: var(--color-text-muted);
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
   line-height: 1;
   text-align: center;
   white-space: nowrap;
@@ -496,7 +500,7 @@ function sortModeLabel(mode: CurrentValuesSortMode): string {
   width: 24px;
   height: 24px;
   line-height: 1;
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   cursor: pointer;
   display: flex;
   align-items: center;

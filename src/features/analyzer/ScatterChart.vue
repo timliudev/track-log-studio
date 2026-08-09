@@ -366,13 +366,13 @@ const aspectAutoHint = computed(() =>
   display: inline-flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   flex: 1 1 220px;
   min-width: 180px;
 }
 .picker-label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 /* Same segmented-toggle look as TimeSeriesChart's timeline/overlay `.mode`
    buttons — two mutually exclusive presentation modes for one chart. */
@@ -389,7 +389,7 @@ const aspectAutoHint = computed(() =>
   border: none;
   padding: 6px 12px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .aspect button.active {
@@ -402,7 +402,7 @@ const aspectAutoHint = computed(() =>
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   cursor: pointer;
   align-self: flex-end;
@@ -439,7 +439,7 @@ const aspectAutoHint = computed(() =>
 }
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 </style>

@@ -87,7 +87,7 @@ function onSave(): void {
 }
 h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
 }
 .controls,
 .save-row {
@@ -100,7 +100,7 @@ h2 {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 select,

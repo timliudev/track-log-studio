@@ -132,7 +132,7 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
   gap: 8px;
 }
 .tc-title {
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text);
 }
@@ -140,7 +140,7 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 .tc-channel :deep(.ss) {
@@ -155,7 +155,7 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text);
   cursor: pointer;
 }
@@ -181,7 +181,7 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
 }
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .scope-hint {
@@ -202,7 +202,7 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
   padding: 4px 8px;
   border-radius: var(--radius);
   background: var(--color-bg);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
 }
 .ex-kind {
@@ -214,7 +214,7 @@ const markersRequested = () => analyzer.markMinima || analyzer.markMaxima
   border-radius: 9px;
   background: var(--color-accent);
   color: var(--color-accent-text);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 .extrema-list li.max .ex-kind {

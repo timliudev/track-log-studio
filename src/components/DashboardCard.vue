@@ -893,7 +893,7 @@ onBeforeUnmount(() => {
     border-radius: 0;
     --card-body-pad-x: 4px;
     --card-bleed-x: 4px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
+    box-shadow: var(--shadow-2);
   }
 }
 /* Collapsed: shrink the card itself to just its header. On desktop the
@@ -944,7 +944,7 @@ onBeforeUnmount(() => {
      handling, not mouse dragging). */
   touch-action: pan-y;
   user-select: none;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-fast) ease;
 }
 .dashboard-card.collapsed .drag-handle {
   border-bottom: none;
@@ -968,7 +968,7 @@ onBeforeUnmount(() => {
   touch-action: none;
 }
 .title {
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text);
   white-space: nowrap;
@@ -1034,7 +1034,7 @@ onBeforeUnmount(() => {
   color: var(--color-accent);
 }
 .collapse-btn svg {
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-fast) ease;
 }
 .collapse-btn.collapsed svg {
   transform: rotate(-90deg);
@@ -1091,7 +1091,7 @@ onBeforeUnmount(() => {
   /* Override the base rule's `height: 100%` — a sticky card should size to
      its natural content height, not stretch to fill its grid cell. */
   height: auto;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-2);
 }
 .dashboard-card.pinned .body {
   /* Cap the body so the whole sticky card respects max-height instead of

@@ -555,7 +555,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 }
 .control span {
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 .control select {
   background: var(--color-bg);
@@ -567,13 +567,13 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 }
 .current-value {
   color: var(--color-text-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   font-style: italic;
 }
 .transfer-description {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .checkbox-control {
   gap: 8px;
@@ -595,7 +595,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 }
 .smoothing-endpoint {
   color: var(--color-text-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   white-space: nowrap;
 }
 /* §8 touch target — the slider itself grows to a comfortable drag height on
@@ -614,7 +614,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 }
 .transfer-message {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .transfer-message.success {
   color: var(--color-accent);
@@ -654,23 +654,23 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 }
 .card-heading {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   color: var(--color-text);
 }
 .app-name {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   color: var(--color-accent);
 }
 .app-subtitle {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .app-description {
   margin: 4px 0 0;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   line-height: 1.6;
   color: var(--color-text);
 }
@@ -685,7 +685,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 8px;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 .info-row dt {
   min-width: 6em;
@@ -714,7 +714,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 }
 .tap-hint {
   margin-left: 8px;
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   font-style: italic;
   color: var(--color-text-muted);
 }
@@ -728,7 +728,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 }
 .licenses-intro {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .licenses-table-wrap {
@@ -737,7 +737,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 .licenses-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .licenses-table th,
 .licenses-table td {
@@ -759,7 +759,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
   border-radius: var(--radius);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  font-size: 0.78rem;
+  font-size: var(--text-md);
 }
 .licenses-table a {
   color: var(--color-accent);
@@ -767,7 +767,7 @@ function onFlagToggle(name: FeatureFlagName, e: Event): void {
 .note-row td {
   white-space: normal;
   color: var(--color-text-muted);
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   padding-top: 0;
   padding-bottom: 10px;
 }

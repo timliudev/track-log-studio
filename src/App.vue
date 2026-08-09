@@ -164,11 +164,14 @@ const buildDate = __BUILD_DATE__
 }
 .brand-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--text-2xl);
+  /* M17 — 大標收緊字距,對應 Apple「字距隨字級變化」準則(密集小字反過來
+     用 --tracking-wide,見下面 .build-stamp)。 */
+  letter-spacing: var(--tracking-tight);
   color: var(--color-accent);
 }
 .brand-subtitle {
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .topbar-actions {
@@ -204,7 +207,7 @@ const buildDate = __BUILD_DATE__
   cursor: not-allowed;
 }
 .tab small {
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
 }
 .content {
   flex: 1;
@@ -267,8 +270,8 @@ const buildDate = __BUILD_DATE__
 .slide-right-enter-active,
 .slide-right-leave-active {
   transition:
-    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+    transform var(--dur-base) var(--ease-standard),
+    opacity var(--dur-base) var(--ease-standard);
 }
 .slide-left-enter-from {
   opacity: 0;
@@ -292,7 +295,7 @@ const buildDate = __BUILD_DATE__
   .slide-left-leave-active,
   .slide-right-enter-active,
   .slide-right-leave-active {
-    transition: opacity 0.15s linear;
+    transition: opacity var(--dur-fast) linear;
   }
   .slide-left-enter-from,
   .slide-left-leave-to,
@@ -317,7 +320,10 @@ const buildDate = __BUILD_DATE__
   border-top: 1px solid var(--color-border);
 }
 .build-stamp {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
+  /* M17 — 密集小字,略放字距(--tracking-wide),同 BottomNav.vue 的
+     .bottom-nav__label。 */
+  letter-spacing: var(--tracking-wide);
   color: var(--color-text-muted);
   opacity: 0.7;
 }
@@ -327,7 +333,7 @@ const buildDate = __BUILD_DATE__
   gap: 6px;
   color: var(--color-text-muted);
   text-decoration: none;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .repo-link:hover {
   color: var(--color-text);

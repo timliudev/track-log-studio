@@ -256,7 +256,7 @@ function onLocate(id: string, locatable: boolean): void {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) * 1.5);
-  box-shadow: 0 8px 24px color-mix(in srgb, black 25%, transparent);
+  box-shadow: var(--shadow-3);
   padding: calc(var(--space) * 1.5);
   display: flex;
   flex-direction: column;
@@ -303,7 +303,7 @@ function onLocate(id: string, locatable: boolean): void {
 }
 .group-heading {
   margin: 0 0 4px;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -311,7 +311,7 @@ function onLocate(id: string, locatable: boolean): void {
 }
 .empty-hint {
   margin: 0 0 4px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 
@@ -361,7 +361,7 @@ function onLocate(id: string, locatable: boolean): void {
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1;
   cursor: pointer;
 }

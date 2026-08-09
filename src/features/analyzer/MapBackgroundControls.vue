@@ -80,7 +80,7 @@ function choose(e: Event): void {
 </template>
 
 <style scoped>
-.map-background { font-size: .85rem; }
+.map-background { font-size: var(--text-base); }
 .toggle {
   display: flex;
   align-items: center;
@@ -103,7 +103,7 @@ function choose(e: Event): void {
   width: 16px;
   height: 16px;
   flex: none;
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-fast) ease;
 }
 :root[data-any-pointer-coarse] .chevron { width: 20px; height: 20px; }
 /* 收合時箭頭轉向右（▶ 提示可展開），展開時維持向下（▼ 提示可收合）。 */

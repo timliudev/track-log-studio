@@ -1314,7 +1314,7 @@ const axisBandCursor = computed<string | undefined>(() => {
   right: 4px;
   z-index: 2;
   padding: 3px 9px;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
@@ -1332,7 +1332,7 @@ const axisBandCursor = computed<string | undefined>(() => {
    the visible box itself reads fine here. */
 :root[data-any-pointer-coarse] .reset-zoom {
   padding: 12px 16px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   min-height: 44px;
 }
 .uplot-host {

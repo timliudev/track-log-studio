@@ -33,7 +33,7 @@ const entries = computed(() => {
   gap: 4px 10px;
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 .legend-entry {
   display: inline-flex;

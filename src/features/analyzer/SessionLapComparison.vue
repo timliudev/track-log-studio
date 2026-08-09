@@ -250,15 +250,15 @@ function resetChartOffset(id: number): void {
 
 <style scoped>
 .session-summary { margin-top: 10px; border-top: 1px solid var(--color-border); padding-top: 8px; }
-h4 { margin: 0 0 6px; font-size: .85rem; color: var(--color-text-muted); }
+h4 { margin: 0 0 6px; font-size: var(--text-base); color: var(--color-text-muted); }
 .recording-laps + .recording-laps { margin-top: 12px; }
-.recording-heading { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: .82rem; }
+.recording-heading { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: var(--text-md); }
 .recording-heading .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; font-weight: 600; }
 .recording-swatch { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .lap-count { color: var(--color-text-muted); flex: none; }
 .delta { color: var(--color-text-muted); margin-left: auto; flex: none; }
 
-.chart-align { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 0 6px 16px; color: var(--color-text-muted); font-size: .78rem; }
+.chart-align { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 5px 0 6px 16px; color: var(--color-text-muted); font-size: var(--text-md); }
 .chart-align input { width: 68px; padding: 2px 4px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); color: var(--color-text); }
 .chart-align button { padding: 2px 6px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-bg); color: var(--color-text-muted); font: inherit; cursor: pointer; }
 .chart-align button:hover { border-color: var(--color-accent); color: var(--color-accent); }

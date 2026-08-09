@@ -189,12 +189,12 @@ function applyImportedCalibration(): void {
 }
 h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
 }
 .intro {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .part {
   display: flex;
@@ -212,7 +212,7 @@ h3 {
   gap: 8px;
   padding: 8px;
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
@@ -230,7 +230,7 @@ h3 {
   gap: 6px;
 }
 .out {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 code {
@@ -249,7 +249,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .field input,
@@ -263,7 +263,7 @@ code {
 }
 .preview {
   margin: 0;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
   font-family: ui-monospace, monospace;
 }
@@ -293,7 +293,7 @@ code {
 }
 .hint,
 .msg {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .msg {

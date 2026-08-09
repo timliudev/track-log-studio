@@ -324,7 +324,7 @@ function showsPeak(seg: AccelSegment): boolean {
   border: none;
   padding: 6px 12px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .kind-toggle button.active {
@@ -335,7 +335,7 @@ function showsPeak(seg: AccelSegment): boolean {
   display: inline-flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .field input {
@@ -349,12 +349,12 @@ function showsPeak(seg: AccelSegment): boolean {
 }
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .entry-speed-hint {
   flex-basis: 100%;
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   opacity: 0.8;
 }
 .result-count-row {
@@ -369,7 +369,7 @@ function showsPeak(seg: AccelSegment): boolean {
   border: none;
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
@@ -399,7 +399,7 @@ function showsPeak(seg: AccelSegment): boolean {
   padding: 8px 10px;
   border-radius: var(--radius);
   background: var(--color-bg);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 .result.fastest {
   outline: 1px solid var(--color-accent);
@@ -439,7 +439,7 @@ function showsPeak(seg: AccelSegment): boolean {
 .exclusion-reason {
   flex-basis: 100%;
   color: var(--color-danger, var(--color-accent));
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .focus-btn {
   margin-left: auto;
@@ -449,7 +449,7 @@ function showsPeak(seg: AccelSegment): boolean {
   border-radius: var(--radius);
   padding: 5px 10px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .focus-btn:hover {

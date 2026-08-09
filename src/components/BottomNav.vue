@@ -32,7 +32,7 @@ const items: { id: NavTab; labelKey: string }[] = [
       v-for="item in items"
       :key="item.id"
       type="button"
-      class="bottom-nav__tab"
+      class="bottom-nav__tab no-press"
       :class="{ active: tab === item.id }"
       :aria-current="tab === item.id ? 'page' : undefined"
       @click="emit('update:tab', item.id)"
@@ -110,7 +110,21 @@ const items: { id: NavTab; labelKey: string }[] = [
     -webkit-backdrop-filter: blur(14px) saturate(150%);
     backdrop-filter: blur(14px) saturate(150%);
     border-top: 1px solid var(--color-border);
-    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+    box-shadow: var(--shadow-nav);
+  }
+}
+
+/* B119 — 這支列本身是全庫唯一一處半透明材質(88% surface + blur 14 +
+   saturate 150%),做對了(見 docs/ISSUES.md B119 條目)。`prefers-reduced-
+   transparency` 是可及性偏好(部分使用者對半透明/模糊背景會不適,或裝置
+   效能不足以流暢算 backdrop-filter),命中時直接退回不透明實色列 —— 這是
+   本檔案自己的 scoped 區塊,而非 theme.css 統一處理,因為 backdrop-filter
+   這個材質層本來就只有這支列在用,屬於它自己的職責。 */
+@media (prefers-reduced-transparency: reduce) {
+  .bottom-nav {
+    background: var(--color-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
@@ -132,10 +146,16 @@ const items: { id: NavTab; labelKey: string }[] = [
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition:
-    color 0.15s ease,
-    transform 0.15s ease;
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
 }
 
+/* B115 — 這支列比 theme.css 的全域 button:active 更早就有自己的按下回饋
+   (scale 0.94,經過觸控手感調過),模板上特意加了 `.no-press` 逃生艙把全域
+   那條(scale 0.97)排除掉 —— 不是因為這支按鈕本身有拖曳/canvas 定位風險,
+   純粹是特異度問題:全域規則帶了 `button` 元素選擇器,比這裡純 class 組成
+   的選擇器特異度還高(即使算上 Vue scoped 附加的 data-v 屬性選擇器),不排
+   除就會被兩個不同的縮放值打架、且贏的還不是這裡刻意調過的 0.94。 */
 .bottom-nav__tab:active {
   transform: scale(0.94);
 }
@@ -155,7 +175,10 @@ const items: { id: NavTab; labelKey: string }[] = [
 }
 
 .bottom-nav__label {
-  font-size: 0.68rem;
+  font-size: var(--text-xs);
+  /* M17 — 密集小字略放字距(tracking-wide),與大標的收緊(tracking-tight)
+     方向相反,對應 Apple「字距隨字級變化」而非全域套一個值的準則。 */
+  letter-spacing: var(--tracking-wide);
   line-height: 1;
   font-weight: 500;
 }

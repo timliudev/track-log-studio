@@ -145,12 +145,12 @@ function fmtOffset(ms: number): string {
 }
 .hint {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .need-two {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .row {
@@ -162,7 +162,7 @@ function fmtOffset(ms: number): string {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
   flex: 1 1 180px;
 }
@@ -203,7 +203,7 @@ function fmtOffset(ms: number): string {
 }
 .error {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: #ff6b6b;
 }
 .offset-panel {
@@ -220,7 +220,7 @@ function fmtOffset(ms: number): string {
   gap: 10px;
 }
 .offset-row .label {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .nudge {
@@ -230,7 +230,7 @@ function fmtOffset(ms: number): string {
   border-radius: var(--radius);
   padding: 4px 8px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   cursor: pointer;
 }
 .nudge:hover {
@@ -245,7 +245,7 @@ function fmtOffset(ms: number): string {
 }
 .score {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .overlay-preview {
@@ -255,7 +255,7 @@ function fmtOffset(ms: number): string {
 }
 .overlay-title {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .overlay-chart {
@@ -264,7 +264,7 @@ function fmtOffset(ms: number): string {
 }
 .merged-ok {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-accent);
 }
 </style>
