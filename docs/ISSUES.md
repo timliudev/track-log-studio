@@ -230,15 +230,30 @@ Test assets: user placed `bbbb(22).loga` + `bbbb(22)set.json` (his manual gates 
 FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策用能力偵測而非視窗寬度),缺口集中在
 **設計語言未系統化**與**動效全部是固定時長 CSS transition**兩件事。以下五條為審查產出的可執行條目。
 
-- [ ] **B115** 全 app 幾乎沒有「按下」回饋。整個 `src/` 只有 `BottomNav.vue` 一個檔案有 `:active`
+- [x] **B115** 全 app 幾乎沒有「按下」回饋。整個 `src/` 只有 `BottomNav.vue` 一個檔案有 `:active`
   (69 處互動狀態其餘全是 `:hover`,而 hover 在觸控裝置上不存在)——手機使用者按下 FileBar 匯入鈕、
   CardMenu `.menu-toggle`/`.row-name`、rcnx session 選擇鈕、DashboardCard `.icon-btn`(26×26)、
   Settings/Converter 表單按鈕時,從按下到動作完成之間畫面完全無反應,違反「回饋發生在 pointer-down
   而非 release」。同一組問題:`:focus-visible` 也只有 `BottomNav.vue`/`PwaUpdateToast.vue` 兩檔有,
   其餘控制項靠瀏覽器預設 outline,與自訂 accent 焦點環不一致。
-- [ ] **B116** `LapTable.vue` 與 `SessionLapComparison.vue` 缺 `font-variant-numeric: tabular-nums`。
+  **修法**:`theme.css` 補元素層級基礎樣式(非伸進任何元件 scoped 內部,並遵守本檔案 B35/B110 那條
+  「絕不用 `:global()` 包 `:root[...]`」的教訓)——`button` 基礎規則掛
+  `transition: transform var(--dur-instant) ease-out` + `-webkit-tap-highlight-color: transparent`,
+  `button:not(:disabled):not(.no-press):active` 掛 `transform: scale(0.97)`,整組包在
+  `prefers-reduced-motion: no-preference` 內。⚠️ **實作中抓到並修正的坑**:transition 一度寫在
+  `:active` 規則**內**,這樣只在按住期間生效,放開瞬間規則不再套用、`transform` 沒有 transition 可依
+  而直接跳回,造成「進場有動畫、退場是瞬跳」的不對稱;正解是 `BottomNav.vue` 本來就在用的形狀
+  (transition 在基礎規則、transform 在 `:active`),已在程式碼內註解記錄。焦點環用
+  `:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible` 把特異度壓到 0,
+  元件自己既有的兩份 `:focus-visible` 仍然贏,這裡只補原本無人管的控制項。`.no-press` 逃生艙全庫
+  只用到一處(`BottomNav.vue` 的分頁鈕,它自己已有調過手感的 scale 0.94,純粹是特異度衝突需要排除);
+  稽核過所有 `<button>`,本庫拖曳/縮放把手一律是 `<div>`,天生不會被這條規則命中。 — merge `dec86d3`
+- [x] **B116** `LapTable.vue` 與 `SessionLapComparison.vue` 缺 `font-variant-numeric: tabular-nums`。
   `AccelTestPanel`/`CurrentValuesPanel`/`SectorPanel`/`GearPanel`/`CvtDynamicsCard` 都已有,但**圈速表
   是本 app 最重要的數字表**——比例寬度數字使同位數欄位對不齊、切換圈次時數字左右跳動。
+  **修法**:改在共用根 `LapTableView.vue`(依 [[B1]]/[[B17]],比較表本來就重用主表這個元件)加
+  `tbody td:not(:first-child) { font-variant-numeric: tabular-nums }`,一處涵蓋兩個呼叫端,
+  而不是在兩個檔案各補一次。 — merge `dec86d3`
 - [ ] **B117** 手勢缺物理:(a) `useCssGridDashboardDrag.onCardDragEnd` 一 commit 就把 `active` 設 null,
   `dragOffsetPx` 立刻變 null → 卡片從手指位置**瞬間跳**到格線位置,剛剛的物理操作在放手瞬間消失;
   (b) `DashboardCard` 的 `.touch-armed` 只換背景色,缺 iOS 拖曳排序那個「拿起來」的 lift;
@@ -246,18 +261,44 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   即停、`UPlotChart` 觸控 pan 同理,而地圖類元件的肌肉記憶預期會滑行;
   (d) `xRangeGesture.clampRange` 與 `TrackMap` 的 `MIN_ZOOM`/`MAX_ZOOM` 到邊界硬夾,讀起來像「當掉了」
   而不是「到底了」,缺 rubber-banding 漸進阻力。
-- [ ] **B118** 浮層行為不一致且缺空間連續性:(a) `CardMenu` 的 `.popover` 直接 `v-if` 出現/消失,無進出
+  ⚠️ **本條尚未實作,且是本批唯一未落地項**——實作 agent 在完成前因用量上限被中止,分支
+  `feat/gesture-physics-b117` 上**零 commit**,工作全部遺失,需整個重做。注意 [[B118]] 已落地的
+  `src/domain/interaction/sheetPhysics.ts` 內含 `project()`/`rubberBand()`/速度取樣三個純函式,
+  重做時應**直接重用該模組**(必要時上移到更中性的位置),不要再寫第二份。
+- [x] **B118** 浮層行為不一致且缺空間連續性:(a) `CardMenu` 的 `.popover` 直接 `v-if` 出現/消失,無進出
   動畫、`transform-origin` 未錨定觸發按鈕;手機版 `@media (max-width:768px)` 已經把它變成 `position:
   fixed` 貼底的 bottom sheet 形狀,卻沒有 sheet 的任何行為(不從底部滑入、不能下拉關閉);
   (b) `FileBar` 三個 `role="dialog" aria-modal="true"` 的 rcnx 選擇器有 scrim 卻**沒有 Escape 關閉、
   沒有焦點陷阱、沒有進出動畫**,而同一個 app 裡 `CardMenu` 有 Escape——看起來一樣的東西行為不一樣,
   且 aria 宣告與實際行為不符。
-- [ ] **B119** 深色模式下陰影實質失效 + 材質層只做了一處。全庫 10 種 `box-shadow` 全部硬寫
+  **修法**:新增純模組 `src/domain/interaction/sheetPhysics.ts`(`project()` 用 Apple《Designing Fluid
+  Interfaces》的指數衰減離散閉式 `(v/1000)·d/(1−d)`,**不是**教科書的 `v²/2a`;`rubberBand()` 為
+  WebKit over-scroll 公式,漸近趨近 sheet 高度而非硬停;另有 `dragTranslateY`/`pushSample`/
+  `estimateVelocityPxPerSec`/`shouldDismissSheet`/`parseTranslateY`)與 `focusTrap.ts`,共用 composable
+  `useOverlayMotion.ts`(進出編排:prime-hidden → 強制 reflow → release → transitionend-or-timeout,
+  同 `useFlipAnimation` 既有的手法)與 `useModalDialog.ts`(Escape/焦點陷阱/焦點歸還,三個 dialog 共用
+  一份、不複製三次;不擁有開關狀態,只吃呼叫端的 `open` 與既有 cancel handler,確保 cancel 語意
+  完全不變)。CardMenu 桌面版 `transform-origin: top left` 靜態即正確(popover 本來就 `top`/`left`
+  貼齊按鈕,不需 JS 量測);手機版拖曳關閉限制在新的 `.sheet-grab` 抓握區,避免與 `.popover-scroll`
+  自己的 `overflow-y: auto` 打架;中斷支援靠解析當前 computed `translateY` 凍結後接手。FileBar 三個
+  dialog 的 scrim-click 取消**本來就有**(`@click.self`),未改動。 — merge `e3e8c49`
+- [x] **B119** 深色模式下陰影實質失效 + 材質層只做了一處。全庫 10 種 `box-shadow` 全部硬寫
   `rgba(0,0,0,α)`,`rgba(0,0,0,0.18)` 疊在深色 `--color-surface: #181b21` 上幾乎看不見 → 暗色主題的
   層級感塌掉。另:`backdrop-filter` 只有 `BottomNav` 一處(且做得正確:88% surface + blur 14 + saturate
   150% + 亮上緣),topbar/tabs/FileBar 都是不透明實色橫條;且全庫 0 處 `prefers-reduced-transparency`
   與 `prefers-contrast`,半透明材質要往外鋪之前必須先補這兩個分支,否則是可及性倒退。
-- [ ] **M17** 設計 token 未系統化。`theme.css` 只有 7 個顏色 token + `--radius` + `--space`,其餘全部硬寫:
+  **修法(陰影部分併入 [[M17]] 的 token 系統)**:三階 `--shadow-1/2/3` + `--shadow-nav`,深色兩個
+  分支(`prefers-color-scheme` 與顯式 `[data-theme='dark']`)各自覆寫,深色版額外疊
+  `0 0 0 1px rgba(255,255,255,α)` 的極淡白色描邊——純黑陰影在深色 surface 上做不到分離,這圈
+  「材質在暗處自己反光」的亮邊可以。`prefers-reduced-transparency: reduce` 放在 `BottomNav.vue`
+  自己的 scoped 區塊(全庫唯一使用 `backdrop-filter` 的就是它,屬它自己的職責),命中時退回不透明
+  實色列。`prefers-contrast: more` 在 `theme.css` 補三分支(鏡射色彩 token 本身的結構),只拉
+  `--color-border` 與 `--color-text-muted` 這兩個本來就刻意低對比的 token。⚠️ **實作中抓到並修正
+  的數值問題**:淺色 border 初版 `#8b92a0` 對 `--color-bg` 只有 2.94:1,低於 WCAG 非文字 UI 元件的
+  3:1 門檻——在一個專為提高對比而存在的分支裡沒達標說不過去,改為 `#828a99`(對 bg 3.27:1、對
+  surface 3.47:1)。深色組(3.96:1 / 3.61:1)本來就合格未動。**本批刻意不新增任何半透明材質**
+  (topbar/FileBar 的毛玻璃處理不在範圍內)。 — merge `dec86d3`
+- [x] **M17** 設計 token 未系統化。`theme.css` 只有 7 個顏色 token + `--radius` + `--space`,其餘全部硬寫:
   **字級** 216 處 `font-size`、**23 種不同值**(0.85/0.8/0.9/0.78/0.82/0.75/0.72/0.7/0.68/0.65/0.64/0.62rem…),
   `.85rem` 與 `0.85rem` 兩種寫法混用,0.62rem≈9.9px 實質不可讀,另有 2 處硬像素破壞 Dynamic Type
   (`CvtDynamicsCard` 的 `.cvt-svg text`、`TrackMap` 的 `.osm-attribution`);**陰影** 10 種值(見 [[B119]]);
@@ -265,6 +306,18 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   0.1/0.12/0.15/0.25/0.32/0.4/1s 無規則。**排版基準**亦缺:`body` 沒有全域 `line-height`(theme.css 的
   1.35 是掛在 `.app-tooltip` 上),全庫只有 1 處 `letter-spacing`,而 tracking 本應隨字級變化
   (大標收緊、密集小字略放)。
+  **修法**:9 階字級 `--text-2xs`(0.65rem)…`--text-3xl`(1.4rem),遷移後 `src/` 內字面 `font-size`
+  **歸零**(含原本兩處 10px 硬像素——實測 SVG text 在該處用 rem 幾何一致,所以是修掉而非豁免);
+  合併誤差最大 0.05rem(≈0.8px),刻意保守,這是「把既有視覺尺寸收斂進系統」而非重新設計字級。
+  另加 `--leading-*`/`--tracking-*`(`body` 補上全域 `line-height`,tracking 只套在大標與密集小字
+  兩端、中段本文維持 0——**不是**全域套一個值,那正是準則點名的反模式)、`--shadow-*`(見 [[B119]])、
+  `--ease-standard` 與 `--dur-instant/fast/base/slow`。`flip.ts` 的 `PIN_FLIP_DURATION_MS`/
+  `PIN_FLIP_EASING` 維持 TS 為真實來源(JS 讀不到 CSS custom property 的數值語意),兩邊各自宣告、
+  由新增的 `test/lint/designTokens.test.ts` **import 該常數與 theme.css 逐字比對**,漂移即紅燈;
+  同測試另外守住「`font-size` 必須用 `var(--text-*)`」與「elevation `box-shadow` 必須用
+  `var(--shadow-*)`」(ring/marker 類陰影逐檔案 allowlist 並註明理由)。保留 bespoke 值的例外:
+  兩個 `@keyframes` 脈衝(1s locate-pulse、400ms value-pulse)無合適 token、GgChart 的 echarts
+  tooltip 陰影是 `<script>` 內的 JS 防禦性 fallback 字串(天生不在 CSS 掃描範圍)。 — merge `dec86d3`
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
@@ -275,6 +328,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 - [x] **M15** CI `npm audit --audit-level=high` 閘門第四度紅燈(同 [[M11]]/[[M12]]/[[M13]] 家族),三則**新公告**同時命中,皆為 dev/build 期依賴、不進出貨 bundle:① `brace-expansion` — `GHSA-rgw5-rvv9-x895`「無界中間陣列致 DoS,繞過 CVE-2026-14257 的緩解」,受害範圍 **4.0.0–5.0.8**,**連 [[M13]] 當初加的 `^5.0.8` override 本身也落在範圍內**,修補版 5.0.9;② `fast-uri` — `GHSA-7p8r-x3mc-p8w7`「反斜線 authority 前導字元造成 host confusion」,範圍 3.0.0–3.1.4,即 [[M11]] 的 `^3.1.4` override 亦已失效,修補版 3.1.5(**留在 3.x 線**,不跳 4.x —— `ajv` 要求 `fast-uri ^3.0.1`);③ `undici` — 5 則公告(retry interceptor 回應去同步、私有快取指令解析致跨使用者資訊洩漏/崩潰、blob body `type` 的 CRLF injection、Cache-Control 等號空白、cookie 屬性注入),範圍 7.0.0–7.28.0,而 `miniflare` **精確釘死 `undici@7.28.0`**、即使 wrangler/@cloudflare/vite-plugin 都在最新版仍如此,故 `npm audit fix --force` 的「解法」是把 `@cloudflare/vite-plugin` 降到 **1.12.4**(破壞性,不採用),改以 override 拉到修補版 7.29.0。修法一律沿用 M11–M13 慣例:top-level `overrides`(`brace-expansion ^5.0.9`、`fast-uri ^3.1.5`、新增 `undici ^7.29.0`;`sharp ^0.35.3` 原封保留)並重新產生 lockfile。主線獨立複驗:`npm audit --audit-level=high` **0 漏洞**(全嚴重度亦 0)、`npm ls` 三者全樹分別收斂至 5.0.9/3.1.5/7.29.0 無漏網、typecheck 乾淨、**2307/2307 綠**(197 檔)、build 成功 PWA 31 entries(1367.90 KiB)、lint 0 error。**體質修正(user 拍板採用建議)**:此閘門原本排在 typecheck/test/build **之前**,任一 dev 期公告一出現就整條 workflow 17 秒閃退、連測試結果都看不到(純文件 commit 亦紅)——已把該步移到 job **最後**。把關強度完全不變(照樣讓 job 失敗、照樣 `--audit-level=high`),但公告出現時仍看得到 typecheck/測試/build 的真實結果。未採用 `continue-on-error`(會退化成純提醒、漏擋真該擋的)與放寬到 `--audit-level=critical`。 — `f6fb3fb`/merge `87d2bb8`,CI 順序調整見下一則 commit
 - [x] **M16** 相依 minor/patch 刷新(全部落在既有 caret range 內,`package.json` 版本字串未動、僅 lockfile 前進;`npm install` 因 lockfile 已滿足範圍而不會自動前進,需顯式 `npm update <pkgs>`):`@cloudflare/vite-plugin` 1.49.0→1.51.0、`@vitest/eslint-plugin` 1.6.24→1.6.26、`globals` 17.8.0→17.9.0、`typescript-eslint` 8.65.0→8.66.0、`vite` 8.2.0→8.2.1、`vue` 3.5.40→3.5.41、`vue-tsc` 3.3.8→3.3.9、`wrangler` 4.116.0→4.119.0。`typescript` 維持 `^6.0.3` 不動(TS7 阻擋原因未解,見上方再評估條目)。與 [[M15]] 同一 commit 落地、共用同一次驗證。連帶效果:GitHub PR #14(Dependabot minor-and-patch 群組 5 項:@cloudflare/vite-plugin 1.50.0、@vitest/eslint-plugin 1.6.25、globals 17.9.0、vue-tsc 3.3.9、wrangler 4.118.0)為本條的**真子集**且其 CI 因 M15 的閘門而紅,故不合併、直接關閉並註明由本次取代。 — `f6fb3fb`/merge `87d2bb8`
 - [x] **TypeScript 6→7 再評估(M1/M7/M12 續案)—— 實測後維持 TS6,不升級。** `vue-tsc` 已到 3.3.8、其 `peerDependencies` 宣告 `typescript: ">=5.0.0"` 看似允許 TS7,但**宣告寬鬆不等於實際可用**,實測抓到兩個獨立阻擋:**(1)** 連裝都裝不起來——`typescript-eslint@8.65.0` 的 peer 為 `typescript: ">=4.8.4 <6.1.0"`,`npm install typescript@7.0.2` 直接 ERESOLVE 失敗(非 `--force` 不可);**(2)** 強制安裝後單獨驗 vue-tsc,**與 M1 當初完全相同的崩潰重現**:`Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './lib/tsc' is not defined by "exports" in node_modules/typescript/package.json (at resolveTscPath, vue-tsc/index.js:73)`。已完整還原 `package.json`/`package-lock.json` 至 `^6.0.3` 並重裝,**全程未動任何原始碼**。結論:M1 的阻擋原因**尚未解除**,`npm outdated` 中 typescript 是唯一刻意保留落後的項目;待 vue-tsc 真正支援 TS7(而非只是放寬 peer 宣告)且 typescript-eslint 放行後再評估。
+- [x] **M18** CI `npm audit --audit-level=high` 閘門第五度紅燈(同 [[M11]]/[[M12]]/[[M13]]/[[M15]] 家族,又一則新收錄公告):`GHSA-2v37-7h3g-55p8` — nanoid「custom generators can loop indefinitely when size is zero」,受害範圍 `<3.3.17`,經 `vite` 8.2.1 → `postcss` 8.5.25 → `nanoid` 3.3.16 間接引入,屬 build 期依賴、不進出貨 bundle,但該閘門仍會擋。**與 M13/M15 不同,本則不需要 overrides**:`npm audit fix`(未加 `--force`)解出的 3.3.18 仍落在既有 caret range 內,故 `package.json` 未動、只有 lockfile 前進。主線實測:audit 0 漏洞、typecheck 乾淨、2353 綠、build 31 entries。 — `e713104`
 - [ ] **M4** Optional: screenshot user manual. (Deferred until the current batch wraps.)
 - [x] **M7** Dependency refresh round 2: vite 8.1.5 / wrangler 4.112.0 / @cloudflare/vite-plugin 1.45.1 / happy-dom 20.11.0; `npm outdated` clean除 typescript、`npm audit` 0 vulnerabilities。TS7 續留 skip——vue-tsc 仍為 3.3.7（M1 驗證過與 TS7 不相容），等 vue-tsc 支援再升。 — `16a1831`/merge `9ef0ae7`
 - [x] **M8** 架構清理（knip 掃描 + 逐項人工確認）：25 個無引用死 i18n 鍵移除（en/zh-Hant 同步，各 676 鍵、集合一致；`mapBackground.upload*Error` 為樣板字串動態組鍵、確認保留）`b3c7a7d`；Phase 0 遺留 `sessionStore.ts` 死檔移除 `8bcef37`；`accelTest.ts` 內重複 `crossingFrac`/`lerp` 收斂 `c334412`；`Rc3NmeaExporter` 改用 `vbo/format.ts` 既有 `padInt` `d159878`。未動（審查過、不值得或需確認）：knip 的 26+43 個「未使用 export」實為檔內仍用、僅可收窄 export 面（~30 檔、風險/效益不划算）；`suspension.ts` `OUTPUT_NAME`/`ECU_NAME` 為刻意語意別名；`scripts/`+`bench-*.ts` 為手動開發工具、是否保留待使用者確認；`src/debug/diagnostics.ts` 有 main.ts 引用（`?debug=1` 面板）非死碼。 — merge `9ef0ae7`
