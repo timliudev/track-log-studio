@@ -37,6 +37,20 @@ class FakeResizeObserver {
 }
 
 let rafCallback: FrameRequestCallback | null = null
+// B117 — `performance.now()` is stubbed to a manually-advanced clock (see
+// `advanceNowMs`) so the settle spring's release-velocity estimation
+// (`estimateVelocity2DPxPerSec`, sampled via real `performance.now()` calls
+// inside `onCardDragMove`) gets a REALISTIC gap between pointer samples in
+// tests. Two synchronous JS calls with the REAL clock can read back a
+// sub-millisecond (near-zero) delta, which would make the estimated
+// velocity spuriously enormous (dividing a real pixel delta by a near-zero
+// time span) — a pure test-timing artifact that has no bearing on real
+// pointer input (browsers throttle real pointermove delivery far coarser
+// than that), but would make the settle-spring assertions below flaky.
+let mockNowMs = 0
+function advanceNowMs(deltaMs: number): void {
+  mockNowMs += deltaMs
+}
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', FakeResizeObserver)
   rafCallback = null
@@ -47,6 +61,8 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', () => {
     rafCallback = null
   })
+  mockNowMs = 0
+  vi.stubGlobal('performance', { now: () => mockNowMs })
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -58,6 +74,29 @@ function flushRaf(): void {
   const cb = rafCallback
   rafCallback = null
   cb?.(0)
+}
+
+/** B117 — same as {@link flushRaf} but with an explicit timestamp, needed for
+ *  the settle-spring tests: `stepSettle` computes `dtSec` from the DELTA
+ *  between successive rAF timestamps, so every frame needs to advance the
+ *  clock (unlike the drag-move tests above, which only ever flush a single
+ *  coalesced frame and don't care what timestamp it carries). */
+function flushRafAt(ms: number): void {
+  const cb = rafCallback
+  rafCallback = null
+  cb?.(ms)
+}
+
+/** Runs `steps` settle frames spaced `stepMs` apart (default ~60Hz), each via
+ *  {@link flushRafAt}, re-queuing between frames the same way the real
+ *  browser would — used to let a settle spring run for a simulated duration
+ *  without every test hand-rolling the loop. */
+function runSettleFrames(steps: number, stepMs = 16): void {
+  let t = 0
+  for (let i = 0; i < steps; i++) {
+    t += stepMs
+    flushRafAt(t)
+  }
 }
 
 function mountHarness(
@@ -344,5 +383,209 @@ describe('useCssGridDashboardDrag', () => {
     wrapper.unmount()
     // Nothing throws when the (now-orphaned) frame callback would otherwise fire.
     expect(() => flushRaf()).not.toThrow()
+  })
+
+  // B117 stage 1 — post-release settle spring: `onCardDragEnd` no longer
+  // teleports the card straight to its grid cell (see ISSUES.md's B117 entry
+  // for the bug this replaces); instead it springs there via `settleOffsetPx`.
+  // `dragOffsetPx` itself is UNCHANGED (still null the instant a drag ends —
+  // see the pre-existing "committing..."/"aborting..." tests above, which
+  // must keep passing unmodified) — the settle lives entirely in the new,
+  // separate field.
+  describe('B117 — post-release settle spring', () => {
+    it('settleOffsetPx starts at the exact residual offset the instant a committed drag ends, with dragOffsetPx staying null', async () => {
+      const items: DashboardLayoutItem[] = [{ i: 'a', x: 0, y: 0, w: 4, h: 6 }]
+      const { result } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('a', 10, 20)
+      advanceNowMs(16)
+      // A small move that stays within the origin cell (well under one
+      // colStep/rowStep) — the item's PREVIEW grid cell never changes, so
+      // the settle's initial offset is exactly the raw live pointer delta,
+      // with no grid-cell-boundary pixel math to account for.
+      result.onCardDragMove(37, 65) // dx=27, dy=45 — same numbers the existing "1:1 tracking" test above uses
+      flushRaf()
+
+      result.onCardDragEnd(true)
+
+      expect(result.dragOffsetPx.value).toBeNull()
+      expect(result.settleOffsetPx.value).toEqual({ id: 'a', dxPx: 27, dyPx: 45 })
+    })
+
+    it('settleOffsetPx decays toward (0,0) over successive frames and eventually clears', async () => {
+      const items: DashboardLayoutItem[] = [{ i: 'a', x: 0, y: 0, w: 4, h: 6 }]
+      const { result } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('a', 0, 0)
+      advanceNowMs(16)
+      result.onCardDragMove(30, 20)
+      flushRaf()
+      result.onCardDragEnd(true)
+
+      const initial = result.settleOffsetPx.value
+      expect(initial).not.toBeNull()
+      const initialMagnitude = Math.hypot(initial!.dxPx, initial!.dyPx)
+
+      runSettleFrames(6)
+      const mid = result.settleOffsetPx.value
+      expect(mid).not.toBeNull() // still animating after a handful of frames
+      expect(Math.hypot(mid!.dxPx, mid!.dyPx)).toBeLessThan(initialMagnitude)
+
+      // Run long enough (~3s of frames) for even an underdamped spring with
+      // slow release velocity to have settled well within its epsilon.
+      runSettleFrames(200)
+      expect(result.settleOffsetPx.value).toBeNull()
+    })
+
+    it('a release with zero net offset settles instantly — no residual ever exposed', async () => {
+      const items: DashboardLayoutItem[] = [{ i: 'a', x: 0, y: 0, w: 4, h: 6 }]
+      const { result } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('a', 10, 10)
+      advanceNowMs(16)
+      result.onCardDragMove(10, 10) // no movement at all
+      flushRaf()
+      result.onCardDragEnd(true)
+
+      expect(result.settleOffsetPx.value).toBeNull()
+      expect(rafCallback).toBeNull() // no settle rAF was ever scheduled
+    })
+
+    it('an ABORTED drag also springs back rather than snapping (committed:false)', async () => {
+      const items = threeStackedRows()
+      const { result, onCommit } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('c', 0, 0)
+      advanceNowMs(16)
+      // Move far enough to cross real grid-cell boundaries (same drag as the
+      // pre-existing "aborting" test above) — c's PREVIEW cell genuinely
+      // moves, so the settle has real pixel distance to cover back to c's
+      // untouched ORIGIN cell once the abort discards the whole gesture.
+      result.onCardDragMove(0, DRAG_C_ABOVE_B_DY)
+      flushRaf()
+
+      result.onCardDragEnd(false)
+
+      expect(onCommit).not.toHaveBeenCalled()
+      expect(result.dragOffsetPx.value).toBeNull()
+      const initial = result.settleOffsetPx.value
+      expect(initial).not.toBeNull()
+      // The abort discarded the whole ~14-row move; the settle must have a
+      // real y-offset to spring back through (not just the sub-cell leftover
+      // a committed small move would have) — sanity floor well below the
+      // full rowStep()*14 distance but clearly non-trivial.
+      expect(Math.abs(initial!.dyPx)).toBeGreaterThan(rowStep())
+
+      runSettleFrames(200)
+      expect(result.settleOffsetPx.value).toBeNull()
+      // The card's logical position is unaffected either way — `previewLayout`
+      // already reverted to the untouched input the instant the drag ended
+      // (verified by the pre-existing "aborting" test above); the settle is
+      // purely the VISUAL catch-up, never gates or changes that.
+      expect(result.previewLayout.value).toEqual(items)
+    })
+
+    it('interrupting a mid-settle card with a new drag picks up from the current on-screen offset, not from zero', async () => {
+      const items: DashboardLayoutItem[] = [{ i: 'a', x: 0, y: 0, w: 4, h: 6 }]
+      const { result } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('a', 0, 0)
+      advanceNowMs(16)
+      result.onCardDragMove(30, 20)
+      flushRaf()
+      result.onCardDragEnd(true)
+
+      // Let the spring decay partway (but nowhere near settled) before the
+      // interrupting drag grabs it.
+      runSettleFrames(3)
+      const residual = result.settleOffsetPx.value
+      expect(residual).not.toBeNull()
+      expect(residual!.dxPx).not.toBe(0)
+
+      result.onCardDragStart('a', 500, 500) // grabbed from an arbitrary new screen position
+      // Settle must be cancelled cleanly — no leftover settle rAF fighting
+      // the new live drag.
+      expect(result.settleOffsetPx.value).toBeNull()
+      // The very first instant of the new drag (before any move) must render
+      // at the SAME on-screen offset the settle spring had reached — not 0
+      // (which would be a fresh micro-teleport) and not the old drag's
+      // ORIGINAL target/offset. `toBeCloseTo` rather than exact equality:
+      // the bias is applied as `startX = clientX - biasX` and read back as
+      // `lastPointerX - startX`, a float round-trip that can differ from
+      // `biasX` in the last couple of ULPs.
+      const afterInterrupt = result.dragOffsetPx.value
+      expect(afterInterrupt?.id).toBe('a')
+      expect(afterInterrupt?.dxPx).toBeCloseTo(residual!.dxPx, 9)
+      expect(afterInterrupt?.dyPx).toBeCloseTo(residual!.dyPx, 9)
+
+      // From there, new pointer movement tracks 1:1 on top of that bias.
+      result.onCardDragMove(510, 505) // +10, +5 from the new drag's start
+      flushRaf()
+      const afterMove = result.dragOffsetPx.value
+      expect(afterMove?.id).toBe('a')
+      expect(afterMove?.dxPx).toBeCloseTo(residual!.dxPx + 10, 9)
+      expect(afterMove?.dyPx).toBeCloseTo(residual!.dyPx + 5, 9)
+    })
+
+    it('interrupting with a drag on a DIFFERENT card cancels the other card\'s settle', async () => {
+      const items: DashboardLayoutItem[] = [
+        { i: 'a', x: 0, y: 0, w: 4, h: 6 },
+        { i: 'b', x: 4, y: 0, w: 4, h: 6 },
+      ]
+      const { result } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('a', 0, 0)
+      advanceNowMs(16)
+      result.onCardDragMove(30, 20)
+      flushRaf()
+      result.onCardDragEnd(true)
+      expect(result.settleOffsetPx.value).not.toBeNull()
+
+      result.onCardDragStart('b', 0, 0)
+      expect(result.settleOffsetPx.value).toBeNull()
+      expect(result.draggingId.value).toBe('b')
+    })
+
+    it('respects prefers-reduced-motion: settles instantly, no residual ever exposed', async () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: query.includes('reduce'),
+        addEventListener() {},
+        removeEventListener() {},
+      }))
+      const items: DashboardLayoutItem[] = [{ i: 'a', x: 0, y: 0, w: 4, h: 6 }]
+      const { result } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('a', 0, 0)
+      advanceNowMs(16)
+      result.onCardDragMove(30, 20)
+      flushRaf()
+      result.onCardDragEnd(true)
+
+      expect(result.settleOffsetPx.value).toBeNull()
+      expect(rafCallback).toBeNull()
+    })
+
+    it('cancels an in-flight settle rAF on unmount', async () => {
+      const items: DashboardLayoutItem[] = [{ i: 'a', x: 0, y: 0, w: 4, h: 6 }]
+      const { wrapper, result } = mountHarness(items)
+      result.containerRef.value = document.createElement('div')
+      await nextTick()
+      result.onCardDragStart('a', 0, 0)
+      advanceNowMs(16)
+      result.onCardDragMove(30, 20)
+      flushRaf()
+      result.onCardDragEnd(true)
+      expect(rafCallback).not.toBeNull()
+
+      wrapper.unmount()
+      expect(() => flushRafAt(16)).not.toThrow()
+    })
   })
 })

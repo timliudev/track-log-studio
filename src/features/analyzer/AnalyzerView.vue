@@ -748,7 +748,14 @@ const cssGridResize = useCssGridDashboardResize({
 // computed, never from `cssGridActiveLayout` directly" — it already carries
 // through both the drag preview AND the resize preview.
 const cssGridRenderedLayout = cssGridResize.previewLayout
-const cssGridDragOffsetPx = cssGridDrag.dragOffsetPx
+// B117 stage 1 — CssGridGrid's `dragOffsetPx` prop only ever needs "what
+// extra translate should the currently-relevant card have right now", and a
+// live drag / a post-release settle are mutually exclusive in time for any
+// given card (see useCssGridDashboardDrag.ts's `settleOffsetPx` doc) — so
+// falling back to the settle offset whenever nothing is actively being
+// dragged is exactly the right merge, and needs no CssGridGrid.vue change at
+// all (still a single `{id,dxPx,dyPx}|null` prop).
+const cssGridDragOffsetPx = computed(() => cssGridDrag.dragOffsetPx.value ?? cssGridDrag.settleOffsetPx.value)
 // A plain component-ref -> composable `containerRef` wiring, pointed at
 // CssGridGrid's own root element: drag/resize each need their OWN width
 // measurement. Both composables' `containerRef`s are bound to the SAME
