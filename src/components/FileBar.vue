@@ -5,6 +5,15 @@ import { useFileStore } from '@/stores/fileStore'
 import { useAnalyzerStore } from '@/stores/analyzerStore'
 import { useLapStore } from '@/stores/lapStore'
 import { useLogImport } from '@/composables/useLogImport'
+import { useModalDialog } from '@/composables/useModalDialog'
+import { prefersReducedMotion } from '@/composables/useFlipAnimation'
+import {
+  primeOverlayEnter,
+  playOverlayTransition,
+  OVERLAY_DURATION_MS,
+  OVERLAY_EASING,
+  REDUCED_MOTION_DURATION_MS,
+} from '@/composables/useOverlayMotion'
 import { sniff, detectImporter, allImportExtensions, extensionsForImporter } from '@/domain/import/formatDefinitions'
 import type { RcnxSessionInfo } from '@/domain/import/rcnx/parseRcnx'
 import type { RczSessionInfo } from '@/domain/import/rcz/listRczSessions'
@@ -546,6 +555,84 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
   const d = s.date
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+// ---------------------------------------------------------------------
+// B118(b) — the three rcnx/rcz/composite pickers below declare
+// `role="dialog" aria-modal="true"` and had a scrim, but none of the
+// Escape/focus-trap/focus-restore behaviour that declaration promises (and
+// CardMenu.vue, elsewhere in this same app, already closes on Escape — see
+// its own B118(a) comment block — so the two looked-alike surfaces used to
+// behave differently). `useModalDialog` (composables/useModalDialog.ts) is
+// the one place that behaviour now lives; wired identically to all three
+// rather than copy-pasted. Each dialog's OWN existing cancel handler
+// (`cancelPendingRcnx`/`cancelPendingRcz`/`cancelCompositePicker`, all
+// defined above) is passed straight through as `onCancel` — Escape ends up
+// meaning EXACTLY what the Cancel button and the already-existing
+// scrim-click (`@click.self` in the template, unchanged by this) already
+// meant, for each picker.
+const rcnxDialogEl = ref<HTMLElement | null>(null)
+useModalDialog({
+  dialogEl: rcnxDialogEl,
+  open: computed(() => pendingRcnx.value !== null),
+  onCancel: cancelPendingRcnx,
+})
+const rczDialogEl = ref<HTMLElement | null>(null)
+useModalDialog({
+  dialogEl: rczDialogEl,
+  open: computed(() => pendingRcz.value !== null),
+  onCancel: cancelPendingRcz,
+})
+const compositeDialogEl = ref<HTMLElement | null>(null)
+useModalDialog({
+  dialogEl: compositeDialogEl,
+  open: computed(() => pendingComposite.value !== null),
+  onCancel: cancelCompositePicker,
+})
+
+/**
+ * Enter/exit animation for all three dialogs — the scrim (the `Transition`'s
+ * own target element, `.rcnx-picker-backdrop`) cross-fades while its panel
+ * (`.rcnx-picker`, found via `querySelector` rather than a fourth template
+ * ref per dialog — there is exactly one per backdrop) scales/rises
+ * slightly, consistent with CardMenu's desktop popover treatment (B118(a)) —
+ * same duration/easing constants, imported from the same
+ * `useOverlayMotion.ts` rather than a second hardcoded copy. `done` is only
+ * ever wired to the SCRIM's own transition (not the panel's) so Vue's
+ * `:css="false"` contract of "call done exactly once" holds regardless of
+ * whether the panel animation is skipped under reduced motion.
+ */
+function dialogPanel(backdrop: HTMLElement): HTMLElement | null {
+  return backdrop.querySelector<HTMLElement>('.rcnx-picker')
+}
+function onDialogBeforeEnter(el: Element): void {
+  const backdrop = el as HTMLElement
+  primeOverlayEnter(backdrop, { opacity: '0' })
+  if (prefersReducedMotion()) return
+  const panel = dialogPanel(backdrop)
+  if (panel) primeOverlayEnter(panel, { opacity: '0', transform: 'scale(0.96) translateY(8px)' })
+}
+function onDialogEnter(el: Element, done: () => void): void {
+  const backdrop = el as HTMLElement
+  const reduced = prefersReducedMotion()
+  const durationMs = reduced ? REDUCED_MOTION_DURATION_MS : OVERLAY_DURATION_MS
+  playOverlayTransition(backdrop, { opacity: '1' }, { durationMs, easing: OVERLAY_EASING, onDone: done })
+  if (reduced) return
+  const panel = dialogPanel(backdrop)
+  if (panel) {
+    playOverlayTransition(panel, { opacity: '1', transform: 'scale(1) translateY(0)' }, { durationMs, easing: OVERLAY_EASING })
+  }
+}
+function onDialogLeave(el: Element, done: () => void): void {
+  const backdrop = el as HTMLElement
+  const reduced = prefersReducedMotion()
+  const durationMs = reduced ? REDUCED_MOTION_DURATION_MS : OVERLAY_DURATION_MS
+  playOverlayTransition(backdrop, { opacity: '0' }, { durationMs, easing: OVERLAY_EASING, onDone: done })
+  if (reduced) return
+  const panel = dialogPanel(backdrop)
+  if (panel) {
+    playOverlayTransition(panel, { opacity: '0', transform: 'scale(0.96) translateY(8px)' }, { durationMs, easing: OVERLAY_EASING })
+  }
+}
 </script>
 
 <template>
@@ -721,111 +808,125 @@ function rczDateLabel(s: RczSessionInfo): string | undefined {
       {{ t('fileBar.clearAll') }}
     </button>
 
-    <div v-if="pendingRcnx" class="rcnx-picker-backdrop" @click.self="cancelPendingRcnx">
-      <div class="rcnx-picker" role="dialog" aria-modal="true">
-        <p class="rcnx-picker-title">{{ t('fileBar.rcnxPicker.title', { n: pendingRcnx.sessions.length }) }}</p>
-        <p class="rcnx-picker-file">{{ t('fileBar.rcnxPicker.fileLabel') }}: {{ pendingRcnx.file.name }}</p>
-        <ul class="rcnx-picker-list">
-          <li v-for="s in pendingRcnx.sessions" :key="s.n">
-            <button type="button" class="rcnx-session-btn" @click="choosePendingSession(s.n)">
-              <span class="rcnx-session-name">
-                {{ s.trackName || t('fileBar.rcnxPicker.session', { n: s.n }) }}
-                <span v-if="s.n === largestSession(pendingRcnx.sessions).n" class="rcnx-recommended">
-                  {{ t('fileBar.rcnxPicker.recommended') }}
+    <!-- B118(b) — `:css="false"` hands the scrim/panel enter+exit to the JS
+         hooks defined above (onDialogBeforeEnter/onDialogEnter/onDialogLeave
+         — shared verbatim across all three dialogs). Escape-to-close, the
+         Tab focus trap, and focus restore-on-close come from
+         `useModalDialog` (`rcnxDialogEl` below is that composable's
+         returned ref, bound to the `role="dialog"` panel — NOT the scrim).
+         `@click.self="cancelPendingRcnx"` on the scrim was already here
+         before this change (scrim-click already cancelled — unchanged). -->
+    <Transition :css="false" @before-enter="onDialogBeforeEnter" @enter="onDialogEnter" @leave="onDialogLeave">
+      <div v-if="pendingRcnx" class="rcnx-picker-backdrop" @click.self="cancelPendingRcnx">
+        <div ref="rcnxDialogEl" class="rcnx-picker" role="dialog" aria-modal="true" tabindex="-1">
+          <p class="rcnx-picker-title">{{ t('fileBar.rcnxPicker.title', { n: pendingRcnx.sessions.length }) }}</p>
+          <p class="rcnx-picker-file">{{ t('fileBar.rcnxPicker.fileLabel') }}: {{ pendingRcnx.file.name }}</p>
+          <ul class="rcnx-picker-list">
+            <li v-for="s in pendingRcnx.sessions" :key="s.n">
+              <button type="button" class="rcnx-session-btn" @click="choosePendingSession(s.n)">
+                <span class="rcnx-session-name">
+                  {{ s.trackName || t('fileBar.rcnxPicker.session', { n: s.n }) }}
+                  <span v-if="s.n === largestSession(pendingRcnx.sessions).n" class="rcnx-recommended">
+                    {{ t('fileBar.rcnxPicker.recommended') }}
+                  </span>
                 </span>
-              </span>
-              <span class="rcnx-session-meta">
-                {{ t('fileBar.rcnxPicker.waypoints', { n: s.waypointCount }) }}
-                <template v-if="durationMin(s) !== undefined">
-                  · {{ t('fileBar.rcnxPicker.duration', { m: durationMin(s) }) }}
-                </template>
-                ·
-                {{ s.hasLapData ? t('fileBar.rcnxPicker.hasLaps') : t('fileBar.rcnxPicker.noLaps') }}
-              </span>
-            </button>
-          </li>
-        </ul>
-        <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcnx">
-          {{ t('fileBar.rcnxPicker.cancel') }}
-        </button>
+                <span class="rcnx-session-meta">
+                  {{ t('fileBar.rcnxPicker.waypoints', { n: s.waypointCount }) }}
+                  <template v-if="durationMin(s) !== undefined">
+                    · {{ t('fileBar.rcnxPicker.duration', { m: durationMin(s) }) }}
+                  </template>
+                  ·
+                  {{ s.hasLapData ? t('fileBar.rcnxPicker.hasLaps') : t('fileBar.rcnxPicker.noLaps') }}
+                </span>
+              </button>
+            </li>
+          </ul>
+          <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcnx">
+            {{ t('fileBar.rcnxPicker.cancel') }}
+          </button>
+        </div>
       </div>
-    </div>
+    </Transition>
 
-    <div v-if="pendingRcz" class="rcnx-picker-backdrop" @click.self="cancelPendingRcz">
-      <div class="rcnx-picker" role="dialog" aria-modal="true">
-        <p class="rcnx-picker-title">{{ t('fileBar.rczPicker.title', { n: pendingRcz.sessions.length }) }}</p>
-        <p class="rcnx-picker-file">{{ t('fileBar.rcnxPicker.fileLabel') }}: {{ pendingRcz.file.name }}</p>
-        <ul class="rcnx-picker-list">
-          <li v-for="s in pendingRcz.sessions" :key="s.key">
-            <button type="button" class="rcnx-session-btn" @click="choosePendingRczSession(s.key)">
-              <span class="rcnx-session-name">
-                {{ rczDateLabel(s) || s.key }}
-              </span>
-              <span class="rcnx-session-meta">
-                <template v-if="s.lapCount !== undefined">
-                  {{ t('fileBar.rczPicker.laps', { n: s.lapCount }) }} ·
-                </template>
-                <template v-if="s.distanceKm !== undefined">
-                  {{ t('fileBar.rczPicker.distance', { km: s.distanceKm.toFixed(1) }) }} ·
-                </template>
-                <template v-if="rczDurationMin(s) !== undefined">
-                  {{ t('fileBar.rcnxPicker.duration', { m: rczDurationMin(s) }) }}
-                </template>
-              </span>
-            </button>
-          </li>
-        </ul>
-        <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcz">
-          {{ t('fileBar.rcnxPicker.cancel') }}
-        </button>
+    <Transition :css="false" @before-enter="onDialogBeforeEnter" @enter="onDialogEnter" @leave="onDialogLeave">
+      <div v-if="pendingRcz" class="rcnx-picker-backdrop" @click.self="cancelPendingRcz">
+        <div ref="rczDialogEl" class="rcnx-picker" role="dialog" aria-modal="true" tabindex="-1">
+          <p class="rcnx-picker-title">{{ t('fileBar.rczPicker.title', { n: pendingRcz.sessions.length }) }}</p>
+          <p class="rcnx-picker-file">{{ t('fileBar.rcnxPicker.fileLabel') }}: {{ pendingRcz.file.name }}</p>
+          <ul class="rcnx-picker-list">
+            <li v-for="s in pendingRcz.sessions" :key="s.key">
+              <button type="button" class="rcnx-session-btn" @click="choosePendingRczSession(s.key)">
+                <span class="rcnx-session-name">
+                  {{ rczDateLabel(s) || s.key }}
+                </span>
+                <span class="rcnx-session-meta">
+                  <template v-if="s.lapCount !== undefined">
+                    {{ t('fileBar.rczPicker.laps', { n: s.lapCount }) }} ·
+                  </template>
+                  <template v-if="s.distanceKm !== undefined">
+                    {{ t('fileBar.rczPicker.distance', { km: s.distanceKm.toFixed(1) }) }} ·
+                  </template>
+                  <template v-if="rczDurationMin(s) !== undefined">
+                    {{ t('fileBar.rcnxPicker.duration', { m: rczDurationMin(s) }) }}
+                  </template>
+                </span>
+              </button>
+            </li>
+          </ul>
+          <button type="button" class="rcnx-picker-cancel" @click="cancelPendingRcz">
+            {{ t('fileBar.rcnxPicker.cancel') }}
+          </button>
+        </div>
       </div>
-    </div>
+    </Transition>
 
     <!-- F4 phase 2 — "複合區段" checkbox picker (opened from an ALREADY
          imported multi-session record's new composite button above, not the
          import-time pendingRcnx single-pick dialog). -->
-    <div v-if="pendingComposite" class="rcnx-picker-backdrop" @click.self="cancelCompositePicker">
-      <div class="rcnx-picker" role="dialog" aria-modal="true">
-        <p class="rcnx-picker-title">
-          {{ t('fileBar.compositePicker.title', { n: pendingComposite.sessions.length }) }}
-        </p>
-        <p class="rcnx-picker-file">{{ t('fileBar.compositePicker.hint') }}</p>
-        <ul class="rcnx-picker-list">
-          <li v-for="s in pendingComposite.sessions" :key="s.n">
-            <label class="rcnx-session-check">
-              <input
-                type="checkbox"
-                :checked="pendingComposite.selected.has(s.n)"
-                @change="toggleCompositeSession(s.n)"
-              />
-              <span class="rcnx-session-name">
-                {{ rcnxSessionLabel(s) }}
-              </span>
-            </label>
-          </li>
-        </ul>
-        <p v-if="compositeError" class="rcnx-switch-err" role="alert">
-          {{ t('fileBar.compositePicker.failed', { message: compositeError }) }}
-        </p>
-        <div class="composite-picker-actions">
-          <button type="button" class="rcnx-picker-cancel" @click="cancelCompositePicker">
-            {{ t('fileBar.rcnxPicker.cancel') }}
-          </button>
-          <button
-            type="button"
-            class="composite-confirm-btn"
-            :disabled="pendingComposite.selected.size < 2 || compositeBusy"
-            @click="combineCompositeSessions"
-          >
-            {{
-              compositeBusy
-                ? t('fileBar.compositePicker.combining')
-                : t('fileBar.compositePicker.combine', { n: pendingComposite.selected.size })
-            }}
-          </button>
+    <Transition :css="false" @before-enter="onDialogBeforeEnter" @enter="onDialogEnter" @leave="onDialogLeave">
+      <div v-if="pendingComposite" class="rcnx-picker-backdrop" @click.self="cancelCompositePicker">
+        <div ref="compositeDialogEl" class="rcnx-picker" role="dialog" aria-modal="true" tabindex="-1">
+          <p class="rcnx-picker-title">
+            {{ t('fileBar.compositePicker.title', { n: pendingComposite.sessions.length }) }}
+          </p>
+          <p class="rcnx-picker-file">{{ t('fileBar.compositePicker.hint') }}</p>
+          <ul class="rcnx-picker-list">
+            <li v-for="s in pendingComposite.sessions" :key="s.n">
+              <label class="rcnx-session-check">
+                <input
+                  type="checkbox"
+                  :checked="pendingComposite.selected.has(s.n)"
+                  @change="toggleCompositeSession(s.n)"
+                />
+                <span class="rcnx-session-name">
+                  {{ rcnxSessionLabel(s) }}
+                </span>
+              </label>
+            </li>
+          </ul>
+          <p v-if="compositeError" class="rcnx-switch-err" role="alert">
+            {{ t('fileBar.compositePicker.failed', { message: compositeError }) }}
+          </p>
+          <div class="composite-picker-actions">
+            <button type="button" class="rcnx-picker-cancel" @click="cancelCompositePicker">
+              {{ t('fileBar.rcnxPicker.cancel') }}
+            </button>
+            <button
+              type="button"
+              class="composite-confirm-btn"
+              :disabled="pendingComposite.selected.size < 2 || compositeBusy"
+              @click="combineCompositeSessions"
+            >
+              {{
+                compositeBusy
+                  ? t('fileBar.compositePicker.combining')
+                  : t('fileBar.compositePicker.combine', { n: pendingComposite.selected.size })
+              }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
