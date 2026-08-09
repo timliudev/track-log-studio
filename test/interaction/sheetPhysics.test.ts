@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   pushSample,
   estimateVelocityPxPerSec,
+  estimateVelocity2DPxPerSec,
   rubberBand,
   dragTranslateY,
   project,
@@ -63,6 +64,36 @@ describe('estimateVelocityPxPerSec', () => {
   it('returns 0 for a degenerate (non-positive) time span', () => {
     expect(estimateVelocityPxPerSec([{ t: 50, y: 0 }, { t: 50, y: 40 }])).toBe(0)
     expect(estimateVelocityPxPerSec([{ t: 50, y: 0 }, { t: 10, y: 40 }])).toBe(0)
+  })
+})
+
+describe('estimateVelocity2DPxPerSec', () => {
+  it('returns {0,0} for fewer than 2 samples', () => {
+    expect(estimateVelocity2DPxPerSec([])).toEqual({ vx: 0, vy: 0 })
+    expect(estimateVelocity2DPxPerSec([{ t: 0, x: 0, y: 0 }])).toEqual({ vx: 0, vy: 0 })
+  })
+
+  it('computes independent signed px/s secants for x and y from the same sample window', () => {
+    // 100px right + 50px up over 200ms -> vx=500, vy=-250.
+    const v = estimateVelocity2DPxPerSec([
+      { t: 0, x: 0, y: 50 },
+      { t: 200, x: 100, y: 0 },
+    ])
+    expect(v.vx).toBeCloseTo(500, 5)
+    expect(v.vy).toBeCloseTo(-250, 5)
+  })
+
+  it('returns {0,0} for a degenerate (non-positive) time span', () => {
+    expect(estimateVelocity2DPxPerSec([{ t: 50, x: 0, y: 0 }, { t: 50, x: 40, y: 40 }])).toEqual({ vx: 0, vy: 0 })
+  })
+
+  it('treats a missing x as 0 rather than propagating NaN', () => {
+    const v = estimateVelocity2DPxPerSec([
+      { t: 0, y: 0 },
+      { t: 200, y: 100 },
+    ])
+    expect(v.vx).toBe(0)
+    expect(v.vy).toBeCloseTo(500, 5)
   })
 })
 

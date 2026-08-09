@@ -7,14 +7,19 @@
  * pointer-event stream — CardMenu.vue wires these to actual PointerEvents and
  * does the imperative DOM writes; this module never touches `window`/`document`.
  *
- * NOTE for whoever reconciles this with the B117 gesture-physics branch
- * (`useCssGridDashboardDrag.ts`/`TrackMap.vue`/`xRangeGesture.ts`/
- * `UPlotChart.vue`): this module was written independently and does NOT
- * import from or coordinate with that branch's velocity-tracking/rubber-band
- * code (per this task's instructions — implement locally, let the main
- * thread converge the two later). If B117 lands a shared
- * velocity-sample/rubber-band helper, `estimateVelocityPxPerSec`/`rubberBand`
- * below are the two functions most likely to duplicate it.
+ * B117 UPDATE: this module IS now that shared velocity-sample/rubber-band/
+ * projection helper — `useCssGridDashboardDrag.ts` (drag-release spring),
+ * `TrackMap.vue` and `UPlotChart.vue` (pan momentum) all import `project()`/
+ * `rubberBand()`/`pushSample()` directly from here rather than duplicating
+ * them, per B117's explicit instruction in docs/ISSUES.md. The one
+ * generalisation B117 needed — velocity sampling over BOTH axes, not just Y
+ * (a card drag has X and Y release velocity; CardMenu's sheet only ever
+ * needed Y) — was added here as an ADDITIVE change: {@link PointerSample}
+ * gained an optional `x` field and {@link estimateVelocity2DPxPerSec} is a
+ * new function alongside the original Y-only `estimateVelocityPxPerSec`,
+ * which is UNCHANGED and still what CardMenu.vue uses. `pushSample` itself
+ * needed no change at all — it only ever looked at `t`, so it already worked
+ * for 2D samples unmodified.
  */
 
 /** One (timestamp-ms, position-px) sample of a pointer's vertical position
@@ -26,6 +31,12 @@
 export interface PointerSample {
   t: number
   y: number
+  /** Horizontal position, px — OPTIONAL (B117 addition): CardMenu's vertical
+   *  sheet drag never sets this and {@link estimateVelocityPxPerSec} never
+   *  reads it, so every pre-existing call site is unaffected. Only
+   *  {@link estimateVelocity2DPxPerSec} (B117's card-drag release velocity,
+   *  which needs BOTH axes) reads it. */
+  x?: number
 }
 
 /** Rolling window used by {@link estimateVelocityPxPerSec}: only samples
@@ -70,6 +81,29 @@ export function estimateVelocityPxPerSec(samples: readonly PointerSample[]): num
   const dtMs = last.t - first.t
   if (!(dtMs > 0)) return 0
   return ((last.y - first.y) / dtMs) * 1000
+}
+
+/**
+ * B117 — two-axis sibling of {@link estimateVelocityPxPerSec}, for gestures
+ * that carry momentum on BOTH axes at once (a dragged dashboard card, a
+ * panned map/chart) rather than CardMenu's vertical-only sheet. Same secant-
+ * over-the-window approach, just applied to `x` and `y` independently from
+ * the SAME pair of samples (one shared time window, not two separately-
+ * windowed 1D estimates) so a diagonal flick's X and Y velocities are
+ * measured over identical, consistent start/end samples. A sample missing
+ * `x` (shouldn't happen for a caller that actually wants 2D velocity, but
+ * guards the same way the rest of this module treats malformed input) reads
+ * as `x: 0` rather than `NaN` propagating through the whole result.
+ */
+export function estimateVelocity2DPxPerSec(samples: readonly PointerSample[]): { vx: number; vy: number } {
+  if (samples.length < 2) return { vx: 0, vy: 0 }
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  const dtMs = last.t - first.t
+  if (!(dtMs > 0)) return { vx: 0, vy: 0 }
+  const vx = (((last.x ?? 0) - (first.x ?? 0)) / dtMs) * 1000
+  const vy = ((last.y - first.y) / dtMs) * 1000
+  return { vx, vy }
 }
 
 /**
