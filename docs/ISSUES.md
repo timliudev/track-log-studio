@@ -254,17 +254,40 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   **修法**:改在共用根 `LapTableView.vue`(依 [[B1]]/[[B17]],比較表本來就重用主表這個元件)加
   `tbody td:not(:first-child) { font-variant-numeric: tabular-nums }`,一處涵蓋兩個呼叫端,
   而不是在兩個檔案各補一次。 — merge `dec86d3`
-- [ ] **B117** 手勢缺物理:(a) `useCssGridDashboardDrag.onCardDragEnd` 一 commit 就把 `active` 設 null,
+- [x] **B117** 手勢缺物理:(a) `useCssGridDashboardDrag.onCardDragEnd` 一 commit 就把 `active` 設 null,
   `dragOffsetPx` 立刻變 null → 卡片從手指位置**瞬間跳**到格線位置,剛剛的物理操作在放手瞬間消失;
   (b) `DashboardCard` 的 `.touch-armed` 只換背景色,缺 iOS 拖曳排序那個「拿起來」的 lift;
   (c) 全庫無任何指標速度追蹤(`edgeAutoscrollVelocity` 是捲動速度不是手勢速度)→ `TrackMap` 平移放手
   即停、`UPlotChart` 觸控 pan 同理,而地圖類元件的肌肉記憶預期會滑行;
   (d) `xRangeGesture.clampRange` 與 `TrackMap` 的 `MIN_ZOOM`/`MAX_ZOOM` 到邊界硬夾,讀起來像「當掉了」
   而不是「到底了」,缺 rubber-banding 漸進阻力。
-  ⚠️ **本條尚未實作,且是本批唯一未落地項**——實作 agent 在完成前因用量上限被中止,分支
-  `feat/gesture-physics-b117` 上**零 commit**,工作全部遺失,需整個重做。注意 [[B118]] 已落地的
-  `src/domain/interaction/sheetPhysics.ts` 內含 `project()`/`rubberBand()`/速度取樣三個純函式,
-  重做時應**直接重用該模組**(必要時上移到更中性的位置),不要再寫第二份。
+  **修法(分四階段,每階段獨立 commit)**:①`useCssGridDashboardDrag.onCardDragEnd` 改用彈簧從當前
+  螢幕位移收斂回 0,**X/Y 兩條獨立彈簧**(單一 2D 距離彈簧在兩軸速度不同時會脫節),放手速度交接
+  故拖曳與動畫之間無接縫;`onCommit` 語意完全不變——版面寫回仍只在 pointerup 發生一次,彈簧純視覺、
+  不延後也不把關持久化,中止的拖曳(`committed:false`)同樣彈回而非瞬跳(`7c36795`)。②`DashboardCard`
+  的 `.touch-armed` 由「只換背景色」加上 iOS 式 lift(scale + 抬高陰影),不動既有
+  `touch-action: pan-y → none` 交接與 `touchDragDelay.ts` 長按狀態機(`d80b9a8`)。③`TrackMap`/
+  `UPlotChart` 放手保留平移慣性,`TrackMap` 走**既有的平移夾制路徑**故不可能逸出邊界、`UPlotChart`
+  走既有 `xRange` owner(`analyzerStore`)不另開第二條設定尺度的路(`f63c1ad`)。④邊界橡皮筋阻力,
+  以**新命名匯出**加進 `xRangeGesture.ts`,[[B68]] 既有的 `clampCentreNeedleRange` 家族語意一字未改
+  (`24479f6`)。
+  **重用而非重造**:直接 import [[B118]] 落地的 `sheetPhysics.ts` 的 `project()`/`rubberBand()`/
+  `pushSample()`,並**原地加性泛化**(`PointerSample` 增選用 `x`、新增 `estimateVelocity2DPxPerSec`
+  與 `momentumOffsetAt`),既有匯出行為零變動。新增 `src/domain/interaction/spring.ts`——semi-implicit
+  (symplectic) Euler,以 Apple 式 `(dampingRatio, responseSec)` 參數化而非 stiffness/damping/mass;
+  `SPRING_DRAG_RELEASE = {0.8, 0.3s}`(帶動量的手勢才配 overshoot)、`SPRING_DEFAULT = {1.0, 0.3s}`
+  (臨界阻尼,無動量的程式化 snap 用);`SPRING_MAX_DT_SEC = 1/30` 夾制單步,避免分頁背景化/掉幀
+  交回過大 dt 導致顯式積分器發散;`isSpringSettled` 同時檢查位置與速度,否則欠阻尼彈簧第一次穿越
+  目標時就會被誤判為靜止而凍在 overshoot 中途。**全部可中斷**:新手勢落下即取消進行中的彈簧/滑行,
+  並從當前螢幕位置接手(stage 1 以殘餘位移平移 `startX/startY`,首幀即連續)。reduced-motion 全覆蓋,
+  沿用既有 `prefersReducedMotion()`。主線實測:typecheck 乾淨、**2416/2416 綠**(基準 2353 + 63)、
+  lint 0 error、build 31 entries、audit 0;8 個受影響測試檔 `git diff --numstat` 全為
+  **0 deletions**,確認未竄改任何既有斷言。
+  ⚠️ **已知缺口(刻意不做完,非疏漏)**:`TrackMap` 的 `MIN_ZOOM`/`MAX_ZOOM` 只落地純函式
+  `rubberBandZoomValue` 與其測試,**未接進 `zoomAbout`**——滾輪縮放每一格是原子操作、沒有自然的
+  「放手」時機可觸發回彈,需要另行設計 debounce,硬接會是半成品。`TrackMap` 自身的平移邊界、軸帶
+  平移([[B70]]/[[B94]])、滑鼠 Shift 拖曳與雙指縮放亦維持既有硬夾;本次只有 `UPlotChart` 一般模式
+  觸控平移接上橡皮筋。 — merge `6e1f849`
 - [x] **B118** 浮層行為不一致且缺空間連續性:(a) `CardMenu` 的 `.popover` 直接 `v-if` 出現/消失,無進出
   動畫、`transform-origin` 未錨定觸發按鈕;手機版 `@media (max-width:768px)` 已經把它變成 `position:
   fixed` 貼底的 bottom sheet 形狀,卻沒有 sheet 的任何行為(不從底部滑入、不能下拉關閉);
