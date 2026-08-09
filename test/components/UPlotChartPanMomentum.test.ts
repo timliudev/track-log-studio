@@ -111,12 +111,12 @@ function pointer(type: string, init: PointerEventInit): PointerEvent {
   return new PointerEvent(type, { bubbles: true, cancelable: true, ...init })
 }
 
-function mountChart(): VueWrapper {
+function mountChart(centreCursorMode = true): VueWrapper {
   wrapper = mount(UPlotChart, {
     props: {
       data: [[0, 25, 50, 75, 100], [1, 2, 3, 4, 5]],
       series: [{}, { label: 'RPM' }],
-      centreCursorMode: true, // touch pan arms immediately (no long-press gate) — see startTouchGesture's allowLongPress
+      centreCursorMode, // true: touch pan arms immediately (no long-press gate) — see startTouchGesture's allowLongPress
     },
     global: {
       plugins: [
@@ -283,5 +283,119 @@ describe('UPlotChart touch-pan-release momentum (B117 stage 3)', () => {
     // otherwise still be pending — belt-and-braces, mirrors the existing
     // drag-composable/TrackMap unmount tests' own convention.
     expect(() => flushOneFrame(16)).not.toThrow()
+  })
+})
+
+// B117 stage 4 — normal (non-centre) mode's live rubber-band + release
+// spring-back. Centre mode is deliberately untested here — it never rubber-
+// bands at all (B68's own virtual-padding policy, unchanged) so it always
+// falls through to the unchanged stage-3 momentum path, already covered
+// above (`mountChart()` defaults to centre mode).
+describe('UPlotChart touch-pan rubber-band + spring-back (B117 stage 4, normal mode)', () => {
+  /** Drags from `startX` to `startX + totalDx` in `steps`, entering 'pan'
+   *  mode via the long-press-gate's horizontal-slop escape (normal mode has
+   *  no long-press-free immediate pan start — see `startTouchGesture`'s
+   *  `allowLongPress` branch). */
+  async function dragNormalMode(w: VueWrapper, startX: number, totalDx: number, steps = 4, stepMs = 16): Promise<void> {
+    const host = w.get('.uplot-host').element
+    let x = startX
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: x, clientY: 100 }))
+    const stepDx = totalDx / steps
+    for (let i = 0; i < steps; i++) {
+      mockNowMs += stepMs
+      x += stepDx
+      host.dispatchEvent(pointer('pointermove', { pointerId: 1, pointerType: 'touch', clientX: x, clientY: 100 }))
+    }
+    host.dispatchEvent(pointer('pointerup', { pointerId: 1, pointerType: 'touch', clientX: x, clientY: 100 }))
+    await Promise.resolve()
+  }
+
+  it('a normal in-bounds drag behaves exactly as before (no spring-back, momentum still applies)', async () => {
+    const w = mountChart(false)
+    // Zoomed to a real sub-range first — an UNZOOMED chart already shows the
+    // full bounds, so panRange/rubberBandPanRange correctly treat any pan as
+    // a no-op (there's nothing outside the current view left to reveal);
+    // the SAME behaviour clampRange's own existing tests already pin down.
+    mockState.instances[0].scales.x = { min: 20, max: 60 }
+    await dragNormalMode(w, 300, -80) // well clear of either edge
+    const plot = mockState.instances[0]
+    const callsAfterRelease = plot.setScaleCalls.length
+    const rangeAfterRelease = plot.setScaleCalls[callsAfterRelease - 1]
+    expect(rangeAfterRelease.min).toBeGreaterThanOrEqual(0)
+    expect(rangeAfterRelease.max).toBeLessThanOrEqual(100)
+
+    flushOneFrame(16)
+    await Promise.resolve()
+    expect(plot.setScaleCalls.length).toBeGreaterThan(callsAfterRelease) // momentum, not a no-op
+  })
+
+  it('a drag that pushes past the upper bound creeps past 100 live, then springs back to it on release', async () => {
+    const w = mountChart(false)
+    const plot = mockState.instances[0]
+    // Start already zoomed to the top edge — dragging further right-to-left
+    // has nowhere real to reveal, so it rubber-bands past `max: 100`.
+    plot.scales.x = { min: 80, max: 100 }
+
+    const host = w.get('.uplot-host').element
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 400, clientY: 100 }))
+    mockNowMs += 16
+    host.dispatchEvent(pointer('pointermove', { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 100 })) // arms 'pan' (horizontal, past slop)
+    mockNowMs += 16
+    host.dispatchEvent(pointer('pointermove', { pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 100 })) // keeps dragging the same direction
+    await Promise.resolve()
+
+    const liveOvershot = plot.setScaleCalls[plot.setScaleCalls.length - 1]
+    expect(liveOvershot.max).toBeGreaterThan(100) // rubber-banded past the true bound, live
+    expect(liveOvershot.max).toBeLessThan(100 + (100 - 0)) // never a full extra bounds-span past it
+
+    host.dispatchEvent(pointer('pointerup', { pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 100 }))
+    await Promise.resolve()
+    const callsAfterRelease = plot.setScaleCalls.length
+
+    flushOneFrame(16)
+    await Promise.resolve()
+    const afterOneSpringFrame = plot.setScaleCalls[plot.setScaleCalls.length - 1]
+    // Spring-back PULLS the overshoot IN (toward 100), the opposite
+    // direction momentum would push it (further past 100) — this is the
+    // behavioural signature that distinguishes the two paths.
+    expect(afterOneSpringFrame.max).toBeLessThan(liveOvershot.max)
+    expect(afterOneSpringFrame.max).toBeGreaterThanOrEqual(100)
+
+    for (let i = 0; i < 200; i++) flushOneFrame(16)
+    await Promise.resolve()
+    const finalRange = plot.setScaleCalls[plot.setScaleCalls.length - 1]
+    expect(finalRange).toEqual({ min: 80, max: 100 }) // lands exactly back on the true bound
+    expect(plot.setScaleCalls.length).toBeGreaterThan(callsAfterRelease)
+  })
+
+  it('respects prefers-reduced-motion: an overshot release snaps straight to the bound, no animated frames', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('reduce'),
+      addEventListener() {},
+      removeEventListener() {},
+    }))
+    const w = mountChart(false)
+    const plot = mockState.instances[0]
+    plot.scales.x = { min: 80, max: 100 }
+
+    const host = w.get('.uplot-host').element
+    host.dispatchEvent(pointer('pointerdown', { pointerId: 1, pointerType: 'touch', clientX: 400, clientY: 100 }))
+    mockNowMs += 16
+    host.dispatchEvent(pointer('pointermove', { pointerId: 1, pointerType: 'touch', clientX: 300, clientY: 100 }))
+    mockNowMs += 16
+    host.dispatchEvent(pointer('pointermove', { pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 100 }))
+    host.dispatchEvent(pointer('pointerup', { pointerId: 1, pointerType: 'touch', clientX: 200, clientY: 100 }))
+    await Promise.resolve()
+
+    expect(plot.scales.x).toEqual({ min: 80, max: 100 }) // snapped straight back, no live glide frames needed
+    const callsAfterRelease = plot.setScaleCalls.length
+    // Flushing further frames must not move it again — there is no live
+    // spring-back rAF loop under reduced motion, just the one synchronous
+    // snap (any OTHER unrelated pending rAF — e.g. the needle-position
+    // scheduler — is irrelevant to this assertion).
+    flushOneFrame(16)
+    await Promise.resolve()
+    expect(plot.setScaleCalls.length).toBe(callsAfterRelease)
+    expect(plot.scales.x).toEqual({ min: 80, max: 100 })
   })
 })

@@ -6,7 +6,26 @@
  * without a canvas or uPlot instance. The caller (UPlotChart.vue) owns the
  * pointer bookkeeping and applies the result via `u.setScale('x', ...)` /
  * the shared `xRange` owner (analyzerStore), same as the existing mouse path.
+ *
+ * B117 stage 4 — `clampRange`'s hard stop at `bounds` reads as "the gesture
+ * hit a wall" rather than "there's nothing more here", the same complaint
+ * B117 raised against TrackMap's zoom clamp (see trackMapGeometry.ts's
+ * `rubberBandZoomValue`, the sibling fix for that surface). `rubberBandPanRange`
+ * below is the OPT-IN, separately-named fix for THIS module: it reuses
+ * `rubberBand()` from sheetPhysics.ts (the SAME WebKit over-scroll formula
+ * B118's sheet drag already uses — a resistance curve is a resistance curve
+ * regardless of whether the unit underneath is CSS px or chart data units)
+ * rather than `panRange`'s hard `clampRange`. CRITICAL: every EXISTING
+ * exported function in this module (`clampRange`, `panRange`, `zoomRange`,
+ * `pinchRange`, and the B68 centre-needle family) is UNCHANGED — B68's
+ * centre-needle variants already implement their OWN deliberately different
+ * virtual-padding policy and are not touched by this stage at all; rubber-
+ * banding is a THIRD, independently opt-in policy a caller chooses instead
+ * of either of the other two, exactly the way B68 itself was added as new
+ * exports alongside the originals rather than a behavioural change to them.
  */
+
+import { rubberBand } from '@/domain/interaction/sheetPhysics'
 
 export interface XRange {
   min: number
@@ -153,4 +172,56 @@ export function blankTickLabelsOutsideData(
     const value = splits[index]
     return value == null || value < dataBounds.min || value > dataBounds.max ? '' : label
   })
+}
+
+/**
+ * B117 stage 4 — rubber-banded pan: mirrors `panRange`'s own signature and
+ * "positive delta moves the window forward" convention EXACTLY, but instead
+ * of `clampRange`'s hard stop, whatever portion of the panned candidate
+ * would cross `bounds` is resisted via `rubberBand()` — the edge creeps
+ * asymptotically toward (never quite reaching) one extra `bounds`-span past
+ * the true boundary, rather than refusing to move at all. `span` (how much
+ * of the timeline is visible) never changes here — only WHERE it sits — so a
+ * caller doesn't need to re-derive it from the resisted result.
+ *
+ * Degenerate/oversized-span inputs fall back to the exact same cases
+ * `clampRange` already handles (a non-positive `bounds` span, a non-positive
+ * `range` span, or a `range` span that already covers all of `bounds`) —
+ * there is nothing meaningful to resist in any of those, so this returns the
+ * plain clamp result for them rather than inventing a resistance curve with
+ * no real boundary to resist against.
+ */
+export function rubberBandPanRange(range: XRange, deltaX: number, bounds: XRange, coefficient = 0.55): XRange {
+  const boundsSpan = bounds.max - bounds.min
+  if (!(boundsSpan > 0)) return { ...bounds }
+  let span = range.max - range.min
+  if (!(span > 0)) span = boundsSpan
+  if (span >= boundsSpan) return { ...bounds }
+
+  let min = range.min - deltaX
+  let max = min + span
+  if (min < bounds.min) {
+    const overshoot = bounds.min - min
+    min = bounds.min - rubberBand(overshoot, boundsSpan, coefficient)
+    max = min + span
+  } else if (max > bounds.max) {
+    const overshoot = max - bounds.max
+    max = bounds.max + rubberBand(overshoot, boundsSpan, coefficient)
+    min = max - span
+  }
+  return { min, max }
+}
+
+/**
+ * B117 stage 4 — the spring-back TARGET for a range a caller has been
+ * rubber-banding live (see `rubberBandPanRange`) once the gesture releases:
+ * simply the plain, hard-clamped `bounds`-respecting range — `clampRange`
+ * itself, reused rather than reimplemented (a rubber-banded range's span
+ * never changed, so clamping it back is exactly the same operation
+ * `clampRange` already performs on an out-of-bounds candidate). Exported
+ * under its own name so a call site reads as "where do I spring back to"
+ * rather than an unexplained bare `clampRange` call in gesture-release code.
+ */
+export function rubberBandSpringTarget(range: XRange, bounds: XRange): XRange {
+  return clampRange(range, bounds)
 }

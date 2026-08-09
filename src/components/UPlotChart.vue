@@ -138,6 +138,8 @@ import {
   panRange,
   pinchCentreNeedleRange,
   pinchRange,
+  rubberBandPanRange,
+  rubberBandSpringTarget,
   zoomCentreNeedleRange,
   type XRange,
 } from '@/features/analyzer/xRangeGesture'
@@ -152,6 +154,7 @@ import {
   type Rect2D,
 } from '@/domain/analysis/chartPointerGesture'
 import { pushSample, estimateVelocityPxPerSec, momentumOffsetAt, type PointerSample } from '@/domain/interaction/sheetPhysics'
+import { springStep, isSpringSettled, SPRING_DEFAULT, SPRING_MAX_DT_SEC, type SpringState } from '@/domain/interaction/spring'
 import { prefersReducedMotion } from '@/composables/useFlipAnimation'
 
 const { t } = useI18n()
@@ -684,6 +687,61 @@ function startTouchPanMomentum(): void {
   touchPanMomentumId = window.requestAnimationFrame(step)
 }
 
+// ── B117 stage 4 — touch-pan-release spring-back ────────────────────────────
+// When a touch-pan RELEASES while the live rubber-band resistance (see
+// `moveTouchGesture`'s normal-mode pan branch above) has the visible range
+// sitting past the true bound, momentum makes no sense (there's nowhere
+// further to glide TO — see `endTouchGesture`'s own dispatch between this
+// and `startTouchPanMomentum`); instead the range springs back to
+// `rubberBandSpringTarget` — reusing B117 stage 1's `springStep`/
+// `SPRING_DEFAULT` (critically damped: a "you overshot, here's the edge"
+// correction should not itself overshoot back past the true bound, unlike
+// stage 1's drag-release settle which deliberately DOES allow a touch of
+// overshoot because that gesture carried real momentum).
+let touchPanSpringBackId: number | null = null
+
+function cancelTouchPanSpringBack(): void {
+  if (touchPanSpringBackId != null) {
+    window.cancelAnimationFrame(touchPanSpringBackId)
+    touchPanSpringBackId = null
+  }
+}
+
+/**
+ * `overshotRange` is the LIVE (rubber-banded, out-of-bounds) range at
+ * release; `bounds` the data extent it must spring back within. Only ONE
+ * degree of freedom is actually sprung (`min`, with `max` recomputed each
+ * frame as `min + span`) — a rubber-banded range's span never changes (see
+ * `rubberBandPanRange`'s own doc), so springing both edges independently
+ * would be redundant motion for a single physical quantity ("how far past
+ * the edge is this window sitting").
+ */
+function startTouchPanSpringBack(overshotRange: XRange, bounds: XRange): void {
+  const target = rubberBandSpringTarget(overshotRange, bounds)
+  if (target.min === overshotRange.min && target.max === overshotRange.max) return // already at rest, nothing to spring
+  if (prefersReducedMotion()) {
+    emitXRange(target)
+    return
+  }
+  const span = overshotRange.max - overshotRange.min
+  let state: SpringState = { position: overshotRange.min, velocity: 0 }
+  let lastFrameMs: number | null = null
+
+  function step(nowMs: number): void {
+    const dtSec = lastFrameMs == null ? 1 / 60 : Math.min((nowMs - lastFrameMs) / 1000, SPRING_MAX_DT_SEC)
+    lastFrameMs = nowMs
+    state = springStep(state, target.min, SPRING_DEFAULT, dtSec)
+    if (isSpringSettled(state, target.min)) {
+      touchPanSpringBackId = null
+      emitXRange(target) // land on the EXACT target, not wherever the epsilon check stopped
+      return
+    }
+    emitXRange({ min: state.position, max: state.position + span })
+    touchPanSpringBackId = window.requestAnimationFrame(step)
+  }
+  touchPanSpringBackId = window.requestAnimationFrame(step)
+}
+
 function clearLongPress(): void {
   if (longPressTimer != null) clearTimeout(longPressTimer)
   longPressTimer = null
@@ -945,8 +1003,15 @@ function moveTouchGesture(e: PointerEvent): void {
     const curVal = plot.posToVal(pos.x, 'x')
     emitXRange(
       props.centreCursorMode
+        // B68's virtual-padding policy is untouched — deliberately NOT
+        // rubber-banded (see xRangeGesture.ts's own B117 stage-4 doc: the
+        // two policies are independent, opt-in alternatives, never combined).
         ? panCentreNeedleRange(range, curVal - prevVal, bounds)
-        : panRange(range, curVal - prevVal, bounds),
+        // B117 stage 4 — normal mode's STRICT clamp gets the live rubber-band
+        // resistance instead of `panRange`'s hard stop; `startTouchPanSpringBack`
+        // (see `endTouchGesture`) takes over on release to return this to the
+        // true bound (`rubberBandSpringTarget`) if the drag ended overshot.
+        : rubberBandPanRange(range, curVal - prevVal, bounds),
     )
     panLastX = pos.x
     touchPanSamples = pushSample(touchPanSamples, { t: performance.now(), y: pos.x })
@@ -976,7 +1041,23 @@ function endTouchGesture(e: PointerEvent): void {
   if (touchPointers.size === 0) {
     touchMode = 'idle'
     pinchLast = null
-    if (wasPanning) startTouchPanMomentum()
+    if (wasPanning) {
+      // B117 stage 4 — normal mode may have released mid-rubber-band (the
+      // visible range sitting past the true bound); spring back to it
+      // instead of starting a momentum glide that has nowhere further to
+      // usefully go. Centre mode never rubber-bands (its own B68 virtual-
+      // padding bounds are a different policy entirely — see
+      // `moveTouchGesture`'s pan branch) so it always falls through to the
+      // unchanged stage-3 momentum path.
+      const bounds = !props.centreCursorMode ? dataXBounds() : null
+      const range = bounds ? currentXRange() : null
+      const overshot = bounds && range && (range.min < bounds.min || range.max > bounds.max)
+      if (overshot && bounds && range) {
+        startTouchPanSpringBack(range, bounds)
+      } else {
+        startTouchPanMomentum()
+      }
+    }
   }
 }
 
@@ -1112,11 +1193,12 @@ function onPointerDown(e: PointerEvent): void {
   if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
     return
   }
-  // B117 stage 3 — any pointer this chart actually starts handling below
+  // B117 stage 3/4 — any pointer this chart actually starts handling below
   // (axis-band pan, touch pan/pinch/select, or the centre-needle scrub)
-  // cancels an in-flight touch-pan glide immediately, regardless of which of
-  // those gestures the new pointer turns out to start.
+  // cancels an in-flight touch-pan glide OR spring-back immediately,
+  // regardless of which of those gestures the new pointer turns out to start.
   cancelTouchPanMomentum()
+  cancelTouchPanSpringBack()
   // B94 — the axis band claims its own drag before anything else considers
   // this pointerdown, for every pointer type (mouse/touch/pen): it's a region
   // uPlot's native drag-zoom and this file's other gestures never reach.
@@ -1268,6 +1350,7 @@ onBeforeUnmount(() => {
   if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
   if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
   cancelTouchPanMomentum()
+  cancelTouchPanSpringBack()
   resizeEpoch++
   destroy()
 })
