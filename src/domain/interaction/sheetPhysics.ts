@@ -171,6 +171,43 @@ export function project(velocityPxPerSec: number, decay = 0.998): number {
   return ((velocityPxPerSec / 1000) * decay) / (1 - decay)
 }
 
+/**
+ * B117 stage 3 — the CUMULATIVE glide distance travelled `elapsedMs` after
+ * release, under the exact same discrete exponential-decay model
+ * {@link project} already implements — this is a live, drivable-by-rAF
+ * ANIMATION built on top of that "where does it eventually stop" projection,
+ * for TrackMap.vue's pan-release glide and UPlotChart.vue's touch-pan-release
+ * glide (B117's stage-3 requirement: "use the existing project() for the
+ * glide target").
+ *
+ * Derivation: distance travelled from release (t=0ms) to time t is the
+ * PARTIAL sum {@link project} takes all the way to infinity — using the same
+ * `v(t) = v0 * decay^t` per-ms velocity {@link project}'s own doc derives:
+ *
+ *   traveled(t) = sum_{i=1}^{t} v0*decay^i / 1000
+ *               = (v0/1000) * decay * (1 - decay^t) / (1 - decay)
+ *               = project(v0, decay) * (1 - decay^t)
+ *
+ * — an EXACT closed form, not a numerically-integrated approximation: no
+ * per-frame accumulation error regardless of how irregular real rAF frame
+ * timing is (a dropped frame just means the next call passes a larger
+ * `elapsedMs`, landing on the exact same curve rather than "catching up"
+ * through however many intermediate steps were skipped). It also trivially
+ * satisfies "reduces to `project()` itself as t -> infinity" by construction
+ * (`decay^t -> 0`), so a caller checking "has this glide effectively
+ * finished" can compare `traveled` against `project(v0, decay)` directly
+ * instead of tracking velocity decay separately.
+ *
+ * A caller drives this by recording `t0 = performance.now()` at release and
+ * calling `momentumOffsetAt(v0, now() - t0)` each animation frame, adding
+ * the result to the value's position AT RELEASE (not accumulating a running
+ * delta) — see TrackMap.vue's/UPlotChart.vue's own glide loops.
+ */
+export function momentumOffsetAt(velocityPxPerSec: number, elapsedMs: number, decay = 0.998): number {
+  if (!(elapsedMs > 0)) return 0
+  return project(velocityPxPerSec, decay) * (1 - decay ** elapsedMs)
+}
+
 export interface DismissDecisionParams {
   /** Sheet's translateY at release, in px (0 = resting, positive = dragged
    *  toward dismissal). Should be the RESISTED value actually on screen

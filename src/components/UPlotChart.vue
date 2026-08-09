@@ -151,6 +151,8 @@ import {
   type CentreNeedleGeometry,
   type Rect2D,
 } from '@/domain/analysis/chartPointerGesture'
+import { pushSample, estimateVelocityPxPerSec, momentumOffsetAt, type PointerSample } from '@/domain/interaction/sheetPhysics'
+import { prefersReducedMotion } from '@/composables/useFlipAnimation'
 
 const { t } = useI18n()
 // B36 — edge-gesture guard for the mobile full-bleed chart (see this file's
@@ -592,6 +594,96 @@ let pendingTouchStart: { x: number; y: number } | null = null
 let suppressTouchContextMenu = false
 let contextMenuResetTimer: ReturnType<typeof setTimeout> | null = null
 
+// ── B117 stage 3 — touch-pan-release momentum ───────────────────────────────
+// Rolling window of recent touch-pan pointer X positions, read once at
+// release to estimate a release velocity — reused `pushSample`/
+// `estimateVelocityPxPerSec` from sheetPhysics.ts (the ORIGINAL single-axis
+// function, not the 2D one: this gesture only ever has one axis, X). Each
+// sample's `.y` field carries the pan-axis screen-px X position — a
+// deliberate reuse of a field CardMenu's own vertical-sheet-drag calls "the
+// vertical position", but the function itself only ever reads `.t`/`.y` as
+// "whatever ONE axis this particular gesture cares about"; using `.x` here
+// instead would need the NEW 2D estimator for no benefit on a 1D gesture.
+let touchPanSamples: PointerSample[] = []
+let touchPanMomentumId: number | null = null
+
+/** Cancel any in-flight touch-pan glide. */
+function cancelTouchPanMomentum(): void {
+  if (touchPanMomentumId != null) {
+    window.cancelAnimationFrame(touchPanMomentumId)
+    touchPanMomentumId = null
+  }
+}
+
+// Release velocities below this (screen px/s) read as "the finger just
+// stopped", not a flick — same threshold/reasoning as TrackMap.vue's own
+// pan-release momentum (kept in PIXEL space, not converted data units, so
+// the "does this look like a flick" decision stays resolution-relative
+// regardless of how zoomed-in the chart currently is).
+const TOUCH_PAN_MOMENTUM_MIN_VELOCITY_PX_PER_SEC = 60
+const TOUCH_PAN_MOMENTUM_DECAY = 0.998
+
+/**
+ * Start (or, given a below-threshold release velocity, decline to start) the
+ * post-touch-pan-release glide — see TrackMap.vue's `startPanMomentum` for
+ * the shared design (exact `momentumOffsetAt` closed form evaluated fresh
+ * from the FIXED release-time range and timestamp every frame, no per-frame
+ * accumulation drift). The one extra step here: `estimateVelocityPxPerSec`
+ * gives a SCREEN-PIXEL velocity, but this chart's pan pipeline
+ * (`panRange`/`panCentreNeedleRange`/`emitXRange`) all operate in DATA units
+ * — converted once at release via `posToVal`'s local px-per-data slope
+ * (constant across a pure pan: translating the range never changes its
+ * span, only a genuinely bounds-clamped edge would, and even then the span
+ * usually stays the same — see `clampRange`'s own doc), not re-derived every
+ * frame.
+ *
+ * Routes through the SAME `panRange`/`panCentreNeedleRange` + `emitXRange`
+ * pipeline the live touch-pan drag already uses (B117's own requirement:
+ * "do not add a second scale-setting route") — never touches `plot.setScale`
+ * directly.
+ */
+function startTouchPanMomentum(): void {
+  const velocityPxPerSec = estimateVelocityPxPerSec(touchPanSamples)
+  touchPanSamples = []
+  if (!plot) return
+  if (prefersReducedMotion()) return
+  if (Math.abs(velocityPxPerSec) < TOUCH_PAN_MOMENTUM_MIN_VELOCITY_PX_PER_SEC) return
+  // Re-bound to a non-null `const` — TS's control-flow narrowing from the
+  // `!bounds` guard above doesn't carry into the nested `step()` closure
+  // below (a well-known limitation: a closure could in principle run at a
+  // point where the outer narrowing no longer holds, even though `bounds`
+  // itself is never reassigned here).
+  const boundsOrNull = dataXBounds()
+  if (!boundsOrNull) return
+  const bounds: XRange = boundsOrNull
+  const releaseRange = currentXRange() ?? bounds
+  // px-per-data slope of the CURRENT linear x scale, evaluated at two
+  // arbitrary screen-px points one apart — this app's x scale is always
+  // linear (elapsed time / distance), never log, so this ratio is the same
+  // everywhere along it and stays valid for the whole glide (pan alone never
+  // changes the scale's span).
+  const dataPerPx = plot.posToVal(1, 'x') - plot.posToVal(0, 'x')
+  const dataVelocityPerSec = velocityPxPerSec * dataPerPx
+  const releaseTimeMs = performance.now()
+
+  function step(): void {
+    const elapsedMs = performance.now() - releaseTimeMs
+    const deltaX = momentumOffsetAt(dataVelocityPerSec, elapsedMs, TOUCH_PAN_MOMENTUM_DECAY)
+    emitXRange(
+      props.centreCursorMode
+        ? panCentreNeedleRange(releaseRange, deltaX, bounds)
+        : panRange(releaseRange, deltaX, bounds),
+    )
+    const remainingSpeed = Math.abs(velocityPxPerSec * TOUCH_PAN_MOMENTUM_DECAY ** elapsedMs)
+    if (remainingSpeed < TOUCH_PAN_MOMENTUM_MIN_VELOCITY_PX_PER_SEC) {
+      touchPanMomentumId = null
+      return
+    }
+    touchPanMomentumId = window.requestAnimationFrame(step)
+  }
+  touchPanMomentumId = window.requestAnimationFrame(step)
+}
+
 function clearLongPress(): void {
   if (longPressTimer != null) clearTimeout(longPressTimer)
   longPressTimer = null
@@ -785,6 +877,7 @@ function startTouchGesture(e: PointerEvent, allowLongPress: boolean): void {
 
   touchMode = 'pan'
   panLastX = pos.x
+  touchPanSamples = [{ t: performance.now(), y: pos.x }]
   captureTouchPointer(e.pointerId)
   e.preventDefault()
 }
@@ -810,6 +903,7 @@ function moveTouchGesture(e: PointerEvent): void {
     }
     touchMode = 'pan'
     panLastX = start.x
+    touchPanSamples = [{ t: performance.now(), y: start.x }]
     captureTouchPointer(e.pointerId)
   }
 
@@ -855,6 +949,7 @@ function moveTouchGesture(e: PointerEvent): void {
         : panRange(range, curVal - prevVal, bounds),
     )
     panLastX = pos.x
+    touchPanSamples = pushSample(touchPanSamples, { t: performance.now(), y: pos.x })
     e.preventDefault()
   }
 }
@@ -869,11 +964,19 @@ function endTouchGesture(e: PointerEvent): void {
     touchMode = 'pan'
     panLastX = touchPointers.values().next().value?.x ?? panLastX
     pinchLast = null
+    // B117 stage 3 — fresh velocity window for the single-finger
+    // continuation (same reasoning as TrackMap.vue's own pinch->pan handoff).
+    touchPanSamples = [{ t: performance.now(), y: panLastX }]
     return
   }
+  // B117 stage 3 — captured BEFORE the `touchPointers.size === 0` branch
+  // below unconditionally resets `touchMode` to 'idle' regardless of what
+  // gesture was actually live (mirrors TrackMap.vue's own `wasPanning`).
+  const wasPanning = touchMode === 'pan'
   if (touchPointers.size === 0) {
     touchMode = 'idle'
     pinchLast = null
+    if (wasPanning) startTouchPanMomentum()
   }
 }
 
@@ -1009,6 +1112,11 @@ function onPointerDown(e: PointerEvent): void {
   if (e.pointerType === 'touch' && anyPointerCoarse.value && isEdgeGestureZone(e.clientX, window.innerWidth)) {
     return
   }
+  // B117 stage 3 — any pointer this chart actually starts handling below
+  // (axis-band pan, touch pan/pinch/select, or the centre-needle scrub)
+  // cancels an in-flight touch-pan glide immediately, regardless of which of
+  // those gestures the new pointer turns out to start.
+  cancelTouchPanMomentum()
   // B94 — the axis band claims its own drag before anything else considers
   // this pointerdown, for every pointer type (mouse/touch/pen): it's a region
   // uPlot's native drag-zoom and this file's other gestures never reach.
@@ -1159,6 +1267,7 @@ onBeforeUnmount(() => {
   if (needleFrame != null) cancelAnimationFrame(needleFrame)
   if (needleSettleFrame != null) cancelAnimationFrame(needleSettleFrame)
   if (resizeFrame != null) cancelAnimationFrame(resizeFrame)
+  cancelTouchPanMomentum()
   resizeEpoch++
   destroy()
 })

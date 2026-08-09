@@ -6,6 +6,7 @@ import {
   rubberBand,
   dragTranslateY,
   project,
+  momentumOffsetAt,
   shouldDismissSheet,
   parseTranslateY,
   type PointerSample,
@@ -161,6 +162,58 @@ describe('project', () => {
 
   it('is negative for negative (upward) velocity', () => {
     expect(project(-1000, 0.998)).toBeCloseTo(-499, 5)
+  })
+})
+
+describe('momentumOffsetAt', () => {
+  it('returns 0 at or before t=0 (nothing travelled yet)', () => {
+    expect(momentumOffsetAt(1000, 0)).toBe(0)
+    expect(momentumOffsetAt(1000, -5)).toBe(0)
+  })
+
+  it('is 0 for 0 velocity at any elapsed time', () => {
+    expect(momentumOffsetAt(0, 500)).toBe(0)
+  })
+
+  it('converges to project()\'s own resting offset as elapsed time grows', () => {
+    const v = 1200
+    const total = project(v)
+    // decay=0.998 per ms: after 10 real seconds (10000ms), decay^10000 is
+    // astronomically small — the glide should have travelled essentially
+    // the whole projected distance.
+    expect(momentumOffsetAt(v, 10_000)).toBeCloseTo(total, 3)
+  })
+
+  it('is monotonically increasing in elapsed time for a positive velocity, and never overshoots the eventual total', () => {
+    const v = 800
+    const total = project(v)
+    let prev = 0
+    for (const t of [10, 50, 100, 300, 600, 1000, 2000]) {
+      const d = momentumOffsetAt(v, t)
+      expect(d).toBeGreaterThan(prev)
+      expect(d).toBeLessThan(total)
+      prev = d
+    }
+  })
+
+  it('is negative (and monotonically decreasing) for a negative (upward/leftward) velocity, mirroring project()\'s own sign convention', () => {
+    const v = -800
+    const total = project(v)
+    expect(total).toBeLessThan(0)
+    let prev = 0
+    for (const t of [10, 100, 1000]) {
+      const d = momentumOffsetAt(v, t)
+      expect(d).toBeLessThan(prev)
+      expect(d).toBeGreaterThan(total)
+      prev = d
+    }
+  })
+
+  it('matches the exact closed form for a known input (spot-check against project()\'s own worked example)', () => {
+    // project(1000, 0.998) = 499 (see project()'s own test above). At
+    // elapsedMs=100, traveled = 499 * (1 - 0.998^100).
+    const expected = 499 * (1 - 0.998 ** 100)
+    expect(momentumOffsetAt(1000, 100, 0.998)).toBeCloseTo(expected, 6)
   })
 })
 
