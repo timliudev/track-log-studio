@@ -9,6 +9,7 @@ import {
   computeCheckeredBand,
   extremumColor,
   clampZoomValue,
+  rubberBandZoomValue,
   clampPanAxis,
   computeZoomAbout,
   computeFocusFit,
@@ -203,6 +204,46 @@ describe('clampZoomValue / clampPanAxis / computeZoomAbout', () => {
     expect(clampZoomValue(0.5, 1, 24)).toBe(1)
     expect(clampZoomValue(30, 1, 24)).toBe(24)
     expect(clampZoomValue(5, 1, 24)).toBe(5)
+  })
+
+  // B117 stage 4 — rubber-banded sibling of clampZoomValue.
+  describe('rubberBandZoomValue', () => {
+    it('behaves exactly like clampZoomValue while in-bounds', () => {
+      expect(rubberBandZoomValue(5, 1, 24)).toBe(5)
+      expect(rubberBandZoomValue(1, 1, 24)).toBe(1)
+      expect(rubberBandZoomValue(24, 1, 24)).toBe(24)
+    })
+
+    it('creeps below minZoom instead of hard-clamping to it', () => {
+      const z = rubberBandZoomValue(0.5, 1, 24)
+      expect(z).toBeLessThan(1)
+      expect(z).toBeGreaterThan(0.5) // resisted, not the raw value
+    })
+
+    it('creeps above maxZoom instead of hard-clamping to it', () => {
+      const z = rubberBandZoomValue(30, 1, 24)
+      expect(z).toBeGreaterThan(24)
+      expect(z).toBeLessThan(30) // resisted, not the raw value
+    })
+
+    it('resists monotonically: further past the bound creeps further, but always less than the raw amount', () => {
+      const near = rubberBandZoomValue(25, 1, 24) // 1 past maxZoom
+      const far = rubberBandZoomValue(1000, 1, 24) // 976 past maxZoom
+      const nearOvershoot = near - 24
+      const farOvershoot = far - 24
+      expect(farOvershoot).toBeGreaterThan(nearOvershoot)
+      expect(farOvershoot).toBeLessThan(1000 - 24)
+    })
+
+    it('never lets the resisted value reach a full extra zoom-range span past the true bound', () => {
+      const z = rubberBandZoomValue(1_000_000, 1, 24)
+      expect(z - 24).toBeLessThan(24 - 1)
+    })
+
+    it('falls back to the plain clamp for a degenerate zoom range', () => {
+      expect(rubberBandZoomValue(5, 10, 10)).toBe(10)
+      expect(rubberBandZoomValue(5, 10, 5)).toBe(10)
+    })
   })
 
   it('clampPanAxis keeps at least `margin` px of the bbox on-screen', () => {

@@ -7,14 +7,19 @@
  * pointer-event stream — CardMenu.vue wires these to actual PointerEvents and
  * does the imperative DOM writes; this module never touches `window`/`document`.
  *
- * NOTE for whoever reconciles this with the B117 gesture-physics branch
- * (`useCssGridDashboardDrag.ts`/`TrackMap.vue`/`xRangeGesture.ts`/
- * `UPlotChart.vue`): this module was written independently and does NOT
- * import from or coordinate with that branch's velocity-tracking/rubber-band
- * code (per this task's instructions — implement locally, let the main
- * thread converge the two later). If B117 lands a shared
- * velocity-sample/rubber-band helper, `estimateVelocityPxPerSec`/`rubberBand`
- * below are the two functions most likely to duplicate it.
+ * B117 UPDATE: this module IS now that shared velocity-sample/rubber-band/
+ * projection helper — `useCssGridDashboardDrag.ts` (drag-release spring),
+ * `TrackMap.vue` and `UPlotChart.vue` (pan momentum) all import `project()`/
+ * `rubberBand()`/`pushSample()` directly from here rather than duplicating
+ * them, per B117's explicit instruction in docs/ISSUES.md. The one
+ * generalisation B117 needed — velocity sampling over BOTH axes, not just Y
+ * (a card drag has X and Y release velocity; CardMenu's sheet only ever
+ * needed Y) — was added here as an ADDITIVE change: {@link PointerSample}
+ * gained an optional `x` field and {@link estimateVelocity2DPxPerSec} is a
+ * new function alongside the original Y-only `estimateVelocityPxPerSec`,
+ * which is UNCHANGED and still what CardMenu.vue uses. `pushSample` itself
+ * needed no change at all — it only ever looked at `t`, so it already worked
+ * for 2D samples unmodified.
  */
 
 /** One (timestamp-ms, position-px) sample of a pointer's vertical position
@@ -26,6 +31,12 @@
 export interface PointerSample {
   t: number
   y: number
+  /** Horizontal position, px — OPTIONAL (B117 addition): CardMenu's vertical
+   *  sheet drag never sets this and {@link estimateVelocityPxPerSec} never
+   *  reads it, so every pre-existing call site is unaffected. Only
+   *  {@link estimateVelocity2DPxPerSec} (B117's card-drag release velocity,
+   *  which needs BOTH axes) reads it. */
+  x?: number
 }
 
 /** Rolling window used by {@link estimateVelocityPxPerSec}: only samples
@@ -70,6 +81,29 @@ export function estimateVelocityPxPerSec(samples: readonly PointerSample[]): num
   const dtMs = last.t - first.t
   if (!(dtMs > 0)) return 0
   return ((last.y - first.y) / dtMs) * 1000
+}
+
+/**
+ * B117 — two-axis sibling of {@link estimateVelocityPxPerSec}, for gestures
+ * that carry momentum on BOTH axes at once (a dragged dashboard card, a
+ * panned map/chart) rather than CardMenu's vertical-only sheet. Same secant-
+ * over-the-window approach, just applied to `x` and `y` independently from
+ * the SAME pair of samples (one shared time window, not two separately-
+ * windowed 1D estimates) so a diagonal flick's X and Y velocities are
+ * measured over identical, consistent start/end samples. A sample missing
+ * `x` (shouldn't happen for a caller that actually wants 2D velocity, but
+ * guards the same way the rest of this module treats malformed input) reads
+ * as `x: 0` rather than `NaN` propagating through the whole result.
+ */
+export function estimateVelocity2DPxPerSec(samples: readonly PointerSample[]): { vx: number; vy: number } {
+  if (samples.length < 2) return { vx: 0, vy: 0 }
+  const first = samples[0]
+  const last = samples[samples.length - 1]
+  const dtMs = last.t - first.t
+  if (!(dtMs > 0)) return { vx: 0, vy: 0 }
+  const vx = (((last.x ?? 0) - (first.x ?? 0)) / dtMs) * 1000
+  const vy = ((last.y - first.y) / dtMs) * 1000
+  return { vx, vy }
 }
 
 /**
@@ -135,6 +169,43 @@ export function dragTranslateY(rawTranslateYPx: number, sheetHeightPx: number, c
  */
 export function project(velocityPxPerSec: number, decay = 0.998): number {
   return ((velocityPxPerSec / 1000) * decay) / (1 - decay)
+}
+
+/**
+ * B117 stage 3 — the CUMULATIVE glide distance travelled `elapsedMs` after
+ * release, under the exact same discrete exponential-decay model
+ * {@link project} already implements — this is a live, drivable-by-rAF
+ * ANIMATION built on top of that "where does it eventually stop" projection,
+ * for TrackMap.vue's pan-release glide and UPlotChart.vue's touch-pan-release
+ * glide (B117's stage-3 requirement: "use the existing project() for the
+ * glide target").
+ *
+ * Derivation: distance travelled from release (t=0ms) to time t is the
+ * PARTIAL sum {@link project} takes all the way to infinity — using the same
+ * `v(t) = v0 * decay^t` per-ms velocity {@link project}'s own doc derives:
+ *
+ *   traveled(t) = sum_{i=1}^{t} v0*decay^i / 1000
+ *               = (v0/1000) * decay * (1 - decay^t) / (1 - decay)
+ *               = project(v0, decay) * (1 - decay^t)
+ *
+ * — an EXACT closed form, not a numerically-integrated approximation: no
+ * per-frame accumulation error regardless of how irregular real rAF frame
+ * timing is (a dropped frame just means the next call passes a larger
+ * `elapsedMs`, landing on the exact same curve rather than "catching up"
+ * through however many intermediate steps were skipped). It also trivially
+ * satisfies "reduces to `project()` itself as t -> infinity" by construction
+ * (`decay^t -> 0`), so a caller checking "has this glide effectively
+ * finished" can compare `traveled` against `project(v0, decay)` directly
+ * instead of tracking velocity decay separately.
+ *
+ * A caller drives this by recording `t0 = performance.now()` at release and
+ * calling `momentumOffsetAt(v0, now() - t0)` each animation frame, adding
+ * the result to the value's position AT RELEASE (not accumulating a running
+ * delta) — see TrackMap.vue's/UPlotChart.vue's own glide loops.
+ */
+export function momentumOffsetAt(velocityPxPerSec: number, elapsedMs: number, decay = 0.998): number {
+  if (!(elapsedMs > 0)) return 0
+  return project(velocityPxPerSec, decay) * (1 - decay ** elapsedMs)
 }
 
 export interface DismissDecisionParams {

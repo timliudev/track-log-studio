@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   pushSample,
   estimateVelocityPxPerSec,
+  estimateVelocity2DPxPerSec,
   rubberBand,
   dragTranslateY,
   project,
+  momentumOffsetAt,
   shouldDismissSheet,
   parseTranslateY,
   type PointerSample,
@@ -63,6 +65,36 @@ describe('estimateVelocityPxPerSec', () => {
   it('returns 0 for a degenerate (non-positive) time span', () => {
     expect(estimateVelocityPxPerSec([{ t: 50, y: 0 }, { t: 50, y: 40 }])).toBe(0)
     expect(estimateVelocityPxPerSec([{ t: 50, y: 0 }, { t: 10, y: 40 }])).toBe(0)
+  })
+})
+
+describe('estimateVelocity2DPxPerSec', () => {
+  it('returns {0,0} for fewer than 2 samples', () => {
+    expect(estimateVelocity2DPxPerSec([])).toEqual({ vx: 0, vy: 0 })
+    expect(estimateVelocity2DPxPerSec([{ t: 0, x: 0, y: 0 }])).toEqual({ vx: 0, vy: 0 })
+  })
+
+  it('computes independent signed px/s secants for x and y from the same sample window', () => {
+    // 100px right + 50px up over 200ms -> vx=500, vy=-250.
+    const v = estimateVelocity2DPxPerSec([
+      { t: 0, x: 0, y: 50 },
+      { t: 200, x: 100, y: 0 },
+    ])
+    expect(v.vx).toBeCloseTo(500, 5)
+    expect(v.vy).toBeCloseTo(-250, 5)
+  })
+
+  it('returns {0,0} for a degenerate (non-positive) time span', () => {
+    expect(estimateVelocity2DPxPerSec([{ t: 50, x: 0, y: 0 }, { t: 50, x: 40, y: 40 }])).toEqual({ vx: 0, vy: 0 })
+  })
+
+  it('treats a missing x as 0 rather than propagating NaN', () => {
+    const v = estimateVelocity2DPxPerSec([
+      { t: 0, y: 0 },
+      { t: 200, y: 100 },
+    ])
+    expect(v.vx).toBe(0)
+    expect(v.vy).toBeCloseTo(500, 5)
   })
 })
 
@@ -130,6 +162,58 @@ describe('project', () => {
 
   it('is negative for negative (upward) velocity', () => {
     expect(project(-1000, 0.998)).toBeCloseTo(-499, 5)
+  })
+})
+
+describe('momentumOffsetAt', () => {
+  it('returns 0 at or before t=0 (nothing travelled yet)', () => {
+    expect(momentumOffsetAt(1000, 0)).toBe(0)
+    expect(momentumOffsetAt(1000, -5)).toBe(0)
+  })
+
+  it('is 0 for 0 velocity at any elapsed time', () => {
+    expect(momentumOffsetAt(0, 500)).toBe(0)
+  })
+
+  it('converges to project()\'s own resting offset as elapsed time grows', () => {
+    const v = 1200
+    const total = project(v)
+    // decay=0.998 per ms: after 10 real seconds (10000ms), decay^10000 is
+    // astronomically small — the glide should have travelled essentially
+    // the whole projected distance.
+    expect(momentumOffsetAt(v, 10_000)).toBeCloseTo(total, 3)
+  })
+
+  it('is monotonically increasing in elapsed time for a positive velocity, and never overshoots the eventual total', () => {
+    const v = 800
+    const total = project(v)
+    let prev = 0
+    for (const t of [10, 50, 100, 300, 600, 1000, 2000]) {
+      const d = momentumOffsetAt(v, t)
+      expect(d).toBeGreaterThan(prev)
+      expect(d).toBeLessThan(total)
+      prev = d
+    }
+  })
+
+  it('is negative (and monotonically decreasing) for a negative (upward/leftward) velocity, mirroring project()\'s own sign convention', () => {
+    const v = -800
+    const total = project(v)
+    expect(total).toBeLessThan(0)
+    let prev = 0
+    for (const t of [10, 100, 1000]) {
+      const d = momentumOffsetAt(v, t)
+      expect(d).toBeLessThan(prev)
+      expect(d).toBeGreaterThan(total)
+      prev = d
+    }
+  })
+
+  it('matches the exact closed form for a known input (spot-check against project()\'s own worked example)', () => {
+    // project(1000, 0.998) = 499 (see project()'s own test above). At
+    // elapsedMs=100, traveled = 499 * (1 - 0.998^100).
+    const expected = 499 * (1 - 0.998 ** 100)
+    expect(momentumOffsetAt(1000, 100, 0.998)).toBeCloseTo(expected, 6)
   })
 })
 
