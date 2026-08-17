@@ -374,13 +374,19 @@ export function convertToVbo(
 
   // --- VBO time field (UTC time-of-day, HHMMSS.sss). Source priority:
   //  1. GPS_UTC_hh/mm/ss/ms when present and not all-zero — the real GPS clock;
-  //  2. else the created date's time-of-day + elapsed `Time` column;
-  //  3. else (no time column) the created date + a synthesized sample interval.
+  //  2. else meta.firstSampleEpochMs (B126: the .rcz importer's first
+  //     master-clock sample, more precise than createdDate) + elapsed `Time`;
+  //  3. else the created date's time-of-day + elapsed `Time` column;
+  //  4. else (no time column) the created date + a synthesized sample interval.
+  // `createdDate` itself (and the "File created on …" stamp line below) is
+  // NEVER replaced by firstSampleEpochMs — only the time-of-day anchor is.
   const timeCh = session.timeChannel?.data
   const stepMs = session.sampleIntervalMs ?? 100
   const t0 = timeCh && n > 0 ? cell(timeCh, 0) : 0
-  const baseSecs = created
-    ? created.getHours() * 3600 + created.getMinutes() * 60 + created.getSeconds()
+  const firstSampleEpochMs = session.meta.firstSampleEpochMs
+  const timeBase = typeof firstSampleEpochMs === 'number' ? new Date(firstSampleEpochMs) : created
+  const baseSecs = timeBase
+    ? timeBase.getHours() * 3600 + timeBase.getMinutes() * 60 + timeBase.getSeconds()
     : 0
 
   const cUtcHh = session.get('GPS_UTC_hh')?.data

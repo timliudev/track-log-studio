@@ -359,3 +359,60 @@ describe('convertToVbo — B122 standard GPS columns', () => {
     expect(channels.map((c) => c.ctTitle)).toContain('GPS_Course')
   })
 })
+
+describe('convertToVbo — B126 time-of-day anchors on the first-sample epoch, not createdDate', () => {
+  /** First data row's time field (HHMMSS.sss) from a _ct.vbo. */
+  function firstTime(content: string): string {
+    const lines = content.split('\r\n')
+    return lines[lines.indexOf('[data]') + 1].split(' ')[1]
+  }
+  const pad = (v: number) => String(v).padStart(2, '0')
+  const hms = (d: Date) => `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+
+  // Real-world B126 scenario: session.json's timeCreated (createdDate) is
+  // ~6.5s BEFORE firstTimestamp (firstSampleEpochMs) — the moment RaceChrono
+  // opened the session vs. the moment the first sample was actually taken.
+  const createdEpochMs = Date.UTC(2025, 7, 17, 8, 21, 5, 518)
+  const firstSampleEpochMs = Date.UTC(2025, 7, 17, 8, 21, 12, 23)
+
+  it('uses firstSampleEpochMs, not createdDate, for the time-of-day base when they differ', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('RPM', [1000, 2000])],
+      {
+        formatId: 'rcz',
+        createdDate: new Date(createdEpochMs),
+        headerInfo: {},
+        firstSampleEpochMs,
+      },
+    )
+    const ct = convertToVbo(session, 'test.rcz').find((a) => a.suffix === '_ct')!.content
+    expect(firstTime(ct).startsWith(hms(new Date(firstSampleEpochMs)))).toBe(true)
+    // Sanity: the pre-fix (createdDate-anchored) value must NOT appear —
+    // otherwise this test would pass even with the bug still present.
+    expect(firstTime(ct).startsWith(hms(new Date(createdEpochMs)))).toBe(false)
+  })
+
+  it('does not change the createdDate-derived "File created on …" stamp line', () => {
+    const created = new Date(createdEpochMs)
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('RPM', [1000, 2000])],
+      { formatId: 'rcz', createdDate: created, headerInfo: {}, firstSampleEpochMs },
+    )
+    const ct = convertToVbo(session, 'test.rcz').find((a) => a.suffix === '_ct')!.content
+    const stampLine = ct.split('\r\n')[0]
+    expect(stampLine).toBe(
+      `File created on ${pad(created.getDate())}/${pad(created.getMonth() + 1)}/` +
+        `${created.getFullYear()} at ${hms(created).replace(/(\d\d)(\d\d)(\d\d)/, '$1:$2:$3')}`,
+    )
+  })
+
+  it('falls back to createdDate when firstSampleEpochMs is absent (non-.rcz formats unaffected)', () => {
+    const created = new Date(2026, 5, 21, 16, 25, 24)
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('RPM', [1000, 2000])],
+      { formatId: 'superX', createdDate: created, headerInfo: {} },
+    )
+    const ct = convertToVbo(session, 'test.loga').find((a) => a.suffix === '_ct')!.content
+    expect(firstTime(ct).startsWith(hms(created))).toBe(true)
+  })
+})

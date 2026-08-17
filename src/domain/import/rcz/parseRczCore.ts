@@ -575,6 +575,10 @@ export function buildRczSession(
   const undecodedDeviceCount = devices.length - decodable.length
   if (undecodedDeviceCount > 0) headerInfo.undecodedDeviceCount = String(undecodedDeviceCount)
 
-  const meta: LogMeta = { formatId: 'rcz', createdDate, headerInfo }
+  // t0 = epoch (ms) of the first MASTER-CLOCK sample — more precise than
+  // createdDate (session.json's timeCreated/firstTimestamp, the moment
+  // RaceChrono opened the session) for anchoring the VBO time-of-day field
+  // when there's no GPS_UTC_* clock to use instead. See B126.
+  const meta: LogMeta = { formatId: 'rcz', createdDate, headerInfo, firstSampleEpochMs: t0 }
   return new LogSession(channels, meta)
 }

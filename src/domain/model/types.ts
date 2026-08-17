@@ -36,4 +36,16 @@ export interface LogMeta {
   readonly headerInfo: Readonly<Record<string, string>>
   /** Portable annotations recovered from an exported source file. */
   readonly exportMetadata?: import('@/domain/export/metadata').ExportMetadata
+  /**
+   * Epoch (ms) of the FIRST master-clock sample, when the importer can supply
+   * one more precise than `createdDate` — currently only the `.rcz` importer
+   * (`session.json`'s `firstTimestamp`, exposed as `parseRczCore.ts`'s `t0`).
+   * `createdDate` for `.rcz` is the session's `timeCreated` (when RaceChrono
+   * opened the session, e.g. the moment the app was launched), which can
+   * differ from the first actual data sample by several seconds — see B126.
+   * `VboExporter.ts` prefers this over `createdDate` for the VBO time-of-day
+   * base when no `GPS_UTC_*` channel is present; `createdDate`'s own meaning
+   * (the "File created on …" stamp) is unaffected.
+   */
+  readonly firstSampleEpochMs?: number
 }
