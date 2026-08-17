@@ -342,6 +342,64 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   兩個 `@keyframes` 脈衝(1s locate-pulse、400ms value-pulse)無合適 token、GgChart 的 echarts
   tooltip 陰影是 `<script>` 內的 JS 防禦性 fallback 字串(天生不在 CSS 掃描範圍)。 — merge `dec86d3`
 
+## User report — .rcz → .vbo 匯出欄位映射失準 (B120–B126, F7)
+> 實測樣本 `session_20250817_1621_lihpao_full.rcz`(LihPao Full,7 圈,5 個裝置:100 accel /
+> 101 gyro / 102 magn / 200 GPS / 300 RC3 資料裝置 model 404)。匯出 **49 欄**(7 標準 GPS +
+> 42 頻道),**欄位數本身正確、沒有遺漏**:原始 45 個 channel 檔 − 4 份重複的 `distance`
+> + `IR_LapNumber` = 42。問題全部在**命名、單位、槽位分配**。根因:`domain/export/vbo/`
+> 這套映射是為 `.loga`(aRacer ECU 文字欄名)設計的,而 `.rcz` 內**只有數字 channel id、
+> 沒有任何文字標籤**(`sessionfragment.json` 實測只有 device id/model/type),頻道名是
+> importer 依 id 造出來的 `rc_*`(見 docs/specs/RCZ-FORMAT-SPEC.md §5.3)——兩邊語彙直接撞號。
+
+- [ ] **B120** 已經是合法 RaceChrono 識別符的頻道被 Allocator 重新編號,和來源撞名。實測:
+  來源 `rc_analog_5`(電瓶電壓,值域 0.5–14.7)在 `_rc.vbo` 變成 `rc_analog_18`;來源
+  `rc_analog_15` 變成 `rc_digital_2`;來源 `rc_digital_2` 反過來變成 `rc_analog_27`;
+  `rc_x/y/z_acc`、`rc_*_rate_of_rotation`、`rc_*_magn` 本身就是官方識別符,卻被丟進
+  `rc_analog_1..9`。修法:`buildVboCatalog` 在查 `SEMANTIC` 之前先判斷「名稱已是合法 `rc_`
+  識別符」→ identity 直通,並把這些已占用的槽位登記進 `Allocator`,避免後續 generic 配號撞號。
+- [ ] **B121** RC3 `digital1` 的固定語意(RPM)沒被識別。RaceChrono `$RC3` 句子的 d1 槽位是
+  **固定的 RPM**(本 repo 自家的 `Rc3NmeaExporter.ts` 也是硬填 `RPM`;`mapping.ts` 註明可由
+  使用者指派的只有 d2 + a1..a15),RCZ-FORMAT-SPEC §5.3 亦記 id 20002 = digital1「RaceChrono
+  顯示為 RPM」。本檔實測 `rc_digital_1` 值域 0–10337、怠速 1732–1925,確為引擎轉速,卻因為
+  「值不只有 0/1」被歸進 `rc_analog_28`、單位 `raw`。修法:`rc_digital_1` → `rc_rpm`(單位 rpm)。
+  `rc_digital_2` 是使用者自訂槽(本檔實測 0–100 且值呈 n/255×100 的離散階,實質是節氣門開度 %),
+  **不得**硬編語意,但也不該被判成 bool。
+- [ ] **B122** 標準 VBO GPS 欄位沒接上來源資料。`sats` 欄永遠寫死 `012`(實際 `Satellites`
+  首筆為 5)、`height` 欄永遠 `+00000.00`(實際 `GPS_Altitude` 首筆 201.5 m)→ Circuit Tools
+  的高度圖是平的、衛星數是假的;真值反而被塞進 `rc_analog_11` / `rc_analog_16`。另
+  `GPS_Lat`/`GPS_Lon` 已經填進 `lat`/`long` 標準欄,卻因不在 `GPS_CONSUMED` 名單而又各自
+  重複輸出一欄。修法:`GPS_Altitude`→`height`、`Satellites`→`sats`(來源缺這兩者時才退回
+  現行常數),`GPS_Lat`/`GPS_Lon` 併入 `GPS_CONSUMED`。**`heading` 維持現行由 lat/lon 重算的
+  平滑航向**(與 `.loga`/`.nmea` 路徑一致、已平滑),來源的 `GPS_Course` 保留為一般頻道,不互相取代。
+- [ ] **B123** 單位被洗成 `raw`/`bool`。importer 已經標好 G / deg/s / µT / km / ° / DOP,
+  `buildVboCatalog` 對所有非 `SEMANTIC` 頻道一律覆寫成 `raw`(類比)或 `bool`(數位),
+  資訊平白丟掉,`[channel units]` 整段幾乎沒有意義。修法:generic bucket 保留來源
+  `channel.unit`,真的沒有單位時才落 `raw`。
+- [ ] **B124** 整條無資料的頻道仍被輸出成一整欄 0。本檔 dev300 的 IMU 六條
+  (`rc_x/y/z_acc_dev300`、`rc_x/y/z_rate_of_rotation_dev300`)與 `rc_analog_13/14/15` 在
+  `.rcz` 內整條是 `INT32_MAX` 哨兵(= 無資料,見 RCZ-FORMAT-SPEC §5.3),importer 正確轉成
+  NaN,但匯出的 `cell()` 把 NaN 一律當 0 → **9 個垃圾欄位**,還讓「無資料」在 Circuit Tools
+  裡看起來像真實的 0。修法:整條皆 NaN 的頻道不輸出,並在 `_channels.csv` 列一行
+  「已略過(整條無資料)」;其餘零星 NaN 維持現行填 0(VBO 沒有空值表示法)。
+- [ ] **B125** 數位/類比判定規則過脆。現行規則是「所有值都是 0 或 1 就算 digital」,於是
+  (a) 被 [[B124]] 填成全 0 的無資料頻道被判成 digital(`rc_z_rate_of_rotation_dev300` →
+  `rc_digital_3`),(b) `GPS_AltitudePrecision` 這種 DOP 浮點只因本檔剛好落在 {0,1} 就被標
+  `bool`,(c) 真正的數位槽(RPM)反而被判成類比。修法:先扣掉 B124 的全無資料頻道,再讓
+  「來源名稱/單位」優先於「值域猜測」,值域規則只當最後手段。
+- [ ] **B126** `.vbo` 的 `time` 欄比實際樣本早 6.5 秒。`.rcz` 沒有 `GPS_UTC_*` 頻道,匯出器
+  因此退回「`meta.createdDate` 的時分秒 + 相對 `Time`」;而 RCZ importer 的 `createdDate` 取
+  `session.json` 的 `timeCreated`(本檔 08:21:05.518 UTC),第一筆樣本卻在 `firstTimestamp`
+  08:21:12.023 UTC → 整份 `.vbo` 的絕對時鐘偏移 6.5 秒。相對時間正確(圈速不受影響),但與
+  影片、或與 RaceChrono 自家匯出對時就會錯。修法:RCZ importer 把「第一筆主時鐘樣本的 epoch」
+  帶出來(`headerInfo` 或 meta 新欄位),VBO 匯出器優先採用它;`createdDate` 的顯示語意不變。
+- [ ] **F7**(design-first,**本批不實作、待拍板**)RC3 Analog 自訂命名表。`.rcz` 內沒有任何
+  頻道文字標籤,Analog 1–15 的語意只存在使用者的 RaceChrono / ECU 設定裡,程式無從得知——
+  這是 [[B120]]–[[B125]] 修完之後**剩下的唯一**「名字看不懂」來源。需要一個可存成 preset、
+  隨裝置記憶的對應表,讓匯入顯示與匯出欄名都用真名。本檔實測值域可供對照:a1 0–118、
+  a2 0–255、a3 −53…61、a4 0–99.84(0.78 階)、a5 0.5–14.7、a6 64–98、a7 37–54、a8 恆 9、
+  a9 恆 251、a10 17–100、a11 0–255、a12 8/9、a13–15 無資料;d1 = RPM(固定)、d2 0–100
+  (n/255×100 階,疑似 TPS)。UX 待拍板。
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `83fc12a`
