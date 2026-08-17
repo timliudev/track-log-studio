@@ -62,6 +62,23 @@ export const SEMANTIC: Readonly<Record<string, Semantic>> = {
  * ECU columns already folded into the 7 standard VBO GPS channels (so they are
  * not re-emitted as telemetry). Includes the GPS_UTC_* clock columns, which
  * feed the VBO time field and would otherwise show up as meaningless analogs.
+ * Also shared by `CsvExporter.ts` (its `CSV_GPS_DUPES`) for the columns its
+ * own leading Time/GPS_Lat/GPS_Lon/GPS_Speed group folds in — anything added
+ * here must therefore have a CSV equivalent too, or be excluded from CSV's
+ * own dupe set (see `GPS_Altitude`/`Satellites`, which stay OUT of this
+ * shared set for exactly that reason — B122).
+ *
+ * `GPS_Lat`/`GPS_Lon` (decimal degrees — the RCZ/NMEA/VBO-import/XRK/RCNX
+ * importers' encoding, see `vboCoords()`'s second branch) are included
+ * unconditionally: every importer that produces decimal `GPS_Lat`/`GPS_Lon`
+ * never ALSO produces the deg/min/mmmm encoding below, so `vboCoords()`
+ * always consumes one or the other whenever either is present — there is no
+ * format that leaves a populated decimal GPS_Lat/GPS_Lon unconsumed while
+ * still having something else fall back to the deg/min/mmmm branch
+ * (verified against every producer of these names: parseRczCore.ts,
+ * nmeaToSession.ts, parseVbo.ts, parseXrk.ts, parseRcnx.ts). CsvExporter.ts
+ * already added these two to its own dupe set explicitly before this
+ * change, so including them here doesn't alter its behaviour.
  */
 export const GPS_CONSUMED: ReadonlySet<string> = new Set([
   'Time',
@@ -73,6 +90,8 @@ export const GPS_CONSUMED: ReadonlySet<string> = new Set([
   'GPS_Lon_deg',
   'GPS_Lon_min',
   'GPS_Lon_mmmm',
+  'GPS_Lat',
+  'GPS_Lon',
   'GPS_Speed',
   'GPS_UTC_hh',
   'GPS_UTC_mm',

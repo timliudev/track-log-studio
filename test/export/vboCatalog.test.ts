@@ -279,3 +279,83 @@ describe('buildVboCatalog — B123 units', () => {
     expect(ch.kind).toBe('semantic')
   })
 })
+
+describe('convertToVbo — B122 standard GPS columns', () => {
+  /** Split a .vbo [data] section's first row into fields. */
+  function firstDataRow(content: string): string[] {
+    const lines = content.split('\r\n')
+    return lines[lines.indexOf('[data]') + 1].split(' ')
+  }
+  /** [header] section as a plain array. */
+  function header(content: string): string[] {
+    const lines = content.split('\r\n')
+    const start = lines.indexOf('[header]') + 1
+    const end = lines.indexOf('', start)
+    return lines.slice(start, end)
+  }
+
+  it('height/sats carry real GPS_Altitude/Satellites values, not the historical constants', () => {
+    const session = new LogSession(
+      [
+        channel('Time', [0, 100]),
+        channel('GPS_Lat', [24.897, 24.898]),
+        channel('GPS_Lon', [121.267, 121.268]),
+        channel('GPS_Altitude', [201.5, 202.1]),
+        channel('Satellites', [5, 6]),
+      ],
+      META,
+    )
+    const ct = convertToVbo(session, 'test.rcz').find((a) => a.suffix === '_ct')!.content
+    const row = firstDataRow(ct)
+    // sats(0), time(1), lat(2), long(3), velocity(4), heading(5), height(6)
+    expect(row[0]).toBe('005')
+    expect(Number(row[6])).toBeCloseTo(201.5, 1)
+  })
+
+  it('falls back to the historical constants when the source has no GPS_Altitude/Satellites', () => {
+    const session = new LogSession(
+      [
+        channel('Time', [0, 100]),
+        channel('GPS_Lat', [24.897, 24.898]),
+        channel('GPS_Lon', [121.267, 121.268]),
+      ],
+      META,
+    )
+    const ct = convertToVbo(session, 'test.rcz').find((a) => a.suffix === '_ct')!.content
+    const row = firstDataRow(ct)
+    expect(row[0]).toBe('012')
+    expect(row[6]).toBe('+00000.00')
+  })
+
+  it('GPS_Lat/GPS_Lon are not duplicated as generic channels once consumed for lat/long', () => {
+    const session = new LogSession(
+      [
+        channel('Time', [0, 100]),
+        channel('GPS_Lat', [24.897, 24.898]),
+        channel('GPS_Lon', [121.267, 121.268]),
+        channel('RPM', [1000, 2000]),
+      ],
+      META,
+    )
+    const ct = convertToVbo(session, 'test.rcz').find((a) => a.suffix === '_ct')!.content
+    const h = header(ct)
+    // Exactly the 7 standard columns (which already include 'latitude'/
+    // 'longitude') + RPM — no extra GPS_Lat/GPS_Lon entries.
+    expect(h.filter((x) => x === 'GPS_Lat' || x === 'GPS_Lon')).toEqual([])
+    expect(h).toHaveLength(8)
+  })
+
+  it('heading is still the smoothed lat/lon-derived course, and GPS_Course (when present) stays a separate channel', () => {
+    const session = new LogSession(
+      [
+        channel('Time', [0, 100, 200]),
+        channel('GPS_Lat', [24.897, 24.898, 24.899]),
+        channel('GPS_Lon', [121.267, 121.268, 121.269]),
+        channel('GPS_Course', [10, 20, 30]),
+      ],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    expect(channels.map((c) => c.ctTitle)).toContain('GPS_Course')
+  })
+})

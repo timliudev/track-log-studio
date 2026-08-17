@@ -26,6 +26,15 @@ const BASE_HEADER: ReadonlyArray<readonly [string, string, string]> = [
   ['height', 'height', 'm'],
 ]
 
+/**
+ * `GPS_Altitude`/`Satellites` are folded into the standard `height`/`sats`
+ * columns (B122) — but ONLY here. Unlike {@link GPS_CONSUMED}, this set is
+ * NOT shared with `CsvExporter.ts`: the generic CSV format has no standard
+ * altitude/satellite-count columns to fall these into, so it must keep
+ * emitting them as ordinary data columns.
+ */
+const VBO_ONLY_CONSUMED: ReadonlySet<string> = new Set(['GPS_Altitude', 'Satellites'])
+
 /** How a channel was classified when assigning its RaceChrono identifier. */
 export type VboKind = 'semantic' | 'passthrough' | 'analog' | 'digital'
 
@@ -239,7 +248,7 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
   // one appears first in the session's channel order (B120).
   for (const ch of session.channels) {
     const name = ch.name
-    if (name === '' || GPS_CONSUMED.has(name)) continue
+    if (name === '' || GPS_CONSUMED.has(name) || VBO_ONLY_CONSUMED.has(name)) continue
     if (isAllNaN(ch.data, n)) continue // B124: handled (and only decided) in pass 2
     if (SEMANTIC[name]) continue // overridden — not an identity passthrough
     if (isRcIdentifier(name)) alloc.reserve(name)
@@ -248,7 +257,7 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
   // Pass 2: classify + emit, in the session's original channel order.
   for (const ch of session.channels) {
     const name = ch.name
-    if (name === '' || GPS_CONSUMED.has(name)) continue
+    if (name === '' || GPS_CONSUMED.has(name) || VBO_ONLY_CONSUMED.has(name)) continue
 
     if (isAllNaN(ch.data, n)) {
       skipped.push({ ctTitle: name, description: ch.description ?? '', unit: ch.unit ?? '' })
@@ -360,6 +369,8 @@ export function convertToVbo(
   const { lat, lon } = vboCoords(session, n)
   const courses = computeSmoothedCourses(lat, lon)
   const cGpsSpeed = session.get('GPS_Speed')?.data
+  const cGpsAlt = session.get('GPS_Altitude')?.data
+  const cSats = session.get('Satellites')?.data
 
   // --- VBO time field (UTC time-of-day, HHMMSS.sss). Source priority:
   //  1. GPS_UTC_hh/mm/ss/ms when present and not all-zero — the real GPS clock;
@@ -411,16 +422,19 @@ export function convertToVbo(
   }
 
   // --- Pre-format the 7 base columns per row ---
+  // sats/height fall back to the historical constants ('012' / +00000.00)
+  // only when the source has no Satellites/GPS_Altitude channel at all
+  // (B122) — same fixed-width formatting either way.
   const baseCells: string[][] = new Array(n)
   for (let i = 0; i < n; i++) {
     baseCells[i] = [
-      '012',
+      cSats ? padInt(cell(cSats, i), 3) : '012',
       vboTime(i),
       padFloat(lat[i] * 60, 12, 5, true),
       padFloat(lon[i] * -60, 12, 5, true), // VBO convention: +longitude = West
       padFloat(cell(cGpsSpeed, i), 7, 3),
       padFloat(courses[i] ?? 0, 6, 2),
-      padFloat(0, 9, 2, true),
+      cGpsAlt ? padFloat(cell(cGpsAlt, i), 9, 2, true) : padFloat(0, 9, 2, true),
     ]
   }
 

@@ -224,5 +224,22 @@ describe('convertToCsv', () => {
       const bodyLines = lines.slice(0, -1)
       expect(bodyLines.every((l) => l.length > 0)).toBe(true)
     })
+
+    it('still emits GPS_Altitude/Satellites as ordinary columns — CSV has no standard height/sats columns to fold them into (B122 is .vbo-only)', () => {
+      const session = new LogSession(
+        [
+          channel('Time', [0, 100]),
+          channel('GPS_Lat', [24.897, 24.898]),
+          channel('GPS_Lon', [121.267, 121.268]),
+          channel('GPS_Altitude', [201.5, 202.1]),
+          channel('Satellites', [5, 6]),
+        ],
+        META,
+      )
+      const content = convertToCsv(session)[0].content
+      const header = content.split('\n')[0]
+      expect(header).toContain('GPS_Altitude')
+      expect(header).toContain('Satellites')
+    })
   })
 })
