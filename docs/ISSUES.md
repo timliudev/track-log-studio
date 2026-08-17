@@ -359,7 +359,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   識別符」→ identity 直通,並把這些已占用的槽位登記進 `Allocator`,避免後續 generic 配號撞號。
   識別符集合抽到共用模組 `domain/raceChrono/identifiers.ts`,匯入(`decodeRcChannelName`)與
   匯出雙邊共用同一份表,不再各自硬寫。新增測試證明 5 個 generic 頻道排在 `rc_analog_5` 之前
-  仍不會撞號。 — `b5b786c`
+  仍不會撞號。 — `23c75f5`
 - [x] **B121** RC3 `digital1` 的固定語意(RPM)沒被識別。RaceChrono `$RC3` 句子的 d1 槽位是
   **固定的 RPM**(本 repo 自家的 `Rc3NmeaExporter.ts` 也是硬填 `RPM`;`mapping.ts` 註明可由
   使用者指派的只有 d2 + a1..a15),RCZ-FORMAT-SPEC §5.3 亦記 id 20002 = digital1「RaceChrono
@@ -367,7 +367,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   「值不只有 0/1」被歸進 `rc_analog_28`、單位 `raw`。修法:`rc_digital_1` → `rc_rpm`(單位 rpm)。
   `rc_digital_2` 是使用者自訂槽(本檔實測 0–100 且值呈 n/255×100 的離散階,實質是節氣門開度 %),
   **不得**硬編語意,但也不該被判成 bool——現況為 identity 直通、非 bool。真檔複驗:
-  `rc_digital_1` 首筆 1833 rpm。 — `b5b786c`
+  `rc_digital_1` 首筆 1833 rpm。 — `23c75f5`
 - [x] **B122** 標準 VBO GPS 欄位沒接上來源資料。`sats` 欄永遠寫死 `012`(實際 `Satellites`
   首筆為 5)、`height` 欄永遠 `+00000.00`(實際 `GPS_Altitude` 首筆 201.5 m)→ Circuit Tools
   的高度圖是平的、衛星數是假的;真值反而被塞進 `rc_analog_11` / `rc_analog_16`。另
@@ -377,12 +377,12 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   平滑航向**(與 `.loga`/`.nmea` 路徑一致、已平滑),來源的 `GPS_Course` 保留為一般頻道,不互相取代。
   `GPS_Altitude`/`Satellites` 刻意**不**併入共用 `GPS_CONSUMED`(會連帶讓通用 `.csv` 匯出器
   漏掉這兩欄,CSV 沒有對應標準欄位可接),改開一個僅 VBO 用的 `VBO_ONLY_CONSUMED`。真檔複驗:
-  `sats`=005、`height`=+00201.50。 — `b2d3ab4`
+  `sats`=005、`height`=+00201.50。 — `a6fc0ff`
 - [x] **B123** 單位被洗成 `raw`/`bool`。importer 已經標好 G / deg/s / µT / km / ° / DOP,
   `buildVboCatalog` 對所有非 `SEMANTIC` 頻道一律覆寫成 `raw`(類比)或 `bool`(數位),
   資訊平白丟掉,`[channel units]` 整段幾乎沒有意義。修法:generic bucket 保留來源
   `channel.unit`,真的沒有單位時才落 `raw`。`.loga` 路徑不受影響(該路徑頻道本就沒有
-  `channel.unit`,golden fixture 位元不變)。 — `5ae9d4d`
+  `channel.unit`,golden fixture 位元不變)。 — `4c3ee7c`
 - [x] **B124** 整條無資料的頻道仍被輸出成一整欄 0。本檔 dev300 的 IMU 六條
   (`rc_x/y/z_acc_dev300`、`rc_x/y/z_rate_of_rotation_dev300`)與 `rc_analog_13/14/15` 在
   `.rcz` 內整條是 `INT32_MAX` 哨兵(= 無資料,見 RCZ-FORMAT-SPEC §5.3),importer 正確轉成
@@ -392,7 +392,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   `Float32Array`(不是先過 `cell()` 的 NaN→0 視圖)。真檔複驗發現**第 10 個**全無資料頻道
   `GPS_AltitudePrecision`(本檔整條也是 `INT32_MAX`)——連帶解釋了 [[B125]] 描述的 (b) 案例
   實際上就是本條(全 NaN 被 `cell()` 灌成常數 0 才誤判 digital),而非「真實 DOP 數值恰好落在
-  {0,1}」;修完後此頻道由本條直接略過,根本不會走到 [[B125]] 的判定。 — `f6abcf3`
+  {0,1}」;修完後此頻道由本條直接略過,根本不會走到 [[B125]] 的判定。 — `a1c9f5c`
 - [x] **B125** 數位/類比判定規則過脆。現行規則是「所有值都是 0 或 1 就算 digital」,於是
   (a) 被 [[B124]] 填成全 0 的無資料頻道被判成 digital(`rc_z_rate_of_rotation_dev300` →
   `rc_digital_3`),(b) `GPS_AltitudePrecision` 這種 DOP 浮點只因本檔剛好落在 {0,1} 就被標
@@ -407,7 +407,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   `INT32_MAX`,早被 [[B124]] 攔掉,從未走到這個判定式;倖存頻道(`GPS_FixType` {1,2}、
   `GPS_CoordinatePrecision` 1.8–2.4、`distance` 連續值、`IR_LapNumber` 0–8)沒有一個落在
   {0,1},新舊規則判定結果完全相同。已改回歷史語意(NaN 略過、不當 0)。殘留限制見 [[B127]]。
-  — `f6abcf3`(初版)/`2cb0cb1`(訂正 `looksDigital()` 為歷史語意、fixture 復原、測試改寫)
+  — `a1c9f5c`(初版)/`789d1b9`(訂正 `looksDigital()` 為歷史語意、fixture 復原、測試改寫)
 - [x] **B126** `.vbo` 的 `time` 欄比實際樣本早 6.5 秒。`.rcz` 沒有 `GPS_UTC_*` 頻道,匯出器
   因此退回「`meta.createdDate` 的時分秒 + 相對 `Time`」;而 RCZ importer 的 `createdDate` 取
   `session.json` 的 `timeCreated`(本檔 08:21:05.518 UTC),第一筆樣本卻在 `firstTimestamp`
@@ -417,7 +417,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   採用型別化欄位 `LogMeta.firstSampleEpochMs`(而非塞進 `headerInfo` 字串)——選它是因為匯出器
   要的是真正的 epoch number 可直接 `new Date()`,不是還要再解析回數字的字串,且是純新增的
   optional 欄位,其餘 9 個 importer 的既有 `LogMeta` 建構語法完全不用動。真檔複驗:首筆
-  `time`=162112.xxx(非改前的 162105.xxx)。 — `cb5a4d2`
+  `time`=162112.xxx(非改前的 162105.xxx)。 — `d3b15a6`
 - [ ] **B127** [[B125]] 的殘留限制:值域啟發式規則分辨不出「整場都沒觸發過的真實數位旗標」跟
   「值剛好恆為某個常數的類比頻道」。`.loga` 裡整趟記錄都停在 0 的 ECU 旗標(如
   `IR_LapNumber`/`IR_LapTime`/`SimRPM`/`MapNum` 這類本質是類比、但剛好也全程恆 0/某常數的頻道)
