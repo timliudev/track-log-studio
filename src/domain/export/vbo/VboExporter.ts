@@ -122,26 +122,34 @@ function isAllNaN(data: Float32Array, n: number): boolean {
 /**
  * Value-range fallback for digital/analog classification — the LAST resort,
  * consulted only when nothing else (SEMANTIC mapping, a source unit) already
- * identifies the channel (B125). A channel only counts as digital when its
- * raw data contains BOTH a genuine 0 and a genuine 1 sample (NaN cells are
- * skipped — they're not evidence either way) and nothing else: this is what
- * makes a constant-0 or constant-1 channel fail automatically (it can only
- * ever supply one of the two), instead of needing a separate "is constant"
- * carve-out. A channel that already has a source-supplied physical unit is
- * never a boolean state, so it's excluded up front.
+ * identifies the channel (B125). Historical semantics, restored: a channel
+ * counts as digital when every FINITE sample is 0 or 1 (NaN cells are
+ * skipped, never treated as 0 — that `cell()`-based conflation is exactly
+ * what made an all-NaN channel look like a constant-0 digital channel
+ * before B124 existed; do not reintroduce it here). A channel that already
+ * has a source-supplied physical unit is never a boolean state, so it's
+ * excluded up front — this part of B125 is genuinely right, it's what fixes
+ * the DOP-style-float-happens-to-be-0/1 case.
+ *
+ * Deliberately does NOT require both a 0 and a 1 to appear (an earlier
+ * version of this fix did, to auto-reject constant channels, but that
+ * misfires on real ECU boolean flags that simply never fired in a given
+ * log — e.g. `Malf8.Malf_On`, `Pit_SW_On` — which are still genuinely
+ * digital signals, just constant-0 in this particular recording. There is
+ * no way to tell those apart from a constant-0 analog using value range
+ * alone; see B127 for the residual limitation and why a fix needs
+ * name/description evidence instead, deferred pending a user decision).
+ * B124 already removes the one case that motivated the "both values" rule
+ * in .rcz — an all-NaN channel — before this function ever runs.
  */
 function looksDigital(ch: Channel, n: number): boolean {
   if (ch.unit) return false
-  let sawZero = false
-  let sawOne = false
   for (let i = 0; i < n; i++) {
     const v = ch.data[i]
     if (!Number.isFinite(v)) continue
-    if (v === 0) sawZero = true
-    else if (v === 1) sawOne = true
-    else return false
+    if (v !== 0 && v !== 1) return false
   }
-  return sawZero && sawOne
+  return true
 }
 
 /**

@@ -77,25 +77,34 @@ describe('buildVboCatalog — B124 all-NaN channels are dropped', () => {
 })
 
 describe('buildVboCatalog — B125 digital/analog classification', () => {
-  it('does not classify a constant-0 channel with real data as digital', () => {
+  // Historical semantics, restored (see B127): "every finite value is 0 or
+  // 1" — NOT "both a 0 and a 1 must appear". A never-fired boolean ECU flag
+  // (constant 0 for an entire log, e.g. Malf8.Malf_On, Pit_SW_On) is still a
+  // real digital signal and must land in the digital bucket like any other
+  // — value-range alone cannot distinguish it from a constant-0 analog, and
+  // an earlier attempt at "require both values" broke exactly these real
+  // flags (108 reclassified in the .loga golden fixture) for no benefit to
+  // .rcz (every channel B124/B125 actually needed to fix there is all-NaN,
+  // already dropped by B124 before this heuristic ever runs).
+  it('classifies a constant-0, unitless channel as digital (never-fired flag)', () => {
     const session = new LogSession(
       [channel('Time', [0, 100, 200]), channel('AlwaysZero', [0, 0, 0])],
       META,
     )
     const { channels } = buildVboCatalog(session)
     const ch = channels.find((c) => c.ctTitle === 'AlwaysZero')!
-    expect(ch.kind).not.toBe('digital')
-    expect(ch.unit).not.toBe('bool')
+    expect(ch.kind).toBe('digital')
+    expect(ch.unit).toBe('bool')
   })
 
-  it('does not classify a constant-1 channel with real data as digital', () => {
+  it('classifies a constant-1, unitless channel as digital (always-on flag)', () => {
     const session = new LogSession(
       [channel('Time', [0, 100, 200]), channel('AlwaysOne', [1, 1, 1])],
       META,
     )
     const { channels } = buildVboCatalog(session)
     const ch = channels.find((c) => c.ctTitle === 'AlwaysOne')!
-    expect(ch.kind).not.toBe('digital')
+    expect(ch.kind).toBe('digital')
   })
 
   it('still classifies a genuinely-toggling 0/1 channel as digital', () => {
@@ -130,6 +139,21 @@ describe('buildVboCatalog — B125 digital/analog classification', () => {
     const { channels } = buildVboCatalog(session)
     const ch = channels.find((c) => c.ctTitle === 'Bearing')!
     expect(ch.kind).toBe('digital')
+  })
+
+  it('an all-NaN channel is dropped by B124, never reaching the digital heuristic at all', () => {
+    // Before B124 existed, this is exactly the shape that got misclassified
+    // digital: NaN-filled data reads as constant 0 through cell(). B124's
+    // raw-array all-NaN check removes it from the catalog entirely, so it
+    // never even reaches looksDigital() — proven here by kind being absent,
+    // not by kind being 'analog'.
+    const session = new LogSession(
+      [channel('Time', [0, 100, 200]), channel('rc_z_rate_of_rotation_dev300', [NaN, NaN, NaN])],
+      META,
+    )
+    const { channels, skipped } = buildVboCatalog(session)
+    expect(channels.find((c) => c.ctTitle === 'rc_z_rate_of_rotation_dev300')).toBeUndefined()
+    expect(skipped.map((s) => s.ctTitle)).toContain('rc_z_rate_of_rotation_dev300')
   })
 })
 
