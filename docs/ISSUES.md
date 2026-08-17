@@ -342,7 +342,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   兩個 `@keyframes` 脈衝(1s locate-pulse、400ms value-pulse)無合適 token、GgChart 的 echarts
   tooltip 陰影是 `<script>` 內的 JS 防禦性 fallback 字串(天生不在 CSS 掃描範圍)。 — merge `dec86d3`
 
-## User report — .rcz → .vbo 匯出欄位映射失準 (B120–B126, F7)
+## User report — .rcz → .vbo 匯出欄位映射失準 (B120–B127, F7)
 > 實測樣本 `session_20250817_1621_lihpao_full.rcz`(LihPao Full,7 圈,5 個裝置:100 accel /
 > 101 gyro / 102 magn / 200 GPS / 300 RC3 資料裝置 model 404)。匯出 **49 欄**(7 標準 GPS +
 > 42 頻道),**欄位數本身正確、沒有遺漏**:原始 45 個 channel 檔 − 4 份重複的 `distance`
@@ -397,10 +397,17 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   (a) 被 [[B124]] 填成全 0 的無資料頻道被判成 digital(`rc_z_rate_of_rotation_dev300` →
   `rc_digital_3`),(b) `GPS_AltitudePrecision` 這種 DOP 浮點只因本檔剛好落在 {0,1} 就被標
   `bool`,(c) 真正的數位槽(RPM)反而被判成類比。修法:先扣掉 B124 的全無資料頻道,再讓
-  「來源名稱/單位」優先於「值域猜測」,值域規則只當最後手段。實作:改成「必須同時出現真正的
-  0 與真正的 1 才算 digital」(常數頻道天生只會出現其中一種值,因而自動失格,不必另立
-  is-constant 特判)+ 「來源已有 `unit` 就永遠不算 digital」。真檔複驗:(b) 案例已由
-  [[B124]] 先行略過,參見該條備註。 — `f6abcf3`
+  「來源已有 `unit`」優先於「值域猜測」——`unit` 非空的頻道永遠不算 digital(這部分是真正解決
+  (b) 的關鍵)。**值域規則本身維持歷史語意「每個有限值都是 0 或 1」,不要求同時出現 0 與 1**:
+  第一版曾改成「必須同時出現真正的 0 與真正的 1」以求自動排除常數頻道,但這條規則分不清「整場
+  都沒觸發過的真實數位旗標」(如 `Malf8.Malf_On`、`Pit_SW_On`——確實是數位訊號,只是這趟記錄
+  剛好全程沒觸發)跟「值剛好恆為 0 的類比頻道」,結果讓 `.loga` golden fixture 裡 108 個頻道從
+  digital 誤判成 analog(其中真的是數位旗標的也一起遭殃),卻對 `.rcz` 沒有實益——真檔裡促成
+  B125 的全部頻道(`rc_*_dev300`×6、`rc_analog_13/14/15`、`GPS_AltitudePrecision`)整條皆為
+  `INT32_MAX`,早被 [[B124]] 攔掉,從未走到這個判定式;倖存頻道(`GPS_FixType` {1,2}、
+  `GPS_CoordinatePrecision` 1.8–2.4、`distance` 連續值、`IR_LapNumber` 0–8)沒有一個落在
+  {0,1},新舊規則判定結果完全相同。已改回歷史語意(NaN 略過、不當 0)。殘留限制見 [[B127]]。
+  — `f6abcf3`(初版)/`2cb0cb1`(訂正 `looksDigital()` 為歷史語意、fixture 復原、測試改寫)
 - [x] **B126** `.vbo` 的 `time` 欄比實際樣本早 6.5 秒。`.rcz` 沒有 `GPS_UTC_*` 頻道,匯出器
   因此退回「`meta.createdDate` 的時分秒 + 相對 `Time`」;而 RCZ importer 的 `createdDate` 取
   `session.json` 的 `timeCreated`(本檔 08:21:05.518 UTC),第一筆樣本卻在 `firstTimestamp`
@@ -411,6 +418,14 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   要的是真正的 epoch number 可直接 `new Date()`,不是還要再解析回數字的字串,且是純新增的
   optional 欄位,其餘 9 個 importer 的既有 `LogMeta` 建構語法完全不用動。真檔複驗:首筆
   `time`=162112.xxx(非改前的 162105.xxx)。 — `cb5a4d2`
+- [ ] **B127** [[B125]] 的殘留限制:值域啟發式規則分辨不出「整場都沒觸發過的真實數位旗標」跟
+  「值剛好恆為某個常數的類比頻道」。`.loga` 裡整趟記錄都停在 0 的 ECU 旗標(如
+  `IR_LapNumber`/`IR_LapTime`/`SimRPM`/`MapNum` 這類本質是類比、但剛好也全程恆 0/某常數的頻道)
+  跟真正未觸發的數位旗標一樣,都會落進數位槽——單靠值域完全無法區分。正確修法需要**頻道名稱/
+  說明文字**當佐證(例如名稱含 `_SW`/`Malf`/`_Act`/`_En` 等慣例字樣 vs. 純數值型頻道),但這條
+  規則需要涵蓋所有既有 ECU 命名慣例、有誤判風險,屬於待拍板的設計決策,**本批刻意不實作**。
+  背景:[[B125]] 第一版曾嘗試改用純值域規則(要求同時出現 0 與 1)來繞開這個問題,結果誤傷了
+  `.loga` golden fixture 裡 108 個頻道(含真的數位旗標),已還原為歷史語意並記錄在案。
 - [ ] **F7**(design-first,**本批不實作、待拍板**)RC3 Analog 自訂命名表。`.rcz` 內沒有任何
   頻道文字標籤,Analog 1–15 的語意只存在使用者的 RaceChrono / ECU 設定裡,程式無從得知——
   這是 [[B120]]–[[B125]] 修完之後**剩下的唯一**「名字看不懂」來源。需要一個可存成 preset、
