@@ -218,3 +218,64 @@ describe('buildVboCatalog — B121 RC3 digital1 = fixed RPM slot', () => {
     expect(ch.kind).toBe('semantic')
   })
 })
+
+describe('buildVboCatalog — B123 units', () => {
+  it('preserves the source unit on a generic analog channel', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('GPS_AltitudePrecision', [1.2, 2.4], 'DOP')],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    const ch = channels.find((c) => c.ctTitle === 'GPS_AltitudePrecision')!
+    expect(ch.kind).toBe('analog')
+    expect(ch.unit).toBe('DOP')
+  })
+
+  it('falls back to raw when the source has no unit', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('SomeCustomChannel', [1, 2])],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    const ch = channels.find((c) => c.ctTitle === 'SomeCustomChannel')!
+    expect(ch.unit).toBe('raw')
+  })
+
+  it('preserves the source unit on a passthrough identifier channel', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('rc_x_acc', [0.1, 0.2], 'G')],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    const ch = channels.find((c) => c.ctTitle === 'rc_x_acc')!
+    expect(ch.unit).toBe('G')
+  })
+
+  it('keeps unit bool only for a channel actually classified digital, never overwriting a real unit', () => {
+    const session = new LogSession(
+      [
+        channel('Time', [0, 100, 200, 300]),
+        channel('PitSwitch', [0, 1, 0, 1]), // no unit -> classified digital, unit=bool
+        channel('GPS_AltitudePrecision', [0, 1, 0, 1], 'DOP'), // has unit -> never bool
+      ],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    expect(channels.find((c) => c.ctTitle === 'PitSwitch')!.unit).toBe('bool')
+    const dop = channels.find((c) => c.ctTitle === 'GPS_AltitudePrecision')!
+    expect(dop.unit).toBe('DOP')
+    expect(dop.unit).not.toBe('bool')
+  })
+
+  it('keeps SEMANTIC-mapped .loga channels on their declared SI unit + scale, unaffected by B123', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('TC_Xforce', [1000, 2000])],
+      { formatId: 'superX', createdDate: null, headerInfo: {} },
+    )
+    const { channels } = buildVboCatalog(session)
+    const ch = channels.find((c) => c.ctTitle === 'TC_Xforce')!
+    expect(ch.unit).toBe('g')
+    expect(ch.scale).toBe(0.001)
+    expect(ch.kind).toBe('semantic')
+  })
+})

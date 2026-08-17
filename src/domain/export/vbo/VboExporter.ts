@@ -266,14 +266,17 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
       unit = sem.unit
       kind = 'semantic'
     } else if (isRcIdentifier(name)) {
-      // Unit preserved from the source below (B123) — not yet: kept 'raw'
-      // for now, same as the generic buckets below.
       rcName = name
       scale = 1
-      unit = 'raw'
+      // Preserve the source-supplied unit (B123) — 'raw' only when the
+      // importer didn't give one (e.g. the RC3 analog/digital bank, whose
+      // int32ScaleFor has no validated physical unit).
+      unit = ch.unit || 'raw'
       kind = 'passthrough'
     } else if (looksDigital(ch, n)) {
-      // digital bucket spills into analog when full
+      // digital bucket spills into analog when full. looksDigital() already
+      // requires an empty source unit (see its doc), so 'bool' here is never
+      // overwriting a real physical unit.
       rcName = alloc.take([...DIGITAL_BASES, ...ANALOG_BASES])
       scale = 1
       unit = 'bool'
@@ -281,7 +284,7 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
     } else {
       rcName = alloc.take(ANALOG_BASES)
       scale = 1
-      unit = 'raw'
+      unit = ch.unit || 'raw' // B123: preserve the source unit when the importer supplied one
       kind = 'analog'
     }
 
