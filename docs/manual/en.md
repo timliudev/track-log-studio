@@ -99,10 +99,12 @@ Under "Output format," choose:
 
 - **NMEA / RC3**: outputs GPS (`$GPRMC`) plus a limited number of sensor slots (`$RC3`) for import into a RaceChrono DIY device. Requires manually setting up the "field mapping" below.
   - If the log has no GPS (no aRacer Race Module installed), sensor data can still be converted, but timestamps are synthesized from the conversion time.
-- **VBO**: automatically exports **every** ECU channel — no field mapping needed. Each `.loga` produces three files:
+- **VBO**: automatically exports **every** ECU channel that actually carries data — no field mapping needed (works for `.loga`, `.rcz`, and other sources alike). Each log produces three files:
   - `_ct.vbo` (for Circuit Tools, keeps original ECU channel names)
-  - `_rc.vbo` (for RaceChrono, channels named with RaceChrono identifiers)
+  - `_rc.vbo` (for RaceChrono, channels named with RaceChrono identifiers; a channel whose source name is already a valid RaceChrono identifier — e.g. a `.rcz`'s built-in sensors — is kept as-is instead of being renumbered)
   - `_channels.csv` (a channel cross-reference: ECU channel / description / RaceChrono id / unit / type)
+  - A channel with no data at all (e.g. an unconnected sensor) is skipped entirely rather than exported as a column of fake zeros, and is listed in `_channels.csv` as "skipped (no data)".
+  - The standard GPS columns (satellite count, altitude) use the source's real values when available, falling back to placeholders only when the source doesn't provide them.
 - **CSV**: automatically exports **every** channel (including derived suspension channels) — no field mapping needed, and no target-app naming constraints beyond Race Studio 3. Each `.loga` produces one `.csv`: columns are `Time`, `GPS_Lat`, `GPS_Lon`, `GPS_Speed`, followed by every other channel (named with its original aRacer channel name), one row per sample. Rows with no GPS fix leave the lat/lon cells empty; samples with no value are left empty too (never `0`). Line endings are `\n` (LF only), UTF-8 without a BOM.
 - **Save modified (.loga)**: writes calibrated suspension travel (and other derived channels) back into a new `.loga` (the original file is left untouched). **Only selectable when the currently loaded source is itself a `.loga`** — if the source is another format (`.nmea`/`.vbo`/`.rcz`/`.xrk`/`.rcnx`), this option is shown disabled with a hint. See section 3.6.
 

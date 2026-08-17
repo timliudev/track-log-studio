@@ -33,6 +33,7 @@
  */
 import { unzipSync } from 'fflate'
 import type { LogSession } from '@/domain/model/LogSession'
+import { NAMED_LO } from '@/domain/raceChrono/identifiers'
 import { buildRczSession, parseJsonEntry, type RczSessionFragmentJson, type RczSessionJson } from './parseRczCore'
 
 /**
@@ -40,29 +41,10 @@ import { buildRczSession, parseJsonEntry, type RczSessionFragmentJson, type RczS
  * These names are shared across encodings: e.g. id 9 ("x acceleration") is
  * `rc_x_acc` whether it arrives as an int32 (phone/RC3 IMU, mm/s² raw) or a
  * float64 (OBD/CAN device, already G) — see `parseRczCore.ts`'s module doc
- * "★" for why scale, not name, is what depends on the encoding.
+ * "★" for why scale, not name, is what depends on the encoding. The id->name
+ * table itself ({@link NAMED_LO}) lives in `domain/raceChrono/identifiers.ts`,
+ * shared with the `.vbo` exporter's identifier-passthrough detection (B120).
  */
-const NAMED_LO: Record<number, string> = {
-  10024: 'rc_rpm',
-  1023: 'rc_air_fuel_ratio',
-  10028: 'rc_timing_advance',
-  10029: 'rc_intake_temp',
-  10025: 'rc_throttle_pos',
-  10026: 'rc_coolant_temp',
-  10063: 'rc_ecu_voltage',
-  66551: 'rc_wheel_speed_front',
-  33783: 'rc_wheel_speed_rear',
-  9: 'rc_x_acc',
-  10: 'rc_y_acc',
-  11: 'rc_z_acc',
-  12: 'rc_x_rate_of_rotation',
-  13: 'rc_y_rate_of_rotation',
-  14: 'rc_z_rate_of_rotation',
-  28: 'rc_x_magn',
-  29: 'rc_y_magn',
-  30: 'rc_z_magn',
-}
-
 const LO_MOD = 1_048_576
 
 /**

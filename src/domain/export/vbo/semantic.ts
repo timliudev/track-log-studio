@@ -9,6 +9,8 @@
  *    analog/digital slot — see {@link Allocator}.
  */
 
+import { FIXED_IDENTIFIERS } from '@/domain/raceChrono/identifiers'
+
 export interface Semantic {
   /** RaceChrono identifier (without the `rc_` prefix). */
   readonly ident: string
@@ -25,6 +27,14 @@ export interface Semantic {
  */
 export const SEMANTIC: Readonly<Record<string, Semantic>> = {
   RPM: { ident: 'rpm', scale: 1, unit: 'rpm' },
+  // RC3 `$RC3` d1 is a FIXED RPM slot (see Rc3NmeaExporter.ts/mapping.ts and
+  // RCZ-FORMAT-SPEC.md §5.3 — id 20002 "digital1" is displayed by RaceChrono
+  // itself as RPM). The .rcz importer already names this channel
+  // `rc_digital_1` and its data is already in RPM (int32ScaleFor's ÷1000),
+  // so this is a straight passthrough with scale 1 — B121. Checked here
+  // (before the identity-passthrough fallback in VboExporter.ts) so the
+  // fixed RPM slot is never left as a bare identity `rc_digital_1`.
+  rc_digital_1: { ident: 'rpm', scale: 1, unit: 'rpm' },
   TPS_Percent: { ident: 'throttle_pos', scale: 1, unit: '%' },
   T_Eng: { ident: 'coolant_temp', scale: 1, unit: 'degC' },
   T_Air_indx: { ident: 'intake_temp', scale: 1, unit: 'degC' },
@@ -52,6 +62,23 @@ export const SEMANTIC: Readonly<Record<string, Semantic>> = {
  * ECU columns already folded into the 7 standard VBO GPS channels (so they are
  * not re-emitted as telemetry). Includes the GPS_UTC_* clock columns, which
  * feed the VBO time field and would otherwise show up as meaningless analogs.
+ * Also shared by `CsvExporter.ts` (its `CSV_GPS_DUPES`) for the columns its
+ * own leading Time/GPS_Lat/GPS_Lon/GPS_Speed group folds in — anything added
+ * here must therefore have a CSV equivalent too, or be excluded from CSV's
+ * own dupe set (see `GPS_Altitude`/`Satellites`, which stay OUT of this
+ * shared set for exactly that reason — B122).
+ *
+ * `GPS_Lat`/`GPS_Lon` (decimal degrees — the RCZ/NMEA/VBO-import/XRK/RCNX
+ * importers' encoding, see `vboCoords()`'s second branch) are included
+ * unconditionally: every importer that produces decimal `GPS_Lat`/`GPS_Lon`
+ * never ALSO produces the deg/min/mmmm encoding below, so `vboCoords()`
+ * always consumes one or the other whenever either is present — there is no
+ * format that leaves a populated decimal GPS_Lat/GPS_Lon unconsumed while
+ * still having something else fall back to the deg/min/mmmm branch
+ * (verified against every producer of these names: parseRczCore.ts,
+ * nmeaToSession.ts, parseVbo.ts, parseXrk.ts, parseRcnx.ts). CsvExporter.ts
+ * already added these two to its own dupe set explicitly before this
+ * change, so including them here doesn't alter its behaviour.
  */
 export const GPS_CONSUMED: ReadonlySet<string> = new Set([
   'Time',
@@ -63,6 +90,8 @@ export const GPS_CONSUMED: ReadonlySet<string> = new Set([
   'GPS_Lon_deg',
   'GPS_Lon_min',
   'GPS_Lon_mmmm',
+  'GPS_Lat',
+  'GPS_Lon',
   'GPS_Speed',
   'GPS_UTC_hh',
   'GPS_UTC_mm',
@@ -79,19 +108,58 @@ export const POSTFIX_MAX = 63
 export const ANALOG_BASES = ['analog', 'frequency', 'voltage', 'current', 'power', 'angle']
 export const DIGITAL_BASES = ['digital']
 
+/** Every generic numbered base — the set `isRcIdentifier` accepts `rc_<base>_<n>` against. */
+const GENERIC_BASES: ReadonlySet<string> = new Set([...ANALOG_BASES, ...DIGITAL_BASES])
+
+/**
+ * True when `name` is already a fully-qualified, valid RaceChrono `rc_`
+ * identifier — either one of the fixed named signals ({@link
+ * FIXED_IDENTIFIERS}, e.g. `rc_x_acc`) or a generic numbered slot within
+ * range (`rc_analog_5`, `rc_digital_2`, …). Used by `VboExporter.ts` to pass
+ * such a channel through unchanged instead of re-bucketing it (B120).
+ *
+ * Deliberately narrow: a `_dev<N>`-suffixed collision name like
+ * `rc_x_acc_dev300` (produced when two devices decode the same channel id,
+ * see `parseRczCore.ts`'s `pushUnique`) does NOT match — it must still go
+ * through generic allocation, since RaceChrono itself would never recognise
+ * that string as an identifier.
+ */
+export function isRcIdentifier(name: string): boolean {
+  if (FIXED_IDENTIFIERS.has(name)) return true
+  const m = /^rc_([a-z]+)_([1-9][0-9]*)$/.exec(name)
+  if (!m) return false
+  const [, base, numStr] = m
+  if (!GENERIC_BASES.has(base)) return false
+  return Number(numStr) <= POSTFIX_MAX
+}
+
 /**
  * Allocates generic channels to `rc_<base>_<n>` (n = 1..63 per base), spilling
  * to the next base when one fills up — mirrors loga2vbo.py's Allocator.
+ *
+ * Tracks issued names as an explicit set (not a per-base counter) so a name
+ * already claimed by an identity passthrough (B120's {@link isRcIdentifier})
+ * can be {@link reserve}d up front and `take()` will skip straight past it —
+ * collisions between a passed-through channel and a later generically
+ * numbered one are impossible, not merely unlikely, regardless of which
+ * order the two channels appear in the session.
  */
 export class Allocator {
-  private readonly count = new Map<string, number>()
+  private readonly taken = new Set<string>()
+
+  /** Reserve an already-decided name so `take()` never re-issues it. */
+  reserve(name: string): void {
+    this.taken.add(name)
+  }
 
   take(bases: readonly string[]): string {
     for (const base of bases) {
-      const n = this.count.get(base) ?? 0
-      if (n < POSTFIX_MAX) {
-        this.count.set(base, n + 1)
-        return `rc_${base}_${n + 1}`
+      for (let n = 1; n <= POSTFIX_MAX; n++) {
+        const name = `rc_${base}_${n}`
+        if (!this.taken.has(name)) {
+          this.taken.add(name)
+          return name
+        }
       }
     }
     throw new Error('generic channel count exceeds all bucket capacity')

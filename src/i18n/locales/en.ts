@@ -800,8 +800,10 @@ export default {
       kind: {
         gps: 'GPS',
         semantic: 'Semantic',
+        passthrough: 'Passthrough',
         analog: 'Analog',
         digital: 'Digital',
+        skipped: 'Skipped (no data)',
       },
     },
     convert: {
