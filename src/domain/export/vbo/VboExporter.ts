@@ -9,6 +9,7 @@ import {
   GPS_CONSUMED,
   SEMANTIC,
   humanize,
+  isRcIdentifier,
 } from './semantic'
 import { encodeExportMetadata, normalizeExportMetadata, type ExportMetadata } from '@/domain/export/metadata'
 
@@ -26,7 +27,7 @@ const BASE_HEADER: ReadonlyArray<readonly [string, string, string]> = [
 ]
 
 /** How a channel was classified when assigning its RaceChrono identifier. */
-export type VboKind = 'semantic' | 'analog' | 'digital'
+export type VboKind = 'semantic' | 'passthrough' | 'analog' | 'digital'
 
 /** One non-GPS ECU channel resolved for both .vbo flavours. */
 export interface VboChannel {
@@ -214,17 +215,37 @@ function dd(v: number): string {
 
 /**
  * Classify every non-GPS channel and assign its RaceChrono `rc_` identifier:
- * known signals map to a semantic identifier + SI unit; pure 0/1 columns become
- * generic digital; everything else generic analog (sequential allocation, so the
- * order matches the .vbo output). Channels whose data is entirely NaN (B124)
- * are dropped from the output and reported separately as `skipped`. Shared by
- * the exporter and the UI preview.
+ *  1. a SEMANTIC override (known ECU name, or a fixed RC3 slot like
+ *     `rc_digital_1` -> `rc_rpm`, B121) — a semantic identifier + SI unit;
+ *  2. a name that's already a valid RaceChrono `rc_` identifier (B120) —
+ *     passed through unchanged, never re-bucketed;
+ *  3. pure 0/1 columns — generic digital;
+ *  4. everything else — generic analog (sequential allocation, so the order
+ *     matches the .vbo output).
+ * Channels whose data is entirely NaN (B124) are dropped from the output and
+ * reported separately as `skipped`. Shared by the exporter and the UI preview.
  */
 export function buildVboCatalog(session: LogSession): VboCatalog {
   const n = session.rowCount
   const alloc = new Allocator()
   const channels: VboChannel[] = []
   const skipped: VboSkippedChannel[] = []
+
+  // Pass 1: reserve every channel whose name is ALREADY a valid rc_
+  // identifier (and isn't overridden by SEMANTIC) with the Allocator, before
+  // any generic bucket assignment happens. This makes a collision between a
+  // passed-through name (e.g. source `rc_analog_5`) and a later generically
+  // numbered channel impossible, not merely unlikely — regardless of which
+  // one appears first in the session's channel order (B120).
+  for (const ch of session.channels) {
+    const name = ch.name
+    if (name === '' || GPS_CONSUMED.has(name)) continue
+    if (isAllNaN(ch.data, n)) continue // B124: handled (and only decided) in pass 2
+    if (SEMANTIC[name]) continue // overridden — not an identity passthrough
+    if (isRcIdentifier(name)) alloc.reserve(name)
+  }
+
+  // Pass 2: classify + emit, in the session's original channel order.
   for (const ch of session.channels) {
     const name = ch.name
     if (name === '' || GPS_CONSUMED.has(name)) continue
@@ -244,6 +265,13 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
       scale = sem.scale
       unit = sem.unit
       kind = 'semantic'
+    } else if (isRcIdentifier(name)) {
+      // Unit preserved from the source below (B123) — not yet: kept 'raw'
+      // for now, same as the generic buckets below.
+      rcName = name
+      scale = 1
+      unit = 'raw'
+      kind = 'passthrough'
     } else if (looksDigital(ch, n)) {
       // digital bucket spills into analog when full
       rcName = alloc.take([...DIGITAL_BASES, ...ANALOG_BASES])
@@ -459,6 +487,7 @@ export function convertToVbo(
   const renderCsv = (): string => {
     const kindLabel: Record<VboKind, string> = {
       semantic: '語意',
+      passthrough: '直通',
       analog: '類比',
       digital: '數位',
     }

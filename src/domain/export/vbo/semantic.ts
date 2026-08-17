@@ -9,6 +9,8 @@
  *    analog/digital slot — see {@link Allocator}.
  */
 
+import { FIXED_IDENTIFIERS } from '@/domain/raceChrono/identifiers'
+
 export interface Semantic {
   /** RaceChrono identifier (without the `rc_` prefix). */
   readonly ident: string
@@ -25,6 +27,14 @@ export interface Semantic {
  */
 export const SEMANTIC: Readonly<Record<string, Semantic>> = {
   RPM: { ident: 'rpm', scale: 1, unit: 'rpm' },
+  // RC3 `$RC3` d1 is a FIXED RPM slot (see Rc3NmeaExporter.ts/mapping.ts and
+  // RCZ-FORMAT-SPEC.md §5.3 — id 20002 "digital1" is displayed by RaceChrono
+  // itself as RPM). The .rcz importer already names this channel
+  // `rc_digital_1` and its data is already in RPM (int32ScaleFor's ÷1000),
+  // so this is a straight passthrough with scale 1 — B121. Checked here
+  // (before the identity-passthrough fallback in VboExporter.ts) so the
+  // fixed RPM slot is never left as a bare identity `rc_digital_1`.
+  rc_digital_1: { ident: 'rpm', scale: 1, unit: 'rpm' },
   TPS_Percent: { ident: 'throttle_pos', scale: 1, unit: '%' },
   T_Eng: { ident: 'coolant_temp', scale: 1, unit: 'degC' },
   T_Air_indx: { ident: 'intake_temp', scale: 1, unit: 'degC' },
@@ -79,19 +89,58 @@ export const POSTFIX_MAX = 63
 export const ANALOG_BASES = ['analog', 'frequency', 'voltage', 'current', 'power', 'angle']
 export const DIGITAL_BASES = ['digital']
 
+/** Every generic numbered base — the set `isRcIdentifier` accepts `rc_<base>_<n>` against. */
+const GENERIC_BASES: ReadonlySet<string> = new Set([...ANALOG_BASES, ...DIGITAL_BASES])
+
+/**
+ * True when `name` is already a fully-qualified, valid RaceChrono `rc_`
+ * identifier — either one of the fixed named signals ({@link
+ * FIXED_IDENTIFIERS}, e.g. `rc_x_acc`) or a generic numbered slot within
+ * range (`rc_analog_5`, `rc_digital_2`, …). Used by `VboExporter.ts` to pass
+ * such a channel through unchanged instead of re-bucketing it (B120).
+ *
+ * Deliberately narrow: a `_dev<N>`-suffixed collision name like
+ * `rc_x_acc_dev300` (produced when two devices decode the same channel id,
+ * see `parseRczCore.ts`'s `pushUnique`) does NOT match — it must still go
+ * through generic allocation, since RaceChrono itself would never recognise
+ * that string as an identifier.
+ */
+export function isRcIdentifier(name: string): boolean {
+  if (FIXED_IDENTIFIERS.has(name)) return true
+  const m = /^rc_([a-z]+)_([1-9][0-9]*)$/.exec(name)
+  if (!m) return false
+  const [, base, numStr] = m
+  if (!GENERIC_BASES.has(base)) return false
+  return Number(numStr) <= POSTFIX_MAX
+}
+
 /**
  * Allocates generic channels to `rc_<base>_<n>` (n = 1..63 per base), spilling
  * to the next base when one fills up — mirrors loga2vbo.py's Allocator.
+ *
+ * Tracks issued names as an explicit set (not a per-base counter) so a name
+ * already claimed by an identity passthrough (B120's {@link isRcIdentifier})
+ * can be {@link reserve}d up front and `take()` will skip straight past it —
+ * collisions between a passed-through channel and a later generically
+ * numbered one are impossible, not merely unlikely, regardless of which
+ * order the two channels appear in the session.
  */
 export class Allocator {
-  private readonly count = new Map<string, number>()
+  private readonly taken = new Set<string>()
+
+  /** Reserve an already-decided name so `take()` never re-issues it. */
+  reserve(name: string): void {
+    this.taken.add(name)
+  }
 
   take(bases: readonly string[]): string {
     for (const base of bases) {
-      const n = this.count.get(base) ?? 0
-      if (n < POSTFIX_MAX) {
-        this.count.set(base, n + 1)
-        return `rc_${base}_${n + 1}`
+      for (let n = 1; n <= POSTFIX_MAX; n++) {
+        const name = `rc_${base}_${n}`
+        if (!this.taken.has(name)) {
+          this.taken.add(name)
+          return name
+        }
       }
     }
     throw new Error('generic channel count exceeds all bucket capacity')

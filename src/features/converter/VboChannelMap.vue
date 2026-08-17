@@ -132,7 +132,8 @@ tr.gps td {
   color: var(--color-text-muted);
   white-space: nowrap;
 }
-.badge.semantic {
+.badge.semantic,
+.badge.passthrough {
   border-color: var(--color-accent);
   color: var(--color-accent);
 }

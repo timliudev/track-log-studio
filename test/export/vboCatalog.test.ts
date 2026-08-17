@@ -132,3 +132,89 @@ describe('buildVboCatalog — B125 digital/analog classification', () => {
     expect(ch.kind).toBe('digital')
   })
 })
+
+describe('buildVboCatalog — B120 identifier passthrough', () => {
+  it('passes rc_analog_5 through unchanged and never lets a generic channel steal that name', () => {
+    // 5 generic (unnamed-identifier) analog channels BEFORE the real
+    // rc_analog_5 — naive sequential allocation would hand the 5th one
+    // exactly "rc_analog_5", colliding with the source channel of the same
+    // name that appears later in channel order.
+    const session = new LogSession(
+      [
+        channel('Time', [0, 100, 200]),
+        channel('Custom1', [1.1, 1.2, 1.3]),
+        channel('Custom2', [2.1, 2.2, 2.3]),
+        channel('Custom3', [3.1, 3.2, 3.3]),
+        channel('Custom4', [4.1, 4.2, 4.3]),
+        channel('Custom5', [5.1, 5.2, 5.3]),
+        channel('rc_analog_5', [13.1, 13.2, 13.4]),
+      ],
+      META,
+    )
+
+    const { channels } = buildVboCatalog(session)
+    const passthrough = channels.find((c) => c.ctTitle === 'rc_analog_5')!
+    expect(passthrough.rcName).toBe('rc_analog_5')
+    expect(passthrough.kind).toBe('passthrough')
+
+    // No duplicate rc_ names anywhere in the output header.
+    const names = channels.map((c) => c.rcName)
+    expect(new Set(names).size).toBe(names.length)
+    expect(names.filter((n) => n === 'rc_analog_5')).toHaveLength(1)
+  })
+
+  it('passes rc_digital_2 through unchanged (user-assignable slot, not RPM)', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('rc_digital_2', [0, 51])],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    const ch = channels.find((c) => c.ctTitle === 'rc_digital_2')!
+    expect(ch.rcName).toBe('rc_digital_2')
+    expect(ch.kind).toBe('passthrough')
+    expect(ch.unit).not.toBe('bool')
+  })
+
+  it('passes rc_x_acc / rc_y_rate_of_rotation / rc_z_magn through unchanged', () => {
+    const session = new LogSession(
+      [
+        channel('Time', [0, 100]),
+        channel('rc_x_acc', [0.1, 0.2]),
+        channel('rc_y_rate_of_rotation', [1, 2]),
+        channel('rc_z_magn', [10, 20]),
+      ],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    for (const name of ['rc_x_acc', 'rc_y_rate_of_rotation', 'rc_z_magn']) {
+      const ch = channels.find((c) => c.ctTitle === name)!
+      expect(ch.rcName).toBe(name)
+      expect(ch.kind).toBe('passthrough')
+    }
+  })
+
+  it('does NOT pass through a _devN-suffixed collision name — still generically allocated', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100]), channel('rc_x_acc_dev300', [0.1, 0.2])],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    const ch = channels.find((c) => c.ctTitle === 'rc_x_acc_dev300')!
+    expect(ch.rcName).not.toBe('rc_x_acc_dev300')
+    expect(ch.kind).not.toBe('passthrough')
+  })
+})
+
+describe('buildVboCatalog — B121 RC3 digital1 = fixed RPM slot', () => {
+  it('maps rc_digital_1 to rc_rpm with unit rpm', () => {
+    const session = new LogSession(
+      [channel('Time', [0, 100, 200]), channel('rc_digital_1', [1732, 1833, 1925])],
+      META,
+    )
+    const { channels } = buildVboCatalog(session)
+    const ch = channels.find((c) => c.ctTitle === 'rc_digital_1')!
+    expect(ch.rcName).toBe('rc_rpm')
+    expect(ch.unit).toBe('rpm')
+    expect(ch.kind).toBe('semantic')
+  })
+})
