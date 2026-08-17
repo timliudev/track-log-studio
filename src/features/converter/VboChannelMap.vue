@@ -8,9 +8,9 @@ const { t } = useI18n()
 const { vboChannelMap } = storeToRefs(useConverterStore())
 
 const hasRows = computed(() => vboChannelMap.value.length > 0)
-// Channel rows only (exclude the 7 fixed GPS rows) for the count.
+// Channel rows only (exclude the 7 fixed GPS rows and skipped/no-data rows) for the count.
 const channelCount = computed(
-  () => vboChannelMap.value.filter((r) => r.kind !== 'gps').length,
+  () => vboChannelMap.value.filter((r) => r.kind !== 'gps' && r.kind !== 'skipped').length,
 )
 </script>
 
@@ -135,5 +135,8 @@ tr.gps td {
 .badge.semantic {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.badge.skipped {
+  opacity: 0.6;
 }
 </style>

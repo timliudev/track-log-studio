@@ -802,6 +802,7 @@ export default {
         semantic: 'Semantic',
         analog: 'Analog',
         digital: 'Digital',
+        skipped: 'Skipped (no data)',
       },
     },
     convert: {

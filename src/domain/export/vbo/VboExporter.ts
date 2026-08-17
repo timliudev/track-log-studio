@@ -1,4 +1,5 @@
 import type { LogSession } from '@/domain/model/LogSession'
+import type { Channel } from '@/domain/model/types'
 import { computeSmoothedCourses } from '@/domain/export/rc3Nmea/heading'
 import { fmtNum, padFloat, padInt } from './format'
 import {
@@ -44,6 +45,24 @@ export interface VboChannel {
   readonly description: string
 }
 
+/**
+ * A channel dropped entirely from the .vbo output because its data is
+ * entirely NaN (no data at all — see B124). Still reported to the user via
+ * `_channels.csv` / {@link buildVboDisplayMap} so it's clear the signal was
+ * seen but intentionally skipped, not silently lost.
+ */
+export interface VboSkippedChannel {
+  readonly ctTitle: string
+  readonly description: string
+  readonly unit: string
+}
+
+/** Result of classifying every non-GPS channel of a session. */
+export interface VboCatalog {
+  readonly channels: VboChannel[]
+  readonly skipped: VboSkippedChannel[]
+}
+
 /** One row of the channel cross-reference, for the UI preview / _channels.csv. */
 export interface VboMapRow {
   /** ECU canonical name, or the standard GPS channel title. */
@@ -53,7 +72,7 @@ export interface VboMapRow {
   /** RaceChrono `rc_` identifier, or '' for the GPS standard channels. */
   readonly rcId: string
   readonly unit: string
-  readonly kind: VboKind | 'gps'
+  readonly kind: VboKind | 'gps' | 'skipped'
 }
 
 /** One output file produced from a single .loga. */
@@ -69,6 +88,50 @@ function cell(a: Float32Array | undefined, i: number): number {
   if (!a) return 0
   const v = a[i]
   return Number.isFinite(v) ? v : 0
+}
+
+/**
+ * True when a channel's RAW data (not the NaN→0-filled `cell()` view) has no
+ * finite sample anywhere — i.e. the whole column is genuinely empty (B124).
+ * Must be checked on the raw `Float32Array`: `cell()` already maps NaN to 0,
+ * so testing post-`cell()` values would make an all-NaN channel look like a
+ * constant-0 channel instead of "no data at all" — exactly the bug this
+ * fixes (an all-NaN column was being misread as digital, see B125).
+ * A zero-length session (`n === 0`) has nothing to judge, so it is never
+ * treated as "empty" here — there's simply no data either way, and this keeps
+ * a rowCount-0 session from dropping every channel outright.
+ */
+function isAllNaN(data: Float32Array, n: number): boolean {
+  if (n === 0) return false
+  for (let i = 0; i < n; i++) {
+    if (Number.isFinite(data[i])) return false
+  }
+  return true
+}
+
+/**
+ * Value-range fallback for digital/analog classification — the LAST resort,
+ * consulted only when nothing else (SEMANTIC mapping, a source unit) already
+ * identifies the channel (B125). A channel only counts as digital when its
+ * raw data contains BOTH a genuine 0 and a genuine 1 sample (NaN cells are
+ * skipped — they're not evidence either way) and nothing else: this is what
+ * makes a constant-0 or constant-1 channel fail automatically (it can only
+ * ever supply one of the two), instead of needing a separate "is constant"
+ * carve-out. A channel that already has a source-supplied physical unit is
+ * never a boolean state, so it's excluded up front.
+ */
+function looksDigital(ch: Channel, n: number): boolean {
+  if (ch.unit) return false
+  let sawZero = false
+  let sawOne = false
+  for (let i = 0; i < n; i++) {
+    const v = ch.data[i]
+    if (!Number.isFinite(v)) continue
+    if (v === 0) sawZero = true
+    else if (v === 1) sawOne = true
+    else return false
+  }
+  return sawZero && sawOne
 }
 
 /**
@@ -153,23 +216,22 @@ function dd(v: number): string {
  * Classify every non-GPS channel and assign its RaceChrono `rc_` identifier:
  * known signals map to a semantic identifier + SI unit; pure 0/1 columns become
  * generic digital; everything else generic analog (sequential allocation, so the
- * order matches the .vbo output). Shared by the exporter and the UI preview.
+ * order matches the .vbo output). Channels whose data is entirely NaN (B124)
+ * are dropped from the output and reported separately as `skipped`. Shared by
+ * the exporter and the UI preview.
  */
-export function buildVboCatalog(session: LogSession): VboChannel[] {
+export function buildVboCatalog(session: LogSession): VboCatalog {
   const n = session.rowCount
   const alloc = new Allocator()
   const channels: VboChannel[] = []
+  const skipped: VboSkippedChannel[] = []
   for (const ch of session.channels) {
     const name = ch.name
     if (name === '' || GPS_CONSUMED.has(name)) continue
 
-    let isDigital = true
-    for (let i = 0; i < n; i++) {
-      const v = cell(ch.data, i)
-      if (v !== 0 && v !== 1) {
-        isDigital = false
-        break
-      }
+    if (isAllNaN(ch.data, n)) {
+      skipped.push({ ctTitle: name, description: ch.description ?? '', unit: ch.unit ?? '' })
+      continue
     }
 
     let rcName: string
@@ -182,7 +244,7 @@ export function buildVboCatalog(session: LogSession): VboChannel[] {
       scale = sem.scale
       unit = sem.unit
       kind = 'semantic'
-    } else if (isDigital) {
+    } else if (looksDigital(ch, n)) {
       // digital bucket spills into analog when full
       rcName = alloc.take([...DIGITAL_BASES, ...ANALOG_BASES])
       scale = 1
@@ -207,26 +269,37 @@ export function buildVboCatalog(session: LogSession): VboChannel[] {
       description: ch.description ?? '',
     })
   }
-  return channels
+  return { channels, skipped }
 }
 
 /**
- * The channel cross-reference as display rows: the 7 standard GPS channels
- * followed by every ECU channel's rc_ mapping. Same content as _channels.csv,
- * for rendering an in-app preview.
+ * The channel cross-reference as display rows: the 7 standard GPS channels,
+ * every ECU channel's rc_ mapping, then any channel skipped for having no
+ * data at all (B124). Same content as _channels.csv, for rendering an in-app
+ * preview.
  */
 export function buildVboDisplayMap(session: LogSession): VboMapRow[] {
   const rows: VboMapRow[] = []
   for (const [title, , unit] of BASE_HEADER) {
     rows.push({ ecu: title, description: '', rcId: '', unit, kind: 'gps' })
   }
-  for (const c of buildVboCatalog(session)) {
+  const { channels, skipped } = buildVboCatalog(session)
+  for (const c of channels) {
     rows.push({
       ecu: c.ctTitle,
       description: c.description,
       rcId: c.rcName,
       unit: c.unit,
       kind: c.kind,
+    })
+  }
+  for (const s of skipped) {
+    rows.push({
+      ecu: s.ctTitle,
+      description: s.description,
+      rcId: '—',
+      unit: s.unit,
+      kind: 'skipped',
     })
   }
   return rows
@@ -321,7 +394,7 @@ export function convertToVbo(
   }
 
   // --- Classify each non-GPS channel and assign an rc_ identifier ---
-  const channels = buildVboCatalog(session)
+  const { channels, skipped } = buildVboCatalog(session)
 
   // Channel-map comment block — shared by both flavours. (Circuit Tools hangs
   // on the literal "[header]", so _ct gets this bracket-free map too instead of
@@ -412,6 +485,9 @@ export function convertToVbo(
         c.unit,
         kindLabel[c.kind],
       ])
+    }
+    for (const s of skipped) {
+      rows.push([s.ctTitle, s.description, s.ctTitle, s.ctTitle, '—', s.unit, '已略過(整條無資料)'])
     }
     const cvtNotes = normalizeExportMetadata(metadata).cvtNotes ?? []
     if (cvtNotes.length > 0) {
