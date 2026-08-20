@@ -100,60 +100,107 @@ structured clone 演算法，它**不保留 class 原型與方法**，clone 後�
 
 ---
 
-## 3. Importer 介面與 registry
+## 3. 格式辨識與 registry（兩階段架構，B88 之後）
 
-### 介面（`src/domain/import/Importer.ts`）
+> ⚠️ **本節在 B88（`8ad0890`）之後改寫過。** 舊版描述的是「`registry.ts` 直接持有一個
+> `IMPORTERS: Importer[]` 陣列、每個元素同時帶 `detect` 與 `parse`」的單階段架構。那個形狀
+> 會讓「只是把 FileBar 畫出來」就必須把每個 parser（以及它們的解壓縮／WASM 相依）拉進初始
+> bundle。現況拆成**兩階段**：**辨識**（輕量、初始 bundle 內）與**解析**（重量、選檔後才載入）。
+
+### 階段一：辨識用的 `ImportFormatDefinition`（`src/domain/import/formatDefinitions.ts`）
 
 ```ts
-interface ImportCandidate {
-  readonly fileName: string   // 已轉小寫，例如 'run01.loga'
-  readonly headText: string   // 檔案前幾 KB 解成文字，供內容嗅探
-}
-
-type ImportProgress = (fraction: number) => void
-
-interface Importer {
-  readonly id: string                     // 穩定 id，例如 'loga' / 'nmea' / 'vbo'
-  readonly extensions: readonly string[]  // 不含點，例如 ['loga']
+interface ImportFormatDefinition {
+  readonly id: string                     // 穩定 id，例如 'loga' / 'nmea' / 'vbo' / 'rcz'
+  readonly extensions: readonly string[]  // 不含點，例如 ['loga']、['xrk', 'xrz']
   detect(candidate: ImportCandidate): boolean
-  parse(text: string, onProgress?: ImportProgress): LogSession | Promise<LogSession>
 }
+
+/** 順序有意義：第一個命中的勝出。 */
+const IMPORT_FORMATS: readonly ImportFormatDefinition[] = [
+  /* loga, nmea, vbo, csv, rcz, rcnx, xrk（含 .xrz） */
+]
 ```
 
-逐欄位：
+**這裡只有辨識用的中繼資料，沒有 `parse`。** 檔案本體的解析在 worker（`parse.worker.ts`，
+見階段二），所以渲染 FileBar 完全不需要載入任何 parser。
 
-- **`id`**：穩定字串。同時是 worker 端 `WORKER_PARSERS` 的鍵（§5），所以**註冊與 worker 兩處
-  必須用同一個 id**。
+- **`id`**：穩定字串。同時是 worker 端 `WORKER_PARSERS` 的鍵（§5），所以**格式定義與 worker
+  兩處必須用同一個 id**。
 - **`extensions`**：不含點的副檔名。驅動 `<input accept>` 與 zip 白名單（見下）。
-- **`detect(candidate)`**：判斷此 importer 是否認得這個檔案。策略是**「副檔名 + 內容嗅探」**：
+- **`detect(candidate)`**：判斷此格式是否認得這個檔案。策略是**「副檔名 + 內容嗅探」**：
   - 先看 `fileName` 副檔名（快速、常見情形）；
-  - 副檔名不可靠時，**嗅 `headText` 才是權威答案**。例如：
+  - 副檔名不可靠時，**嗅 `headText` / `headBytes` 才是權威答案**。例如：
     - `loga`：`fileName.endsWith('.loga')` **或** 第一行能被 `detectFormat` 認出（即使副檔名不是 .loga）。
     - `nmea`：`fileName.endsWith('.nmea')` **或** `headText` 出現 `$GPRMC` / `$GNRMC` 句首。
     - `vbo`：`fileName.endsWith('.vbo')` **或** `headText` 含 `[header]` 區段標記。
-- **`parse(text, onProgress?)`**：把整份文字解析成 `LogSession`，必須 async-capable 並回報
-  `[0,1]` 進度；無法辨識 / 內容無效時 **throw**（由 FileBar 轉成失敗的 pill）。
+    - `xrk`：副檔名 `.xrk` / `.xrz`，**或** `headBytes` 命中 `<hCNF` magic，**或**命中 zlib
+      （RFC 1950）標頭檢查（`.xrz` 是 zlib 壓縮的 `.xrk`）。二進位 magic 只能比對 `headBytes`，
+      解成文字會被破壞（見 §6）。
+
+### `ImportCandidate` 與 `Importer`（`src/domain/import/Importer.ts`）
+
+`Importer.ts` 現在只剩兩件事：`ImportCandidate`（辨識輸入）與 `TextImporter` / `BinaryImporter`
+（解析側型別）。
+
+```ts
+interface ImportCandidate {
+  readonly fileName: string    // 已轉小寫，例如 'run01.loga'
+  readonly headText: string    // 檔案前 4 KB 解成文字，供內容嗅探
+  readonly headBytes: Uint8Array  // 同樣前 4 KB 的原始 bytes，供二進位 magic 嗅探
+}
+
+type Importer = TextImporter | BinaryImporter   // 以 `binary` 旗標區分（見 §6）
+```
+
+> ⚠️ **現況誠實註記**：`src/domain/import/loga/LogaImporter.ts` 與
+> `src/domain/import/vbo/VboImporter.ts` 兩個 `Importer` 物件在 B88 之後**已無任何引用**
+> （辨識走 `IMPORT_FORMATS`、解析走 `WORKER_PARSERS`），屬於重構殘留。`Importer` 型別本身仍是
+> 「一個格式該提供什麼」的規格文件，但**不要再照著新增 `XxxImporter.ts`**——見 §5 的現行步驟。
 
 ### Registry（`src/domain/import/registry.ts`）
 
-```ts
-const IMPORTERS: readonly Importer[] = [logaImporter, nmeaImporter, vboImporter]
+`registry.ts` 現在是一層**薄的相容出口**，把 `formatDefinitions.ts` 的東西原樣 re-export：
 
-async function sniff(file: File): Promise<ImportCandidate>   // 讀前 4096 bytes
-function detectImporter(candidate: ImportCandidate): Importer | undefined  // first-match-wins
-function allImportExtensions(): string[]                     // 所有副檔名（不含點）
+```ts
+export {
+  IMPORT_FORMATS, allImportExtensions, detectImporter,
+  extensionsForImporter, sniff, type ImportFormatDefinition,
+} from './formatDefinitions'
 ```
 
-- **`sniff(file)`**：`fileName` 轉小寫 + `file.slice(0, 4096).text()` 當 `headText`。
-- **`detectImporter`**：`IMPORTERS.find(imp => imp.detect(candidate))`——**順序決定優先權，第一個命中的勝出**。
-  - 為何重要：當未來新增**泛用副檔名**（例如多種來源都用 `.csv`）時，**較專一的 importer 必須排在
-    泛用的之前**，且專一者要靠 `headText` 內容嗅探，避免被泛用者先攔截。目前三個格式副檔名互斥，
-    順序尚不敏感，但設計上必須維持此不變式。
-- **`allImportExtensions()`**：把所有 importer 的 `extensions` 攤平。**這是副檔名的單一真實來源**：
+函式本體都在 `formatDefinitions.ts`：
+
+```ts
+async function sniff(file: File): Promise<ImportCandidate>              // 讀前 4096 bytes
+function detectImporter(c: ImportCandidate): ImportFormatDefinition | undefined  // first-match-wins
+function allImportExtensions(): string[]                               // 所有副檔名（不含點）
+function extensionsForImporter(id: string): string[]                   // 單一格式的副檔名
+```
+
+- **`sniff(file)`**：`fileName` 轉小寫 + `file.slice(0, 4096).arrayBuffer()`，**同一份 head
+  同時給出 `headBytes` 與 `headText`**（只讀一次）。
+- **`detectImporter`**：`IMPORT_FORMATS.find(f => f.detect(candidate))`——**順序決定優先權，
+  第一個命中的勝出**。
+  - 為何重要：`.csv` 這種**泛用副檔名**已經在清單裡，**較專一的格式必須排在泛用的之前**，且
+    專一者要靠 `headText` / `headBytes` 內容嗅探，避免被泛用者先攔截。目前的順序是
+    `loga → nmea → vbo → csv → rcz → rcnx → xrk`，設計上必須維持此不變式。
+- **`allImportExtensions()`**：把所有格式的 `extensions` 攤平。**這是副檔名的單一真實來源**：
   - `FileBar.vue` 的 `acceptExtensions` 用它組出 `<input accept>`（再加上 `.zip`）；
   - `zip.ts` 的 `extractLogFiles` 用它當**解壓白名單**——zip 內只有副檔名在此清單者才會被
     inflate，其餘（script、README、執行檔）一律略過。
-  - 因此**新增 importer 時不必同步改 FileBar 或 zip**：副檔名自動流通。
+  - 因此**新增格式時不必同步改 FileBar 或 zip**：副檔名自動流通。
+
+### 階段二：解析側（lazy）
+
+- **主要路徑 = worker**：`parse.worker.ts` 的 `WORKER_PARSERS` 以 `importerId` 為鍵，值是
+  `{ binary, parse }`。worker 依 `binary` 決定要餵 `await file.text()` 還是
+  `new Uint8Array(await file.arrayBuffer())`。**parser 全部只在 worker 這個 chunk 裡被 import**，
+  主執行緒初始 bundle 不含它們。
+- **選檔期的輔助 lazy 載入**：`src/domain/import/lazyLoaders.ts` 收攏三個「選到檔案才需要」的
+  重量級動作——`inspectRcnxFile`（動態 `import` `sql.js` WASM 列 RCNX 場次）、`inspectRczFile`
+  （動態 `import` `listRczSessions` 判斷是否為整機備份並列場次）、`extractZipFile`（動態
+  `import` `zip.ts` 解 ZIP 包）。FileBar 只有在使用者真的選了對應副檔名時才觸發。
 
 ---
 
@@ -177,9 +224,9 @@ function allImportExtensions(): string[]                     // 所有副檔名�
 
 ---
 
-## 5. 如何新增一個「文字格式」importer（以 VboImporter 為範例）
+## 5. 如何新增一個「文字格式」importer（以 `vbo` 為範例）
 
-以 `vbo` 為樣板，步驟如下：
+以 `vbo` 為樣板，步驟如下（**步驟 2 已作廢，見下**）：
 
 1. **寫純解析函式 `parseXxx(text): LogSession`**
    放在 `src/domain/import/xxx/parseXxx.ts`。職責：把整份文字切成欄、組出 `Channel[]`
@@ -188,21 +235,22 @@ function allImportExtensions(): string[]                     // 所有副檔名�
    參考 `parseVbo.ts`：它示範了區段切割、座標換算、UTC 時間欄拆解與「剩餘欄變遙測 channel」。
    **務必只依賴 worker-safe 的程式碼**（不可碰 DOM / window），因為它會在 worker 內執行。
 
-2. **包成 `Importer`**
-   `src/domain/import/xxx/XxxImporter.ts`：
-   ```ts
-   export const xxxImporter: Importer = {
-     id: 'xxx',
-     extensions: ['xxx'],
-     detect: ({ fileName, headText }) =>
-       fileName.endsWith('.xxx') || /<內容特徵>/.test(headText),
-     parse: (text) => parseXxx(text),
-   }
-   ```
+2. **（已不需要）包成 `Importer` 物件**
+   B88 之前每個格式會多寫一個 `src/domain/import/xxx/XxxImporter.ts` 匯出
+   `const xxxImporter: Importer = { id, extensions, detect, parse }`。**兩階段架構下這一步已無
+   作用**：辨識由下一步的 `IMPORT_FORMATS` 負責、解析由步驟 4 的 `WORKER_PARSERS` 負責，沒有任何
+   程式碼會 import 這個物件（`LogaImporter.ts` / `VboImporter.ts` 是僅存的殘留，見 §3）。
+   **新格式請直接跳到步驟 3。**
 
-3. **註冊進 `IMPORTERS`**（`registry.ts`）
-   把 `xxxImporter` 加入陣列。**注意排序**：若副檔名泛用（如 `.csv`），務必排在更泛用者之前，
-   並讓 `detect` 以 `headText` 內容嗅探取勝（§3 的 first-match-wins）。
+3. **註冊辨識用的格式定義**（`src/domain/import/formatDefinitions.ts` 的 `IMPORT_FORMATS`）
+   ```ts
+   { id: 'xxx', extensions: ['xxx'], detect: ({ fileName, headText }) =>
+       fileName.endsWith('.xxx') || /<內容特徵>/.test(headText) },
+   ```
+   **這裡只放 `id` / `extensions` / `detect`，不要放 `parse`**——parser 只在 worker 側註冊
+   （下一步），才不會被拉進 FileBar 的初始 bundle（B88，見 §3）。`registry.ts` 只是
+   re-export，不需要動。**注意排序**：`.csv` 這種泛用副檔名已在清單中，較專一的格式務必排在
+   泛用者之前，並讓 `detect` 以 `headText` / `headBytes` 內容嗅探取勝（§3 的 first-match-wins）。
 
 4. **註冊進 worker 的 `WORKER_PARSERS`**（`parse.worker.ts`）
    ```ts
