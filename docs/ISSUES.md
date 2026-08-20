@@ -455,5 +455,8 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 ## Release verification (B95)
 - [x] **B95** Prod console「cross-world service worker resource mismatch」×4：index.html 的 modulepreload 在 Workbox SW 控制下永遠配對不到（模組由 CacheStorage 回應）→ 4 chunk 重複下載 + 警告，功能無影響。修法採 vite `build.modulePreload:false`（SW 控制下本來就走 cache；驗證 dist/client/index.html 零 modulepreload、entry script 與 precache 29 entries 不變）。 — `6649c52`/merge `9080e99`。同場加映（非 bug，勿修）：`beacon.min.js ERR_BLOCKED_BY_CLIENT` = 使用者擋廣告器（B23 已記載）；`inject.js StorageManager settings timeout` = 瀏覽器擴充功能的 content script，非本站程式。
 
-## Done (recent)
+## Done (早期歷史片段)
+
+> ⚠️ 本段是**專案早期**的一批完成項殘留,不是最新進度。**最新完成項見上方各輪 acceptance round 與 B/M 編號條目**(那些才是逐項狀態與 commit 的真實來源)。
+
 - [x] Comparison laps rendered as a per-lap table; cross-file selected laps drawn on the map; overlay↔map cursor link; collapse vertical reflow (no cross-column jump); chart-mode label 時間軸→時序; accel-test "distance from launch speed" (0=standstill); GitHub star button opens reliably; docs de-staled; PWA meta/manifest scaffolding. (Released to main.)

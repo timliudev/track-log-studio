@@ -9,13 +9,13 @@
 |---|---|---|
 | [`DESIGN.md`](./DESIGN.md) | 主設計 | 專案目標、技術選型、架構、逐功能設計決策、decision log。**穩定的「為什麼」**，不放跑動式待辦。 |
 | [`ARCHITECTURE-FORMATS.md`](./ARCHITECTURE-FORMATS.md) | 子系統設計 | Importer/Exporter/LogSession 架構；**§4 格式支援矩陣**（每格式 ↔ importer/formatId/decoder 的 how）。 |
-| [`MULTI-SESSION-ANALYSIS-DESIGN.md`](./MULTI-SESSION-ANALYSIS-DESIGN.md) | 子系統設計 | 多檔同時分析 + 全域疊加分析設計（§9 有待拍板的開放問題）。 |
+| [`MULTI-SESSION-ANALYSIS-DESIGN.md`](./MULTI-SESSION-ANALYSIS-DESIGN.md) | 子系統設計 | 多檔同時分析 + 全域疊加分析設計（§9 的開放問題**已於 Phase 1–4 全數拍板**，保留為歷史紀錄）。 |
 | [`CLOUD-TRACK-DESIGN.md`](./CLOUD-TRACK-DESIGN.md) | 子系統設計 | 雲端賽道機制（自動套用 + 公開賽道庫）設計（§8 有待使用者決策）。**尚未實作**。 |
 | [`TRACK-LIBRARY-OPTIONS.md`](./TRACK-LIBRARY-OPTIONS.md) | 方案評比 | 雲端後端四方案（GitHub/Firebase/Cloudflare/Supabase）比較報告，**等二次拍板**。 |
 | [`IMPORT-FORMATS-STATUS.md`](./IMPORT-FORMATS-STATUS.md) | 狀態快照 | 格式匯入/匯出的**完成進度、已知限制、待完成**（✅/🔧/🛠️/📋）。 |
 | [`PHASE5-MERGE-STATUS.md`](./PHASE5-MERGE-STATUS.md) | 狀態快照 | GPS 場次合併原型建置紀錄（已 shipped，保留為歷史 rationale）。 |
 | [`ISSUES.md`](./ISSUES.md) | 活動追蹤 | **逐項 bug/請求的狀態 + 修復 commit**（B/M 編號）。跨會話的活清單。 |
-| [`specs/`](./specs/) | 研究 | 格式/演算法研究：CVT 動力、格式接入評估、XRK/RCNX/RCZ 二進位規格。 |
+| [`specs/`](./specs/) | 研究 | 格式/演算法研究：CVT 動力、格式接入評估、XRK/RCNX/RCZ 二進位規格；另含 `F7-RC3-ANALOG-NAMING-DESIGN.md`（**待 user 拍板的 draft**，UX/schema 未定前不實作）。 |
 | [`manual/`](./manual/) | 使用手冊 | 對使用者的 zh-Hant / en 操作說明。 |
 | `journal/` | 工時日誌 | 每會話開發日誌。**已 gitignore，不進版控**（避免洩漏工時）。 |
 
