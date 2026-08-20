@@ -7,6 +7,8 @@ import {
   panRange,
   pinchCentreNeedleRange,
   pinchRange,
+  rubberBandPanRange,
+  rubberBandSpringTarget,
   zoomCentreNeedleRange,
   zoomRange,
   type XRange,
@@ -169,5 +171,79 @@ describe('B68 centre-needle virtual edge padding', () => {
   it('hides labels outside the real data while preserving formatted labels inside it', () => {
     expect(blankTickLabelsOutsideData([-10, 0, 25, 100, 110], ['-10', '0:00', '0:25', '1:40', '1:50'], BOUNDS))
       .toEqual(['', '0:00', '0:25', '1:40', ''])
+  })
+})
+
+// B117 stage 4 — rubber-banded pan.
+describe('rubberBandPanRange', () => {
+  it('behaves exactly like panRange while fully in-bounds (no overshoot to resist)', () => {
+    const rubberBanded = rubberBandPanRange({ min: 20, max: 40 }, 10, BOUNDS)
+    const plain = panRange({ min: 20, max: 40 }, 10, BOUNDS)
+    expect(rubberBanded).toEqual(plain)
+  })
+
+  it('creeps PAST the lower bound instead of hard-clamping to it', () => {
+    // Same gesture as clampRange's own "shifts a range that underflows the
+    // min" test above (panRange({min:-20,max:10}) hard-clamps to min:0) —
+    // rubber-banding must go slightly NEGATIVE instead of snapping to 0.
+    const r = rubberBandPanRange({ min: 0, max: 30 }, 20, BOUNDS)
+    expect(r.min).toBeLessThan(0)
+    expect(r.max - r.min).toBeCloseTo(30, 6) // span preserved
+  })
+
+  it('creeps PAST the upper bound instead of hard-clamping to it', () => {
+    const r = rubberBandPanRange({ min: 80, max: 95 }, -20, BOUNDS)
+    expect(r.max).toBeGreaterThan(100)
+    expect(r.max - r.min).toBeCloseTo(15, 6)
+  })
+
+  it('resists monotonically: a bigger raw overshoot creeps further but always less than the raw amount', () => {
+    const small = rubberBandPanRange({ min: 0, max: 20 }, 10, BOUNDS) // 10 past the lower bound
+    const large = rubberBandPanRange({ min: 0, max: 20 }, 200, BOUNDS) // 200 past
+    const smallOvershoot = -small.min
+    const largeOvershoot = -large.min
+    expect(smallOvershoot).toBeGreaterThan(0)
+    expect(largeOvershoot).toBeGreaterThan(smallOvershoot)
+    expect(largeOvershoot).toBeLessThan(200) // always less than the raw drag distance
+  })
+
+  it('never lets the resisted edge reach a full extra bounds-span past the true boundary', () => {
+    const r = rubberBandPanRange({ min: 0, max: 20 }, 100_000, BOUNDS)
+    expect(-r.min).toBeLessThan(BOUNDS.max - BOUNDS.min)
+  })
+
+  it('falls back to the plain clamp for a degenerate bounds span', () => {
+    const degenerate: XRange = { min: 5, max: 5 }
+    expect(rubberBandPanRange({ min: 0, max: 10 }, 3, degenerate)).toEqual({ min: 5, max: 5 })
+  })
+
+  it('falls back to the plain clamp when the range span already covers all of bounds', () => {
+    expect(rubberBandPanRange({ min: -50, max: 200 }, 10, BOUNDS)).toEqual({ min: 0, max: 100 })
+  })
+
+  it('respects a custom coefficient the same way rubberBand() itself does (looser = creeps further for the same overshoot)', () => {
+    const tight = rubberBandPanRange({ min: 0, max: 20 }, 30, BOUNDS, 0.2)
+    const loose = rubberBandPanRange({ min: 0, max: 20 }, 30, BOUNDS, 0.8)
+    expect(-loose.min).toBeGreaterThan(-tight.min)
+  })
+})
+
+describe('rubberBandSpringTarget', () => {
+  it('is exactly clampRange — the true, non-resisted bound to spring back to', () => {
+    const cases: XRange[] = [
+      { min: -30, max: 10 },
+      { min: 90, max: 130 },
+      { min: 20, max: 40 },
+    ]
+    for (const range of cases) {
+      expect(rubberBandSpringTarget(range, BOUNDS)).toEqual(clampRange(range, BOUNDS))
+    }
+  })
+
+  it('clamps a live rubber-banded (out-of-bounds) range back to the true edge', () => {
+    const overshot = rubberBandPanRange({ min: 0, max: 20 }, 50, BOUNDS) // creeps below 0
+    expect(overshot.min).toBeLessThan(0)
+    const target = rubberBandSpringTarget(overshot, BOUNDS)
+    expect(target).toEqual({ min: 0, max: 20 })
   })
 })

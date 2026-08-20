@@ -748,7 +748,14 @@ const cssGridResize = useCssGridDashboardResize({
 // computed, never from `cssGridActiveLayout` directly" — it already carries
 // through both the drag preview AND the resize preview.
 const cssGridRenderedLayout = cssGridResize.previewLayout
-const cssGridDragOffsetPx = cssGridDrag.dragOffsetPx
+// B117 stage 1 — CssGridGrid's `dragOffsetPx` prop only ever needs "what
+// extra translate should the currently-relevant card have right now", and a
+// live drag / a post-release settle are mutually exclusive in time for any
+// given card (see useCssGridDashboardDrag.ts's `settleOffsetPx` doc) — so
+// falling back to the settle offset whenever nothing is actively being
+// dragged is exactly the right merge, and needs no CssGridGrid.vue change at
+// all (still a single `{id,dxPx,dyPx}|null` prop).
+const cssGridDragOffsetPx = computed(() => cssGridDrag.dragOffsetPx.value ?? cssGridDrag.settleOffsetPx.value)
 // A plain component-ref -> composable `containerRef` wiring, pointed at
 // CssGridGrid's own root element: drag/resize each need their OWN width
 // measurement. Both composables' `containerRef`s are bound to the SAME
@@ -1172,7 +1179,7 @@ const cardCtx: AnalyzerCardContext = {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 .record select {
@@ -1210,7 +1217,7 @@ const cardCtx: AnalyzerCardContext = {
   flex-wrap: wrap;
 }
 .drag-hint {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .reset-layout {
@@ -1295,7 +1302,7 @@ const cardCtx: AnalyzerCardContext = {
   touch-action: pan-y;
   background: transparent;
   border-radius: calc(var(--radius) * 1.5);
-  transition: background-color 0.1s ease;
+  transition: background-color var(--dur-instant) ease;
 }
 .grid-gutter.vertical {
   cursor: col-resize;
@@ -1381,6 +1388,11 @@ const cardCtx: AnalyzerCardContext = {
    static outline shown for the same duration (see `locateCard`'s timeout) —
    matches this app's existing reduced-motion convention (useFlipAnimation.ts,
    App.vue, CurrentValuesPanel.vue). */
+/* M17 — 1s 沒有對應的 --dur-* token(最長的 --dur-slow 只有 320ms),這是刻意
+   的例外而非漏改:這個脈動是「定位提示」,要讓使用者的眼睛有時間找到、看清
+   閃爍的卡片,時間軸跟一般互動回饋(按下/懸浮/開合)完全不是同一種東西,
+   硬套最接近的 token 只會讓提示變得太快、失去作用。與 CurrentValuesPanel.vue
+   的 400ms 數值變更脈動同理,見該檔案對應註解。 */
 .analyzer :deep(.card-locate-pulse) {
   animation: card-locate-pulse 1s ease-out;
 }

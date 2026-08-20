@@ -258,7 +258,7 @@ watch(() => props.track, refreshSaved, { immediate: true })
   border-radius: var(--radius);
   padding: 6px 12px;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   cursor: pointer;
 }
 .export:hover,
@@ -282,7 +282,7 @@ watch(() => props.track, refreshSaved, { immediate: true })
 }
 .hint,
 .status {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .status.error {
@@ -297,7 +297,7 @@ watch(() => props.track, refreshSaved, { immediate: true })
   border-radius: var(--radius);
   background: var(--color-bg);
   border: 1px solid var(--color-accent);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .shared-banner span {
   flex: 1;
@@ -311,7 +311,7 @@ watch(() => props.track, refreshSaved, { immediate: true })
   border-radius: var(--radius);
   color: var(--color-text);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   padding: 4px 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -333,7 +333,7 @@ watch(() => props.track, refreshSaved, { immediate: true })
 }
 .ambiguous-title {
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .ambiguous-list {
   list-style: none;
@@ -348,13 +348,13 @@ watch(() => props.track, refreshSaved, { immediate: true })
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 .ambiguous .dismiss {
   align-self: flex-start;
 }
 .saved summary {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   cursor: pointer;
 }
@@ -373,7 +373,7 @@ watch(() => props.track, refreshSaved, { immediate: true })
   padding: 4px 8px;
   border-radius: var(--radius);
   background: var(--color-bg);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
 }
 .saved-name {
   flex: 1;
@@ -389,13 +389,13 @@ watch(() => props.track, refreshSaved, { immediate: true })
   border: none;
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
 }
 .contribute summary {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   cursor: pointer;
 }
@@ -409,12 +409,12 @@ watch(() => props.track, refreshSaved, { immediate: true })
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .contribute-form input {
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   padding: 5px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);

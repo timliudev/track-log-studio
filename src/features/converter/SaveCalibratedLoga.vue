@@ -118,12 +118,12 @@ async function saveAll(): Promise<void> {
 }
 h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
 }
 .intro {
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .muted {
   color: var(--color-text-muted);
@@ -167,10 +167,10 @@ h3 {
 }
 .name {
   font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .result {
-  font-size: 0.78rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .btn-secondary {

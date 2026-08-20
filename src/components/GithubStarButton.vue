@@ -97,7 +97,7 @@ const label = computed(() => {
   background: var(--color-bg);
   color: var(--color-text);
   text-decoration: none;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   line-height: 1;
   white-space: nowrap;
 }

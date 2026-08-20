@@ -161,7 +161,7 @@ function onEnter(): void {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-3);
   overflow: hidden;
 }
 
@@ -212,7 +212,7 @@ function onEnter(): void {
   font-weight: 500;
 }
 .ss-desc {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 

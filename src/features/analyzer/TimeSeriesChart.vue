@@ -634,7 +634,7 @@ function removeChannel(name: string): void {
 }
 .update-rate {
   color: var(--color-text-muted);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -673,7 +673,7 @@ function removeChannel(name: string): void {
   border: 1px solid var(--color-border);
   border-radius: 999px;
   padding: 3px 8px;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 .dot {
   width: 10px;
@@ -685,11 +685,11 @@ function removeChannel(name: string): void {
   border: none;
   color: var(--color-text-muted);
   cursor: pointer;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   line-height: 1;
 }
 .muted {
   color: var(--color-text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 </style>

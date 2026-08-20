@@ -8,6 +8,8 @@
  * matching ctx.* calls — see the small drawXxx() functions in TrackMap.vue.
  */
 
+import { rubberBand } from '@/domain/interaction/sheetPhysics'
+
 /** Axis-aligned bounding box in pixel space. */
 export interface BBox {
   minX: number
@@ -262,6 +264,35 @@ export function extremumColor(frac: number): string {
 
 export function clampZoomValue(z: number, minZoom: number, maxZoom: number): number {
   return Math.max(minZoom, Math.min(maxZoom, z))
+}
+
+/**
+ * B117 stage 4 — rubber-banded sibling of {@link clampZoomValue}: instead of
+ * a hard stop at `minZoom`/`maxZoom` (which B117 flags as reading "like it
+ * crashed" rather than "you're at the limit"), whatever amount `z` overshoots
+ * either bound is resisted via `rubberBand()` (the same WebKit over-scroll
+ * formula sheetPhysics.ts already uses for B118's sheet drag — a resistance
+ * curve works the same regardless of whether the unit underneath is a CSS
+ * px offset or a unitless zoom level) rather than refused outright. The
+ * `dimZoom` scale for the resistance curve is `maxZoom - minZoom` — the
+ * zoom range's own span, mirroring `rubberBandPanRange`'s use of the pan
+ * bounds' own span as ITS resistance scale (xRangeGesture.ts), so overshoot
+ * resistance is proportionate to how "big" this particular map's zoom range
+ * is rather than a fixed absolute number that would feel wrong on a track
+ * with an unusually narrow or wide zoom range.
+ *
+ * A NEW, separately-named export — {@link clampZoomValue} itself, and every
+ * existing caller of it (`computeZoomAbout`, `computeFocusFit`), is
+ * unchanged; a caller opts into this variant explicitly for a LIVE gesture,
+ * the same way B68's centre-needle range functions were added as their own
+ * opt-in exports alongside the originals rather than a behavioural change.
+ */
+export function rubberBandZoomValue(z: number, minZoom: number, maxZoom: number, coefficient = 0.55): number {
+  const dimZoom = maxZoom - minZoom
+  if (!(dimZoom > 0)) return clampZoomValue(z, minZoom, maxZoom)
+  if (z < minZoom) return minZoom - rubberBand(minZoom - z, dimZoom, coefficient)
+  if (z > maxZoom) return maxZoom + rubberBand(z - maxZoom, dimZoom, coefficient)
+  return z
 }
 
 /**

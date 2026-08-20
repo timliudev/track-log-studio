@@ -792,8 +792,10 @@ export default {
       kind: {
         gps: 'GPS',
         semantic: '語意',
+        passthrough: '直通',
         analog: '類比',
         digital: '數位',
+        skipped: '已略過(無資料)',
       },
     },
     convert: {

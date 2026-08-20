@@ -60,18 +60,18 @@ function onSlotChange(slot: SlotId, channel: string | null): void {
 }
 h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
 }
 h4 {
   margin: 0 0 4px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .fixed ul {
   margin: 0;
   padding-left: 18px;
   color: var(--color-text-muted);
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   line-height: 1.6;
 }
 .muted {
@@ -91,6 +91,6 @@ h4 {
 .slot-id {
   font-family: ui-monospace, monospace;
   color: var(--color-accent);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 </style>

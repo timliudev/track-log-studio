@@ -7,7 +7,10 @@ import {
   type DashboardLayoutItem,
 } from '@/domain/layout/dashboardLayout'
 import { cssGridDragTarget } from '@/domain/layout/cssGridDrag'
-import type { GridMetrics } from '@/domain/layout/gridGutter'
+import { xPx, yPx, type GridMetrics } from '@/domain/layout/gridGutter'
+import { pushSample, estimateVelocity2DPxPerSec, type PointerSample } from '@/domain/interaction/sheetPhysics'
+import { springStep, isSpringSettled, SPRING_DRAG_RELEASE, SPRING_MAX_DT_SEC, type SpringState } from '@/domain/interaction/spring'
+import { prefersReducedMotion } from '@/composables/useFlipAnimation'
 
 export interface UseCssGridDashboardDragOptions {
   /** The layout array CURRENTLY fed to `<CssGridGrid>` (already breakpoint-
@@ -73,6 +76,20 @@ export interface UseCssGridDashboardDragReturn {
    *  while its logical slot (and every other card's preview position) only
    *  advances in whole grid-cell steps. Null while nothing is dragging. */
   dragOffsetPx: ComputedRef<{ id: string; dxPx: number; dyPx: number } | null>
+  /** B117 stage 1 — the SAME shape as {@link dragOffsetPx}, but for the brief
+   *  window AFTER a drag ends while the card is still visually springing
+   *  from wherever it was released back down to its true (already-committed)
+   *  grid cell — see `onCardDragEnd`'s own doc for why this is a SEPARATE
+   *  field rather than just keeping `dragOffsetPx` alive longer: the two are
+   *  mutually exclusive in time (never both non-null for the same id at
+   *  once) but a caller that only wants the strict "is a gesture literally
+   *  live right now" signal (e.g. to decide whether to show a grab cursor)
+   *  still needs to tell them apart. A caller that just wants "what extra
+   *  translate should this card have right now" should read
+   *  `dragOffsetPx.value ?? settleOffsetPx.value` (see AnalyzerView's own
+   *  wiring) exactly the way CssGridGrid's existing single `dragOffsetPx`
+   *  prop already expects — no CssGridGrid.vue change was needed for this. */
+  settleOffsetPx: ComputedRef<{ id: string; dxPx: number; dyPx: number } | null>
   /** Whether `id` is currently allowed to start a drag — folds the grid-wide
    *  toggle together with the pinned-card exception (isItemDraggable). */
   isItemDraggableNow: (id: string) => boolean
@@ -96,7 +113,14 @@ interface ActiveDrag {
   originX: number
   originY: number
   w: number
-  /** Pointer position at drag start (clientX/clientY). */
+  /** Pointer position at drag start (clientX/clientY) — B117: NOT necessarily
+   *  the real `clientX`/`clientY` the pointerdown fired at. When this drag
+   *  INTERRUPTS an in-flight release-settle spring on the same card (see
+   *  `onCardDragStart`'s own doc), this is shifted backward by the spring's
+   *  residual offset at that instant, so `dragOffsetPx` (== `lastPointerX -
+   *  startX`) reads as that residual on the very first frame instead of
+   *  snapping to 0 — the card keeps rendering exactly where it visually was,
+   *  with the new drag's pointer movement added 1:1 on top from there. */
   startX: number
   startY: number
   /** Latest RAW pointer position (drives `dragOffsetPx`'s smooth follow). */
@@ -105,6 +129,18 @@ interface ActiveDrag {
   /** Latest CLAMPED target cell (drives `previewLayout`'s discrete reflow). */
   targetX: number
   targetY: number
+}
+
+/** B117 stage 1 — one card's post-release settle: two independent spring
+ *  axes (see spring.ts's own doc for why X and Y must not share one 2D
+ *  spring) animating the residual visual offset back down to its resting
+ *  value of 0 (the card's OWN grid cell already reflects the final position
+ *  by the time this exists — see `onCardDragEnd` — so "settled" always means
+ *  "offset (0, 0)", never a moving target). */
+interface SettleState {
+  id: string
+  x: SpringState
+  y: SpringState
 }
 
 /**
@@ -168,6 +204,80 @@ export function useCssGridDashboardDrag(options: UseCssGridDashboardDragOptions)
     return { id: a.id, dxPx: a.lastPointerX - a.startX, dyPx: a.lastPointerY - a.startY }
   })
 
+  // --- B117 stage 1 — post-release settle spring (see SettleState's own
+  // doc). `settle` is a `ref`, reassigned to a brand-new object every rAF
+  // frame — the SAME pattern `flushPendingMove` below already uses for
+  // `active` (`active.value = { ...a, ... }` on every coalesced pointermove
+  // frame), just applied to the settle animation's own per-frame state
+  // instead of pointer position. `settleLastFrameMs`/`settleRafId` are plain
+  // variables (not refs) since nothing needs to react to THEM, only to
+  // `settle` itself changing. ---
+  const settle = ref<SettleState | null>(null)
+  let settleLastFrameMs: number | null = null
+  let settleRafId: number | null = null
+
+  const settleOffsetPx = computed(() => {
+    const s = settle.value
+    if (!s) return null
+    return { id: s.id, dxPx: s.x.position, dyPx: s.y.position }
+  })
+
+  function cancelSettle(): void {
+    if (settleRafId != null) {
+      window.cancelAnimationFrame(settleRafId)
+      settleRafId = null
+    }
+    settle.value = null
+    settleLastFrameMs = null
+  }
+
+  function stepSettle(nowMs: number): void {
+    const s = settle.value
+    if (!s) {
+      settleRafId = null
+      return
+    }
+    const dtSec = settleLastFrameMs == null ? 1 / 60 : Math.min((nowMs - settleLastFrameMs) / 1000, SPRING_MAX_DT_SEC)
+    settleLastFrameMs = nowMs
+    const nextX = springStep(s.x, 0, SPRING_DRAG_RELEASE, dtSec)
+    const nextY = springStep(s.y, 0, SPRING_DRAG_RELEASE, dtSec)
+    if (isSpringSettled(nextX, 0) && isSpringSettled(nextY, 0)) {
+      settle.value = null
+      settleLastFrameMs = null
+      settleRafId = null
+      return
+    }
+    settle.value = { id: s.id, x: nextX, y: nextY }
+    settleRafId = window.requestAnimationFrame(stepSettle)
+  }
+
+  /** Start (or, mid-interruption, restart) the settle for `id`: the visual
+   *  offset springs from `initialOffsetPx` — computed by the caller as
+   *  "where the card actually was on screen the instant it stopped being
+   *  live-dragged, minus where its now-settled grid cell renders" (see
+   *  `onCardDragEnd`) — with `initialVelocityPxPerSec` as the spring's
+   *  starting velocity, toward a resting offset of (0, 0). Skips the
+   *  animation entirely under `prefers-reduced-motion` or when there is
+   *  nothing to animate (already at rest) — the card's grid cell is already
+   *  correct either way, so "skip" just means no decorative overlay motion,
+   *  not an incorrect final position. */
+  function startSettle(
+    id: string,
+    initialOffsetPx: { dxPx: number; dyPx: number },
+    initialVelocityPxPerSec: { vx: number; vy: number },
+  ): void {
+    cancelSettle()
+    if (initialOffsetPx.dxPx === 0 && initialOffsetPx.dyPx === 0) return
+    if (prefersReducedMotion()) return
+    settle.value = {
+      id,
+      x: { position: initialOffsetPx.dxPx, velocity: initialVelocityPxPerSec.vx },
+      y: { position: initialOffsetPx.dyPx, velocity: initialVelocityPxPerSec.vy },
+    }
+    settleLastFrameMs = null
+    settleRafId = window.requestAnimationFrame(stepSettle)
+  }
+
   /** The live reflow preview — a pure re-run of the SAME collision/packing
    *  pipeline the legacy write-back path uses (resolveOverlaps then
    *  compactLayoutTopLeft, pinned ids excluded via packExcluding), applied to
@@ -213,18 +323,46 @@ export function useCssGridDashboardDrag(options: UseCssGridDashboardDragOptions)
     }
   }
 
+  // B117 stage 1 — rolling pointer-position window for release-velocity
+  // estimation (reused `pushSample`/`estimateVelocity2DPxPerSec` from
+  // sheetPhysics.ts, see this file's own top-of-module note). A plain
+  // variable, not a ref — only ever read at drag-end, never during render.
+  let pointerSamples: PointerSample[] = []
+
   function onCardDragStart(id: string, clientX: number, clientY: number): void {
     if (!isItemDraggableNow(id)) return
     if (active.value) return // belt-and-braces — a stray second start should never stomp an in-flight drag
     const item = layout.value.find((it) => it.i === id)
     if (!item) return
+
+    // B117 stage 1 — interruption: if THIS card is mid-settle from a drag
+    // that JUST ended, don't let the new drag discard the settle's residual
+    // offset out from under it (that would be a visible micro-teleport, the
+    // exact bug this whole feature exists to fix, just relocated to drag
+    // START instead of drag end). Shifting `startX`/`startY` backward by the
+    // residual means `dragOffsetPx` (`lastPointerX - startX`) reads as that
+    // residual on this very first frame — the card keeps rendering exactly
+    // where it was — and every subsequent real pointer move is added on top
+    // 1:1 from there, same as an uninterrupted drag. `item.x`/`item.y` here
+    // already come from `layout.value`, which by now reflects the SETTLED
+    // (committed) cell the spring is animating toward — see `onCardDragEnd`
+    // — so the origin cell itself is already correct with no adjustment
+    // needed. A settle in progress for a DIFFERENT card is simply cancelled
+    // (see `cancelSettle`'s own doc for why that's safe — the earlier card's
+    // grid cell was already committed, the spring is purely decorative).
+    const s = settle.value
+    const biasX = s?.id === id ? s.x.position : 0
+    const biasY = s?.id === id ? s.y.position : 0
+    if (s) cancelSettle()
+
+    pointerSamples = [{ t: performance.now(), x: clientX, y: clientY }]
     active.value = {
       id,
       originX: item.x,
       originY: item.y,
       w: item.w,
-      startX: clientX,
-      startY: clientY,
+      startX: clientX - biasX,
+      startY: clientY - biasY,
       lastPointerX: clientX,
       lastPointerY: clientY,
       targetX: item.x,
@@ -234,6 +372,7 @@ export function useCssGridDashboardDrag(options: UseCssGridDashboardDragOptions)
 
   function onCardDragMove(clientX: number, clientY: number): void {
     if (!active.value) return
+    pointerSamples = pushSample(pointerSamples, { t: performance.now(), x: clientX, y: clientY })
     pendingPointer = { x: clientX, y: clientY }
     if (rafId == null) rafId = window.requestAnimationFrame(flushPendingMove)
   }
@@ -244,17 +383,47 @@ export function useCssGridDashboardDrag(options: UseCssGridDashboardDragOptions)
     const a = active.value
     pendingPointer = null
     if (!a) return
+
+    // B117 stage 1 — capture everything the settle spring needs BEFORE
+    // clearing `active`: `previewLayout` (read via `draggedItem` below)
+    // depends on `active.value`, so it must be read while the drag is still
+    // "live" from this composable's own point of view.
+    const liveOffsetPx = { dxPx: a.lastPointerX - a.startX, dyPx: a.lastPointerY - a.startY }
+    const draggedPreviewItem = previewLayout.value.find((it) => it.i === a.id)
+    const velocity = estimateVelocity2DPxPerSec(pointerSamples)
+    pointerSamples = []
+
+    let finalItem: DashboardLayoutItem | undefined
     if (committed) {
       const settled = previewLayout.value
       active.value = null
       onCommit(settled)
+      // `onCommit` (`writeBackLayout`) is expected to route back into
+      // `layout` reactively before this function returns in the real app
+      // (see this composable's OWN option doc) — but a test harness (or a
+      // caller that persists asynchronously) might not update it
+      // synchronously, so fall back to the settled preview's own copy of
+      // the dragged item rather than assuming `layout.value` already moved.
+      finalItem = layout.value.find((it) => it.i === a.id) ?? settled.find((it) => it.i === a.id)
     } else {
       active.value = null
+      // Aborted — nothing was ever written back, so the card's true resting
+      // cell is whatever `layout` (unchanged) already says it is.
+      finalItem = layout.value.find((it) => it.i === a.id)
     }
+
+    if (!draggedPreviewItem || !finalItem) return // card removed mid-drag — nothing sensible to settle
+
+    const m = metrics.value
+    const onScreenX = xPx(draggedPreviewItem.x, m) + liveOffsetPx.dxPx
+    const onScreenY = yPx(draggedPreviewItem.y, m) + liveOffsetPx.dyPx
+    const initialOffsetPx = { dxPx: onScreenX - xPx(finalItem.x, m), dyPx: onScreenY - yPx(finalItem.y, m) }
+    startSettle(a.id, initialOffsetPx, velocity)
   }
 
   onBeforeUnmount(() => {
     cancelPendingFrame()
+    cancelSettle()
     active.value = null
   })
 
@@ -263,6 +432,7 @@ export function useCssGridDashboardDrag(options: UseCssGridDashboardDragOptions)
     previewLayout,
     draggingId,
     dragOffsetPx,
+    settleOffsetPx,
     isItemDraggableNow,
     onCardDragStart,
     onCardDragMove,

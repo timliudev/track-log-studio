@@ -155,7 +155,7 @@ watch(() => navigation.target, revealSaveModified, { flush: 'post' })
 }
 .muted {
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 .format {
   display: flex;
@@ -164,7 +164,7 @@ watch(() => navigation.target, revealSaveModified, { flush: 'post' })
   flex-wrap: wrap;
 }
 .format-label {
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   color: var(--color-text-muted);
 }
 .seg {
@@ -206,7 +206,7 @@ watch(() => navigation.target, revealSaveModified, { flush: 'post' })
 }
 h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
 }
 .items {
   list-style: none;

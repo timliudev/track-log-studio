@@ -16,6 +16,55 @@
   --radius: 8px;
   --space: 8px;
 
+  /* M17 — 字級尺度(9 階)。取代原本 23 種散落的 rem/px 硬寫值(0.85rem 與
+     .85rem 兩種寫法混用、0.62rem≈9.9px 實質不可讀)。每一階都對應審查文件
+     docs/ISSUES.md M17 條目列出的合併群組,誤差最大 0.05rem(≈0.8px),刻意
+     保守 — 這不是「重新設計字級」,是把既有視覺尺寸收斂進一套系統。 */
+  --text-2xs: 0.65rem; /* 0.62 / 0.64 / 0.65rem 的收斂點 */
+  --text-xs: 0.7rem; /* 0.68 / 0.7 / 0.72rem */
+  --text-sm: 0.75rem; /* 0.75rem(已是唯一值,原樣保留為獨立階) */
+  --text-md: 0.8rem; /* 0.78 / 0.8 / 0.82rem */
+  --text-base: 0.85rem; /* 0.85rem — app 最常見的本文字級,60 處原樣 */
+  --text-lg: 0.9rem; /* 0.88 / 0.9 / 0.95rem */
+  --text-xl: 1rem; /* 1rem / 1.05rem */
+  --text-2xl: 1.1rem; /* 1.1rem — 卡片/區塊標題 */
+  --text-3xl: 1.4rem; /* 1.4rem — App.vue 品牌標題等大標 */
+
+  /* M17 — 排版基準:行高與字距。Apple 準則的字距規則是「隨字級變化」而非
+     全域套一個值:大標(--text-2xl/3xl)收緊、密集小字(--text-2xs/xs)略放,
+     中段本文維持 0(見 body 與各元件套用處的個別套用,而非這裡的全域套用)。*/
+  --leading-tight: 1.2;
+  --leading-normal: 1.4;
+  --leading-loose: 1.6;
+  --tracking-tight: -0.015em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.01em;
+
+  /* B119/M17 — 陰影三階 + 專用的 BottomNav 陰影,取代原本 10 種各自硬寫的
+     rgba(0,0,0,α)。深色模式在下方兩個對應區塊(prefers-color-scheme 與顯式
+     [data-theme='dark'])各自覆寫這四個變數 —— 純黑陰影疊在深色 surface 上
+     幾乎看不見,深色版額外疊一圈極淡的白色描邊(0 0 0 1px rgba(255,255,255,α)),
+     那是「材質在暗處自己反光」的邊緣,黑色陰影做不到但這圈亮邊可以,重新
+     建立卡片與背景的層級分離感。 */
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.14);
+  --shadow-3: 0 10px 30px rgba(0, 0, 0, 0.22);
+  --shadow-nav: 0 -2px 12px rgba(0, 0, 0, 0.08);
+
+  /* M17 — 動效時長/緩動。`--ease-standard` 與 App.vue 分頁切換滑動早就在用
+     的 `cubic-bezier(0.22, 1, 0.36, 1)` 是同一條曲線,現在只有這一份定義。
+     `src/domain/layout/flip.ts` 的 PIN_FLIP_DURATION_MS(320)/PIN_FLIP_EASING
+     必須手動與 --dur-slow/--ease-standard 保持一致 —— 那兩個常數是給 JS
+     FLIP 動畫算數用的,不能只留 CSS 變數(JS 讀不到 CSS custom property
+     的數值語意,只能讀字串),所以兩邊各自宣告、值必須手動同步,
+     test/lint/designTokens.test.ts 會 import flip.ts 的常數並與這裡的字串
+     比對,兩邊漂移就會直接讓測試紅燈。 */
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-instant: 100ms;
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --dur-slow: 320ms;
+
   /* Height reserved for BottomNav.vue's fixed iOS-style tab bar (see its own
      `bottom-nav` rule, App.vue's `.content`/`.site-footer` bottom padding,
      and PwaUpdateToast.vue) — 0 on desktop/tablet where BottomNav is
@@ -44,6 +93,11 @@
     --color-accent: #e23b3b;
     --color-accent-text: #ffffff;
 
+    --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+    --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    --shadow-3: 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+    --shadow-nav: 0 -6px 18px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+
     color-scheme: dark;
   }
 }
@@ -57,7 +111,50 @@
   --color-accent: #e23b3b;
   --color-accent-text: #ffffff;
 
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-3: 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-nav: 0 -6px 18px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
+
   color-scheme: dark;
+}
+
+/* B119 — 0 處 prefers-contrast 分支的補齊。只提高 --color-border(視覺分隔)
+   與 --color-text-muted(次要文字)這兩個「本來就設計成低對比」的 token,
+   --color-text/--color-accent 本來對比就夠高,不需要再拉。三個分支(預設
+   淺色、OS 深色跟隨、顯式 [data-theme='dark'])鏡射上面色彩 token 本身的
+   結構,同一份邏輯只是外面多包一層 `prefers-contrast: more`。
+   實測對比(WCAG relative luminance,見 PR 說明對應腳本):
+     淺色 --color-text-muted #40444d vs --color-bg #f7f8fa → 9.18:1(AAA 一般文字門檻 7:1)
+     淺色 --color-text-muted #40444d vs --color-surface #ffffff → 9.76:1
+     淺色 --color-border      #828a99 vs --color-bg #f7f8fa → 3.27:1(UI 元件非文字對比門檻 3:1)
+     淺色 --color-border      #828a99 vs --color-surface #ffffff → 3.47:1
+     深色 --color-text-muted #c3c8d1 vs --color-bg #0f1115 → 11.25:1
+     深色 --color-text-muted #c3c8d1 vs --color-surface #181b21 → 10.27:1
+     深色 --color-border      #6b7382 vs --color-bg #0f1115 → 3.96:1
+     深色 --color-border      #6b7382 vs --color-surface #181b21 → 3.61:1
+   （淺色 border 原本試過 #8b92a0,對 --color-bg 只有 2.94:1、沒過 3:1 門檻——
+   一個專門為了「提高對比」而存在的分支不能自己不達標,改深一階到 #828a99,
+   兩個背景都有安全餘裕。） */
+@media (prefers-contrast: more) {
+  :root {
+    --color-text-muted: #40444d;
+    --color-border: #828a99;
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-text-muted: #c3c8d1;
+    --color-border: #6b7382;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root[data-theme='dark'] {
+    --color-text-muted: #c3c8d1;
+    --color-border: #6b7382;
+  }
 }
 
 * {
@@ -80,12 +177,64 @@ body {
     'Segoe UI',
     'Noto Sans TC',
     sans-serif;
+  /* M17 — 本來完全沒有全域 line-height(theme.css 唯一的 1.35 是掛在
+     .app-tooltip 自己身上,不是 body 的),字級一密就容易黏在一起。 */
+  line-height: var(--leading-normal);
   /* Avoid double-tap zoom / improve touch responsiveness on the analysis canvas. */
   touch-action: manipulation;
 }
 
 #app {
   min-height: 100%;
+}
+
+/* B115 — 全域「按下」回饋 + 一致的鍵盤焦點環。審查前整個 src/ 只有
+   BottomNav.vue 一個檔案有 :active、只有 BottomNav.vue/PwaUpdateToast.vue
+   兩檔有 :focus-visible,其餘 69 處互動狀態全靠 :hover(觸控裝置上不存在)
+   或瀏覽器預設 outline(與自訂 accent 焦點環不一致)。這裡補的是「元素層級
+   的基礎樣式」,不是伸進任何元件自己的 scoped 內部 —— 讀過本檔案最下方
+   B35/B110 那段教訓:永遠不要用 :global() 包 :root[...] 選擇器(會整條
+   選擇器變成全域、後面的元件範圍全部被吃掉),下面兩條都不需要 :global()
+   也不會誤傷:tap-highlight 是純元素選擇器、focus-visible 用 :where() 把
+   規則本身的特異度壓到 0,兩者天生就不會「伸進」任何 scoped 內部搶styling。 */
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 按下的縮放回饋。`.no-press` 是逃生艙:拖曳把手、格線縮放把手、疊在
+   canvas/圖表上、位置本身就是像素精算出來的控制項,以及本身就是拖曳對象
+   的按鈕,都不該在放手瞬間多一個「自己也在動」的 transform 干擾手勢判讀
+   (transform 還會替該按鈕的子元素建立新的 containing block,任何原本要
+   相對更上層祖先定位的 fixed/absolute 子孫會被劫持 —— 這正是本檔案最下方
+   B35/B110 教訓的同一類「不小心創造新的定位基準」錯誤,只是這次的成因是
+   transform 而不是 :global())。實際稽核結果見批次 commit 說明:本庫目前
+   所有拖曳/縮放把手都是 <div>,不是 <button>,天生不會被這條規則命中;
+   唯一需要顯式排除的是 BottomNav.vue 的分頁鈕,見該檔案自己的說明。
+   `transition` 刻意宣告在「不含 :active」的基礎規則上,`transform` 才留在
+   :active 裡 —— 兩者不能寫在同一條 :active 規則裡。原因::active 規則只
+   在按住當下才會命中,放開的瞬間瀏覽器改套用「不含 :active」的規則來算
+   新的 computed style,如果 transition 只存在於 :active 規則本身,那條
+   規則放手當下已經不再命中、根本沒被拿來用,目的地(base 規則)沒有
+   transition 可套,transform 只能直接跳回 none —— 結果是「按下有動畫、
+   放開瞬間瞬跳」的不對稱,讀起來像掉幀而不是回彈。把 transition 放在兩種
+   狀態都會命中的基礎規則上,進場(套用 :active 的 transform)、退場(移除
+   :active、transform 變回預設)才會共用同一份 transition 定義,兩個方向
+   都能動畫。 */
+@media (prefers-reduced-motion: no-preference) {
+  button:not(:disabled):not(.no-press) {
+    transition: transform var(--dur-instant) ease-out;
+  }
+  button:not(:disabled):not(.no-press):active {
+    transform: scale(0.97);
+  }
+}
+
+/* 零特異度焦點環::where() 讓這條規則的特異度永遠是 0,任何元件自己
+   宣告的 :focus-visible(例如 BottomNav.vue/PwaUpdateToast.vue 既有的兩份)
+   都還是贏,這裡只補「原本完全沒人管、只剩瀏覽器預設方框」的控制項。 */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* Shared v-tooltip bubble (src/directives/tooltip.ts) — rounded + themed
@@ -105,12 +254,12 @@ body {
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
-  font-size: 0.78rem;
-  line-height: 1.35;
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity var(--dur-instant) ease;
 }
 .app-tooltip.is-visible {
   opacity: 1;

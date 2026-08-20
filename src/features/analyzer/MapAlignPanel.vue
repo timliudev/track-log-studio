@@ -246,7 +246,7 @@ const comparisonGroups = computed<ComparisonGroup[]>(() => {
 }
 .hint {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .reset-all {
@@ -284,7 +284,7 @@ const comparisonGroups = computed<ComparisonGroup[]>(() => {
 }
 .name {
   min-width: 2.5em;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 .comparison-section {
   display: flex;
@@ -309,7 +309,7 @@ const comparisonGroups = computed<ComparisonGroup[]>(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
   font-weight: 600;
   color: var(--color-text-muted);
 }
@@ -327,7 +327,7 @@ const comparisonGroups = computed<ComparisonGroup[]>(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   line-height: 1;
   cursor: pointer;
 }
@@ -350,7 +350,7 @@ const comparisonGroups = computed<ComparisonGroup[]>(() => {
 }
 .value {
   min-width: 9em;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
 }
@@ -363,7 +363,7 @@ const comparisonGroups = computed<ComparisonGroup[]>(() => {
   height: 28px;
   flex: none;
   padding: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
 }

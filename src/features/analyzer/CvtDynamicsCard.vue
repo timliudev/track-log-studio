@@ -330,17 +330,23 @@ const statusLabel = computed(() => {
 .card-toolbar, .status-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .profile-title { min-width: 0; display: grid; }
 .profile-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.profile-title span, .confidence-note { color: var(--color-text-muted); font-size: 0.72rem; }
+.profile-title span, .confidence-note { color: var(--color-text-muted); font-size: var(--text-xs); }
 .settings-button { min-height: 36px; padding: 6px 10px; color: var(--color-text); background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: var(--radius); cursor: pointer; }
 .status-row { justify-content: flex-start; flex-wrap: wrap; }
-.status-chip { padding: 3px 7px; border: 1px solid var(--color-border); border-radius: 999px; font-size: 0.68rem; }
+.status-chip { padding: 3px 7px; border: 1px solid var(--color-border); border-radius: 999px; font-size: var(--text-xs); }
 .status-ok { color: var(--color-success, #2ea043); }
 .status-out-of-bounds, .status-no-root { color: var(--color-warning, #c99100); }
 .status-unavailable { color: var(--color-text-muted); }
 .electronic { color: var(--color-accent); }
 .calibration { color: #9b72cf; }
 .cvt-svg { width: 100%; min-height: 128px; flex: 1 1 150px; overflow: visible; }
-.cvt-svg text { fill: var(--color-text-muted); font-size: 10px; }
+/* M17 — 這裡是 SVG 內文字,`font-size` 不管用 px 或 rem 都一樣是 SVG 使用者
+   座標系統下的長度、一樣會被 viewBox(0 0 360 180)→實際渲染尺寸的縮放比例
+   吃進去(標籤本來就該跟著圖表幾何一起縮放,這是設計成的行為,不是 bug)——
+   px 與 rem 在這裡的幾何效果完全相同,差別只在 rem 會尊重使用者的根字級
+   偏好(瀏覽器縮放/OS 大字體),原本硬寫 10px 正是 M17 條目點名的「破壞
+   Dynamic Type」兩處之一,換成 var() 補上這層可及性,不影響幾何。 */
+.cvt-svg text { fill: var(--color-text-muted); font-size: var(--text-2xs); }
 .fixed-sheaves path, .moving-sheave path { fill: none; stroke: var(--color-text-muted); stroke-width: 4; stroke-linecap: round; }
 .pulley-rim { fill: color-mix(in srgb, var(--color-surface-raised) 70%, transparent); stroke: var(--color-border); stroke-width: 2; }
 .pitch-circle { fill: none; stroke: var(--color-accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
@@ -348,10 +354,10 @@ const statusLabel = computed(() => {
 .hub { fill: var(--color-text); }
 .live-values { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 0; }
 .live-values div { min-width: 0; padding: 6px; background: var(--color-surface-raised); border-radius: var(--radius); }
-.live-values dt { overflow: hidden; color: var(--color-text-muted); font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
+.live-values dt { overflow: hidden; color: var(--color-text-muted); font-size: var(--text-2xs); text-overflow: ellipsis; white-space: nowrap; }
 .live-values dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; font-weight: 600; }
 .live-values small { font-weight: 400; color: var(--color-text-muted); }
-.force-readout { padding: 7px 9px; background: var(--color-surface-raised); border-radius: var(--radius); font-size: 0.75rem; }
+.force-readout { padding: 7px 9px; background: var(--color-surface-raised); border-radius: var(--radius); font-size: var(--text-sm); }
 .force-readout summary { cursor: pointer; font-weight: 600; }
 .force-readout[open] summary { margin-bottom: 8px; }
 .force-chart { width: 100%; height: 86px; }
@@ -364,14 +370,14 @@ const statusLabel = computed(() => {
 .force-legend .rear-key::before { background: #d19a47; }
 .force-values { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin: 0; }
 .force-values div { min-width: 0; }
-.force-values dt { color: var(--color-text-muted); font-size: 0.65rem; }
+.force-values dt { color: var(--color-text-muted); font-size: var(--text-2xs); }
 .force-values dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; }
 .field-note { margin: 7px 0 0; color: var(--color-text-muted); line-height: 1.35; }
 .sensitivity-table { display: grid; gap: 5px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--color-border); }
 .sensitivity-table div { display: grid; grid-template-columns: 0.8fr 1.4fr 1.4fr; gap: 6px; font-variant-numeric: tabular-nums; }
 .layer-message, .warning-message, .confidence-note { margin: 0; line-height: 1.35; }
-.layer-message { padding: 7px 9px; color: var(--color-text-muted); background: var(--color-surface-raised); border-radius: var(--radius); font-size: 0.75rem; }
-.warning-message { color: var(--color-warning, #c99100); font-size: 0.72rem; }
+.layer-message { padding: 7px 9px; color: var(--color-text-muted); background: var(--color-surface-raised); border-radius: var(--radius); font-size: var(--text-sm); }
+.warning-message { color: var(--color-warning, #c99100); font-size: var(--text-xs); }
 :root[data-any-pointer-coarse='true'] .settings-button { min-height: 44px; }
 @media (max-width: 520px) {
   .live-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }

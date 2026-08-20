@@ -26,6 +26,7 @@
 - README 部署描述更正為 **Cloudflare Workers**（原誤植 Pages）。
 - XRK 規格 H-message opcode 端序更正（`0x6863` → `0x683c`）。
 - **RCNX 掉最後一圈（B104）**：`buildLapNumberChannel` 的尾巴沿用最後圈值、缺收尾 crossing，`detectLapsByChannel` 少偵測一圈（142.rcnx 8/4/7→7/3/6）。修法：尾巴段 counter +1 給最後一圈收尾。真檔驗證恢復 8/4/7。（見 ISSUES B104。）
+- **`.rcz` → `.vbo` 匯出欄位映射失準（B120–B126）**：`domain/export/vbo/` 這套映射原本是為 `.loga`(文字欄名)設計,套用到 `.rcz`(數字 id 造出的 `rc_*` 名)時整批撞號/誤判——已是合法 RaceChrono 識別符的頻道被 Allocator 重新編號、RC3 `digital1`(固定 RPM 槽)未被識別、標準 GPS 欄位(`sats`/`height`)沒接上來源資料、單位被洗成 `raw`/`bool`、整條無資料的頻道仍輸出成假 0、數位/類比判定規則過脆、絕對時鐘用錯了 epoch。全數修正(F7 RC3 Analog 自訂命名表待拍板,不在此批)。詳見 ISSUES B120–B126。
 
 ## 🛠️ 待修 / 已知限制
 - RCZ 同名通道後綴為 cosmetic 差異（AFR 第二份命名為 `rc_air_fuel_ratio_3`，與 VBO 端 `_2` 不一致）；不影響資料。

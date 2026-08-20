@@ -329,7 +329,7 @@ const allLapsBandExcluded = computed(() => {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .recording-heading strong {
   overflow: hidden;
@@ -338,7 +338,7 @@ const allLapsBandExcluded = computed(() => {
 }
 .recording-heading > span:last-child {
   color: var(--color-text-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 .recording-swatch {
   width: 10px;
@@ -450,7 +450,7 @@ const allLapsBandExcluded = computed(() => {
 }
 .column-label {
   color: var(--color-text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 
 .clear-selection {
@@ -485,14 +485,14 @@ const allLapsBandExcluded = computed(() => {
   border: 1px dashed var(--color-text-muted);
   border-radius: var(--radius);
   color: var(--color-text-muted);
-  font-size: 0.7rem;
+  font-size: var(--text-xs);
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
 }
 .band-excluded-hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .swatch {

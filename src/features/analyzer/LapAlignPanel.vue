@@ -111,7 +111,7 @@ function resetAll(): void {
 }
 .hint {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .reset-all {
@@ -149,7 +149,7 @@ function resetAll(): void {
 }
 .name {
   min-width: 2.5em;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
 }
 .nudge {
   display: inline-flex;
@@ -164,7 +164,7 @@ function resetAll(): void {
   border: none;
   width: 32px;
   height: 30px;
-  font-size: 1.1rem;
+  font-size: var(--text-2xl);
   line-height: 1;
   cursor: pointer;
 }
@@ -175,7 +175,7 @@ function resetAll(): void {
 .value {
   min-width: 5.5em;
   text-align: center;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
   padding: 0 4px;
 }
@@ -191,7 +191,7 @@ function resetAll(): void {
   height: 28px;
   flex: none;
   padding: 0;
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   line-height: 1;
   cursor: pointer;
 }

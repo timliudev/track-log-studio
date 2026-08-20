@@ -224,6 +224,216 @@ Test assets: user placed `bbbb(22).loga` + `bbbb(22)set.json` (his manual gates 
 ## User report — 釘選卡片自行放大/手機超版擠掉內容 (B114)
 - [x] **B114** 使用者回報兩個症狀、同一根因(user:「釘選的卡片要維持原本大小，不要自己放大」、「手機板上的卡片釘選後會超過尺寸? 底下全不見」):B112 把桌面版 `.pinned-anchor :deep(.dashboard-card)` 從 `width: min(560px, 100%)` 改成 `width: 100%`,搭配 `DashboardCard.vue` 既有的 `aspect-ratio`(由卡片格線 `w/h` 推導)機制,使釘選卡片變成「整頁寬 × 原比例」而自行放大;手機上更因此輕易撐爆釘選區 `max-height: 50vh` 的上限,把下方內容全部擠出畫面。**修法**:釘選卡片改用它在格線中的**實際像素尺寸**作為預設大小,而非由寬度反推的比例形狀。高度純粹由 `h`(列數)× `GRID_ROW_HEIGHT` + `GRID_MARGIN[1]` 推得(`gridGutter.ts` 既有的 `hPx`),兩個斷點的公式完全相同、不受容器寬度影響(手機釘選卡的 `h` 本來就繼承自桌面版,`mobileLayout` 早已如此設計);寬度則用 `wPx` 搭配**當前斷點**的 `colNum`/`gridMargin[0]`(桌面用卡片自己的 `w`,手機固定視為 `w:1`——手機本來就只有一欄、`marginX:0`,與非釘選卡片在手機單欄下永遠滿版同一套邏輯),數學上桌面 `w<=12` 時必然 `<= 容器寬度`(12 欄滿版都還留格線自己的左右邊界),不需額外夾限。新增純函式 `pinnedCardPixelSize(item, isMobile, metrics)`(`src/domain/layout/gridGutter.ts`),`AnalyzerView.vue` 的 `pinnedGridSizeForItemId` 只是查出 canonical `layout` 條目後轉呼叫的薄包裝;`useGridGutters.ts` 額外導出原本就有量測的 `containerWidthPx`(單一 ResizeObserver 共用,不重複量測)。`DashboardCard.vue` 新增 `pinnedWidthPx`/`pinnedHeightPx` prop,`cardStyle` 計算屬性的優先順序:①使用者手動拖曳的 `pinnedSize`(B18 拖曳把手)最優先、不受影響;②新的 `pinnedWidthPx`/`pinnedHeightPx`(本次新預設,`maxWidth: '100%'` 作為上限安全網、不是強制寬度)次之;③容器尚未量測完成或 id 意外不在 `layout` 中時,才退回舊的 `aspectRatio` 行為(現在純屬邊界情況的保底)。`AnalyzerView.vue` 的 `.pinned-anchor :deep(.dashboard-card)` 也把 `width: 100%` 改為 `max-width: 100%`(inline style 本來就會贏過 class,此變更主要是讓 CSS 意圖與新行為一致)。新增測試:`gridGutter.test.ts` 的 `pinnedCardPixelSize` 純函式(桌面寬度來自卡片自身 w、高度與容器寬度無關、不同形狀卡片尺寸不同、手機寬度等於容器滿版、容器未量測/非法 w-h 回傳 null,共 6 項)+ `DashboardCard.test.ts` 的 `pinnedWidthPx`/`pinnedHeightPx`(套用/優先於 aspectRatio/缺一退回 fallback/非法值忽略/非釘選不套用/使用者拖曳仍優先,共 7 項)。typecheck 乾淨、**2216/2216 綠**(基準 2203)、lint 0 error(既有 4 個警告與本次無關)、scoped-css-lint 過、build 31 entries、audit 0。⚠️ 視覺結果(釘選卡片實際看起來是否等於格線中原尺寸、手機是否不再擠掉下方內容)headless 無法繪製,待使用者裝置實測。 — `fb4b817`/merge `ab8f1b3`
 
+## 設計審查 — Apple 流體介面準則 (B115–B119, M17)
+一次以 Apple《Designing Fluid Interfaces》/《Principles of Great Design》準則對全 `src/` 做的設計審查
+(觸發:user「審查一次目前專案的設計」)。審查結論:工程紀律高(1:1 拖曳追蹤保留抓取偏移、rAF 合併輸入、
+FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策用能力偵測而非視窗寬度),缺口集中在
+**設計語言未系統化**與**動效全部是固定時長 CSS transition**兩件事。以下五條為審查產出的可執行條目。
+
+- [x] **B115** 全 app 幾乎沒有「按下」回饋。整個 `src/` 只有 `BottomNav.vue` 一個檔案有 `:active`
+  (69 處互動狀態其餘全是 `:hover`,而 hover 在觸控裝置上不存在)——手機使用者按下 FileBar 匯入鈕、
+  CardMenu `.menu-toggle`/`.row-name`、rcnx session 選擇鈕、DashboardCard `.icon-btn`(26×26)、
+  Settings/Converter 表單按鈕時,從按下到動作完成之間畫面完全無反應,違反「回饋發生在 pointer-down
+  而非 release」。同一組問題:`:focus-visible` 也只有 `BottomNav.vue`/`PwaUpdateToast.vue` 兩檔有,
+  其餘控制項靠瀏覽器預設 outline,與自訂 accent 焦點環不一致。
+  **修法**:`theme.css` 補元素層級基礎樣式(非伸進任何元件 scoped 內部,並遵守本檔案 B35/B110 那條
+  「絕不用 `:global()` 包 `:root[...]`」的教訓)——`button` 基礎規則掛
+  `transition: transform var(--dur-instant) ease-out` + `-webkit-tap-highlight-color: transparent`,
+  `button:not(:disabled):not(.no-press):active` 掛 `transform: scale(0.97)`,整組包在
+  `prefers-reduced-motion: no-preference` 內。⚠️ **實作中抓到並修正的坑**:transition 一度寫在
+  `:active` 規則**內**,這樣只在按住期間生效,放開瞬間規則不再套用、`transform` 沒有 transition 可依
+  而直接跳回,造成「進場有動畫、退場是瞬跳」的不對稱;正解是 `BottomNav.vue` 本來就在用的形狀
+  (transition 在基礎規則、transform 在 `:active`),已在程式碼內註解記錄。焦點環用
+  `:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible` 把特異度壓到 0,
+  元件自己既有的兩份 `:focus-visible` 仍然贏,這裡只補原本無人管的控制項。`.no-press` 逃生艙全庫
+  只用到一處(`BottomNav.vue` 的分頁鈕,它自己已有調過手感的 scale 0.94,純粹是特異度衝突需要排除);
+  稽核過所有 `<button>`,本庫拖曳/縮放把手一律是 `<div>`,天生不會被這條規則命中。 — merge `dec86d3`
+- [x] **B116** `LapTable.vue` 與 `SessionLapComparison.vue` 缺 `font-variant-numeric: tabular-nums`。
+  `AccelTestPanel`/`CurrentValuesPanel`/`SectorPanel`/`GearPanel`/`CvtDynamicsCard` 都已有,但**圈速表
+  是本 app 最重要的數字表**——比例寬度數字使同位數欄位對不齊、切換圈次時數字左右跳動。
+  **修法**:改在共用根 `LapTableView.vue`(依 [[B1]]/[[B17]],比較表本來就重用主表這個元件)加
+  `tbody td:not(:first-child) { font-variant-numeric: tabular-nums }`,一處涵蓋兩個呼叫端,
+  而不是在兩個檔案各補一次。 — merge `dec86d3`
+- [x] **B117** 手勢缺物理:(a) `useCssGridDashboardDrag.onCardDragEnd` 一 commit 就把 `active` 設 null,
+  `dragOffsetPx` 立刻變 null → 卡片從手指位置**瞬間跳**到格線位置,剛剛的物理操作在放手瞬間消失;
+  (b) `DashboardCard` 的 `.touch-armed` 只換背景色,缺 iOS 拖曳排序那個「拿起來」的 lift;
+  (c) 全庫無任何指標速度追蹤(`edgeAutoscrollVelocity` 是捲動速度不是手勢速度)→ `TrackMap` 平移放手
+  即停、`UPlotChart` 觸控 pan 同理,而地圖類元件的肌肉記憶預期會滑行;
+  (d) `xRangeGesture.clampRange` 與 `TrackMap` 的 `MIN_ZOOM`/`MAX_ZOOM` 到邊界硬夾,讀起來像「當掉了」
+  而不是「到底了」,缺 rubber-banding 漸進阻力。
+  **修法(分四階段,每階段獨立 commit)**:①`useCssGridDashboardDrag.onCardDragEnd` 改用彈簧從當前
+  螢幕位移收斂回 0,**X/Y 兩條獨立彈簧**(單一 2D 距離彈簧在兩軸速度不同時會脫節),放手速度交接
+  故拖曳與動畫之間無接縫;`onCommit` 語意完全不變——版面寫回仍只在 pointerup 發生一次,彈簧純視覺、
+  不延後也不把關持久化,中止的拖曳(`committed:false`)同樣彈回而非瞬跳(`7c36795`)。②`DashboardCard`
+  的 `.touch-armed` 由「只換背景色」加上 iOS 式 lift(scale + 抬高陰影),不動既有
+  `touch-action: pan-y → none` 交接與 `touchDragDelay.ts` 長按狀態機(`d80b9a8`)。③`TrackMap`/
+  `UPlotChart` 放手保留平移慣性,`TrackMap` 走**既有的平移夾制路徑**故不可能逸出邊界、`UPlotChart`
+  走既有 `xRange` owner(`analyzerStore`)不另開第二條設定尺度的路(`f63c1ad`)。④邊界橡皮筋阻力,
+  以**新命名匯出**加進 `xRangeGesture.ts`,[[B68]] 既有的 `clampCentreNeedleRange` 家族語意一字未改
+  (`24479f6`)。
+  **重用而非重造**:直接 import [[B118]] 落地的 `sheetPhysics.ts` 的 `project()`/`rubberBand()`/
+  `pushSample()`,並**原地加性泛化**(`PointerSample` 增選用 `x`、新增 `estimateVelocity2DPxPerSec`
+  與 `momentumOffsetAt`),既有匯出行為零變動。新增 `src/domain/interaction/spring.ts`——semi-implicit
+  (symplectic) Euler,以 Apple 式 `(dampingRatio, responseSec)` 參數化而非 stiffness/damping/mass;
+  `SPRING_DRAG_RELEASE = {0.8, 0.3s}`(帶動量的手勢才配 overshoot)、`SPRING_DEFAULT = {1.0, 0.3s}`
+  (臨界阻尼,無動量的程式化 snap 用);`SPRING_MAX_DT_SEC = 1/30` 夾制單步,避免分頁背景化/掉幀
+  交回過大 dt 導致顯式積分器發散;`isSpringSettled` 同時檢查位置與速度,否則欠阻尼彈簧第一次穿越
+  目標時就會被誤判為靜止而凍在 overshoot 中途。**全部可中斷**:新手勢落下即取消進行中的彈簧/滑行,
+  並從當前螢幕位置接手(stage 1 以殘餘位移平移 `startX/startY`,首幀即連續)。reduced-motion 全覆蓋,
+  沿用既有 `prefersReducedMotion()`。主線實測:typecheck 乾淨、**2416/2416 綠**(基準 2353 + 63)、
+  lint 0 error、build 31 entries、audit 0;8 個受影響測試檔 `git diff --numstat` 全為
+  **0 deletions**,確認未竄改任何既有斷言。
+  ⚠️ **已知缺口(刻意不做完,非疏漏)**:`TrackMap` 的 `MIN_ZOOM`/`MAX_ZOOM` 只落地純函式
+  `rubberBandZoomValue` 與其測試,**未接進 `zoomAbout`**——滾輪縮放每一格是原子操作、沒有自然的
+  「放手」時機可觸發回彈,需要另行設計 debounce,硬接會是半成品。`TrackMap` 自身的平移邊界、軸帶
+  平移([[B70]]/[[B94]])、滑鼠 Shift 拖曳與雙指縮放亦維持既有硬夾;本次只有 `UPlotChart` 一般模式
+  觸控平移接上橡皮筋。 — merge `6e1f849`
+- [x] **B118** 浮層行為不一致且缺空間連續性:(a) `CardMenu` 的 `.popover` 直接 `v-if` 出現/消失,無進出
+  動畫、`transform-origin` 未錨定觸發按鈕;手機版 `@media (max-width:768px)` 已經把它變成 `position:
+  fixed` 貼底的 bottom sheet 形狀,卻沒有 sheet 的任何行為(不從底部滑入、不能下拉關閉);
+  (b) `FileBar` 三個 `role="dialog" aria-modal="true"` 的 rcnx 選擇器有 scrim 卻**沒有 Escape 關閉、
+  沒有焦點陷阱、沒有進出動畫**,而同一個 app 裡 `CardMenu` 有 Escape——看起來一樣的東西行為不一樣,
+  且 aria 宣告與實際行為不符。
+  **修法**:新增純模組 `src/domain/interaction/sheetPhysics.ts`(`project()` 用 Apple《Designing Fluid
+  Interfaces》的指數衰減離散閉式 `(v/1000)·d/(1−d)`,**不是**教科書的 `v²/2a`;`rubberBand()` 為
+  WebKit over-scroll 公式,漸近趨近 sheet 高度而非硬停;另有 `dragTranslateY`/`pushSample`/
+  `estimateVelocityPxPerSec`/`shouldDismissSheet`/`parseTranslateY`)與 `focusTrap.ts`,共用 composable
+  `useOverlayMotion.ts`(進出編排:prime-hidden → 強制 reflow → release → transitionend-or-timeout,
+  同 `useFlipAnimation` 既有的手法)與 `useModalDialog.ts`(Escape/焦點陷阱/焦點歸還,三個 dialog 共用
+  一份、不複製三次;不擁有開關狀態,只吃呼叫端的 `open` 與既有 cancel handler,確保 cancel 語意
+  完全不變)。CardMenu 桌面版 `transform-origin: top left` 靜態即正確(popover 本來就 `top`/`left`
+  貼齊按鈕,不需 JS 量測);手機版拖曳關閉限制在新的 `.sheet-grab` 抓握區,避免與 `.popover-scroll`
+  自己的 `overflow-y: auto` 打架;中斷支援靠解析當前 computed `translateY` 凍結後接手。FileBar 三個
+  dialog 的 scrim-click 取消**本來就有**(`@click.self`),未改動。 — merge `e3e8c49`
+- [x] **B119** 深色模式下陰影實質失效 + 材質層只做了一處。全庫 10 種 `box-shadow` 全部硬寫
+  `rgba(0,0,0,α)`,`rgba(0,0,0,0.18)` 疊在深色 `--color-surface: #181b21` 上幾乎看不見 → 暗色主題的
+  層級感塌掉。另:`backdrop-filter` 只有 `BottomNav` 一處(且做得正確:88% surface + blur 14 + saturate
+  150% + 亮上緣),topbar/tabs/FileBar 都是不透明實色橫條;且全庫 0 處 `prefers-reduced-transparency`
+  與 `prefers-contrast`,半透明材質要往外鋪之前必須先補這兩個分支,否則是可及性倒退。
+  **修法(陰影部分併入 [[M17]] 的 token 系統)**:三階 `--shadow-1/2/3` + `--shadow-nav`,深色兩個
+  分支(`prefers-color-scheme` 與顯式 `[data-theme='dark']`)各自覆寫,深色版額外疊
+  `0 0 0 1px rgba(255,255,255,α)` 的極淡白色描邊——純黑陰影在深色 surface 上做不到分離,這圈
+  「材質在暗處自己反光」的亮邊可以。`prefers-reduced-transparency: reduce` 放在 `BottomNav.vue`
+  自己的 scoped 區塊(全庫唯一使用 `backdrop-filter` 的就是它,屬它自己的職責),命中時退回不透明
+  實色列。`prefers-contrast: more` 在 `theme.css` 補三分支(鏡射色彩 token 本身的結構),只拉
+  `--color-border` 與 `--color-text-muted` 這兩個本來就刻意低對比的 token。⚠️ **實作中抓到並修正
+  的數值問題**:淺色 border 初版 `#8b92a0` 對 `--color-bg` 只有 2.94:1,低於 WCAG 非文字 UI 元件的
+  3:1 門檻——在一個專為提高對比而存在的分支裡沒達標說不過去,改為 `#828a99`(對 bg 3.27:1、對
+  surface 3.47:1)。深色組(3.96:1 / 3.61:1)本來就合格未動。**本批刻意不新增任何半透明材質**
+  (topbar/FileBar 的毛玻璃處理不在範圍內)。 — merge `dec86d3`
+- [x] **M17** 設計 token 未系統化。`theme.css` 只有 7 個顏色 token + `--radius` + `--space`,其餘全部硬寫:
+  **字級** 216 處 `font-size`、**23 種不同值**(0.85/0.8/0.9/0.78/0.82/0.75/0.72/0.7/0.68/0.65/0.64/0.62rem…),
+  `.85rem` 與 `0.85rem` 兩種寫法混用,0.62rem≈9.9px 實質不可讀,另有 2 處硬像素破壞 Dynamic Type
+  (`CvtDynamicsCard` 的 `.cvt-svg text`、`TrackMap` 的 `.osm-attribution`);**陰影** 10 種值(見 [[B119]]);
+  **動效** `cubic-bezier(0.22,1,0.36,1)` 在 `App.vue` 與 `flip.ts` 各寫一份字串常數,時長有
+  0.1/0.12/0.15/0.25/0.32/0.4/1s 無規則。**排版基準**亦缺:`body` 沒有全域 `line-height`(theme.css 的
+  1.35 是掛在 `.app-tooltip` 上),全庫只有 1 處 `letter-spacing`,而 tracking 本應隨字級變化
+  (大標收緊、密集小字略放)。
+  **修法**:9 階字級 `--text-2xs`(0.65rem)…`--text-3xl`(1.4rem),遷移後 `src/` 內字面 `font-size`
+  **歸零**(含原本兩處 10px 硬像素——實測 SVG text 在該處用 rem 幾何一致,所以是修掉而非豁免);
+  合併誤差最大 0.05rem(≈0.8px),刻意保守,這是「把既有視覺尺寸收斂進系統」而非重新設計字級。
+  另加 `--leading-*`/`--tracking-*`(`body` 補上全域 `line-height`,tracking 只套在大標與密集小字
+  兩端、中段本文維持 0——**不是**全域套一個值,那正是準則點名的反模式)、`--shadow-*`(見 [[B119]])、
+  `--ease-standard` 與 `--dur-instant/fast/base/slow`。`flip.ts` 的 `PIN_FLIP_DURATION_MS`/
+  `PIN_FLIP_EASING` 維持 TS 為真實來源(JS 讀不到 CSS custom property 的數值語意),兩邊各自宣告、
+  由新增的 `test/lint/designTokens.test.ts` **import 該常數與 theme.css 逐字比對**,漂移即紅燈;
+  同測試另外守住「`font-size` 必須用 `var(--text-*)`」與「elevation `box-shadow` 必須用
+  `var(--shadow-*)`」(ring/marker 類陰影逐檔案 allowlist 並註明理由)。保留 bespoke 值的例外:
+  兩個 `@keyframes` 脈衝(1s locate-pulse、400ms value-pulse)無合適 token、GgChart 的 echarts
+  tooltip 陰影是 `<script>` 內的 JS 防禦性 fallback 字串(天生不在 CSS 掃描範圍)。 — merge `dec86d3`
+
+## User report — .rcz → .vbo 匯出欄位映射失準 (B120–B127, F7)
+> 實測樣本 `session_20250817_1621_lihpao_full.rcz`(LihPao Full,7 圈,5 個裝置:100 accel /
+> 101 gyro / 102 magn / 200 GPS / 300 RC3 資料裝置 model 404)。匯出 **49 欄**(7 標準 GPS +
+> 42 頻道),**欄位數本身正確、沒有遺漏**:原始 45 個 channel 檔 − 4 份重複的 `distance`
+> + `IR_LapNumber` = 42。問題全部在**命名、單位、槽位分配**。根因:`domain/export/vbo/`
+> 這套映射是為 `.loga`(aRacer ECU 文字欄名)設計的,而 `.rcz` 內**只有數字 channel id、
+> 沒有任何文字標籤**(`sessionfragment.json` 實測只有 device id/model/type),頻道名是
+> importer 依 id 造出來的 `rc_*`(見 docs/specs/RCZ-FORMAT-SPEC.md §5.3)——兩邊語彙直接撞號。
+
+- [x] **B120** 已經是合法 RaceChrono 識別符的頻道被 Allocator 重新編號,和來源撞名。實測:
+  來源 `rc_analog_5`(電瓶電壓,值域 0.5–14.7)在 `_rc.vbo` 變成 `rc_analog_18`;來源
+  `rc_analog_15` 變成 `rc_digital_2`;來源 `rc_digital_2` 反過來變成 `rc_analog_27`;
+  `rc_x/y/z_acc`、`rc_*_rate_of_rotation`、`rc_*_magn` 本身就是官方識別符,卻被丟進
+  `rc_analog_1..9`。修法:`buildVboCatalog` 在查 `SEMANTIC` 之前先判斷「名稱已是合法 `rc_`
+  識別符」→ identity 直通,並把這些已占用的槽位登記進 `Allocator`,避免後續 generic 配號撞號。
+  識別符集合抽到共用模組 `domain/raceChrono/identifiers.ts`,匯入(`decodeRcChannelName`)與
+  匯出雙邊共用同一份表,不再各自硬寫。新增測試證明 5 個 generic 頻道排在 `rc_analog_5` 之前
+  仍不會撞號。 — `23c75f5`
+- [x] **B121** RC3 `digital1` 的固定語意(RPM)沒被識別。RaceChrono `$RC3` 句子的 d1 槽位是
+  **固定的 RPM**(本 repo 自家的 `Rc3NmeaExporter.ts` 也是硬填 `RPM`;`mapping.ts` 註明可由
+  使用者指派的只有 d2 + a1..a15),RCZ-FORMAT-SPEC §5.3 亦記 id 20002 = digital1「RaceChrono
+  顯示為 RPM」。本檔實測 `rc_digital_1` 值域 0–10337、怠速 1732–1925,確為引擎轉速,卻因為
+  「值不只有 0/1」被歸進 `rc_analog_28`、單位 `raw`。修法:`rc_digital_1` → `rc_rpm`(單位 rpm)。
+  `rc_digital_2` 是使用者自訂槽(本檔實測 0–100 且值呈 n/255×100 的離散階,實質是節氣門開度 %),
+  **不得**硬編語意,但也不該被判成 bool——現況為 identity 直通、非 bool。真檔複驗:
+  `rc_digital_1` 首筆 1833 rpm。 — `23c75f5`
+- [x] **B122** 標準 VBO GPS 欄位沒接上來源資料。`sats` 欄永遠寫死 `012`(實際 `Satellites`
+  首筆為 5)、`height` 欄永遠 `+00000.00`(實際 `GPS_Altitude` 首筆 201.5 m)→ Circuit Tools
+  的高度圖是平的、衛星數是假的;真值反而被塞進 `rc_analog_11` / `rc_analog_16`。另
+  `GPS_Lat`/`GPS_Lon` 已經填進 `lat`/`long` 標準欄,卻因不在 `GPS_CONSUMED` 名單而又各自
+  重複輸出一欄。修法:`GPS_Altitude`→`height`、`Satellites`→`sats`(來源缺這兩者時才退回
+  現行常數),`GPS_Lat`/`GPS_Lon` 併入 `GPS_CONSUMED`。**`heading` 維持現行由 lat/lon 重算的
+  平滑航向**(與 `.loga`/`.nmea` 路徑一致、已平滑),來源的 `GPS_Course` 保留為一般頻道,不互相取代。
+  `GPS_Altitude`/`Satellites` 刻意**不**併入共用 `GPS_CONSUMED`(會連帶讓通用 `.csv` 匯出器
+  漏掉這兩欄,CSV 沒有對應標準欄位可接),改開一個僅 VBO 用的 `VBO_ONLY_CONSUMED`。真檔複驗:
+  `sats`=005、`height`=+00201.50。 — `a6fc0ff`
+- [x] **B123** 單位被洗成 `raw`/`bool`。importer 已經標好 G / deg/s / µT / km / ° / DOP,
+  `buildVboCatalog` 對所有非 `SEMANTIC` 頻道一律覆寫成 `raw`(類比)或 `bool`(數位),
+  資訊平白丟掉,`[channel units]` 整段幾乎沒有意義。修法:generic bucket 保留來源
+  `channel.unit`,真的沒有單位時才落 `raw`。`.loga` 路徑不受影響(該路徑頻道本就沒有
+  `channel.unit`,golden fixture 位元不變)。 — `4c3ee7c`
+- [x] **B124** 整條無資料的頻道仍被輸出成一整欄 0。本檔 dev300 的 IMU 六條
+  (`rc_x/y/z_acc_dev300`、`rc_x/y/z_rate_of_rotation_dev300`)與 `rc_analog_13/14/15` 在
+  `.rcz` 內整條是 `INT32_MAX` 哨兵(= 無資料,見 RCZ-FORMAT-SPEC §5.3),importer 正確轉成
+  NaN,但匯出的 `cell()` 把 NaN 一律當 0 → **9 個垃圾欄位**,還讓「無資料」在 Circuit Tools
+  裡看起來像真實的 0。修法:整條皆 NaN 的頻道不輸出,並在 `_channels.csv` 列一行
+  「已略過(整條無資料)」;其餘零星 NaN 維持現行填 0(VBO 沒有空值表示法)。空值檢查改讀原始
+  `Float32Array`(不是先過 `cell()` 的 NaN→0 視圖)。真檔複驗發現**第 10 個**全無資料頻道
+  `GPS_AltitudePrecision`(本檔整條也是 `INT32_MAX`)——連帶解釋了 [[B125]] 描述的 (b) 案例
+  實際上就是本條(全 NaN 被 `cell()` 灌成常數 0 才誤判 digital),而非「真實 DOP 數值恰好落在
+  {0,1}」;修完後此頻道由本條直接略過,根本不會走到 [[B125]] 的判定。 — `a1c9f5c`
+- [x] **B125** 數位/類比判定規則過脆。現行規則是「所有值都是 0 或 1 就算 digital」,於是
+  (a) 被 [[B124]] 填成全 0 的無資料頻道被判成 digital(`rc_z_rate_of_rotation_dev300` →
+  `rc_digital_3`),(b) `GPS_AltitudePrecision` 這種 DOP 浮點只因本檔剛好落在 {0,1} 就被標
+  `bool`,(c) 真正的數位槽(RPM)反而被判成類比。修法:先扣掉 B124 的全無資料頻道,再讓
+  「來源已有 `unit`」優先於「值域猜測」——`unit` 非空的頻道永遠不算 digital(這部分是真正解決
+  (b) 的關鍵)。**值域規則本身維持歷史語意「每個有限值都是 0 或 1」,不要求同時出現 0 與 1**:
+  第一版曾改成「必須同時出現真正的 0 與真正的 1」以求自動排除常數頻道,但這條規則分不清「整場
+  都沒觸發過的真實數位旗標」(如 `Malf8.Malf_On`、`Pit_SW_On`——確實是數位訊號,只是這趟記錄
+  剛好全程沒觸發)跟「值剛好恆為 0 的類比頻道」,結果讓 `.loga` golden fixture 裡 108 個頻道從
+  digital 誤判成 analog(其中真的是數位旗標的也一起遭殃),卻對 `.rcz` 沒有實益——真檔裡促成
+  B125 的全部頻道(`rc_*_dev300`×6、`rc_analog_13/14/15`、`GPS_AltitudePrecision`)整條皆為
+  `INT32_MAX`,早被 [[B124]] 攔掉,從未走到這個判定式;倖存頻道(`GPS_FixType` {1,2}、
+  `GPS_CoordinatePrecision` 1.8–2.4、`distance` 連續值、`IR_LapNumber` 0–8)沒有一個落在
+  {0,1},新舊規則判定結果完全相同。已改回歷史語意(NaN 略過、不當 0)。殘留限制見 [[B127]]。
+  — `a1c9f5c`(初版)/`789d1b9`(訂正 `looksDigital()` 為歷史語意、fixture 復原、測試改寫)
+- [x] **B126** `.vbo` 的 `time` 欄比實際樣本早 6.5 秒。`.rcz` 沒有 `GPS_UTC_*` 頻道,匯出器
+  因此退回「`meta.createdDate` 的時分秒 + 相對 `Time`」;而 RCZ importer 的 `createdDate` 取
+  `session.json` 的 `timeCreated`(本檔 08:21:05.518 UTC),第一筆樣本卻在 `firstTimestamp`
+  08:21:12.023 UTC → 整份 `.vbo` 的絕對時鐘偏移 6.5 秒。相對時間正確(圈速不受影響),但與
+  影片、或與 RaceChrono 自家匯出對時就會錯。修法:RCZ importer 把「第一筆主時鐘樣本的 epoch」
+  帶出來(`headerInfo` 或 meta 新欄位),VBO 匯出器優先採用它;`createdDate` 的顯示語意不變。
+  採用型別化欄位 `LogMeta.firstSampleEpochMs`(而非塞進 `headerInfo` 字串)——選它是因為匯出器
+  要的是真正的 epoch number 可直接 `new Date()`,不是還要再解析回數字的字串,且是純新增的
+  optional 欄位,其餘 9 個 importer 的既有 `LogMeta` 建構語法完全不用動。真檔複驗:首筆
+  `time`=162112.xxx(非改前的 162105.xxx)。 — `d3b15a6`
+- [ ] **B127** [[B125]] 的殘留限制:值域啟發式規則分辨不出「整場都沒觸發過的真實數位旗標」跟
+  「值剛好恆為某個常數的類比頻道」。`.loga` 裡整趟記錄都停在 0 的 ECU 旗標(如
+  `IR_LapNumber`/`IR_LapTime`/`SimRPM`/`MapNum` 這類本質是類比、但剛好也全程恆 0/某常數的頻道)
+  跟真正未觸發的數位旗標一樣,都會落進數位槽——單靠值域完全無法區分。正確修法需要**頻道名稱/
+  說明文字**當佐證(例如名稱含 `_SW`/`Malf`/`_Act`/`_En` 等慣例字樣 vs. 純數值型頻道),但這條
+  規則需要涵蓋所有既有 ECU 命名慣例、有誤判風險,屬於待拍板的設計決策,**本批刻意不實作**。
+  背景:[[B125]] 第一版曾嘗試改用純值域規則(要求同時出現 0 與 1)來繞開這個問題,結果誤傷了
+  `.loga` golden fixture 裡 108 個頻道(含真的數位旗標),已還原為歷史語意並記錄在案。
+- [ ] **F7**(design-first,**本批不實作、待拍板**)RC3 Analog 自訂命名表。`.rcz` 內沒有任何
+  頻道文字標籤,Analog 1–15 的語意只存在使用者的 RaceChrono / ECU 設定裡,程式無從得知——
+  這是 [[B120]]–[[B125]] 修完之後**剩下的唯一**「名字看不懂」來源。需要一個可存成 preset、
+  隨裝置記憶的對應表,讓匯入顯示與匯出欄名都用真名。本檔實測值域可供對照:a1 0–118、
+  a2 0–255、a3 −53…61、a4 0–99.84(0.78 階)、a5 0.5–14.7、a6 64–98、a7 37–54、a8 恆 9、
+  a9 恆 251、a10 17–100、a11 0–255、a12 8/9、a13–15 無資料;d1 = RPM(固定)、d2 0–100
+  (n/255×100 階,疑似 TPS)。UX 待拍板。
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `83fc12a`
@@ -233,6 +443,7 @@ Test assets: user placed `bbbb(22).loga` + `bbbb(22)set.json` (his manual gates 
 - [x] **M15** CI `npm audit --audit-level=high` 閘門第四度紅燈(同 [[M11]]/[[M12]]/[[M13]] 家族),三則**新公告**同時命中,皆為 dev/build 期依賴、不進出貨 bundle:① `brace-expansion` — `GHSA-rgw5-rvv9-x895`「無界中間陣列致 DoS,繞過 CVE-2026-14257 的緩解」,受害範圍 **4.0.0–5.0.8**,**連 [[M13]] 當初加的 `^5.0.8` override 本身也落在範圍內**,修補版 5.0.9;② `fast-uri` — `GHSA-7p8r-x3mc-p8w7`「反斜線 authority 前導字元造成 host confusion」,範圍 3.0.0–3.1.4,即 [[M11]] 的 `^3.1.4` override 亦已失效,修補版 3.1.5(**留在 3.x 線**,不跳 4.x —— `ajv` 要求 `fast-uri ^3.0.1`);③ `undici` — 5 則公告(retry interceptor 回應去同步、私有快取指令解析致跨使用者資訊洩漏/崩潰、blob body `type` 的 CRLF injection、Cache-Control 等號空白、cookie 屬性注入),範圍 7.0.0–7.28.0,而 `miniflare` **精確釘死 `undici@7.28.0`**、即使 wrangler/@cloudflare/vite-plugin 都在最新版仍如此,故 `npm audit fix --force` 的「解法」是把 `@cloudflare/vite-plugin` 降到 **1.12.4**(破壞性,不採用),改以 override 拉到修補版 7.29.0。修法一律沿用 M11–M13 慣例:top-level `overrides`(`brace-expansion ^5.0.9`、`fast-uri ^3.1.5`、新增 `undici ^7.29.0`;`sharp ^0.35.3` 原封保留)並重新產生 lockfile。主線獨立複驗:`npm audit --audit-level=high` **0 漏洞**(全嚴重度亦 0)、`npm ls` 三者全樹分別收斂至 5.0.9/3.1.5/7.29.0 無漏網、typecheck 乾淨、**2307/2307 綠**(197 檔)、build 成功 PWA 31 entries(1367.90 KiB)、lint 0 error。**體質修正(user 拍板採用建議)**:此閘門原本排在 typecheck/test/build **之前**,任一 dev 期公告一出現就整條 workflow 17 秒閃退、連測試結果都看不到(純文件 commit 亦紅)——已把該步移到 job **最後**。把關強度完全不變(照樣讓 job 失敗、照樣 `--audit-level=high`),但公告出現時仍看得到 typecheck/測試/build 的真實結果。未採用 `continue-on-error`(會退化成純提醒、漏擋真該擋的)與放寬到 `--audit-level=critical`。 — `f6fb3fb`/merge `87d2bb8`,CI 順序調整見下一則 commit
 - [x] **M16** 相依 minor/patch 刷新(全部落在既有 caret range 內,`package.json` 版本字串未動、僅 lockfile 前進;`npm install` 因 lockfile 已滿足範圍而不會自動前進,需顯式 `npm update <pkgs>`):`@cloudflare/vite-plugin` 1.49.0→1.51.0、`@vitest/eslint-plugin` 1.6.24→1.6.26、`globals` 17.8.0→17.9.0、`typescript-eslint` 8.65.0→8.66.0、`vite` 8.2.0→8.2.1、`vue` 3.5.40→3.5.41、`vue-tsc` 3.3.8→3.3.9、`wrangler` 4.116.0→4.119.0。`typescript` 維持 `^6.0.3` 不動(TS7 阻擋原因未解,見上方再評估條目)。與 [[M15]] 同一 commit 落地、共用同一次驗證。連帶效果:GitHub PR #14(Dependabot minor-and-patch 群組 5 項:@cloudflare/vite-plugin 1.50.0、@vitest/eslint-plugin 1.6.25、globals 17.9.0、vue-tsc 3.3.9、wrangler 4.118.0)為本條的**真子集**且其 CI 因 M15 的閘門而紅,故不合併、直接關閉並註明由本次取代。 — `f6fb3fb`/merge `87d2bb8`
 - [x] **TypeScript 6→7 再評估(M1/M7/M12 續案)—— 實測後維持 TS6,不升級。** `vue-tsc` 已到 3.3.8、其 `peerDependencies` 宣告 `typescript: ">=5.0.0"` 看似允許 TS7,但**宣告寬鬆不等於實際可用**,實測抓到兩個獨立阻擋:**(1)** 連裝都裝不起來——`typescript-eslint@8.65.0` 的 peer 為 `typescript: ">=4.8.4 <6.1.0"`,`npm install typescript@7.0.2` 直接 ERESOLVE 失敗(非 `--force` 不可);**(2)** 強制安裝後單獨驗 vue-tsc,**與 M1 當初完全相同的崩潰重現**:`Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './lib/tsc' is not defined by "exports" in node_modules/typescript/package.json (at resolveTscPath, vue-tsc/index.js:73)`。已完整還原 `package.json`/`package-lock.json` 至 `^6.0.3` 並重裝,**全程未動任何原始碼**。結論:M1 的阻擋原因**尚未解除**,`npm outdated` 中 typescript 是唯一刻意保留落後的項目;待 vue-tsc 真正支援 TS7(而非只是放寬 peer 宣告)且 typescript-eslint 放行後再評估。
+- [x] **M18** CI `npm audit --audit-level=high` 閘門第五度紅燈(同 [[M11]]/[[M12]]/[[M13]]/[[M15]] 家族,又一則新收錄公告):`GHSA-2v37-7h3g-55p8` — nanoid「custom generators can loop indefinitely when size is zero」,受害範圍 `<3.3.17`,經 `vite` 8.2.1 → `postcss` 8.5.25 → `nanoid` 3.3.16 間接引入,屬 build 期依賴、不進出貨 bundle,但該閘門仍會擋。**與 M13/M15 不同,本則不需要 overrides**:`npm audit fix`(未加 `--force`)解出的 3.3.18 仍落在既有 caret range 內,故 `package.json` 未動、只有 lockfile 前進。主線實測:audit 0 漏洞、typecheck 乾淨、2353 綠、build 31 entries。 — `e713104`
 - [ ] **M4** Optional: screenshot user manual. (Deferred until the current batch wraps.)
 - [x] **M7** Dependency refresh round 2: vite 8.1.5 / wrangler 4.112.0 / @cloudflare/vite-plugin 1.45.1 / happy-dom 20.11.0; `npm outdated` clean除 typescript、`npm audit` 0 vulnerabilities。TS7 續留 skip——vue-tsc 仍為 3.3.7（M1 驗證過與 TS7 不相容），等 vue-tsc 支援再升。 — `16a1831`/merge `9ef0ae7`
 - [x] **M8** 架構清理（knip 掃描 + 逐項人工確認）：25 個無引用死 i18n 鍵移除（en/zh-Hant 同步，各 676 鍵、集合一致；`mapBackground.upload*Error` 為樣板字串動態組鍵、確認保留）`b3c7a7d`；Phase 0 遺留 `sessionStore.ts` 死檔移除 `8bcef37`；`accelTest.ts` 內重複 `crossingFrac`/`lerp` 收斂 `c334412`；`Rc3NmeaExporter` 改用 `vbo/format.ts` 既有 `padInt` `d159878`。未動（審查過、不值得或需確認）：knip 的 26+43 個「未使用 export」實為檔內仍用、僅可收窄 export 面（~30 檔、風險/效益不划算）；`suspension.ts` `OUTPUT_NAME`/`ECU_NAME` 為刻意語意別名；`scripts/`+`bench-*.ts` 為手動開發工具、是否保留待使用者確認；`src/debug/diagnostics.ts` 有 main.ts 引用（`?debug=1` 面板）非死碼。 — merge `9ef0ae7`

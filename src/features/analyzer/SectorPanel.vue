@@ -147,7 +147,7 @@ const hasOptimalData = computed(
   padding: 8px 10px;
   border-radius: var(--radius);
   background: var(--color-bg);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .optimal-title {
   color: var(--color-text-muted);
@@ -193,16 +193,16 @@ const hasOptimalData = computed(
   color: var(--color-accent);
 }
 .count {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .invalid-count {
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .detect-hint {
   flex-basis: 100%;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
 }
 .clear {
@@ -210,7 +210,7 @@ const hasOptimalData = computed(
   border: none;
   color: var(--color-text-muted);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   text-decoration: underline;
   cursor: pointer;
   padding: 0;
@@ -234,7 +234,7 @@ const hasOptimalData = computed(
   padding: 4px 8px;
   border-radius: var(--radius);
   background: var(--color-bg);
-  font-size: 0.85rem;
+  font-size: var(--text-base);
 }
 .gate-index {
   display: inline-flex;
@@ -246,7 +246,7 @@ const hasOptimalData = computed(
   border-radius: 50%;
   border: 1.5px solid var(--color-accent);
   color: var(--color-text);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   line-height: 1;
 }
 .gate-label {
@@ -258,7 +258,7 @@ const hasOptimalData = computed(
   border-radius: var(--radius);
   padding: 2px 8px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   cursor: pointer;
   background: var(--color-surface);
   color: var(--color-text-muted);

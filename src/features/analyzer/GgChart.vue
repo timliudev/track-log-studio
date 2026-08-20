@@ -552,7 +552,12 @@ function buildOption(): echarts.EChartsCoreOption {
       borderWidth: 1,
       borderRadius: parseFloat(themeColor('--radius', '8')) || 8,
       textStyle: { color: themeColor('--color-text', '#1a1c20') },
-      extraCssText: 'box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);',
+      // M17 — reads the shared `--shadow-2` elevation token the same way the
+      // colours above do, so this tooltip's shadow follows dark mode instead
+      // of staying a fixed rgba(0,0,0,0.18) that used to vanish over a dark
+      // surface (B119). The fallback string is only a defensive default for
+      // the (never-expected-in-practice) case the CSS variable isn't set.
+      extraCssText: `box-shadow: ${themeColor('--shadow-2', '0 4px 14px rgba(0, 0, 0, 0.18)')};`,
       formatter: (p: { seriesName?: string; value?: unknown[] }) =>
         formatScatterTooltip(p.seriesName, p.value, square, props.colorChannel, thirdDecimals),
     },
@@ -881,7 +886,7 @@ watch(
   right: 4px;
   z-index: 2;
   padding: 3px 9px;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
@@ -895,7 +900,7 @@ watch(
    >=44px touch target — see UPlotChart's identical rule for the full doc. */
 :root[data-any-pointer-coarse] .reset-zoom {
   padding: 12px 16px;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   min-height: 44px;
 }
 </style>

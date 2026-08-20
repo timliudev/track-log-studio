@@ -8,9 +8,9 @@ const { t } = useI18n()
 const { vboChannelMap } = storeToRefs(useConverterStore())
 
 const hasRows = computed(() => vboChannelMap.value.length > 0)
-// Channel rows only (exclude the 7 fixed GPS rows) for the count.
+// Channel rows only (exclude the 7 fixed GPS rows and skipped/no-data rows) for the count.
 const channelCount = computed(
-  () => vboChannelMap.value.filter((r) => r.kind !== 'gps').length,
+  () => vboChannelMap.value.filter((r) => r.kind !== 'gps' && r.kind !== 'skipped').length,
 )
 </script>
 
@@ -65,15 +65,15 @@ const channelCount = computed(
 }
 h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
 }
 .count {
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   color: var(--color-text-muted);
 }
 .hint {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-base);
   line-height: 1.5;
 }
 .muted {
@@ -93,7 +93,7 @@ h3 {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  font-size: var(--text-md);
 }
 thead th {
   position: sticky;
@@ -127,13 +127,17 @@ tr.gps td {
   display: inline-block;
   padding: 1px 7px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
   white-space: nowrap;
 }
-.badge.semantic {
+.badge.semantic,
+.badge.passthrough {
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.badge.skipped {
+  opacity: 0.6;
 }
 </style>

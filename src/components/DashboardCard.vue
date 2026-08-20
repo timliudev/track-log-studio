@@ -152,6 +152,15 @@ import { edgeAutoscrollVelocity } from '@/domain/layout/edgeAutoscroll'
  * pure `touchDragDelay.ts` state machine, a separate tracked gesture) is
  * ALSO applied to `.css-grid-resize-handle` below — see that handle's own
  * B102c-style doc for why.
+ *
+ * B117(b) — the iOS drag-reorder "pick up" cue: `.drag-handle.touch-dragging`
+ * (see `touchDragActive` above — the FULL-duration class, not the brief
+ * 400ms `.touch-armed` confirm flash) additionally gets a small scale-up +
+ * raised shadow, purely in CSS (see that class's own style rule below for why
+ * NOT `.touch-armed`, and for the reduced-motion/containing-block notes).
+ * This does NOT touch the touch-action pan-y→none handoff or the
+ * touchDragDelay.ts state machine at all — it is a pure visual addition
+ * layered on top of an existing class toggle these mechanics already drive.
  */
 // `withDefaults` (rather than plain `defineProps`) ONLY because `draggable`/
 // `resizable` need a TRUE default: Vue's compiler-generated runtime prop
@@ -893,7 +902,7 @@ onBeforeUnmount(() => {
     border-radius: 0;
     --card-body-pad-x: 4px;
     --card-bleed-x: 4px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.16);
+    box-shadow: var(--shadow-2);
   }
 }
 /* Collapsed: shrink the card itself to just its header. On desktop the
@@ -944,7 +953,21 @@ onBeforeUnmount(() => {
      handling, not mouse dragging). */
   touch-action: pan-y;
   user-select: none;
-  transition: background-color 0.15s ease;
+  /* B117(b) — `transform`/`box-shadow` added alongside the pre-existing
+     `background-color` so `.touch-dragging`'s lift (below) animates BOTH
+     in and out. Declared here, on the UNCONDITIONAL base rule, rather than
+     inside `.touch-dragging` itself — theme.css's own button-press fix
+     (B115) documents exactly why: a `transition` declared only inside the
+     toggled class never plays on the way BACK, since the instant that class
+     is removed the browser re-resolves style from this class-less rule,
+     which would have no `transition` to animate through — "lift animates
+     in, but drops instantly on release" is the asymmetric bug that pattern
+     causes. Harmless to list `transform`/`box-shadow` here even though
+     `prefers-reduced-motion: reduce` never sets non-default values for them
+     (see `.touch-dragging`'s own rule below) — a transition on a property
+     that never actually changes value never fires, so there is nothing to
+     "skip" in that case beyond what's already true. */
+  transition: background-color var(--dur-fast) ease, transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
 .dashboard-card.collapsed .drag-handle {
   border-bottom: none;
@@ -967,8 +990,37 @@ onBeforeUnmount(() => {
 .drag-handle.touch-dragging {
   touch-action: none;
 }
+/* B117(b) — the "pick up" lift itself, bound to `.touch-dragging` (full
+   drag duration — confirm through drag end) rather than `.touch-armed`
+   (a brief 400ms confirm flash that would clear on its own timer while the
+   finger is still actively dragging the card, making the card visually "put
+   itself down" mid-gesture — the exact opposite of what B117 asked for:
+   "on confirm, released on drag end"). `scale(1.02)` is deliberately SMALL —
+   this is a header sub-element inside a card whose own outer `.css-grid-
+   item.dragging` wrapper (CssGridGrid.vue) already gets `--shadow-3` and a
+   raised z-index for the whole card; `--shadow-2` here reads as "this
+   header is what you're actually holding" layered on top of that, without
+   the two shadows visually fighting for dominance. Wrapped in its own
+   `prefers-reduced-motion: no-preference` block — B115's own established
+   pattern (see theme.css) — rather than a JS `prefersReducedMotion()`
+   check: this is pure CSS with no imperative animation to gate, so the
+   media query alone is sufficient and needs no script involvement.
+   ⚠️ `scale(1.02)` needs real-device tuning — chosen to read as "lifted"
+   without the card visibly changing size enough to shift where the finger
+   thinks the edges are.
+   Applying `transform` to `.drag-handle` gives it a new containing block for
+   any `position: fixed`/`absolute` DESCENDANT — audited: the only such
+   consumer in this subtree is `v-tooltip` (src/directives/tooltip.ts), and
+   that bubble is appended directly to `document.body`, never as a DOM
+   descendant of `.drag-handle` at all, so it is entirely unaffected. */
+@media (prefers-reduced-motion: no-preference) {
+  .drag-handle.touch-dragging {
+    transform: scale(1.02);
+    box-shadow: var(--shadow-2);
+  }
+}
 .title {
-  font-size: 0.9rem;
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--color-text);
   white-space: nowrap;
@@ -1034,7 +1086,7 @@ onBeforeUnmount(() => {
   color: var(--color-accent);
 }
 .collapse-btn svg {
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-fast) ease;
 }
 .collapse-btn.collapsed svg {
   transform: rotate(-90deg);
@@ -1091,7 +1143,7 @@ onBeforeUnmount(() => {
   /* Override the base rule's `height: 100%` — a sticky card should size to
      its natural content height, not stretch to fill its grid cell. */
   height: auto;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-2);
 }
 .dashboard-card.pinned .body {
   /* Cap the body so the whole sticky card respects max-height instead of

@@ -39,6 +39,8 @@ import {
 } from './trackNearestSample'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
 import { isEdgeGestureZone } from '@/domain/layout/edgeGesture'
+import { pushSample, estimateVelocity2DPxPerSec, momentumOffsetAt, type PointerSample } from '@/domain/interaction/sheetPhysics'
+import { prefersReducedMotion } from '@/composables/useFlipAnimation'
 import { useMapBackground } from '@/composables/useMapBackground'
 import MapBackgroundControls from './MapBackgroundControls.vue'
 import {
@@ -1165,6 +1167,10 @@ function zoomAbout(sx: number, sy: number, factor: number): void {
 }
 
 function resetView(): void {
+  // B117 stage 3 — a track swap mid-glide (the `watch(() => props.track, ...)`
+  // below) must not let a stale glide keep writing panX/panY out from under
+  // the reset it's about to perform.
+  cancelPanMomentum()
   zoom.value = 1
   panX.value = 0
   panY.value = 0
@@ -1244,6 +1250,79 @@ let draftLine: LapLine | null = null
 let draftGate: { index: number; line: LapLine } | null = null
 let panLast: { x: number; y: number } | null = null
 let pinchLast: { dist: number; cx: number; cy: number } | null = null
+
+// ── B117 stage 3 — pan-release momentum ─────────────────────────────────────
+// Rolling window of recent 'pan'-mode pointer positions (reused
+// `pushSample`/`estimateVelocity2DPxPerSec` from sheetPhysics.ts — see this
+// module's own top note), read once at release to estimate a 2D release
+// velocity. Reset whenever a fresh single-pointer pan begins (both the
+// direct pan-start in `onPointerDown` and the pinch->pan handoff in
+// `onPointerUp`, mirroring how `panLast` itself is reset in both places).
+let panSamples: PointerSample[] = []
+let panMomentumId: number | null = null
+
+/** Cancel any in-flight glide — called the instant a NEW pointer goes down
+ *  (any mode, not just a future pan; see `onPointerDown`'s own call site) so
+ *  a glide never fights a gesture that has already grabbed the map again. */
+function cancelPanMomentum(): void {
+  if (panMomentumId != null) {
+    window.cancelAnimationFrame(panMomentumId)
+    panMomentumId = null
+  }
+}
+
+// Release velocities below this (px/s) read as "the finger just stopped",
+// not a flick — skips the glide (and the one wasted rAF frame it would
+// otherwise cost) entirely rather than animating an imperceptible creep.
+const PAN_MOMENTUM_MIN_VELOCITY_PX_PER_SEC = 40
+// Same decay constant `project()`/`momentumOffsetAt()` default to — kept as
+// an explicit local so this glide's calibration is visible at the call site
+// rather than an implicit default threaded through two function calls.
+const PAN_MOMENTUM_DECAY = 0.998
+
+/**
+ * Start (or, given a below-threshold release velocity, decline to start) the
+ * post-pan-release glide. Reuses `momentumOffsetAt` — an EXACT closed form,
+ * not a per-frame numerically-integrated approximation (see that function's
+ * own doc) — evaluated fresh from the FIXED release-time pan position and
+ * release timestamp on every frame, rather than accumulating a running
+ * per-frame delta: a dropped frame just means the next call lands on a later
+ * point of the SAME curve, with no compounding drift.
+ *
+ * Routes through the SAME `clampPan()` the live drag already uses on every
+ * frame (B117's own requirement: momentum can never escape the existing
+ * bounds) — stage 4 will layer rubber-band resistance INTO that shared path
+ * rather than this function needing its own separate boundary handling.
+ */
+function startPanMomentum(): void {
+  const velocity = estimateVelocity2DPxPerSec(panSamples)
+  panSamples = []
+  if (prefersReducedMotion()) return
+  if (Math.hypot(velocity.vx, velocity.vy) < PAN_MOMENTUM_MIN_VELOCITY_PX_PER_SEC) return
+
+  const releasePanX = panX.value
+  const releasePanY = panY.value
+  const releaseTimeMs = performance.now()
+
+  function step(): void {
+    const elapsedMs = performance.now() - releaseTimeMs
+    panX.value = releasePanX + momentumOffsetAt(velocity.vx, elapsedMs, PAN_MOMENTUM_DECAY)
+    panY.value = releasePanY + momentumOffsetAt(velocity.vy, elapsedMs, PAN_MOMENTUM_DECAY)
+    clampPan()
+    draw()
+
+    const remainingSpeed = Math.hypot(
+      velocity.vx * PAN_MOMENTUM_DECAY ** elapsedMs,
+      velocity.vy * PAN_MOMENTUM_DECAY ** elapsedMs,
+    )
+    if (remainingSpeed < PAN_MOMENTUM_MIN_VELOCITY_PX_PER_SEC) {
+      panMomentumId = null
+      return
+    }
+    panMomentumId = window.requestAnimationFrame(step)
+  }
+  panMomentumId = window.requestAnimationFrame(step)
+}
 
 function setupInteractionFrame(): CanvasRenderingContext2D | null {
   const cv = cursorCanvas.value
@@ -1358,6 +1437,12 @@ function onPointerDown(e: PointerEvent): void {
   if (!pos) return
   pointers.set(e.pointerId, pos)
   canvas.value?.setPointerCapture(e.pointerId)
+  // B117 stage 3 — any pointer this component actually starts handling
+  // (pinch/line-drag/background-drag/pan alike) cancels an in-flight glide
+  // immediately: "cancel the glide the instant a new pointer goes down" is
+  // non-negotiable regardless of which gesture the new pointer turns out to
+  // start.
+  cancelPanMomentum()
 
   if (pointers.size >= 2) {
     // Second finger down → pinch zoom/pan; abandon any line/pan in progress.
@@ -1401,6 +1486,7 @@ function onPointerDown(e: PointerEvent): void {
   } else {
     mode = 'pan'
     panLast = pos
+    panSamples = [{ t: performance.now(), x: pos.x, y: pos.y }]
   }
   e.preventDefault()
 }
@@ -1461,6 +1547,7 @@ function onPointerMove(e: PointerEvent): void {
     panX.value += pos.x - panLast.x
     panY.value += pos.y - panLast.y
     panLast = pos
+    panSamples = pushSample(panSamples, { t: performance.now(), x: pos.x, y: pos.y })
     clampPan()
     draw()
     return
@@ -1534,12 +1621,23 @@ function onPointerUp(e: PointerEvent): void {
       mode = 'pan'
       panLast = pointers.values().next().value ?? null
       pinchLast = null
+      // B117 stage 3 — fresh velocity window for the single-finger
+      // continuation, same reasoning as the plain pan-start above: a
+      // release estimate should reflect the CONTINUATION's own motion, not
+      // get diluted by the two-finger pinch's midpoint motion beforehand.
+      panSamples = panLast ? [{ t: performance.now(), x: panLast.x, y: panLast.y }] : []
     } else if (pointers.size === 0) {
       mode = 'idle'
       pinchLast = null
     }
     return
   }
+
+  // B117 stage 3 — capture BEFORE `mode` is reset to 'idle' below (the
+  // `pointers.size === 0` branch unconditionally resets it regardless of
+  // what gesture was actually live — see that branch's own pre-existing
+  // handling of 'line'/'background' releases).
+  const wasPanning = mode === 'pan'
 
   if (pointers.size === 0) {
     if (dragging?.target.kind === 'line' && draftLine) emit('update:line', draftLine)
@@ -1549,6 +1647,7 @@ function onPointerUp(e: PointerEvent): void {
     dragStartGeo = null
     dragOriginLine = null
     panLast = null
+    if (wasPanning) startPanMomentum()
     drawInteractionOverlay()
   }
 }
@@ -1598,6 +1697,7 @@ onBeforeUnmount(() => {
     tileSettleTimer = null
   }
   cancelPendingHover()
+  cancelPanMomentum()
 })
 
 // A new track has a different fit, so any prior zoom/pan no longer makes sense.
@@ -1778,8 +1878,8 @@ watch(background.image, () => draw())
   border-radius: var(--radius);
 }
 .background-control { position: absolute; left: 8px; bottom: 8px; max-width: min(300px, calc(100% - 16px)); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); padding: 3px 6px; }
-.align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: .8rem; }
-.osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: 10px; }
+.align-background { position: absolute; left: 8px; top: 48px; background: var(--color-surface); padding: 6px; border-radius: var(--radius); font-size: var(--text-md); }
+.osm-attribution { position: absolute; right: 8px; bottom: 4px; color: var(--color-text-muted); background: var(--color-surface); font-size: var(--text-2xs); }
 :root[data-any-pointer-coarse] .align-background { min-height: 44px; display: flex; align-items: center; }
 /* ⑤ follow-up — shared top-right overlay row (reset-view + host slot, e.g.
    MapCard's play/pause button). `pointer-events: none` on the row itself so
@@ -1808,7 +1908,7 @@ watch(background.image, () => draw())
   align-items: center;
   min-height: 32px;
   padding: 4px 10px;
-  font-size: 0.8rem;
+  font-size: var(--text-md);
   background: var(--color-surface);
   color: var(--color-text);
   border: 1px solid var(--color-border);
@@ -1845,7 +1945,7 @@ watch(background.image, () => draw())
   width: 32px;
   height: 32px;
   padding: 0;
-  font-size: 1rem;
+  font-size: var(--text-xl);
   line-height: 1;
   background: var(--color-surface);
   color: var(--color-text);

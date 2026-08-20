@@ -48,7 +48,19 @@ export interface FlipTransform {
  *  each call site) so both are easy to find/adjust together. Same
  *  non-linear "ease-out-ish" curve App.vue's tab-switch slide already uses
  *  (`cubic-bezier(0.22, 1, 0.36, 1)`), reused here rather than invented fresh
- *  so the app's transitions read as one consistent motion language. */
+ *  so the app's transitions read as one consistent motion language.
+ *
+ *  M17 — these are the JS-side source of truth; `theme.css` declares the
+ *  SAME two values as `--dur-slow` (320ms) / `--ease-standard`
+ *  (`cubic-bezier(0.22, 1, 0.36, 1)`) for CSS `transition`/`animation`
+ *  call sites. JS can't read the *numeric* meaning of a CSS custom property
+ *  (only its string form via `getComputedStyle`), so this pair of constants
+ *  has to keep existing independently rather than being generated from the
+ *  CSS tokens — the two sides must be kept in sync BY HAND whenever either
+ *  changes. `test/lint/designTokens.test.ts` imports these two constants and
+ *  asserts theme.css's `--dur-slow`/`--ease-standard` declarations match
+ *  them byte-for-byte, so any future drift fails a test instead of silently
+ *  diverging. */
 export const PIN_FLIP_DURATION_MS = 320
 export const PIN_FLIP_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'
 

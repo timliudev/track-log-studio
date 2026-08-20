@@ -322,10 +322,10 @@ function onBackdropPointer(event: PointerEvent): void {
 .profile-editor { width: 100vw; max-width: none; height: 100vh; height: 100dvh; display: flex; flex-direction: column; color: var(--color-text); background: var(--color-bg); }
 header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 18px 20px; border-bottom: 1px solid var(--color-border); }
 h2, h3, p { margin: 0; }
-header p, .field-note { margin-top: 5px; color: var(--color-text-muted); font-size: 0.8rem; line-height: 1.45; }
-.close-button { width: 40px; height: 40px; flex: 0 0 auto; font-size: 1.4rem; }
+header p, .field-note { margin-top: 5px; color: var(--color-text-muted); font-size: var(--text-md); line-height: 1.45; }
+.close-button { width: 40px; height: 40px; flex: 0 0 auto; font-size: var(--text-3xl); }
 .profile-toolbar { display: grid; grid-template-columns: minmax(160px, 1fr) repeat(3, auto); gap: 8px; align-items: end; padding: 12px 20px; border-bottom: 1px solid var(--color-border); }
-.profile-toolbar label, .form-grid label { display: grid; gap: 5px; min-width: 0; color: var(--color-text-muted); font-size: 0.78rem; }
+.profile-toolbar label, .form-grid label { display: grid; gap: 5px; min-width: 0; color: var(--color-text-muted); font-size: var(--text-md); }
 button, select, input { min-height: 36px; padding: 6px 9px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); }
 button { cursor: pointer; background: var(--color-surface-raised); }
 button:disabled { opacity: 0.45; cursor: default; }
@@ -334,17 +334,17 @@ button:disabled { opacity: 0.45; cursor: default; }
 .form-section h3 { margin-bottom: 12px; }
 .form-section h4 { margin: 18px 0 10px; }
 .force-section summary { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; cursor: pointer; }
-.force-section summary span { color: var(--color-text-muted); font-size: 0.78rem; }
-.wide-field { display: grid; gap: 5px; margin-top: 10px; color: var(--color-text-muted); font-size: 0.78rem; }
+.force-section summary span { color: var(--color-text-muted); font-size: var(--text-md); }
+.wide-field { display: grid; gap: 5px; margin-top: 10px; color: var(--color-text-muted); font-size: var(--text-md); }
 .wide-field textarea { min-height: 96px; resize: vertical; padding: 8px 9px; color: var(--color-text); background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); font-family: var(--font-mono, monospace); }
-.check-field { min-height: 36px; display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.8rem; }
+.check-field { min-height: 36px; display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: var(--text-md); }
 .check-field input { min-height: auto; }
-.calibration-action { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; color: var(--color-text-muted); font-size: 0.78rem; }
+.calibration-action { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; color: var(--color-text-muted); font-size: var(--text-md); }
 .map-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
 .reduction-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .honesty-boundary { padding: 14px; border: 1px solid var(--color-warning, #c99100); border-radius: var(--radius); background: color-mix(in srgb, var(--color-warning, #c99100) 10%, transparent); }
-.honesty-boundary p { margin-top: 6px; line-height: 1.5; font-size: 0.82rem; }
+.honesty-boundary p { margin-top: 6px; line-height: 1.5; font-size: var(--text-md); }
 :root[data-any-pointer-coarse='true'] button,
 :root[data-any-pointer-coarse='true'] select,
 :root[data-any-pointer-coarse='true'] input { min-height: 44px; }
