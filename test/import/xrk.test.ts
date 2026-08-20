@@ -3,7 +3,7 @@ import { zlibSync } from 'fflate'
 import { parseXrk, float16ToFloat32, parseChsRecord } from '@/domain/import/xrk/parseXrk'
 import { ecefToLla } from '@/domain/import/xrk/ecef'
 import { isZlibMagic, inflateXrz } from '@/domain/import/xrk/inflateXrz'
-import { xrkImporter } from '@/domain/import/xrk/XrkImporter'
+import { IMPORT_FORMATS } from '@/domain/import/formatDefinitions'
 
 // --- pure helper: float16 → float32 ---
 describe('float16ToFloat32', () => {
@@ -227,22 +227,25 @@ describe('isZlibMagic / inflateXrz', () => {
   })
 })
 
-// --- importer registration: extension + magic detection, .xrz included ---
-describe('xrkImporter.detect', () => {
+// --- format registration: extension + magic detection, .xrz included ---
+// M20: previously asserted against `xrkImporter.detect`, a verbatim copy in an
+// object nothing imported. Now runs the registered predicate FileBar runs.
+describe("IMPORT_FORMATS 'xrk' detect", () => {
+  const xrkFormat = IMPORT_FORMATS.find((format) => format.id === 'xrk')!
   const headBytes = (bytes: number[]): Uint8Array => Uint8Array.from(bytes)
 
   it('matches by .xrk / .xrz extension regardless of content', () => {
     expect(
-      xrkImporter.detect({ fileName: 'run.xrk', headText: '', headBytes: headBytes([0, 0]) }),
+      xrkFormat.detect({ fileName: 'run.xrk', headText: '', headBytes: headBytes([0, 0]) }),
     ).toBe(true)
     expect(
-      xrkImporter.detect({ fileName: 'run.xrz', headText: '', headBytes: headBytes([0, 0]) }),
+      xrkFormat.detect({ fileName: 'run.xrz', headText: '', headBytes: headBytes([0, 0]) }),
     ).toBe(true)
   })
 
   it('matches an unrecognised-extension file by zlib magic', () => {
     expect(
-      xrkImporter.detect({
+      xrkFormat.detect({
         fileName: 'run.bin',
         headText: '',
         headBytes: headBytes([0x78, 0x9c, 0, 0, 0]),
@@ -252,11 +255,39 @@ describe('xrkImporter.detect', () => {
 
   it('does not match unrelated content', () => {
     expect(
-      xrkImporter.detect({
+      xrkFormat.detect({
         fileName: 'run.bin',
         headText: '',
         headBytes: headBytes([0x50, 0x4b, 0x03, 0x04, 0]),
       }),
     ).toBe(false)
+  })
+
+  // The ONE copy M20 could not delete: `formatDefinitions.ts` re-implements the
+  // RFC 1950 header check inline instead of importing `isZlibMagic`, because
+  // importing it would drag fflate's Unzlib into the initial bundle — exactly
+  // what B88's lazy boundary exists to prevent. So pin the two together here:
+  // if either side drifts, this fails.
+  it('its inline zlib check stays equivalent to isZlibMagic', () => {
+    const samples: number[][] = [
+      [],
+      [0x78],
+      [0x78, 0x01],
+      [0x78, 0x9c],
+      [0x78, 0xda],
+      [0x78, 0x9d],
+      [0x50, 0x4b],
+      [0x1f, 0x8b],
+      [0x08, 0x1d],
+      [0x00, 0x00],
+      [0xff, 0xff],
+    ]
+    for (const bytes of samples) {
+      const bs = headBytes(bytes)
+      expect(
+        xrkFormat.detect({ fileName: 'run.bin', headText: '', headBytes: bs }),
+        JSON.stringify(bytes),
+      ).toBe(isZlibMagic(bs))
+    }
   })
 })

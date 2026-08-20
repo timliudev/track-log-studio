@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseVbo } from '@/domain/import/vbo/parseVbo'
-import { vboImporter } from '@/domain/import/vbo/VboImporter'
-import { detectImporter } from '@/domain/import/registry'
+import { detectImporter, IMPORT_FORMATS } from '@/domain/import/registry'
 
 /**
  * Robustness / security tests for the VBO importer against UNTRUSTED, malformed
@@ -131,7 +130,12 @@ describe('parseVbo robustness — dirty data degrades to NaN, never throws', () 
   })
 })
 
-describe('vboImporter.detect — detection ambiguity & ordering', () => {
+// M20: these used to assert against `vboImporter.detect` — a verbatim copy of
+// the shipping predicate that lived in an object nothing imported. They now run
+// the registered `IMPORT_FORMATS` entry, i.e. the predicate FileBar itself runs.
+describe("IMPORT_FORMATS 'vbo' detect — detection ambiguity & ordering", () => {
+  const vboFormat = IMPORT_FORMATS.find((format) => format.id === 'vbo')!
+
   /** Build an ImportCandidate from a filename + headText (headBytes derived). */
   const cand = (fileName: string, headText: string) => ({
     fileName,
@@ -139,24 +143,28 @@ describe('vboImporter.detect — detection ambiguity & ordering', () => {
     headBytes: new TextEncoder().encode(headText),
   })
 
+  it('is registered at all', () => {
+    expect(vboFormat).toBeDefined()
+  })
+
   it('detects a real .vbo by filename even without [header] in the head', () => {
-    expect(vboImporter.detect(cand('lap.vbo', ''))).toBe(true)
+    expect(vboFormat.detect(cand('lap.vbo', ''))).toBe(true)
   })
 
   it('detects by [header] marker in content (extensionless name)', () => {
-    expect(vboImporter.detect(cand('export', '[header]\ntime\n'))).toBe(true)
+    expect(vboFormat.detect(cand('export', '[header]\ntime\n'))).toBe(true)
   })
 
   it('does NOT falsely detect an ordinary text file as VBO', () => {
     const txt = 'hello world\nthis is just a note\nno markers here\n'
-    expect(vboImporter.detect(cand('notes.txt', txt))).toBe(false)
+    expect(vboFormat.detect(cand('notes.txt', txt))).toBe(false)
     // And the registry as a whole returns no importer for it.
     expect(detectImporter(cand('notes.txt', txt))).toBeUndefined()
   })
 
   it('a CSV-ish file that is not loga/nmea/vbo is not claimed by vbo', () => {
     const csv = 'a,b,c\n1,2,3\n4,5,6\n'
-    expect(vboImporter.detect(cand('x.csv', csv))).toBe(false)
+    expect(vboFormat.detect(cand('x.csv', csv))).toBe(false)
   })
 
   it('first-match-wins: a .loga file is not stolen by vbo even if it contained [header]-like text', () => {

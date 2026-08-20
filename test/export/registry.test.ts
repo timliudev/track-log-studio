@@ -5,6 +5,7 @@ import { Rc3NmeaExporter } from '@/domain/export/rc3Nmea/Rc3NmeaExporter'
 import { LEGACY_PY_MAPPING } from '@/domain/export/rc3Nmea/mapping'
 import { convertToVbo } from '@/domain/export/vbo/VboExporter'
 import { convertToCsv } from '@/domain/export/csv/CsvExporter'
+import { nmeaToSession } from '@/domain/import/nmea/nmeaToSession'
 import { loadFixture } from '../fixtures'
 
 describe('export registry — listing and lookup', () => {
@@ -78,10 +79,10 @@ describe('export registry — dispatch produces the SAME bytes as calling the ex
 })
 
 describe('export registry — any imported format can export (not gated to loga)', () => {
+  // M20: this used to reach the parser through `nmeaImporter.parse` (a pre-B88
+  // wrapper object nothing shipped). It now calls `nmeaToSession` directly —
+  // the same function `WORKER_PARSERS.nmea` dispatches to.
   it('exports an NMEA-imported session back out to vbo via the registry', async () => {
-    const { nmeaToSession } = await import('@/domain/import/nmea/NmeaImporter').then(
-      (m) => ({ nmeaToSession: m.nmeaImporter.parse }),
-    )
     const nmeaText = loadFixture('super2.expected.nmea')
     const session = await nmeaToSession(nmeaText)
 

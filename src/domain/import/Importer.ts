@@ -1,6 +1,24 @@
-import type { LogSession } from '@/domain/model/LogSession'
+/**
+ * Shared vocabulary of the two-stage import pipeline (B88).
+ *
+ * Stage 1 — recognition: `formatDefinitions.ts` holds `IMPORT_FORMATS`, a list
+ * of `ImportFormatDefinition` (id / extensions / detect) built from the
+ * {@link ImportCandidate} below. It is lightweight on purpose so that merely
+ * rendering FileBar does not pull any parser onto the initial route.
+ *
+ * Stage 2 — parsing: `src/workers/parse.worker.ts` holds `WORKER_PARSERS`,
+ * keyed by the same ids, calling the `parseXxx` functions off the main thread.
+ *
+ * M20 removed the seven pre-B88 `XxxImporter` objects (and the `TextImporter` /
+ * `BinaryImporter` / `Importer` types they implemented), which bundled `detect`
+ * and `parse` into one object. Nothing shipped used them, yet they carried a
+ * verbatim second copy of every `detect` predicate that the tests asserted
+ * against — a blind spot in front of the real registry. Do NOT reintroduce that
+ * shape: register recognition in `IMPORT_FORMATS` and parsing in
+ * `WORKER_PARSERS` (see docs/ARCHITECTURE-FORMATS.md §5).
+ */
 
-/** What the registry inspects before committing to an importer. */
+/** What the registry inspects before committing to a format. */
 export interface ImportCandidate {
   /** Lower-cased file name, e.g. 'run01.loga'. */
   readonly fileName: string
@@ -10,45 +28,5 @@ export interface ImportCandidate {
   readonly headBytes: Uint8Array
 }
 
+/** Parse progress in [0,1], reported from the worker back to the UI. */
 export type ImportProgress = (fraction: number) => void
-
-/** Fields common to every importer, regardless of text/binary input. */
-interface BaseImporter {
-  /** Stable importer id, e.g. 'loga', 'nmea', 'vbo', 'rcz'. */
-  readonly id: string
-  /** Accepted extensions WITHOUT the dot, e.g. ['loga']. */
-  readonly extensions: readonly string[]
-  /**
-   * True if this importer recognises the file. Extension is a hint; sniff
-   * headText / headBytes for the authoritative answer when the extension is
-   * ambiguous.
-   */
-  detect(candidate: ImportCandidate): boolean
-}
-
-/**
- * Importer whose source is decoded text (e.g. .loga, .nmea, .vbo). The whole
- * file text is parsed into a LogSession. Must be async-capable and report
- * progress in [0,1]. Throw on unrecognised/invalid content.
- */
-export interface TextImporter extends BaseImporter {
-  readonly binary?: false
-  parse(text: string, onProgress?: ImportProgress): LogSession | Promise<LogSession>
-}
-
-/**
- * Importer whose source is raw bytes (e.g. a zip-based .rcz). The whole file is
- * read as a Uint8Array and parsed into a LogSession. Must be async-capable and
- * report progress in [0,1]. Throw on unrecognised/invalid content.
- */
-export interface BinaryImporter extends BaseImporter {
-  readonly binary: true
-  parseBinary(bytes: Uint8Array, onProgress?: ImportProgress): LogSession | Promise<LogSession>
-}
-
-/**
- * Strategy for turning a supported file into the internal LogSession model.
- * Either a {@link TextImporter} (decoded text input) or a {@link BinaryImporter}
- * (raw bytes input), discriminated by the `binary` flag.
- */
-export type Importer = TextImporter | BinaryImporter
