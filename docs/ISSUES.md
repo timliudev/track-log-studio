@@ -449,6 +449,30 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   a9 恆 251、a10 17–100、a11 0–255、a12 8/9、a13–15 無資料;d1 = RPM(固定)、d2 0–100
   (n/255×100 階,疑似 TPS)。UX 待拍板。
 
+## 圈次偵測 — M4 截圖作業順帶發現 (B129–B131)
+> 這三條是 2026-08-21 做 [[M4]] 截圖手冊時,agent 為了讓示範記錄跑出完整圈而反覆調參,從行為
+> 反推出來的。**B129/B130 我已讀碼確認屬實**(證據見各條),但**都還沒寫復現測試**,實際影響
+> 範圍待評估;修法皆會動到圈次偵測這個核心路徑,**待 user 拍板要不要修**。
+
+- [ ] **B129** `detectLapsByLine`(起終點線圈次偵測,`src/domain/analysis/laps.ts:257`)缺少
+  `walkLapGates` 有的「取樣點正好落在線上」補救。**已讀碼確認**:`walkLapGates`(同檔 :170)
+  明文處理這個情況——註解寫著「A GPS fix can land exactly on the gate line. The two adjacent
+  segments then only TOUCH the gate at their endpoint, so the strict pairwise test below rejects
+  both」,並以 `crossesThroughSample()`(:145,檢查前後兩個有效 fix 分屬異側)救回;但
+  `detectLapsByLine` 的 raw crossing 迴圈(:282-299)**只有** `segmentsIntersect()` 這個嚴格
+  proper-straddle 判斷,端點接觸一律拒絕。後果:該圈被漏算、與下一圈合併成一圈。
+  觸發條件:軌跡每圈幾乎完全重疊時會系統性發生——float32 經度在 121°E 的 ulp 約 0.85 m,
+  座標會吸附到同一格點,取樣點就可能正好落在線上。修法:把 `crossesThroughSample` 的三點
+  檢查套進 `detectLapsByLine`(該函式已存在、已被 sector 路徑用了,不必新寫演算法)。
+- [ ] **B130** 自動種下的起終點線,方向取自「前兩個有效 fix」(`src/composables/useLaps.ts:25`
+  的 `defaultLine()`)。**已讀碼確認**:`defaultLine` 取 `firstValidIdx` 與其後第一個 valid fix
+  當方向基準。若記錄從靜止或極慢速開頭(常見:按下記錄後才起步),這兩點的位移可能小於
+  float32 量化誤差 → 方向等同雜訊 → 種出來的線角度歪掉,大部分圈次因而漏算。修法建議:改取
+  「與起點相距 ≥N 公尺的第一個 fix」當方向基準(N 待定),而非固定取下一個 fix。
+- [ ] **B131**(信心較低,**待確認是刻意設計還是 bug**)手機寬度下匯入記錄後**不會自動啟用**:
+  勾選框未打勾,切到分析頁是空白,要手動勾選才有內容;桌面版匯入後直接是「主要」。
+  agent 是在拍手機版截圖時遇到的,未深究。若為刻意(避免手機一次載入太多),應在 UI 上給提示。
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `83fc12a`
