@@ -18,16 +18,16 @@
 File (使用者選檔 / 拖放 / 解壓自 .zip)
   │
   ▼  FileBar.vue：importOne(file)
-sniff(file)                         讀檔案前 4096 bytes 解成文字 → ImportCandidate { fileName, headText }
+sniff(file)                         讀檔案前 4096 bytes → ImportCandidate { fileName, headText, headBytes }
   │
   ▼
-detectImporter(candidate)           走訪 IMPORTERS，第一個 detect()==true 勝出 → Importer
+detectImporter(candidate)           走訪 IMPORT_FORMATS，第一個 detect()==true 勝出 → ImportFormatDefinition
   │  (找不到 → 標記 unsupported)
   ▼  parseFile(file, imp.id)（useLogImport）
 postMessage({ id, importerId, file }) ──► Web Worker (parse.worker.ts)
                                             │
-                                            │  WORKER_PARSERS[importerId](text, onProgress)
-                                            │  → Importer.parse → LogSession
+                                            │  WORKER_PARSERS[importerId].parse(input, onProgress)
+                                            │  → parseXxx(...) → LogSession
                                             │
                                             │  序列化：channels[{name,rawName,description,data}] + meta
                                             ▼
@@ -95,7 +95,7 @@ LogSession（重新 new，含 byName 索引、alias 解析）
 structured clone 演算法，它**不保留 class 原型與方法**，clone 後只會是一個普通物件，`get()` /
 `timeChannel` 等方法全失。因此 worker 不傳 `LogSession`，而是：
 
-1. Worker 內 `Importer.parse` 產出 `LogSession`，但只取出可序列化的部分——
+1. Worker 內 `WORKER_PARSERS[importerId].parse` 產出 `LogSession`，但只取出可序列化的部分——
    `channels` 陣列（純資料物件）與 `meta`（純資料）。
 2. 以 `transfer` 清單把每個 channel 的 `data.buffer` **零拷貝轉移**給主執行緒
    （見 `parse.worker.ts` 的 `transfer = channels.map(c => c.data.buffer)`）。轉移後 worker 端
@@ -145,10 +145,10 @@ const IMPORT_FORMATS: readonly ImportFormatDefinition[] = [
       （RFC 1950）標頭檢查（`.xrz` 是 zlib 壓縮的 `.xrk`）。二進位 magic 只能比對 `headBytes`，
       解成文字會被破壞（見 §6）。
 
-### `ImportCandidate` 與 `Importer`（`src/domain/import/Importer.ts`）
+### `ImportCandidate`（`src/domain/import/Importer.ts`）
 
-`Importer.ts` 現在只剩兩件事：`ImportCandidate`（辨識輸入）與 `TextImporter` / `BinaryImporter`
-（解析側型別）。
+`Importer.ts` 現在只剩兩個共用型別：`ImportCandidate`（辨識輸入，由 `sniff()` 產出、餵給
+`detect()`）與 `ImportProgress`（進度回呼，worker 端 parser 用）。
 
 ```ts
 interface ImportCandidate {
@@ -157,13 +157,17 @@ interface ImportCandidate {
   readonly headBytes: Uint8Array  // 同樣前 4 KB 的原始 bytes，供二進位 magic 嗅探
 }
 
-type Importer = TextImporter | BinaryImporter   // 以 `binary` 旗標區分（見 §6）
+type ImportProgress = (fraction: number) => void
 ```
 
-> ⚠️ **現況誠實註記**：`src/domain/import/loga/LogaImporter.ts` 與
-> `src/domain/import/vbo/VboImporter.ts` 兩個 `Importer` 物件在 B88 之後**已無任何引用**
-> （辨識走 `IMPORT_FORMATS`、解析走 `WORKER_PARSERS`），屬於重構殘留。`Importer` 型別本身仍是
-> 「一個格式該提供什麼」的規格文件，但**不要再照著新增 `XxxImporter.ts`**——見 §5 的現行步驟。
+> **M20（B88 收尾）**：B88 前每個格式都有一個 `XxxImporter` 物件（`id`/`extensions`/`detect` +
+> `parse` 綁在一起）。兩階段化之後那**七個**物件（`Csv` / `Loga` / `Nmea` / `Rcnx` / `Rcz` /
+> `Vbo` / `XrkImporter.ts`）在 `src/` 已無任何引用，卻仍被四個測試檔引用——而且它們把 `detect`
+> 判斷式**逐字複製**了一份，於是測試斷言的是複本，出貨用的 `IMPORT_FORMATS.detect` 改壞或漂移
+> 時測試照樣綠。M20 把七個物件連同 `TextImporter` / `BinaryImporter` / `Importer` 型別一併刪除，
+> 並把測試改成直接對出貨路徑斷言：**辨識**斷言走 `detectImporter()` / `IMPORT_FORMATS`、**解析**
+> 斷言直接呼叫 `WORKER_PARSERS` 所派送的 `parseXxx` 函式，另加一條「`IMPORT_FORMATS` 的 id 與
+> `WORKER_PARSERS` 的鍵雙向對齊」檢查。**新增格式請照 §5 的步驟，不要再寫 `XxxImporter.ts`。**
 
 ### Registry（`src/domain/import/registry.ts`）
 
@@ -218,13 +222,13 @@ function extensionsForImporter(id: string): string[]                   // 單一
 
 | 格式 | 可匯入? | 可匯出? | formatId | 備註 |
 |---|---|---|---|---|
-| aRacer `.loga` | ✅ `logaImporter` | ✅（就地 patch） | `super2` / `superX` / `raceAmp` / `mxApp`（`LogaFormatId` 子集，含 `nmea`） | 匯出走 `patchLogaText`（`LogaWriter.ts`）：把指定 channel 寫回原始 .loga 文字，既有欄覆寫、缺欄附加，其餘逐字保留；非 registry 化的 Exporter |
-| RaceChrono `.nmea` | ✅ `nmeaImporter` | ✅（RC3 NMEA） | `nmea`（匯入時）；偵測靠 `$GPRMC` / `$GNRMC` | 匯出由 `Rc3NmeaExporter`（實作 `Exporter`）產生 NMEA0183 `$GPGGA`+`$GPRMC`+`$RC3`；`export()` **多吃一個 mapping 參數**（見 §7） |
-| RaceLogic `.vbo` | ✅ `vboImporter` → `parseVbo` | ✅（但非單純對稱，見備註） | `vbo` | 匯入：解析 `[header]`/`[channel units]`/`[column names]`/`[data]`，座標反轉與匯出鏡像，可 round-trip。匯出：`convertToVbo` 是 **free function**，一份來源產出 **多個產物**——`_ct.vbo`（Circuit Tools，原始 ECU 名）、`_rc.vbo`（RaceChrono `rc_` 識別符 + 內嵌 channel map）、`_channels.csv`（對照表）；非 registry 化。**`rc_` 識別符的單一真實來源 = `src/domain/raceChrono/identifiers.ts`，匯入（`decodeRcChannelName`）與匯出（`buildVboCatalog` 的 identity 直通判斷）共用同一份表，不再各自硬寫（B120）** |
-| AiM XRK | ✅ `xrkImporter` → `parseXrk`（**二進位**） | ⬜ | `xrk` | 扁平 LE 訊息流（H-訊息 header+payload+footer 含 checksum + sample 訊息 `(S`/`(M`）。CNF/CHS 為 channel 表（112B 記錄：短/長名、size、單位、decoder、取樣率）；decoder 含 int16/float16/int32/gear。各 channel 取樣率不同 → 以 MCLK 為主軸重採樣。GPS 為 ECEF X/Y/Z（cm）→ Bowring 轉 WGS84 經緯度。真檔驗證：95890 列/27 channels/座標正確/圈時 ~48s。規格見 XRK-FORMAT-SPEC.md。（`.xrz` = zlib 壓縮的 .xrk，`parseXrk` 偵測 RFC 1950 magic 後以 `inflateXrz`（`fflate` `Unzlib` 串流，含解壓炸彈防護）還原成 `.xrk` bytes 再走同一 parser，**已支援**） |
-| RaceChrono RCZ | ✅ `rczImporter` → `parseRcz`（**二進位**） | ⬜ | `rcz` | **第一個二進位 importer**（用了 §6 的 `parseBinary`/`headBytes` 擴充）。ZIP（fflate 解）+ `session.json`（含每圈時間/track 名）+ 每通道一個 raw 數值檔（type 0=int32／1=int64／3=float64，LE）。channel id = `k*2²⁰+lo`：`lo=5000→rc_analog_k`、`5001→rc_digital_k`、其餘查 `NAMED_LO`——**`NAMED_LO` 與全部 `rc_` 識別符集中在 `src/domain/raceChrono/identifiers.ts`，是匯入/匯出共用的單一真實來源（B120）**。GPS lat/lon 為 int32 配對 `/6e6`、速度 mm/s、heading 毫度；GPS↔ECU 以各自 int64 時間戳最近鄰對齊。真檔驗證：17791 列／147 channels／座標正確。**另支援 RaceChrono「整機備份」`.rcz`（F3）**：同副檔名、不同結構（多場巢狀 `sessions/session_<KEY>/`），`listRczSessions`／`parseRczBackupSession`（`src/domain/import/rcz/`）以 fflate `unzipSync({filter})` 做**選擇性 inflate**（列場次只解小 JSON、載入只解選中場），是本專案第一個必須避免整檔解壓（OOM）的 importer；裝置角色由 `sessionfragment.json` `devices[].type` 推導（GPS=1），master clock 取樣本數最多者，其餘最近鄰對齊 |
-| Qstarz `.rcnx`（LT-Q6000/Q6000S） | ✅ `rcnxImporter` → `parseRcnx`（**二進位/SQLite**） | ⬜ | `rcnx` | ZIP 內含每場 `sess_N.db`（標準 SQLite）。用 **`sql.js`（WASM，動態載入、PWA 預快取 `**/*.wasm`）** 讀 `WayPoints` 表；多 session 取列數最多者。lat/lon 十進位度（無縮放）、speed km/h、Gx/Gy/Gz g。真檔驗證 22402 列/座標正確/TWN-ARK/LT-Q6000。規格見 RCNX-FORMAT-SPEC.md。（`sana_N.db` 的官方圈資料、多 session 全展開為後續增強） |
-| 通用 `.csv` | ✅ `csvImporter` → `parsePlainCsv` | ✅ `convertToCsv`（registry `id: 'csv'`） | `csv` | RFC 4180 逗號分隔資料；第一個非空白列為標題，需有唯一 `Time` 或 `Timer`（不分大小寫）。支援 BOM、CRLF、引號/轉義引號與 quoted newline；空白/無效數值為 NaN，`TLS_Metadata` 欄只還原可攜註記而不成為通道。配置先驗證再配置 Float32Arrays，並有 cell cap。匯出仍是每筆取樣一列的 `Time,GPS_Lat,GPS_Lon,GPS_Speed,...`。 |
+| aRacer `.loga` | ✅ `parseLoga` | ✅（就地 patch） | `super2` / `superX` / `raceAmp` / `mxApp`（`LogaFormatId` 子集，含 `nmea`） | 匯出走 `patchLogaText`（`LogaWriter.ts`）：把指定 channel 寫回原始 .loga 文字，既有欄覆寫、缺欄附加，其餘逐字保留；非 registry 化的 Exporter |
+| RaceChrono `.nmea` | ✅ `nmeaToSession` | ✅（RC3 NMEA） | `nmea`（匯入時）；偵測靠 `$GPRMC` / `$GNRMC` | 匯出由 `Rc3NmeaExporter`（實作 `Exporter`）產生 NMEA0183 `$GPGGA`+`$GPRMC`+`$RC3`；`export()` **多吃一個 mapping 參數**（見 §7） |
+| RaceLogic `.vbo` | ✅ `parseVbo` | ✅（但非單純對稱，見備註） | `vbo` | 匯入：解析 `[header]`/`[channel units]`/`[column names]`/`[data]`，座標反轉與匯出鏡像，可 round-trip。匯出：`convertToVbo` 是 **free function**，一份來源產出 **多個產物**——`_ct.vbo`（Circuit Tools，原始 ECU 名）、`_rc.vbo`（RaceChrono `rc_` 識別符 + 內嵌 channel map）、`_channels.csv`（對照表）；非 registry 化。**`rc_` 識別符的單一真實來源 = `src/domain/raceChrono/identifiers.ts`，匯入（`decodeRcChannelName`）與匯出（`buildVboCatalog` 的 identity 直通判斷）共用同一份表，不再各自硬寫（B120）** |
+| AiM XRK | ✅ `parseXrk`（**二進位**） | ⬜ | `xrk` | 扁平 LE 訊息流（H-訊息 header+payload+footer 含 checksum + sample 訊息 `(S`/`(M`）。CNF/CHS 為 channel 表（112B 記錄：短/長名、size、單位、decoder、取樣率）；decoder 含 int16/float16/int32/gear。各 channel 取樣率不同 → 以 MCLK 為主軸重採樣。GPS 為 ECEF X/Y/Z（cm）→ Bowring 轉 WGS84 經緯度。真檔驗證：95890 列/27 channels/座標正確/圈時 ~48s。規格見 XRK-FORMAT-SPEC.md。（`.xrz` = zlib 壓縮的 .xrk，`parseXrk` 偵測 RFC 1950 magic 後以 `inflateXrz`（`fflate` `Unzlib` 串流，含解壓炸彈防護）還原成 `.xrk` bytes 再走同一 parser，**已支援**） |
+| RaceChrono RCZ | ✅ `parseRcz`（**二進位**） | ⬜ | `rcz` | **第一個二進位 importer**（用了 §6 的 `headBytes` + worker 端二進位解析擴充）。ZIP（fflate 解）+ `session.json`（含每圈時間/track 名）+ 每通道一個 raw 數值檔（type 0=int32／1=int64／3=float64，LE）。channel id = `k*2²⁰+lo`：`lo=5000→rc_analog_k`、`5001→rc_digital_k`、其餘查 `NAMED_LO`——**`NAMED_LO` 與全部 `rc_` 識別符集中在 `src/domain/raceChrono/identifiers.ts`，是匯入/匯出共用的單一真實來源（B120）**。GPS lat/lon 為 int32 配對 `/6e6`、速度 mm/s、heading 毫度；GPS↔ECU 以各自 int64 時間戳最近鄰對齊。真檔驗證：17791 列／147 channels／座標正確。**另支援 RaceChrono「整機備份」`.rcz`（F3）**：同副檔名、不同結構（多場巢狀 `sessions/session_<KEY>/`），`listRczSessions`／`parseRczBackupSession`（`src/domain/import/rcz/`）以 fflate `unzipSync({filter})` 做**選擇性 inflate**（列場次只解小 JSON、載入只解選中場），是本專案第一個必須避免整檔解壓（OOM）的 importer；裝置角色由 `sessionfragment.json` `devices[].type` 推導（GPS=1），master clock 取樣本數最多者，其餘最近鄰對齊 |
+| Qstarz `.rcnx`（LT-Q6000/Q6000S） | ✅ `parseRcnx`（**二進位/SQLite**） | ⬜ | `rcnx` | ZIP 內含每場 `sess_N.db`（標準 SQLite）。用 **`sql.js`（WASM，動態載入、PWA 預快取 `**/*.wasm`）** 讀 `WayPoints` 表；多 session 取列數最多者。lat/lon 十進位度（無縮放）、speed km/h、Gx/Gy/Gz g。真檔驗證 22402 列/座標正確/TWN-ARK/LT-Q6000。規格見 RCNX-FORMAT-SPEC.md。（`sana_N.db` 的官方圈資料、多 session 全展開為後續增強） |
+| 通用 `.csv` | ✅ `parsePlainCsv` | ✅ `convertToCsv`（registry `id: 'csv'`） | `csv` | RFC 4180 逗號分隔資料；第一個非空白列為標題，需有唯一 `Time` 或 `Timer`（不分大小寫）。支援 BOM、CRLF、引號/轉義引號與 quoted newline；空白/無效數值為 NaN，`TLS_Metadata` 欄只還原可攜註記而不成為通道。配置先驗證再配置 Float32Arrays，並有 cell cap。匯出仍是每筆取樣一列的 `Time,GPS_Lat,GPS_Lon,GPS_Speed,...`。 |
 
 > 對稱性現況：匯入側六個格式（loga / nmea / vbo 文字 + rcz / xrk / rcnx 二進位，其中 rcnx 用 sql.js WASM）都已 registry 化、走同一條 worker 路徑；
 > 匯出側**已 registry 化**（`src/domain/export/registry.ts` 的 `EXPORT_FORMATS`：`nmea` / `vbo` / `csv`），`converterStore.convertAll()` 用單一迴圈透過 `ExportFormat.exportSession()` 驅動；§7 記錄的「三個匯出器各有不同呼叫慣例」是 registry 化**之前**的歷史現況，予以保留作紀錄，但目前已由 registry 統一封裝。
@@ -233,7 +237,7 @@ function extensionsForImporter(id: string): string[]                   // 單一
 
 ## 5. 如何新增一個「文字格式」importer（以 `vbo` 為範例）
 
-以 `vbo` 為樣板，步驟如下（**步驟 2 已作廢，見下**）：
+以 `vbo` 為樣板，步驟如下（**步驟 2 已於 M20 移除，見下**）：
 
 1. **寫純解析函式 `parseXxx(text): LogSession`**
    放在 `src/domain/import/xxx/parseXxx.ts`。職責：把整份文字切成欄、組出 `Channel[]`
@@ -242,12 +246,12 @@ function extensionsForImporter(id: string): string[]                   // 單一
    參考 `parseVbo.ts`：它示範了區段切割、座標換算、UTC 時間欄拆解與「剩餘欄變遙測 channel」。
    **務必只依賴 worker-safe 的程式碼**（不可碰 DOM / window），因為它會在 worker 內執行。
 
-2. **（已不需要）包成 `Importer` 物件**
+2. **（已於 M20 移除）包成 `Importer` 物件**
    B88 之前每個格式會多寫一個 `src/domain/import/xxx/XxxImporter.ts` 匯出
    `const xxxImporter: Importer = { id, extensions, detect, parse }`。**兩階段架構下這一步已無
-   作用**：辨識由下一步的 `IMPORT_FORMATS` 負責、解析由步驟 4 的 `WORKER_PARSERS` 負責，沒有任何
-   程式碼會 import 這個物件（`LogaImporter.ts` / `VboImporter.ts` 是僅存的殘留，見 §3）。
-   **新格式請直接跳到步驟 3。**
+   作用**：辨識由下一步的 `IMPORT_FORMATS` 負責、解析由步驟 4 的 `WORKER_PARSERS` 負責。七個殘留
+   物件與 `TextImporter` / `BinaryImporter` / `Importer` 型別已於 M20 全數刪除（連同讓測試改對
+   出貨路徑斷言，見 §3）。**新格式請直接跳到步驟 3。**
 
 3. **註冊辨識用的格式定義**（`src/domain/import/formatDefinitions.ts` 的 `IMPORT_FORMATS`）
    ```ts
@@ -284,21 +288,25 @@ function extensionsForImporter(id: string): string[]                   // 單一
 
 ## 6. 二進位與 ZIP 格式的擴充（已落地）
 
-`Importer.parse` 原本**只吃 `text`**，`detect` 只拿得到 `headText`（前 4 KB 解成 UTF-8）——
+解析原本**只吃 `text`**，`detect` 只拿得到 `headText`（前 4 KB 解成 UTF-8）——
 這對純文字格式夠用，但二進位格式（XRK）與 ZIP 容器（RCZ / RCNX）需要兩個擴充，**現已實作並在用**：
 
-- **`detect` 端：`ImportCandidate` 補上 `headBytes: Uint8Array`**——二進位 magic（例如 ZIP 的
-  `PK\x03\x04`、zlib 的 `0x78`）在解成文字時會被破壞，必須比對原始 bytes。
-- **`parse` 端：新增 `parseBinary(bytes: Uint8Array, onProgress?)`**（見 `Importer.ts`）——worker /
-  registry 在 importer 提供 `parseBinary` 時改傳 `Uint8Array` 而非文字。
+- **`detect` 端：`ImportCandidate` 補上 `headBytes: Uint8Array`**（見 `Importer.ts`）——二進位
+  magic（例如 ZIP 的 `PK\x03\x04`、zlib 的 `0x78`）在解成文字時會被破壞，必須比對原始 bytes。
+- **`parse` 端：`WORKER_PARSERS` 的每個條目帶一個 `binary` 旗標**（見 `parse.worker.ts` 的
+  `WorkerParser`）——worker 依旗標決定把整份檔案讀成 `string` 還是 `Uint8Array` 再交給 parser。
+  （M20 之前這件事由 `Importer.ts` 的 `BinaryImporter.parseBinary` 表達；那組型別已隨七個
+  `XxxImporter` 物件一起刪除，旗標式的 `WorkerParser` 才是現行且唯一的表述。）
 
-三個二進位 importer（`xrkImporter` / `rczImporter` / `rcnxImporter`，見 §4 支援矩陣）都已用這條路徑
-接入；`rcnxImporter` 另外動態載入 `sql.js`（WASM）解 SQLite。XRK / RCZ / Qstarz 的格式層評估（是否
+三個二進位格式（`parseXrk` / `parseRcz` / `parseRcnx`，見 §4 支援矩陣）都已用這條路徑
+接入；`parseRcnx` 另外動態載入 `sql.js`（WASM）解 SQLite。XRK / RCZ / Qstarz 的格式層評估（是否
 二進位、是否有開源 parser、瀏覽器可行性、formatId 命名建議、接入方式）詳列於
 [`FORMAT-SUPPORT-RESEARCH.md`](./specs/FORMAT-SUPPORT-RESEARCH.md)，此處不重複。
 
-**原則：等第一個二進位 importer 真的要實作時，才一併加入 `headBytes` 與 `parseBinary`**，
-避免在沒有消費者的情況下預先污染介面（介面保持「現在被用到」的最小面積）。
+**原則：等第一個二進位格式真的要實作時，才一併加入 `headBytes` 與二進位解析路徑**，
+避免在沒有消費者的情況下預先污染介面（介面保持「現在被用到」的最小面積）。M20 刪掉的七個
+`XxxImporter` 物件正是這條原則的反例：它們在 B88 之後就沒有消費者了，卻多留了一份會和真正的
+`IMPORT_FORMATS` 漂移的 `detect` 複本，還讓測試對著複本斷言。
 
 ---
 

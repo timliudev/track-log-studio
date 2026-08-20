@@ -9,12 +9,13 @@ import { parseRcnx } from '@/domain/import/rcnx/parseRcnx'
 import { parseXrk } from '@/domain/import/xrk/parseXrk'
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 import type { LogSession } from '@/domain/model/LogSession'
+import type { ImportProgress } from '@/domain/import/Importer'
 import type { ParseRequest, ParseResponse } from './parseProtocol'
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope
 
 /** Progress callback passed through to a worker parser. */
-type ProgressFn = (fraction: number) => void
+type ProgressFn = ImportProgress
 
 /**
  * A parser entry runnable in the worker. `binary: false` parsers receive the

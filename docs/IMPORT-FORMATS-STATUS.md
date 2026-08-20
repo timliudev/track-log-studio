@@ -10,7 +10,7 @@
 [XRK-FORMAT-SPEC.md](specs/XRK-FORMAT-SPEC.md)。
 
 ## ✅ 已完成
-- **可插拔 Importer 架構**：`Importer` 介面（`id` / `extensions` / `detect` / `parse`）+ registry，對稱於既有 `Exporter`；`detect`/`parse` 支援文字與二進位（`headBytes` + `parseBinary`）。parse worker 依 `importerId` 路由，所有格式走同一條 worker 路徑。
+- **可插拔格式架構（B88 起為兩階段，M20 收尾）**：**辨識**＝`IMPORT_FORMATS`（`formatDefinitions.ts`，`id` / `extensions` / `detect`，在初始 bundle 內、不含任何 parser）；**解析**＝`WORKER_PARSERS`（`parse.worker.ts`，依 `importerId` 路由，選檔後才載入）。文字與二進位皆支援（`detect` 看 `headText` + `headBytes`；解析側由 `WorkerParser.binary` 旗標決定餵 `string` 還是 `Uint8Array`）。所有格式走同一條 worker 路徑。B88 之前那種「一個 `Importer` 物件同時帶 `detect` 與 `parse`」的形狀已於 M20 連同七個殘留物件刪除，勿再新增。
 - **匯入格式**：
   - `loga`、`nmea`（既有，包裝進 registry）
   - `vbo`（RaceLogic）—— 新增 `parseVbo`，為 VBO 匯出的逆運算，round-trip 驗證通過；可在分析器開啟。
