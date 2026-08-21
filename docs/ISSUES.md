@@ -508,7 +508,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   無論如何都要補上硬上限當保險絲。**繞道方案(現在可用)**:sector 面板「清除全部」
   後手動加閘門,幾何會依賽道存下來、不會再被自動偵測蓋掉。
 
-- [ ] **B133** ([[B132]] 的 UI 併發症,但**根因是通用缺陷**)Sector 卡片在閘門數量爆量時,
+- [x] **B133** ([[B132]] 的 UI 併發症,但**根因是通用缺陷**)Sector 卡片在閘門數量爆量時,
   「理論最佳圈」的各段時間清單會撐滿整張卡片,把下方的閘門清單/移除按鈕整個擠出可視範圍。
   根因:`SectorPanel.vue` 的 `.optimal` 區塊(含 `<ul class="optimal-sectors">`,**每個 sector
   一個 `<li>`**)放在 `CardFillScroll` 的 **`#header` slot** 裡——那是 B47 刻意的決定(註解寫明
@@ -516,11 +516,19 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   當時假設 sector 只有個位數。而 `CardFillScroll` 的 `.card-fill-scroll__header` 是
   `flex: 0 0 auto` **無高度上限**,`.card-fill-scroll__content` 則是 `flex: 1 1 auto;
   min-height: 0` ——header 一長,content 就被壓縮到 0 高度、整個消失。**這是 `CardFillScroll`
-  的通用缺陷**:任何會無限成長的 header 都能餓死 content pane,不只 sector 卡片。修法:
-  (a) 局部——`.optimal-sectors` 加 `max-height` + `overflow-y: auto`(或做成可收合,預設收合、
-  顯示「理論最佳圈 總時間」一行);(b) 通用加固——`.card-fill-scroll__header` 給
-  `max-height: 50%` + `overflow-y: auto`,確保 content pane 永遠拿得到一半高度。建議兩者都做:
-  (a) 治這張卡的可讀性,(b) 讓其他卡片不會再踩同一個坑。
+  的通用缺陷**:任何會無限成長的 header 都能餓死 content pane,不只 sector 卡片。**兩層都修
+  了**:(a) 局部——`SectorPanel.vue` 的 `.optimal-sectors` 加 `max-height: min(30vh, 160px)` +
+  `overflow-y: auto`,B47 原意(卡片縮短時理論最佳圈仍留在可視的 `#header` 內)不變,只是限高
+  +可內部捲動;(b) 通用加固——`CardFillScroll.vue` 的 `.card-fill-scroll__header` 加
+  `max-height: 50%` + `overflow-y: auto`,保證 content pane 永遠拿得到至少一半高度。已 grep
+  `CardFillScroll` 的全部既有使用者(`AccelTestPanel`、`CurrentValuesPanel`)確認:兩者的
+  header 都是固定控制項集合(切換鈕/欄位/單行提示),不是隨資料筆數增長的清單,實務上不會
+  接近 50% 上限,故此加固不影響既有版面。因 jsdom/happy-dom 在本專案測試設定下不跑真實
+  layout(`vite.config.ts` 的 `test` 區塊無 `css: true`),新增測試分兩層:CSS 原始碼文字斷言
+  (`test/lint/cardFillScrollHeaderCap.test.ts`,比照既有 `mapOverlayButtonSizing.test.ts` 慣例)
+  + `SectorPanel.test.ts` 用 142 個閘門(對應麗寶真檔實測數字)掛載、斷言 `.gate-list` 仍完整
+  渲染 142 個 `<li>`/移除按鈕於 DOM 中。2448/2448 綠、typecheck/lint/build 皆過。
+  — `99f87bc`/`e3cc1aa`
 
 ## User report — 非自家命名頻道認不得 + MT 齒比建議 (B134, F8)
 - [ ] **B134** 認不得非自家命名的語意頻道 → 齒比/疊圖直接死當,且**無任何手動補救**。實測
