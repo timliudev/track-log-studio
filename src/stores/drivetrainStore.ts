@@ -15,7 +15,30 @@ import type {
   RollerTrackPoint,
   TorqueCamPoint,
 } from '@/domain/analysis/cvtForceBalance'
-import type { EngineCurveValueUnit, EnginePowerUnit } from '@/domain/analysis/engineProfileForm'
+import {
+  defaultEngineProfileFormState,
+  type EngineCurveValueUnit,
+  type EnginePowerUnit,
+  type EngineCurveFormState,
+  type EngineTwoPointFormState,
+  type EngineProfileFormState,
+  type EngineProfileInputKind,
+} from '@/domain/analysis/engineProfileForm'
+
+// F8 — re-exported so callers that only import from `drivetrainStore.ts`
+// (the store's own public surface) keep working without also reaching into
+// `engineProfileForm.ts` directly — the form-state SHAPES live there (see
+// that module's header) since they're also consumed by pure math (profile
+// building), but this store is still the canonical place to import the
+// persisted/UI-facing MT form types from, same as `MtGearFormInput` etc.
+export type {
+  EngineCurveValueUnit,
+  EnginePowerUnit,
+  EngineCurveFormState,
+  EngineTwoPointFormState,
+  EngineProfileFormState,
+  EngineProfileInputKind,
+}
 
 export type DrivetrainKind = 'mt' | 'cvt'
 export type DrivetrainKindSelection = 'auto' | 'manual'
@@ -54,54 +77,6 @@ export interface FinalDriveFormInput {
  *  payloads still parse (they're migrated to 'direct' at store init) and so
  *  `toMtDrivetrainSpec`'s tire-resolution branch stays exercised/testable. */
 export type CircumferenceInputMode = 'tire' | 'direct'
-
-/** F8 — which engine-profile input the user is currently editing/using.
- *  `twoPoint` is always constructible from just two rpm figures (a spec
- *  sheet); `curve` additionally needs a valid pasted table (see
- *  `EngineProfileInput.vue`) — see `gearRecommendation.ts`'s module header
- *  for why curve-only outputs (`optimalShiftRpm`/`simulateAcceleration`)
- *  require the LATTER specifically, not just "some profile exists". */
-export type EngineProfileInputKind = 'twoPoint' | 'curve'
-
-/** F8 — two-point engine-profile form fields. Mirrors
- *  `createEngineTwoPointProfile`'s input shape (`gearRecommendation.ts`) but
- *  every field is nullable so a still-being-typed form has a well-defined
- *  "not entered yet" state rather than a bogus 0 — `redlineRpm` is
- *  deliberately NOT duplicated here: it reuses `MtFormState.redlineRpm` (the
- *  calculator's own redline field) so the user enters it once, not twice. */
-export interface EngineTwoPointFormState {
-  peakTorqueRpm: number | null
-  peakPowerRpm: number | null
-  /** Optional peak torque magnitude, always Nm (torque spec sheets are
-   *  overwhelmingly given in Nm; no unit selector needed unlike power). */
-  peakTorqueNm: number | null
-  /** Optional peak power magnitude, in whichever unit `peakPowerUnit` says —
-   *  converted to kW (via `powerValueToKw`) only when building the profile. */
-  peakPowerValue: number | null
-  peakPowerUnit: EnginePowerUnit
-}
-
-/** F8 — curve-paste engine-profile form fields. `rawText` is the untouched
- *  textarea contents (parsed reactively by the input component via
- *  `parseEngineCurveText`, not pre-parsed into points here — so a
- *  still-being-edited paste never has to round-trip through a lossy
- *  points-array representation). Redline reuses `MtFormState.redlineRpm`,
- *  same as the two-point form above. */
-export interface EngineCurveFormState {
-  rawText: string
-  valueUnit: EngineCurveValueUnit
-}
-
-/** F8 — the full engine-profile input state persisted alongside `MtFormState`.
- *  Both `twoPoint` and `curve` are always kept around (mirrors
- *  `MtGearFormInput`'s "keep both forms so toggling doesn't discard data"
- *  convention) — `activeKind` just picks which one is authoritative for the
- *  recommendation math. */
-export interface EngineProfileFormState {
-  activeKind: EngineProfileInputKind
-  twoPoint: EngineTwoPointFormState
-  curve: EngineCurveFormState
-}
 
 /** Manually-entered MT (chain-drive) spec inputs — mirrors {@link
  *  MtDrivetrainSpec} in `drivetrain.ts`, but kept as a separate UI-facing
@@ -379,24 +354,6 @@ export interface CvtFormState {
 
 function defaultMtGear(ratio: number): MtGearFormInput {
   return { mode: 'ratio', ratio, drivenTeeth: 0, driveTeeth: 0 }
-}
-
-/** F8 — a fresh, empty engine-profile form: no peak rpm/values entered, no
- *  curve pasted. `defaultEngineProfileFormState()` returns a NEW object each
- *  call (never a shared reference) so `DEFAULT_MT`/{@link mergeMtFormState}'s
- *  spread-merge callers can't accidentally alias/mutate a shared default. */
-function defaultEngineProfileFormState(): EngineProfileFormState {
-  return {
-    activeKind: 'twoPoint',
-    twoPoint: {
-      peakTorqueRpm: null,
-      peakPowerRpm: null,
-      peakTorqueNm: null,
-      peakPowerValue: null,
-      peakPowerUnit: 'kW',
-    },
-    curve: { rawText: '', valueUnit: 'Nm' },
-  }
 }
 
 const DEFAULT_MT: MtFormState = {

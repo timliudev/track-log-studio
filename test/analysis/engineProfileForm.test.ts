@@ -4,6 +4,11 @@ import {
   diagnoseCurveProfile,
   curveValueToTorqueNm,
   powerValueToKw,
+  buildTwoPointProfile,
+  buildCurveProfile,
+  buildEngineProfile,
+  defaultEngineProfileFormState,
+  type EngineTwoPointFormState,
 } from '@/domain/analysis/engineProfileForm'
 import { createEngineCurveProfile, torqueNmFromPowerKw, hpToKw } from '@/domain/analysis/gearRecommendation'
 
@@ -146,5 +151,111 @@ describe('diagnoseCurveProfile', () => {
   it('agrees with createEngineCurveProfile on validity for every reason', () => {
     expect(diagnoseCurveProfile([], 10000)).toBe('tooFewPoints')
     expect(createEngineCurveProfile([], 10000)).toBeNull()
+  })
+})
+
+const emptyTwoPoint: EngineTwoPointFormState = {
+  peakTorqueRpm: null,
+  peakPowerRpm: null,
+  peakTorqueNm: null,
+  peakPowerValue: null,
+  peakPowerUnit: 'kW',
+}
+
+describe('buildTwoPointProfile', () => {
+  it('returns null when required fields are missing', () => {
+    expect(buildTwoPointProfile(emptyTwoPoint, 10000)).toBeNull()
+    expect(buildTwoPointProfile({ ...emptyTwoPoint, peakTorqueRpm: 6500 }, 10000)).toBeNull()
+    expect(buildTwoPointProfile({ ...emptyTwoPoint, peakTorqueRpm: 6500, peakPowerRpm: 9000 }, null)).toBeNull()
+  })
+
+  it('builds a valid profile from the required fields alone', () => {
+    const profile = buildTwoPointProfile({ ...emptyTwoPoint, peakTorqueRpm: 6500, peakPowerRpm: 9000 }, 10000)
+    expect(profile).toEqual({ kind: 'twoPoint', peakTorqueRpm: 6500, peakPowerRpm: 9000, redlineRpm: 10000 })
+  })
+
+  it('includes optional peakTorqueNm verbatim', () => {
+    const profile = buildTwoPointProfile(
+      { ...emptyTwoPoint, peakTorqueRpm: 6500, peakPowerRpm: 9000, peakTorqueNm: 42 },
+      10000,
+    )
+    expect(profile?.peakTorqueNm).toBe(42)
+  })
+
+  it('converts optional peakPowerValue through the selected unit', () => {
+    const profileKw = buildTwoPointProfile(
+      { ...emptyTwoPoint, peakTorqueRpm: 6500, peakPowerRpm: 9000, peakPowerValue: 55, peakPowerUnit: 'kW' },
+      10000,
+    )
+    expect(profileKw?.peakPowerKw).toBe(55)
+
+    const profilePs = buildTwoPointProfile(
+      { ...emptyTwoPoint, peakTorqueRpm: 6500, peakPowerRpm: 9000, peakPowerValue: 55, peakPowerUnit: 'PS' },
+      10000,
+    )
+    expect(profilePs?.peakPowerKw).toBeCloseTo(hpToKw(55, 'metric'), 6)
+  })
+
+  it('defers to createEngineTwoPointProfile validation (e.g. peakPowerRpm <= peakTorqueRpm rejected)', () => {
+    const profile = buildTwoPointProfile({ ...emptyTwoPoint, peakTorqueRpm: 9000, peakPowerRpm: 6500 }, 10000)
+    expect(profile).toBeNull()
+  })
+})
+
+describe('buildCurveProfile', () => {
+  it('reports the parse result and a validation reason for too-few-points', () => {
+    const result = buildCurveProfile({ rawText: '3000,40\n6000,55', valueUnit: 'Nm' }, 10000)
+    expect(result.profile).toBeNull()
+    expect(result.reason).toBe('tooFewPoints')
+    expect(result.parse.points).toHaveLength(2)
+  })
+
+  it('builds a valid profile with enough well-formed points', () => {
+    const result = buildCurveProfile({ rawText: '3000,40\n6000,55\n9000,48', valueUnit: 'Nm' }, 10000)
+    expect(result.profile).not.toBeNull()
+    expect(result.reason).toBeNull()
+    expect(result.profile?.points).toHaveLength(3)
+  })
+
+  it('reports noRedline when redlineRpm is null', () => {
+    const result = buildCurveProfile({ rawText: '3000,40\n6000,55\n9000,48', valueUnit: 'Nm' }, null)
+    expect(result.profile).toBeNull()
+    expect(result.reason).toBe('noRedline')
+  })
+})
+
+describe('buildEngineProfile', () => {
+  it('builds from the two-point form when activeKind is twoPoint', () => {
+    const form = defaultEngineProfileFormState()
+    form.activeKind = 'twoPoint'
+    form.twoPoint = { ...emptyTwoPoint, peakTorqueRpm: 6500, peakPowerRpm: 9000 }
+    const profile = buildEngineProfile(form, 10000)
+    expect(profile?.kind).toBe('twoPoint')
+  })
+
+  it('builds from the curve form when activeKind is curve', () => {
+    const form = defaultEngineProfileFormState()
+    form.activeKind = 'curve'
+    form.curve = { rawText: '3000,40\n6000,55\n9000,48', valueUnit: 'Nm' }
+    const profile = buildEngineProfile(form, 10000)
+    expect(profile?.kind).toBe('curve')
+  })
+
+  it('returns null for an invalid curve even if a valid two-point form is also present', () => {
+    const form = defaultEngineProfileFormState()
+    form.activeKind = 'curve'
+    form.twoPoint = { ...emptyTwoPoint, peakTorqueRpm: 6500, peakPowerRpm: 9000 }
+    form.curve = { rawText: '3000,40', valueUnit: 'Nm' } // only 1 point
+    const profile = buildEngineProfile(form, 10000)
+    expect(profile).toBeNull()
+  })
+})
+
+describe('defaultEngineProfileFormState', () => {
+  it('never returns a shared reference across calls', () => {
+    const a = defaultEngineProfileFormState()
+    const b = defaultEngineProfileFormState()
+    a.twoPoint.peakTorqueRpm = 9999
+    expect(b.twoPoint.peakTorqueRpm).toBeNull()
   })
 })

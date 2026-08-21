@@ -1,7 +1,12 @@
 import {
   hpToKw,
   torqueNmFromPowerKw,
+  createEngineCurveProfile,
+  createEngineTwoPointProfile,
   type EnginePoint,
+  type EngineProfile,
+  type EngineCurveProfile,
+  type EngineTwoPointProfile,
 } from '@/domain/analysis/gearRecommendation'
 
 /**
@@ -152,4 +157,146 @@ export function diagnoseCurveProfile(points: readonly EnginePoint[], redlineRpm:
     if (!(points[i].rpm > points[i - 1].rpm)) return 'notIncreasing'
   }
   return null
+}
+
+// ── Form-state shapes (UI-facing, owned here so both the store's
+// persistence/sanitizer layer AND the input/recommendation components share
+// ONE definition — see `drivetrainStore.ts`'s `MtFormState.engineProfile`,
+// which imports these rather than redeclaring them) ────────────────────────
+
+/** Which "horsepower"/power unit a peak-power or curve value column is
+ *  entered in — mirrors `gearRecommendation.ts`'s `HorsepowerStandard` split
+ *  (metric PS vs mechanical/imperial hp) but adds the two units riders
+ *  actually see on spec sheets/dyno printouts, `kW` and `Nm`, so the picker
+ *  covers every common case without asking the user to convert by hand. */
+
+/** Two-point engine-profile form fields. Mirrors
+ *  `createEngineTwoPointProfile`'s input shape but every field is nullable
+ *  so a still-being-typed form has a well-defined "not entered yet" state
+ *  rather than a bogus 0. `redlineRpm` is deliberately NOT duplicated here —
+ *  see {@link buildTwoPointProfile}'s `redlineRpm` parameter: callers pass
+ *  the MT calculator's own redline field so the user enters it once. */
+export interface EngineTwoPointFormState {
+  peakTorqueRpm: number | null
+  peakPowerRpm: number | null
+  /** Optional peak torque magnitude, always Nm (torque spec sheets are
+   *  overwhelmingly given in Nm; no unit selector needed unlike power). */
+  peakTorqueNm: number | null
+  /** Optional peak power magnitude, in whichever unit `peakPowerUnit` says —
+   *  converted to kW (via {@link powerValueToKw}) only when building the
+   *  profile. */
+  peakPowerValue: number | null
+  peakPowerUnit: EnginePowerUnit
+}
+
+/** Curve-paste engine-profile form fields. `rawText` is the untouched
+ *  textarea contents (parsed reactively via {@link parseEngineCurveText},
+ *  not pre-parsed into points here — so a still-being-edited paste never has
+ *  to round-trip through a lossy points-array representation). Redline
+ *  reuses the MT calculator's own field, same as the two-point form above. */
+export interface EngineCurveFormState {
+  rawText: string
+  valueUnit: EngineCurveValueUnit
+}
+
+/** Which engine-profile input (two-point vs curve) is currently
+ *  authoritative for the recommendation math — see `gearRecommendation.ts`'s
+ *  module header for why curve-only outputs (`optimalShiftRpm`/
+ *  `simulateAcceleration`) require a VALID curve specifically, not just
+ *  "some profile exists". */
+export type EngineProfileInputKind = 'twoPoint' | 'curve'
+
+/** The full engine-profile input state. Both `twoPoint` and `curve` are
+ *  always kept around (mirrors `MtGearFormInput`'s "keep both forms so
+ *  toggling doesn't discard data" convention in `drivetrainStore.ts`) —
+ *  `activeKind` just picks which one is authoritative. */
+export interface EngineProfileFormState {
+  activeKind: EngineProfileInputKind
+  twoPoint: EngineTwoPointFormState
+  curve: EngineCurveFormState
+}
+
+/** A fresh, empty engine-profile form: no peak rpm/values entered, no curve
+ *  pasted. Returns a NEW object each call (never a shared reference) so
+ *  spread-merge callers (e.g. `drivetrainStore.ts`'s `DEFAULT_MT`/
+ *  `mergeMtFormState`) can't accidentally alias/mutate a shared default. */
+export function defaultEngineProfileFormState(): EngineProfileFormState {
+  return {
+    activeKind: 'twoPoint',
+    twoPoint: {
+      peakTorqueRpm: null,
+      peakPowerRpm: null,
+      peakTorqueNm: null,
+      peakPowerValue: null,
+      peakPowerUnit: 'kW',
+    },
+    curve: { rawText: '', valueUnit: 'Nm' },
+  }
+}
+
+// ── Building a math-core profile from form state ────────────────────────
+// Shared by EngineProfileInput.vue (to show validity/point-count feedback)
+// and GearRecommendationPanel.vue (to actually run the recommendation math)
+// so the two never compute two subtly different answers for "is this
+// profile valid right now".
+
+/**
+ * Build an {@link EngineTwoPointProfile} from the two-point form fields,
+ * given the MT calculator's redline. Returns `null` when the required
+ * fields aren't filled in yet, OR when {@link createEngineTwoPointProfile}'s
+ * own validation rejects the combination (e.g. peak-power rpm not above
+ * peak-torque rpm) — this function adds no validation of its own beyond
+ * "are the required fields present", deferring everything else to that
+ * constructor so there is exactly one source of truth for validity.
+ */
+export function buildTwoPointProfile(
+  form: EngineTwoPointFormState,
+  redlineRpm: number | null,
+): EngineTwoPointProfile | null {
+  if (form.peakTorqueRpm == null || form.peakPowerRpm == null || redlineRpm == null) return null
+  const peakPowerKw = form.peakPowerValue == null ? NaN : powerValueToKw(form.peakPowerValue, form.peakPowerUnit)
+  return createEngineTwoPointProfile({
+    peakTorqueRpm: form.peakTorqueRpm,
+    peakPowerRpm: form.peakPowerRpm,
+    redlineRpm,
+    ...(form.peakTorqueNm != null ? { peakTorqueNm: form.peakTorqueNm } : {}),
+    ...(Number.isFinite(peakPowerKw) ? { peakPowerKw } : {}),
+  })
+}
+
+/** Result of {@link buildCurveProfile}. */
+export interface CurveProfileBuild {
+  /** The constructed profile, or `null` when parsing/validation failed —
+   *  see `reason` for WHY (surfaced to the user, per the F8 spec's explicit
+   *  requirement that a null result be explained, not silently swallowed). */
+  profile: EngineCurveProfile | null
+  parse: CurveParseResult
+  reason: CurveValidationReason | null
+}
+
+/**
+ * Parse + validate + build an {@link EngineCurveProfile} from the curve form
+ * fields in one step, given the MT calculator's redline — the single
+ * function both the input component (for inline point-count/error feedback)
+ * and the recommendation panel (for the actual math) call, so they can never
+ * disagree about whether the curve is currently usable.
+ */
+export function buildCurveProfile(form: EngineCurveFormState, redlineRpm: number | null): CurveProfileBuild {
+  const parse = parseEngineCurveText(form.rawText, form.valueUnit)
+  const reason = diagnoseCurveProfile(parse.points, redlineRpm)
+  const profile = reason == null && redlineRpm != null ? createEngineCurveProfile(parse.points, redlineRpm) : null
+  return { profile, parse, reason }
+}
+
+/**
+ * Build whichever {@link EngineProfile} the form's `activeKind` currently
+ * selects — the two-point form always builds (or fails) instantly since it
+ * has no parsing step, while the curve form additionally requires a valid
+ * paste (see {@link buildCurveProfile}). Returns `null` for either kind when
+ * its required inputs aren't there yet.
+ */
+export function buildEngineProfile(form: EngineProfileFormState, redlineRpm: number | null): EngineProfile | null {
+  return form.activeKind === 'curve'
+    ? buildCurveProfile(form.curve, redlineRpm).profile
+    : buildTwoPointProfile(form.twoPoint, redlineRpm)
 }
