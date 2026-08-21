@@ -647,12 +647,42 @@ describe('optimalShiftRpm', () => {
     const wheelTorqueCurrent = torqueAt(profile, result!.rpm) * gearRatioN
     const wheelTorqueNext = torqueAt(profile, result!.rpm * (gearRatioNext / gearRatioN)) * gearRatioNext
     expect(wheelTorqueCurrent).toBeCloseTo(wheelTorqueNext, 4)
+    // The curve's last sample (12000) equals redlineRpm exactly, and every
+    // rpm the bisection touches stays within [3000, 12000] -> no clamping.
+    expect(result!.usedClampedTorque).toBe(false)
   })
 
-  it('redlineClamped branch: flat torque curve, staying in gear always wins', () => {
-    // Constant torque -> power strictly increases with rpm (peakPowerRpm =
-    // redline-adjacent sample) and wheel torque is ALWAYS higher in the
-    // current (numerically larger) gear ratio, at every rpm -> no crossover.
+  it('redlineClamped branch: curve sampled all the way to redline, staying in gear always wins', () => {
+    // A realistic hump curve whose LAST sample point sits exactly at
+    // redlineRpm (so torqueAt never needs to clamp/extrapolate anywhere in
+    // the scan — contrast with the next test, which stops short).
+    // peakPowerRpm lands at 8500 (an interior sample, before redline), and
+    // diff stays positive at both 8500 and 10000 with no sign change
+    // between them for this gear pair — verified numerically, not just by
+    // construction, since hand-picking curve shapes for this is error-prone.
+    const profile = createEngineCurveProfile(
+      [
+        { rpm: 3000, torqueNm: 45 },
+        { rpm: 5000, torqueNm: 62 },
+        { rpm: 7000, torqueNm: 68 }, // peak torque
+        { rpm: 8500, torqueNm: 64 },
+        { rpm: 10000, torqueNm: 52 },
+      ],
+      10000,
+    ) as EngineCurveProfile
+    const result = optimalShiftRpm(profile, 2, 1.5)
+    expect(result).not.toBeNull()
+    expect(result!.reason).toBe('redlineClamped')
+    expect(result!.rpm).toBe(10000) // profile.redlineRpm
+    expect(result!.usedClampedTorque).toBe(false)
+  })
+
+  it('redlineClamped branch + usedClampedTorque=true: curve stops short of redline (Defect 2)', () => {
+    // Same flat-torque shape, but the curve's last sample (9000) is BELOW
+    // redlineRpm (12000) -> torqueAt clamps flat for [9000,12000], and the
+    // redline-end evaluation (diff(12000)) relies on that clamped value.
+    // This is the exact "clamped-torque interaction" the result must
+    // surface rather than leave invisible.
     const profile = createEngineCurveProfile(
       [
         { rpm: 3000, torqueNm: 50 },
@@ -664,7 +694,8 @@ describe('optimalShiftRpm', () => {
     const result = optimalShiftRpm(profile, 2, 1.5)
     expect(result).not.toBeNull()
     expect(result!.reason).toBe('redlineClamped')
-    expect(result!.rpm).toBe(12000) // profile.redlineRpm
+    expect(result!.rpm).toBe(12000)
+    expect(result!.usedClampedTorque).toBe(true)
   })
 
   it('rejects a downshift or no-op ratio pair (gearRatioNext must be < gearRatioN)', () => {
@@ -742,6 +773,7 @@ describe('optimalShiftRpm', () => {
     expect(describeReason('bandFloorClamped')).toBe('bandFloorClamped')
   })
 })
+
 
 // ── recommendForMeasuredSpeeds ───────────────────────────────────────────
 

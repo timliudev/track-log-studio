@@ -658,6 +658,22 @@ export interface OptimalShiftResult {
    * possible answer, not a safe fallback — see the doc below).
    */
   reason: 'crossover' | 'redlineClamped' | 'bandFloorClamped'
+  /**
+   * `true` if ANY rpm the search evaluated — in either gear, at any point
+   * during the scan or bisection — fell outside the curve's own sampled
+   * range (`[profile.points[0].rpm, profile.points[last].rpm]`) and
+   * therefore relied on {@link torqueAt}'s clamp-not-extrapolate policy
+   * rather than real digitised data. The most common cause: a curve
+   * digitised only partway to redline reports FLAT torque for the
+   * remainder, which can turn what would have been a genuine crossover
+   * into a `'redlineClamped'` result. This does not make the result wrong
+   * (clamping is the documented, honest policy — see the module header),
+   * but a caller presenting this to a rider should be able to caveat it
+   * ("based on the curve's last sampled point, not real data up there")
+   * rather than silently treating it as equally trustworthy as a
+   * fully-sampled result.
+   */
+  usedClampedTorque: boolean
 }
 
 /**
@@ -730,10 +746,20 @@ export function optimalShiftRpm(
   const hi = profile.redlineRpm
   if (!Number.isFinite(lo) || !(lo < hi)) return null
 
+  const curveMinRpm = profile.points[0].rpm
+  const curveMaxRpm = profile.points[profile.points.length - 1].rpm
+  let usedClampedTorque = false
+  const markIfClamped = (r: number): void => {
+    if (r < curveMinRpm || r > curveMaxRpm) usedClampedTorque = true
+  }
+
   const ratioScale = gearRatioNext / gearRatioN // < 1: engine rpm drops on upshift
   const diff = (r: number): number => {
+    markIfClamped(r)
+    const rNext = r * ratioScale
+    markIfClamped(rNext)
     const wheelTorqueCurrent = torqueAt(profile, r) * gearRatioN
-    const wheelTorqueNext = torqueAt(profile, r * ratioScale) * gearRatioNext
+    const wheelTorqueNext = torqueAt(profile, rNext) * gearRatioNext
     return wheelTorqueCurrent - wheelTorqueNext
   }
 
@@ -762,26 +788,26 @@ export function optimalShiftRpm(
     const diffHi = diff(hi)
     if (diffHi <= 0) {
       const rpm = bisectCrossing(lo, hi, diffLo)
-      return { rpm, reason: 'crossover' }
+      return { rpm, reason: 'crossover', usedClampedTorque }
     }
-    return { rpm: hi, reason: 'redlineClamped' }
+    return { rpm: hi, reason: 'redlineClamped', usedClampedTorque }
   }
 
   // diffLo <= 0: see the doc above — this is defensive (should not occur
   // for a well-formed curve), so extend the search DOWNWARD rather than
   // clamping to the redline, which would be the worst possible answer here.
-  const floorRpm = Math.max(peakTorqueRpm(profile), profile.points[0].rpm)
+  const floorRpm = Math.max(peakTorqueRpm(profile), curveMinRpm)
   if (floorRpm < lo) {
     const diffFloor = diff(floorRpm)
     if (diffFloor > 0) {
       const rpm = bisectCrossing(floorRpm, lo, diffFloor)
-      return { rpm, reason: 'crossover' }
+      return { rpm, reason: 'crossover', usedClampedTorque }
     }
   }
   // diff stayed <= 0 across the entire extended window: no crossover to
   // report anywhere in the realistic scan range. Clamp to the LOW end —
   // never the redline.
-  return { rpm: floorRpm, reason: 'bandFloorClamped' }
+  return { rpm: floorRpm, reason: 'bandFloorClamped', usedClampedTorque }
 }
 
 // ── Stage 5: log-driven target ───────────────────────────────────────────
