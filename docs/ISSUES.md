@@ -652,6 +652,11 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   `_degps`/`_g`/`_uT`/`_km`)拆出單位。兩個子選項:(a) 只填 `unit`、名稱保留尾巴(安全,
   但名稱冗長);(b) 同時把名稱去尾(乾淨,但會動到 [[B134]] 使用者覆寫表的鍵與既有欄名
   假設,誤拆風險:`_g` 可能撞真名)。屬顯示品質改善、非阻斷,**待 user 拍板要不要做與做哪款**。
+  **user 拍板(2026-08-21):做,採 (a) 只填 `unit`、名稱完全不動。** 理由:頻道名稱正是
+  [[B134]] 裝置層覆寫表的**鍵**,改名會讓使用者已存的對應變孤兒;`_g` 這類單字母後綴誤拆
+  風險也高。實作紅線:①只在單位原本為空時才套用(有 `[channel units]` 值一律優先);
+  ②僅 VBO importer 內生效,既有 golden fixture 不得變動;③新填的單位會餵進 B134 啟發式的
+  計分(unit 是訊號之一),須複驗真檔三個角色解析不變。
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
