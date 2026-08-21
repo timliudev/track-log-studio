@@ -1,3 +1,6 @@
+import type { GearRatioInput } from '@/domain/analysis/drivetrain'
+import { resolveGearRatio } from '@/domain/analysis/drivetrain'
+
 /**
  * F8 — 齒比建議 (gear-ratio recommendation), motorcycle context.
  *
@@ -297,4 +300,171 @@ export function peakPowerRpm(profile: EngineCurveProfile): number {
     }
   }
   return bestRpm
+}
+
+// ── Stage 2: usable band + ratio spacing ────────────────────────────────
+
+/**
+ * The engine's "usable band" for gearing purposes: the rpm window a rider
+ * should try to keep the engine within while accelerating hard —
+ * `bottomRpm` = peak-torque rpm (below this you're lugging, off the torque
+ * peak) and `topRpm` = the rpm you should shift at.
+ *
+ * v1 sets `topRpm = redlineRpm` for BOTH profile kinds: in two-point mode
+ * that's the only edge we have; in curve mode the true optimal shift point
+ * depends on the NEXT gear's ratio too (see {@link optimalShiftRpm}), so a
+ * single band shared across all gears can only ever be an approximation —
+ * refining `topRpm` per-gear from the curve is left as future work (noted
+ * here rather than silently done wrong).
+ */
+export interface UsableBand {
+  bottomRpm: number
+  topRpm: number
+}
+
+/**
+ * Derive the usable band from either profile kind — see {@link UsableBand}'s
+ * doc for why `topRpm` is `redlineRpm` in both cases for now. Returns `null`
+ * if the profile's fields aren't usable (defensive: should not happen for a
+ * profile constructed via {@link createEngineCurveProfile} /
+ * {@link createEngineTwoPointProfile}).
+ */
+export function usableBand(profile: EngineProfile): UsableBand | null {
+  if (profile.kind === 'curve') {
+    const bottomRpm = peakTorqueRpm(profile)
+    if (!Number.isFinite(bottomRpm) || !(profile.redlineRpm > bottomRpm)) return null
+    return { bottomRpm, topRpm: profile.redlineRpm }
+  }
+  const bottomRpm = profile.peakTorqueRpm
+  if (!Number.isFinite(bottomRpm) || !(profile.redlineRpm > bottomRpm)) return null
+  return { bottomRpm, topRpm: profile.redlineRpm }
+}
+
+/** Input for {@link recommendRatioSpacing}: exactly one of `topGearRatio` /
+ *  `firstGearRatio` must be supplied as the anchor the rest are derived from. */
+export interface RatioSpacingInput {
+  band: UsableBand
+  /** How many gears to produce ratios for (>= 1). */
+  gearCount: number
+  /** Anchor: the top (last) gear's ratio. Mutually exclusive with `firstGearRatio`. */
+  topGearRatio?: number
+  /** Anchor: the 1st gear's ratio. Mutually exclusive with `topGearRatio`. */
+  firstGearRatio?: number
+  /**
+   * Widens spacing towards the top gears when > 1 (default 1 = pure
+   * geometric progression). Real gearboxes are usually PROGRESSIVE, not
+   * purely geometric: lower gears are kept close together for hard
+   * acceleration off the line (where every extra bit of wheel torque
+   * matters and rpm drop must stay small), while the top 1-2 gears are
+   * spaced further apart as an overdrive/cruise ratio, since by then
+   * acceleration matters less than covering ground per engine revolution.
+   * Implemented by multiplying the base geometric step
+   * `k = band.topRpm / band.bottomRpm` by `progressionFactor^i` for the
+   * i-th gear-to-gear step counting from 1st gear (i=0 is the 1st->2nd
+   * step) — so each successive step widens further, i.e. the spacing
+   * between the top two gears is the widest of all.
+   */
+  progressionFactor?: number
+}
+
+/**
+ * Recommend a full set of per-gear ratios as a (by default) geometric
+ * progression whose step is exactly `band.topRpm / band.bottomRpm`: shifting
+ * at `topRpm` and landing at `bottomRpm` in the next gear keeps every shift
+ * landing right at the bottom of the usable band (see {@link
+ * diagnoseExistingRatios} for the inverse — checking whether an EXISTING
+ * spec's shifts land there). `progressionFactor` optionally widens the
+ * upper-gear spacing beyond pure geometric — see its doc on {@link
+ * RatioSpacingInput}.
+ *
+ * Returns `null` when: `gearCount < 1`; the band is degenerate
+ * (`topRpm <= bottomRpm`); neither or both of `topGearRatio`/`firstGearRatio`
+ * are supplied; the supplied anchor isn't a finite positive number; or
+ * `progressionFactor` is supplied but < 1 (narrowing the top gears isn't a
+ * meaningful "progressive" gearbox and almost certainly indicates a caller
+ * bug rather than an intended input).
+ */
+export function recommendRatioSpacing(input: RatioSpacingInput): number[] | null {
+  const { band, gearCount, topGearRatio, firstGearRatio, progressionFactor = 1 } = input
+  if (!Number.isInteger(gearCount) || gearCount < 1) return null
+  if (!Number.isFinite(band.bottomRpm) || !Number.isFinite(band.topRpm) || !(band.topRpm > band.bottomRpm)) return null
+  if (!Number.isFinite(progressionFactor) || progressionFactor < 1) return null
+  const hasTop = topGearRatio != null
+  const hasFirst = firstGearRatio != null
+  if (hasTop === hasFirst) return null // exactly one anchor required
+  const anchor = hasTop ? topGearRatio! : firstGearRatio!
+  if (!Number.isFinite(anchor) || anchor <= 0) return null
+
+  const k = band.topRpm / band.bottomRpm
+  // step(i) = k * progressionFactor^i is the ratio g[i] / g[i+1] (both
+  // 0-indexed, gear i = i+1'th gear) — widening with i per the doc above.
+  const step = (i: number): number => k * Math.pow(progressionFactor, i)
+
+  const ratios = new Array<number>(gearCount)
+  if (gearCount === 1) {
+    ratios[0] = anchor
+    return ratios
+  }
+  if (hasFirst) {
+    ratios[0] = anchor
+    for (let i = 1; i < gearCount; i++) ratios[i] = ratios[i - 1] / step(i - 1)
+  } else {
+    ratios[gearCount - 1] = anchor
+    for (let i = gearCount - 2; i >= 0; i--) ratios[i] = ratios[i + 1] * step(i)
+  }
+  return ratios
+}
+
+/**
+ * Per-upshift landing diagnosis for an EXISTING drivetrain spec: for every
+ * consecutive gear pair, the engine rpm the shift lands on (assuming
+ * constant road speed through the shift, so wheel rpm — not engine rpm — is
+ * what's actually continuous) and its signed distance to the usable band's
+ * `bottomRpm`. This is the single most actionable diagnostic in this module
+ * — it directly answers "when I shift from 3rd to 4th, do I fall out of the
+ * powerband, and by how much?" (e.g. 「三檔升四檔掉到 6200 rpm，比扭力峰低 800」).
+ *
+ * Physics: at the shift instant, wheel rpm is shared across the shift
+ * (speed doesn't jump), so `landingRpm = shiftRpm * g_next / g_current`.
+ * Only the GEARBOX ratio matters here (not total reduction) because primary
+ * reduction and final drive multiply every gear identically and cancel out
+ * of the ratio `g_next / g_current` — so this deliberately takes just the
+ * gear ratios, not a full {@link resolveFinalDrive}-resolved spec.
+ *
+ * `shiftRpm` defaults to `band.topRpm` (i.e. assumes the rider always
+ * upshifts right at the top of the band / redline); pass an explicit value
+ * to diagnose a rider's actual, earlier shift points instead.
+ *
+ * `gearRatios` entries that don't resolve to a valid positive ratio (see
+ * {@link resolveGearRatio}) are skipped, along with the upshift pair(s) that
+ * would have referenced them. Returns `[]` for fewer than 2 valid gears or
+ * an invalid `shiftRpm`/`band.bottomRpm`.
+ */
+export interface RatioDiagnosis {
+  /** The FROM gear of this upshift (1-based) — e.g. `gear: 3` means the 3rd->4th shift. */
+  gear: number
+  /** The rpm the shift is assumed to happen at (see `shiftRpm` param doc). */
+  shiftRpm: number
+  /** Engine rpm immediately after the shift. */
+  landingRpm: number
+  /** `landingRpm - band.bottomRpm`: negative = landed below the torque peak (bogged down). */
+  deltaFromBottomRpm: number
+}
+
+export function diagnoseExistingRatios(
+  gearRatios: readonly GearRatioInput[],
+  band: UsableBand,
+  shiftRpm: number = band.topRpm,
+): RatioDiagnosis[] {
+  if (!Number.isFinite(shiftRpm) || shiftRpm <= 0 || !Number.isFinite(band.bottomRpm)) return []
+  const ratios = gearRatios.map((g) => resolveGearRatio(g))
+  const out: RatioDiagnosis[] = []
+  for (let i = 0; i < ratios.length - 1; i++) {
+    const gFrom = ratios[i]
+    const gTo = ratios[i + 1]
+    if (!(gFrom > 0) || !(gTo > 0)) continue
+    const landingRpm = shiftRpm * (gTo / gFrom)
+    out.push({ gear: i + 1, shiftRpm, landingRpm, deltaFromBottomRpm: landingRpm - band.bottomRpm })
+  }
+  return out
 }

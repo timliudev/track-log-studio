@@ -10,7 +10,11 @@ import {
   powerKwAt,
   peakTorqueRpm,
   peakPowerRpm,
+  usableBand,
+  recommendRatioSpacing,
+  diagnoseExistingRatios,
   type EngineCurveProfile,
+  type UsableBand,
 } from '@/domain/analysis/gearRecommendation'
 
 // ── Unit conversions ────────────────────────────────────────────────────────
@@ -282,5 +286,177 @@ describe('peakPowerRpm', () => {
     const powerPeak = peakPowerRpm(profile)
     expect(powerPeak).toBeGreaterThan(torquePeak)
     expect(powerPeak).toBeLessThanOrEqual(10000)
+  })
+})
+
+// ── usableBand ────────────────────────────────────────────────────────────
+
+describe('usableBand', () => {
+  it('derives from a curve profile: bottom = peak torque rpm, top = redline', () => {
+    const profile = createEngineCurveProfile(
+      [
+        { rpm: 3000, torqueNm: 40 },
+        { rpm: 6500, torqueNm: 68 },
+        { rpm: 9000, torqueNm: 55 },
+      ],
+      10000,
+    ) as EngineCurveProfile
+    expect(usableBand(profile)).toEqual({ bottomRpm: 6500, topRpm: 10000 })
+  })
+
+  it('derives from a two-point profile directly', () => {
+    const profile = createEngineTwoPointProfile({ peakTorqueRpm: 6000, peakPowerRpm: 8500, redlineRpm: 9500 })!
+    expect(usableBand(profile)).toEqual({ bottomRpm: 6000, topRpm: 9500 })
+  })
+})
+
+// ── recommendRatioSpacing ───────────────────────────────────────────────
+
+describe('recommendRatioSpacing', () => {
+  const band: UsableBand = { bottomRpm: 6000, topRpm: 12000 } // k = 2
+
+  it('produces a pure geometric progression from a top-gear anchor (k=2)', () => {
+    const ratios = recommendRatioSpacing({ band, gearCount: 4, topGearRatio: 1.0 })
+    expect(ratios).not.toBeNull()
+    // g[3]=1.0, g[2]=2.0, g[1]=4.0, g[0]=8.0 (k=2 each step)
+    expect(ratios).toEqual([8, 4, 2, 1])
+  })
+
+  it('produces the same progression from a first-gear anchor', () => {
+    const ratios = recommendRatioSpacing({ band, gearCount: 4, firstGearRatio: 8 })
+    expect(ratios).toEqual([8, 4, 2, 1])
+  })
+
+  it('hand-computed: every adjacent pair has ratio exactly k', () => {
+    const ratios = recommendRatioSpacing({ band, gearCount: 5, topGearRatio: 1.2 })!
+    for (let i = 0; i < ratios.length - 1; i++) {
+      expect(ratios[i] / ratios[i + 1]).toBeCloseTo(2, 9)
+    }
+  })
+
+  it('gearCount=1 returns just the anchor', () => {
+    expect(recommendRatioSpacing({ band, gearCount: 1, topGearRatio: 3.5 })).toEqual([3.5])
+    expect(recommendRatioSpacing({ band, gearCount: 1, firstGearRatio: 3.5 })).toEqual([3.5])
+  })
+
+  it('progressionFactor > 1 widens steps towards the top gears', () => {
+    const ratios = recommendRatioSpacing({ band, gearCount: 4, topGearRatio: 1.0, progressionFactor: 1.5 })!
+    // step(i) = k * 1.5^i for the i-th step counting up from 1st gear.
+    // g[3]=1.0 (anchor); g[2]=g[3]*step(2)=1*2*1.5^2=4.5; g[1]=g[2]*step(1)=4.5*2*1.5=13.5; g[0]=g[1]*step(0)=13.5*2=27
+    expect(ratios[3]).toBeCloseTo(1, 9)
+    expect(ratios[2]).toBeCloseTo(4.5, 9)
+    expect(ratios[1]).toBeCloseTo(13.5, 9)
+    expect(ratios[0]).toBeCloseTo(27, 9)
+    // Spacing between the top two gears (index 2,3) is the narrowest (step(0)),
+    // spacing between the bottom two gears (index 0,1) uses step(2) — the widest.
+    const topStep = ratios[2] / ratios[3]
+    const bottomStep = ratios[0] / ratios[1]
+    expect(topStep).toBeGreaterThan(bottomStep)
+  })
+
+  it('progressionFactor = 1 (default) matches pure geometric', () => {
+    const withDefault = recommendRatioSpacing({ band, gearCount: 4, topGearRatio: 1.0 })
+    const explicit1 = recommendRatioSpacing({ band, gearCount: 4, topGearRatio: 1.0, progressionFactor: 1 })
+    expect(withDefault).toEqual(explicit1)
+  })
+
+  it('rejects gearCount < 1', () => {
+    expect(recommendRatioSpacing({ band, gearCount: 0, topGearRatio: 1 })).toBeNull()
+    expect(recommendRatioSpacing({ band, gearCount: -1, topGearRatio: 1 })).toBeNull()
+  })
+
+  it('rejects a degenerate band (top <= bottom)', () => {
+    expect(recommendRatioSpacing({ band: { bottomRpm: 6000, topRpm: 6000 }, gearCount: 3, topGearRatio: 1 })).toBeNull()
+    expect(recommendRatioSpacing({ band: { bottomRpm: 6000, topRpm: 5000 }, gearCount: 3, topGearRatio: 1 })).toBeNull()
+  })
+
+  it('rejects when neither or both anchors are supplied', () => {
+    expect(recommendRatioSpacing({ band, gearCount: 3 })).toBeNull()
+    expect(recommendRatioSpacing({ band, gearCount: 3, topGearRatio: 1, firstGearRatio: 8 })).toBeNull()
+  })
+
+  it('rejects a non-positive anchor', () => {
+    expect(recommendRatioSpacing({ band, gearCount: 3, topGearRatio: 0 })).toBeNull()
+    expect(recommendRatioSpacing({ band, gearCount: 3, topGearRatio: -1 })).toBeNull()
+  })
+
+  it('rejects progressionFactor < 1', () => {
+    expect(recommendRatioSpacing({ band, gearCount: 3, topGearRatio: 1, progressionFactor: 0.5 })).toBeNull()
+  })
+})
+
+// ── diagnoseExistingRatios ───────────────────────────────────────────────
+
+describe('diagnoseExistingRatios', () => {
+  const band: UsableBand = { bottomRpm: 7000, topRpm: 10000 }
+
+  it('hand-computed landing rpm and delta for a realistic 6-speed box', () => {
+    // gears: 2.615, 1.812, 1.409, 1.16, 1.0, 0.885 (matches drivetrain.test.ts's REF_SPEC)
+    const gears = [2.615, 1.812, 1.409, 1.16, 1.0, 0.885].map((ratio) => ({ ratio }))
+    const diagnoses = diagnoseExistingRatios(gears, band)
+    expect(diagnoses).toHaveLength(5)
+
+    // 1st->2nd: shiftRpm=10000 (band.topRpm), landing = 10000 * 1.812/2.615
+    const d0 = diagnoses[0]
+    expect(d0.gear).toBe(1)
+    expect(d0.shiftRpm).toBe(10000)
+    const expectedLanding0 = (10000 * 1.812) / 2.615
+    expect(d0.landingRpm).toBeCloseTo(expectedLanding0, 6)
+    expect(d0.deltaFromBottomRpm).toBeCloseTo(expectedLanding0 - 7000, 6)
+
+    // 3rd->4th (gear=3): landing = 10000 * 1.16/1.409
+    const d2 = diagnoses[2]
+    expect(d2.gear).toBe(3)
+    const expectedLanding2 = (10000 * 1.16) / 1.409
+    expect(d2.landingRpm).toBeCloseTo(expectedLanding2, 6)
+    expect(d2.deltaFromBottomRpm).toBeCloseTo(expectedLanding2 - 7000, 6)
+  })
+
+  it('reproduces the worked example: 三檔升四檔掉到 band 以下', () => {
+    // A wide 3rd->4th gap: after shifting at 10000, lands well below bottomRpm=7000.
+    const gears = [3.0, 2.0, 1.6, 0.9].map((ratio) => ({ ratio }))
+    const diagnoses = diagnoseExistingRatios(gears, band)
+    const shift3to4 = diagnoses.find((d) => d.gear === 3)!
+    const expectedLanding = (10000 * 0.9) / 1.6 // 5625
+    expect(shift3to4.landingRpm).toBeCloseTo(expectedLanding, 6)
+    expect(shift3to4.deltaFromBottomRpm).toBeLessThan(0) // fell below the torque peak
+    expect(shift3to4.deltaFromBottomRpm).toBeCloseTo(expectedLanding - 7000, 6)
+  })
+
+  it('accepts an explicit shiftRpm override (rider shifts earlier than redline)', () => {
+    const gears = [2.615, 1.812].map((ratio) => ({ ratio }))
+    const diagnoses = diagnoseExistingRatios(gears, band, 8500)
+    expect(diagnoses[0].shiftRpm).toBe(8500)
+    expect(diagnoses[0].landingRpm).toBeCloseTo((8500 * 1.812) / 2.615, 6)
+  })
+
+  it('supports tooth-count gear inputs via resolveGearRatio', () => {
+    const gears = [
+      { drivenTeeth: 34, driveTeeth: 13 },
+      { drivenTeeth: 30, driveTeeth: 16 },
+    ]
+    const diagnoses = diagnoseExistingRatios(gears, band)
+    expect(diagnoses).toHaveLength(1)
+    const gFrom = 34 / 13
+    const gTo = 30 / 16
+    expect(diagnoses[0].landingRpm).toBeCloseTo(10000 * (gTo / gFrom), 6)
+  })
+
+  it('skips pairs referencing an unresolvable gear', () => {
+    const gears = [{ ratio: 2.5 }, {}, { ratio: 1.2 }]
+    const diagnoses = diagnoseExistingRatios(gears, band)
+    // Pair (0,1) and (1,2) both reference the unresolvable middle entry -> skipped.
+    expect(diagnoses).toHaveLength(0)
+  })
+
+  it('returns [] for fewer than 2 gears', () => {
+    expect(diagnoseExistingRatios([{ ratio: 2.5 }], band)).toEqual([])
+    expect(diagnoseExistingRatios([], band)).toEqual([])
+  })
+
+  it('returns [] for an invalid shiftRpm', () => {
+    const gears = [{ ratio: 2.5 }, { ratio: 1.2 }]
+    expect(diagnoseExistingRatios(gears, band, 0)).toEqual([])
+    expect(diagnoseExistingRatios(gears, band, NaN)).toEqual([])
   })
 })
