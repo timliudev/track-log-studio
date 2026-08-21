@@ -473,6 +473,102 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   勾選框未打勾,切到分析頁是空白,要手動勾選才有內容;桌面版匯入後直接是「主要」。
   agent 是在拍手機版截圖時遇到的,未深究。若為刻意(避免手機一次載入太多),應在 UI 上給提示。
 
+## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
+- [ ] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
+  一鍵自動偵測產生 **~142 個 sector 閘門**(平均約每 25 m 一個),整張賽道地圖被切成一片
+  編號圓點,完全不可用。根因就寫在 `src/domain/analysis/cornerDetection.ts` 的
+  `CURVATURE_DEFAULTS` 註解裡:那組門檻(`minProminence=0.9`、`minValue=1.4` deg/m、
+  `minSpacingM=15`)是 2026-07-01/02 針對 **ARK(~750 m/圈、~12 彎)** 的 `.loga` 校正的,
+  註解自己也寫「NOT yet proven to generalise to a differently-scaled track (e.g. a big
+  circuit with long, gentle corners)」。放到 3.5 km 賽道上:①`minSpacingM=15` 的理論上限
+  就有 ~233 個閘門,毫無天花板;②`minValue=1.4` deg/m 在低速段等同「相鄰兩點差 ~3° / 2 m」,
+  GPS 航向雜訊就能過關;③`boxSmooth` 是 **index-domain**(註解已註明),在大賽道上高低速
+  區段的實際平滑弧長差好幾倍;④`.rcz` 無 `TC_Lean_Angle`,一定退回較不穩的 curvature 路徑。
+  另外 `detectSectorGates`/`sectorStore.loadDetected` 全鏈路**沒有任何數量上限或合理性檢查**。
+  可能修法(待拍板):(a) 依參考圈長度縮放 `minSpacingM`(如 `max(15, lapLenM/100)`);
+  (b) 加「彎道最短持續弧長」條件,單點尖峰不算彎;(c) 以 prominence 排序取 top-N(N 隨圈長,
+  或硬上限 ~30);(d) `boxSmooth` 改距離域窗。**演算法研究(2026-08-21,文獻回顧見下)**:
+  問題的本質是現行判據 κ = Δψ/Δs 的單位是 **deg/m —— 有量綱、與彎道半徑成反比**,所以門檻
+  `minValue=1.4` 等同「半徑 ≤ 41 m 才算彎」(57.3/1.4);ARK 的彎大多在這之內所以剛好能用,
+  麗寶的高速 sweeper(R≈150–200 m → κ≈0.29–0.38 deg/m)本質上就在門檻之下,而低速段的 GPS
+  航向雜訊除以極小的 Δs 後又衝過門檻——**同時發生漏抓真彎與抓爆雜訊兩種錯誤**。而且 κ 是
+  一階微分量,天生放大雜訊。真正「大小賽道通吃」的方向是換成**無量綱/積分量**:
+  ①**turning function θ(s)**(累積航向 vs 弧長,平移與縮放不變)——「一個彎」= θ 的一段單調
+  變化且 **|Δθ| ≥ 30°** 之類的角度門檻,單位是度、與賽道尺度無關,且積分會讓零均值的 GPS
+  雜訊互相抵消而非放大;②**側向 G**(a_lat = v·ω = v²κ)——賽車手在任何尺度的彎都開到輪胎
+  極限,所以 a_lat 天生跨尺度一致(小迴轉 40 km/h 與大 sweeper 160 km/h 都約 0.8–1.0 G),
+  這也是 MoTeC/AiM 這類專業分析軟體的慣用判據,且 `.loga` 的 `TC_Lean_Angle` 本質就是
+  atan(a_lat/g)——即現行 lean-angle 路徑之所以比 curvature 穩的原因;③**尺度相對的平滑窗**
+  (σ 取圈長的百分比而非固定樣本數),即 Curvature Scale Space(Mokhtarian)的作法,並只保留
+  跨多個尺度都存活的彎;④**自動決定數量**取代固定門檻:把候選依 prominence(= 1-D 拓樸
+  persistence)排序後,在**最大落差處切**(persistence-gap),小賽道自然停在 ~12、大賽道停在
+  ~16,無需針對賽道調參;⑤ 更徹底的 **MDL 分割**(TRACLUS 的 partitioning 階段,以
+  L(H)+L(D|H) 最小化自動選出特徵點數量,真正無參數)。建議落地順序:先做 ①+④(治本且改動
+  集中在 `cornerDetection.ts`),②當 `.loga` 有 lean angle 時的優先路徑保留,③⑤ 視效果再議;
+  無論如何都要補上硬上限當保險絲。**繞道方案(現在可用)**:sector 面板「清除全部」
+  後手動加閘門,幾何會依賽道存下來、不會再被自動偵測蓋掉。
+
+- [ ] **B133** ([[B132]] 的 UI 併發症,但**根因是通用缺陷**)Sector 卡片在閘門數量爆量時,
+  「理論最佳圈」的各段時間清單會撐滿整張卡片,把下方的閘門清單/移除按鈕整個擠出可視範圍。
+  根因:`SectorPanel.vue` 的 `.optimal` 區塊(含 `<ul class="optimal-sectors">`,**每個 sector
+  一個 `<li>`**)放在 `CardFillScroll` 的 **`#header` slot** 裡——那是 B47 刻意的決定(註解寫明
+  「Moved into the fixed `#header` … so it stays visible even when the card is resized short」),
+  當時假設 sector 只有個位數。而 `CardFillScroll` 的 `.card-fill-scroll__header` 是
+  `flex: 0 0 auto` **無高度上限**,`.card-fill-scroll__content` 則是 `flex: 1 1 auto;
+  min-height: 0` ——header 一長,content 就被壓縮到 0 高度、整個消失。**這是 `CardFillScroll`
+  的通用缺陷**:任何會無限成長的 header 都能餓死 content pane,不只 sector 卡片。修法:
+  (a) 局部——`.optimal-sectors` 加 `max-height` + `overflow-y: auto`(或做成可收合,預設收合、
+  顯示「理論最佳圈 總時間」一行);(b) 通用加固——`.card-fill-scroll__header` 給
+  `max-height: 50%` + `overflow-y: auto`,確保 content pane 永遠拿得到一半高度。建議兩者都做:
+  (a) 治這張卡的可讀性,(b) 讓其他卡片不會再踩同一個坑。
+
+## User report — 非自家命名頻道認不得 + MT 齒比建議 (B134, F8)
+- [ ] **B134** 認不得非自家命名的語意頻道 → 齒比/疊圖直接死當,且**無任何手動補救**。實測
+  使用者自製 `.vbo`(`lihpao_20260816_ct_full.vbo`,由外部 `u6can` 工具把 Luxgen U6 CAN
+  併進 VBO)明明有轉速欄,UI 卻報「此記錄缺少轉速(RPM)頻道」。根因鏈:①該檔轉速欄名為
+  **`EngineRPM_rpm`**(且**沒有 `[channel units]` 區塊**,連單位都拿不到);②`parseVbo.ts`
+  對非 GPS 基本欄一律 `canonicalName(header[c])` 原樣落地,不做語意對應;③
+  `drivetrain.ts` 的 `resolveRpmChannel()` 只有 `session.has('RPM') ? 'RPM' : null`,而
+  `canonical.ts` 的 `ALIASES` **根本沒有 RPM 這組**。連帶同檔還有兩處同病:`VehicleSpeed_kmh`
+  認不得(目前只是靠 GPS `velocity` 欄補上 `GPS_Speed` 才沒爆)、`GearPRND` 過不了
+  `inferDrivetrainKind()` 的檔位頻道正則(該正則要求 `gear` 前後有分隔符)。結論:**只要不是
+  自家匯出器產的檔,所有 role-based 功能都會瞎掉,而使用者完全沒有救援手段。**
+  修法(user 2026-08-21 拍板,兩層都做、範圍涵蓋**轉速+速度+檔位三個角色**):
+  **①自動辨識加強**——把三個 resolver 收斂成單一 `channel roles` 模組,解析順序
+  `使用者覆寫 > 既有 canonical/ALIASES > 名稱/單位啟發式`;啟發式只在 canonical 查無時才跑,
+  確保既有格式(`.loga`/`.rcz`/`.xrk`/自家 `.vbo`)解析結果**逐字不變**。
+  **②手動指定 UI**——自動抓不到時,在原本只會顯示「缺少 X 頻道」的空狀態直接給下拉選單,
+  列出本 session 所有頻道讓使用者指定;選擇**以「頻道名稱→角色」為鍵存進裝置**
+  (`settingsStore`/localStorage,`tracklogstudio.*` 前綴),日後任何 session 只要出現同名頻道就
+  自動套用,同一台車/同一個轉檔工具只需要選一次。⚠️ 實作紅線(記取 [[B125]] 教訓):啟發式
+  規則**必須回報 golden fixture diff 規模**,`.loga` 既有頻道分類一個都不許動;localStorage
+  讀回的覆寫表必須比照 [[M9]] 的 sanitizer 做白名單+長度/筆數上限。
+
+- [ ] **F8**(design-first,user 2026-08-21 拍板要做)MT 齒比計算機:餵入引擎特性後**建議檔位與齒比**。
+  現況:MT 模式是**純幾何計算機**——輸入只有 `gearRatios / primaryReduction / finalDrive /
+  wheelCircumferenceMm / redlineRpm`(`MtFormState`),輸出只有每檔總減速比與紅線極速
+  (`computeMtGearTable`)。**引擎特性完全不在模型內**,所以它能算「這組齒比跑多快」,
+  不能算「這組齒比好不好」。
+  **輸入(雙軌,user 拍板:兩者都要,拿不到曲線就退化成兩點)**:
+  (a) **曲線版**——可貼上/匯入 `(rpm, Nm)` 或 `(rpm, hp/kW)` 數對(P[kW] = T·rpm/9549 互轉);
+  (b) **兩點版**——只有峰值扭力 rpm 與峰值馬力 rpm(+選填量值)。
+  ⚠️ **誠實紅線**:兩點版**只准**產出 band-edge 啟發式結果(級距齒比、換檔轉速近似、
+  過長/過短診斷),**不得**輸出加速模擬或「真正的」換檔交叉點——那需要完整曲線,
+  兩點捏造曲線再報秒數等於騙人。此限制要用型別/API 形狀強制(需要曲線的函式只收曲線 profile)。
+  **輸出(三種最佳化目標,user 拍板全要)**:①**加速優先**——可用轉速帶 =
+  [峰值扭力 rpm, 換檔 rpm],理想級比 = 換檔rpm/落點rpm,產出幾何級數建議齒比表並逐檔對照
+  現有齒比報「升檔後掉出扭力帶多少 rpm」;②**依實測 log 速域量身訂做**——用已載入 session 的
+  速度分布/彎道出彎速度,建議讓主要出彎點落在扭力帶內的齒比(這是本 App 才做得到、
+  外部計算機做不到的一項,且可直接複用既有的 `detectGearPlateaus` 實測齒比反推);
+  ③**極速優先**——由目標極速/紅線/輪周反推所需終傳,並在齒盤模式下給齒數組合建議。
+  曲線版另可算**真正的最佳升檔轉速**(輪端推力相等:T(r)·g_n = T(r·g_{n+1}/g_n)·g_{n+1},
+  於 [峰值馬力 rpm, 紅線] 掃描變號點)與**逐檔加速模擬**(需車重;無空力/滾阻輸入時只報
+  齒比組之間的**相對**比較並明確標示)。
+  **排程**:必須排在 [[B134]] 合併之後才能動 UI ——兩者都會改 `drivetrain.ts` 與
+  `GearPanel.vue`。純數學核心(新檔 `domain/analysis/gearRecommendation.ts` + 型別 + 測試)
+  可與 B130 並行,前提是**完全不碰** `drivetrain.ts`/`GearPanel.vue`/`drivetrainStore.ts`/i18n。
+
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `83fc12a`
