@@ -11,12 +11,21 @@ import type { Lap } from '@/domain/model/Lap'
 import { haversineM } from '@/domain/export/rc3Nmea/geo'
 import { planarGate, walkLapGates } from '@/domain/analysis/laps'
 
-// These tests exercise the peak-separation ALGORITHM on synthetic (low-noise)
-// signals, so they pass lenient, explicit thresholds rather than relying on
-// CURVATURE_DEFAULTS — those defaults are calibrated separately against real,
-// noisy GPS data (see cornerDetection.ts) and are a different concern (how
-// permissive a floor real-world data needs) from "does peak+prominence+spacing
-// correctly separate corners" (what these tests check).
+// Pre-B132, these tests passed lenient, explicit peak/prominence thresholds
+// rather than relying on CURVATURE_DEFAULTS, since those defaults were
+// calibrated separately against real, noisy GPS data — a different concern
+// from "does peak+prominence+spacing correctly separate corners" (what these
+// tests check). B132 replaced the curvature path's peak+prominence screen
+// with a turning-function one (see cornerDetection.ts); `minValue`/
+// `minProminence` are LEAN-ANGLE-PATH-ONLY options now and are simply
+// ignored by `detectCornersByCurvature`, so LENIENT below is inert for every
+// call in this file — kept only to minimise the historical diff, not because
+// it still configures anything. The curvature path's own defaults
+// (thetaMinDeg=30, sigmaFraction=0.01) turned out permissive enough that
+// every test using LENIENT below still passes unmodified against real
+// synthetic-track geometry — only the same-direction-combo test (relies on
+// SUBPEAK_PROMINENCE_FRACTION, a genuinely different mechanism) needed its
+// synthetic valley depth adjusted; see its own comment.
 const LENIENT = { minValue: 0.25, minProminence: 0.15 }
 
 const R = 6371000
@@ -84,28 +93,38 @@ describe('curvatureSignal + detectCornersByCurvature (feasibility spike)', () =>
 
   it('separates a same-direction combo (e.g. ARK 8-9-10) into three corners even though curvature never returns to zero between them', () => {
     // Three same-direction lobes: each a ramp 0->12->0, but the "valley" between
-    // lobes is raised to 3 deg/step (never touches 0) rather than a real straight
-    // — this is the case a naive "gap must reach ~0" merge rule would collapse
-    // into one giant corner. Peak-with-prominence should still find 3 distinct
-    // apexes because each lobe stands out above its neighbouring valleys.
-    const lobe = (peak: number) => {
+    // lobes is raised (never touches 0) rather than a real straight — this is
+    // the case a naive "the sign must flip / signal must reach ~0" merge rule
+    // would collapse into one giant turning segment. Since B132, splitting a
+    // same-direction combo like this is SUBPEAK_PROMINENCE_FRACTION's job
+    // (findPeaks scoped to the one turning segment the whole combo forms,
+    // since the sign never reverses) — a RELATIVE criterion (fraction of the
+    // segment's own peak |dθ/ds|), unlike the old absolute LENIENT floor.
+    // Valley=1 (vs. peak=12) gives each lobe's local prominence a healthy
+    // margin above the 0.45-of-peak bar post-smoothing; the pre-B132 choice
+    // of valley=3 sat right at that bar (passed 2 of 3 lobes, not 3) purely
+    // because it was tuned against the OLD absolute-floor algorithm, not
+    // because valley=3 represents some physically meaningful distinction —
+    // see the SUBPEAK_PROMINENCE_FRACTION calibration note in cornerDetection.ts.
+    const lobe = (peak: number, valleyFloor: number) => {
       const rampSteps = 12
       const out: number[] = []
       const half = rampSteps / 2
       for (let i = 0; i < rampSteps; i++) {
         const t = i < half ? i / half : (rampSteps - i) / half
-        out.push(3 + (peak - 3) * t)
+        out.push(valleyFloor + (peak - valleyFloor) * t)
       }
       return out
     }
-    const valley = new Array(8).fill(3) // never drops to 0 between lobes
+    const valleyFloor = 1
+    const valley = new Array(8).fill(valleyFloor) // never drops to 0 between lobes
     const turnRates = [
       ...new Array(15).fill(0), // straight entry
-      ...lobe(12),
+      ...lobe(12, valleyFloor),
       ...valley,
-      ...lobe(12),
+      ...lobe(12, valleyFloor),
       ...valley,
-      ...lobe(12),
+      ...lobe(12, valleyFloor),
       ...new Array(15).fill(0), // straight exit
     ]
     const track = walkTrack(turnRates)
@@ -159,6 +178,80 @@ describe('curvatureSignal + detectCornersByCurvature (feasibility spike)', () =>
     const track = walkTrack(turnRates, 2)
     const corners = detectCornersByCurvature(track, 0, track.valid.length, CURVATURE_DEFAULTS)
     expect(corners).toHaveLength(2)
+  })
+})
+
+describe('B132 — turning-function scale invariance', () => {
+  it('detects a single corner on a constant-radius arc whatever the physical radius (deg/m-based κ would fail this)', () => {
+    // Same 60deg total turn (20 steps x 3deg/step) at two very different
+    // physical radii: stepM=3 is a tight, low-speed-corner-scale radius;
+    // stepM=40 is a large, highway-sweeper-scale radius (the exact B132
+    // failure case — the old deg/m floor made a big-radius sweeper's
+    // curvature invisible). Both must still register as exactly one corner.
+    const turnRates = (stepCount: number, degPerStep: number) => [
+      ...new Array(20).fill(0),
+      ...new Array(stepCount).fill(degPerStep),
+      ...new Array(20).fill(0),
+    ]
+    const tight = walkTrack(turnRates(20, 3), 3)
+    const gentle = walkTrack(turnRates(20, 3), 40)
+    expect(detectCornersByCurvature(tight, 0, tight.valid.length)).toHaveLength(1)
+    expect(detectCornersByCurvature(gentle, 0, gentle.valid.length)).toHaveLength(1)
+  })
+
+  it('a zig-zagging GPS-heading-noise straight (each wiggle well above the old deg/m floor) produces zero corners', () => {
+    // Alternating +8/-8 deg/step in short (2-step) runs at stepM=1 — each
+    // individual sample's turn-rate is 8 deg/m, comfortably over the OLD
+    // CURVATURE_DEFAULTS.minValue=1.4 deg/m floor (i.e. the pre-B132
+    // algorithm would have flagged this as curvature), but no same-sign run
+    // ever accumulates anywhere near thetaMinDeg=30 before reversing — this
+    // is the "zero-mean noise integrates toward zero" property from the
+    // B132 write-up, exercised directly.
+    const zigzag: number[] = []
+    for (let i = 0; i < 40; i++) zigzag.push(8, 8, -8, -8)
+    const track = walkTrack(zigzag, 1)
+    const corners = detectCornersByCurvature(track, 0, track.valid.length)
+    expect(corners).toHaveLength(0)
+  })
+
+  it('finds the same number of corners on the same track shape scaled up 5x (same turn angles, 5x the physical distance)', () => {
+    // Three same-direction lobes of different sharpness, at two physical
+    // scales (stepM=5 vs stepM=25 — track B is literally track A stretched
+    // 5x, same turn-angle-per-step profile so the corners are geometrically
+    // identical, just spread over 5x the distance). Everything the algorithm
+    // scales by lap length (sigmaFraction*lapLenM smoothing window,
+    // max(minSpacingFloorM, lapLenM/100) NMS spacing) should track that
+    // stretch, so the same corners should still be found — this is the
+    // direct test of B132's core claim (unlike the old deg/m criterion,
+    // whose threshold effectively encoded a fixed corner RADIUS and would
+    // not have survived this scale-up unmodified).
+    const hump = (straight: number, rampSteps: number, peak: number): number[] => {
+      const out: number[] = new Array(straight).fill(0)
+      const half = rampSteps / 2
+      for (let i = 0; i < rampSteps; i++) {
+        const t = i < half ? i / half : (rampSteps - i) / half
+        out.push(peak * t)
+      }
+      return out
+    }
+    const shape = [
+      ...hump(20, 20, 9),
+      ...hump(20, 16, 6),
+      ...hump(20, 24, 12),
+      ...new Array(20).fill(0),
+    ]
+    const small = walkTrack(shape, 5)
+    const large = walkTrack(shape, 25) // same shape, 5x the physical scale
+
+    const smallCorners = detectCornersByCurvature(small, 0, small.valid.length)
+    const largeCorners = detectCornersByCurvature(large, 0, large.valid.length)
+
+    expect(smallCorners.length).toBeGreaterThan(0)
+    expect(largeCorners).toHaveLength(smallCorners.length)
+    // The apexes themselves should land at 5x the arc-length distance too.
+    for (let i = 0; i < smallCorners.length; i++) {
+      expect(largeCorners[i].distanceM).toBeCloseTo(smallCorners[i].distanceM * 5, 0)
+    }
   })
 })
 
