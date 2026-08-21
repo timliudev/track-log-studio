@@ -107,6 +107,107 @@ describe('parseVbo fixtures', () => {
   })
 })
 
+describe('B136: name-suffix unit heuristic (fallback only)', () => {
+  /** Build a minimal VBO with one telemetry column beyond the 7 base GPS
+   *  columns, optionally with a `[channel units]` section. */
+  function vboWithOneChannel(columnToken: string, unitsSection?: string[]): string {
+    const lines = ['[header]', 'sats', 'time', 'lat', 'long', 'velocity', 'heading', 'height', columnToken]
+    if (unitsSection) {
+      lines.push('[channel units]', ...unitsSection)
+    }
+    lines.push(
+      '[column names]',
+      `sats time lat long velocity heading height ${columnToken}`,
+      '[data]',
+      '5 120000.000 1459.114540 -7241.186772 100 0 0 42',
+    )
+    return lines.join('\n')
+  }
+
+  it('fills the unit from a recognised suffix when [channel units] is absent entirely', () => {
+    const session = parseVbo(vboWithOneChannel('EngineRPM_rpm'))
+    const ch = session.get('EngineRPM_rpm')
+    expect(ch).toBeDefined()
+    expect(ch!.unit).toBe('rpm')
+    // Name/rawName must be completely unchanged — B136 variant (a).
+    expect(ch!.name).toBe('EngineRPM_rpm')
+    expect(ch!.rawName).toBe('EngineRPM_rpm')
+  })
+
+  it.each([
+    ['EngineRPM_rpm', 'rpm'],
+    ['VehicleSpeed_kmh', 'km/h'],
+    ['Something_kph', 'km/h'],
+    ['Something_mph', 'mph'],
+    ['Something_ms', 'm/s'],
+    ['Something_mps', 'm/s'],
+    ['CoolantTemp_degC', 'degC'],
+    ['Something_degF', 'degF'],
+    ['YawRate_degps', 'deg/s'],
+    ['SteeringAngle_deg', 'deg'],
+    ['IntakeManifoldPressure_kPa', 'kPa'],
+    ['Something_bar', 'bar'],
+    ['Something_psi', 'psi'],
+    ['ThrottleDemand_pct', '%'],
+    ['PhoneMagX_uT', 'µT'],
+    ['Odometer_km', 'km'],
+    ['Something_nm', 'Nm'],
+    ['Something_hz', 'Hz'],
+  ])('recognises suffix on %s → unit %s', (columnToken, expectedUnit) => {
+    const session = parseVbo(vboWithOneChannel(columnToken))
+    const ch = session.get(columnToken)
+    expect(ch!.unit).toBe(expectedUnit)
+  })
+
+  it('case-insensitive on the suffix, but emits the conventional cased unit string', () => {
+    const session = parseVbo(vboWithOneChannel('CoolantTemp_DEGC'))
+    expect(session.get('CoolantTemp_DEGC')!.unit).toBe('degC')
+  })
+
+  describe('risky single-letter suffixes', () => {
+    it.each([
+      ['LateralAccel_g', 'g'],
+      ['Odometer_m', 'm'],
+      ['Elapsed_s', 's'],
+      ['Battery_v', 'V'],
+      ['Current_a', 'A'],
+    ])('%s → %s', (columnToken, expectedUnit) => {
+      const session = parseVbo(vboWithOneChannel(columnToken))
+      expect(session.get(columnToken)!.unit).toBe(expectedUnit)
+    })
+  })
+
+  it('an explicit [channel units] value always wins, even when the name also has a suffix', () => {
+    const session = parseVbo(vboWithOneChannel('EngineRPM_rpm', ['count', 's', 'min', 'min', 'km/h', 'deg', 'm', 'raw']))
+    // The 8th unit line ('raw') is positional for the 8th column (EngineRPM_rpm).
+    expect(session.get('EngineRPM_rpm')!.unit).toBe('raw')
+  })
+
+  it('a blank positional [channel units] entry still falls back to the suffix heuristic', () => {
+    const session = parseVbo(vboWithOneChannel('EngineRPM_rpm', ['count', 's', 'min', 'min', 'km/h', 'deg', 'm', '']))
+    expect(session.get('EngineRPM_rpm')!.unit).toBe('rpm')
+  })
+
+  it('non-matching names are left with an undefined unit, not a false positive', () => {
+    for (const name of ['CurrentGear', 'GearPRND', 'IgnitionState', 'DoorFL', 'NM_State_700']) {
+      const session = parseVbo(vboWithOneChannel(name))
+      expect(session.get(name)!.unit, `${name} unit`).toBeUndefined()
+    }
+  })
+
+  it('a suffix embedded but not at the end, or not underscore-bounded, does not match', () => {
+    // 'AcCompressorClutch_10Hz' from the real reference file: digit between
+    // the underscore and 'Hz' breaks the boundary rule.
+    const session = parseVbo(vboWithOneChannel('AcCompressorClutch_10Hz'))
+    expect(session.get('AcCompressorClutch_10Hz')!.unit).toBeUndefined()
+  })
+
+  it('_deg does not also match _g (boundary rule prevents single-letter false split)', () => {
+    const session = parseVbo(vboWithOneChannel('SteeringAngle_deg'))
+    expect(session.get('SteeringAngle_deg')!.unit).toBe('deg')
+  })
+})
+
 describe('VBO importer ⇄ exporter round-trip', () => {
   it('re-parsing the exporter output reproduces GPS + telemetry within epsilon', () => {
     const original = parseLoga(loadFixture('vbo.loga'))
