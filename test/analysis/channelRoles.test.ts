@@ -9,8 +9,12 @@ import {
   type ChannelRole,
   type ChannelRoleOverrides,
 } from '@/domain/analysis/channelRoles'
+import { resolveRpmChannel } from '@/domain/analysis/drivetrain'
+import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { parseLoga } from '@/domain/parsing/LogaParser'
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
+import { loadFixture } from '../fixtures'
 
 function channel(
   name: string,
@@ -194,5 +198,28 @@ describe('hashChannelRoleOverrides', () => {
 
   it('empty overrides hash consistently', () => {
     expect(hashChannelRoleOverrides({})).toBe(hashChannelRoleOverrides({}))
+  })
+})
+
+describe('golden fixture — real .loga session resolves identically pre/post B134', () => {
+  // Red-line requirement (B125 lesson): the canonical step must win outright
+  // for every EXISTING supported format, so this module must never change
+  // what a real .loga-style recording resolves to. `super2.loga` carries the
+  // firmware's own canonical `RPM` and `GPS_Speed` channel names — exactly
+  // the pre-B134 canonical-only behaviour `resolveRpmChannel`/
+  // `resolveSpeedChannel` already implement — so this asserts the NEW
+  // `resolveRoleChannel` returns byte-identical results to those two
+  // untouched legacy functions on a real parsed fixture, not just a
+  // synthetic session.
+  const session = parseLoga(loadFixture('super2.loga'))
+
+  it('rpm resolves to the same channel as the pre-B134 canonical-only resolver', () => {
+    expect(resolveRoleChannel(session, 'rpm')).toBe(resolveRpmChannel(session))
+    expect(resolveRoleChannel(session, 'rpm')).toBe('RPM')
+  })
+
+  it('speed resolves to the same channel as the pre-B134 canonical-only resolver', () => {
+    expect(resolveRoleChannel(session, 'speed')).toBe(resolveSpeedChannel(session))
+    expect(resolveRoleChannel(session, 'speed')).toBe('GPS_Speed')
   })
 })
