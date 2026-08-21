@@ -89,11 +89,24 @@ export const useChannelRoleStore = defineStore('channelRoles', () => {
   })
 
   /** Map `channelName` to `role`, replacing any prior mapping for that name
-   *  (a name maps to at most one role at a time). */
+   *  (a name maps to at most one role at a time) — and, when the name was
+   *  ALREADY present, moving it to the END of the table's key order. This is
+   *  what makes re-picking a role's channel actually take effect: two
+   *  distinct channel names can legitimately both be mapped to the same role
+   *  across different sessions (`EngineRPM_rpm`, `rc_rpm`, ...), and
+   *  `overriddenChannelForRole` resolves ties for a single session by
+   *  walking the table in REVERSE (newest-wins) — spreading a changed value
+   *  onto an EXISTING key (`{ ...overrides.value, [name]: role }`) keeps
+   *  that key at its ORIGINAL position, which would silently leave an older
+   *  same-role entry as the winner. Deleting the key first (when present)
+   *  before re-adding forces it to the end regardless. */
   function setOverride(channelName: string, role: ChannelRole): void {
     const trimmed = channelName.trim()
     if (!trimmed) return
-    overrides.value = { ...overrides.value, [trimmed]: role }
+    const next = { ...overrides.value }
+    delete next[trimmed]
+    next[trimmed] = role
+    overrides.value = next
   }
 
   /** Remove `channelName`'s mapping (the picker's "自動" / clear option) —

@@ -131,4 +131,16 @@ describe('useChannelRoleStore', () => {
     store.setOverride('EngineRPM_rpm', 'rpm')
     expect(store.roleFor('EngineRPM_rpm')).toBe('rpm')
   })
+
+  it('re-picking an already-mapped channel moves its key to the end of insertion order (newest-wins)', () => {
+    const store = useChannelRoleStore()
+    store.setOverride('rc_rpm', 'rpm')
+    store.setOverride('EngineRPM_rpm', 'rpm')
+    // Both present, EngineRPM_rpm set second -> should be LAST key.
+    expect(Object.keys(store.overrides)).toEqual(['rc_rpm', 'EngineRPM_rpm'])
+
+    // Re-pick rc_rpm: it must move to the end, not stay in its original slot.
+    store.setOverride('rc_rpm', 'rpm')
+    expect(Object.keys(store.overrides)).toEqual(['EngineRPM_rpm', 'rc_rpm'])
+  })
 })

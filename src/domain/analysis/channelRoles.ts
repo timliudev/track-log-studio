@@ -287,9 +287,15 @@ export function heuristicRoleChannel(session: LogSession, role: ChannelRole): st
 
 // ── Public entry point ──────────────────────────────────────────────────
 
-/** The first override entry (in the table's own key order — a flat
- *  `Record`, so realistically at most one in practice per session) whose
- *  channel NAME exists in `session` and whose ROLE matches. Exported so
+/** The MOST RECENTLY SET override entry whose channel NAME exists in
+ *  `session` and whose ROLE matches — newest-wins, not first-wins. Several
+ *  distinct channel names legitimately coexist in the table mapped to the
+ *  same role (`EngineRPM_rpm`, `rc_rpm`, ...), so re-picking a different
+ *  channel for a role must not be silently shadowed by an older entry: the
+ *  table is a plain `Record`, so "most recently set" is read off its OWN key
+ *  insertion order (`setOverride` re-inserts an existing key at the end on
+ *  every write — see `channelRoleStore.ts`), and this walks that order in
+ *  REVERSE so the last-written matching entry wins. Exported so
  *  `ChannelRolePicker.vue` can show what's currently overridden for THIS
  *  session/role without duplicating {@link resolveRoleChannel}'s override
  *  step (step 1 there is literally this function). */
@@ -298,7 +304,9 @@ export function overriddenChannelForRole(
   role: ChannelRole,
   overrides: ChannelRoleOverrides,
 ): string | null {
-  for (const [channelName, overriddenRole] of Object.entries(overrides)) {
+  const entries = Object.entries(overrides)
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const [channelName, overriddenRole] = entries[i]
     if (overriddenRole === role && session.has(channelName)) return channelName
   }
   return null

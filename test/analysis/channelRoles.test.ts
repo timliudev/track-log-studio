@@ -3,6 +3,7 @@ import {
   resolveRoleChannel,
   heuristicRoleChannel,
   canonicalGearChannel,
+  overriddenChannelForRole,
   hashChannelRoleOverrides,
   type ChannelRole,
   type ChannelRoleOverrides,
@@ -61,6 +62,32 @@ describe('resolveRoleChannel — resolution order', () => {
     const s = session([channel('RPM')])
     const overrides: ChannelRoleOverrides = { GPS_Speed: 'speed' }
     expect(resolveRoleChannel(s, 'rpm', overrides)).toBe('RPM')
+  })
+})
+
+describe('overriddenChannelForRole — newest-wins tie-break', () => {
+  it('when two channel names in the same session both map to the same role, the MOST RECENTLY set one wins', () => {
+    const s = session([channel('EngineRPM_rpm'), channel('rc_rpm')])
+    // Insertion order below matters: rc_rpm is set first, EngineRPM_rpm second.
+    const overrides: ChannelRoleOverrides = { rc_rpm: 'rpm', EngineRPM_rpm: 'rpm' }
+    expect(overriddenChannelForRole(s, 'rpm', overrides)).toBe('EngineRPM_rpm')
+    expect(resolveRoleChannel(s, 'rpm', overrides)).toBe('EngineRPM_rpm')
+  })
+
+  it('re-picking (same key re-inserted at the end) flips the winner', () => {
+    const s = session([channel('EngineRPM_rpm'), channel('rc_rpm')])
+    // EngineRPM_rpm was set first here, then re-picked LAST (as
+    // channelRoleStore.setOverride does on every write) — it must win even
+    // though it was also the FIRST key originally.
+    const overrides: ChannelRoleOverrides = { EngineRPM_rpm: 'rpm', rc_rpm: 'rpm' }
+    expect(overriddenChannelForRole(s, 'rpm', overrides)).toBe('rc_rpm')
+  })
+
+  it('a mapping for a channel absent from the session never shadows one that is present, regardless of order', () => {
+    const s = session([channel('EngineRPM_rpm')])
+    const overrides: ChannelRoleOverrides = { EngineRPM_rpm: 'rpm', not_in_this_session: 'rpm' }
+    expect(overriddenChannelForRole(s, 'rpm', overrides)).toBe('EngineRPM_rpm')
+    expect(resolveRoleChannel(s, 'rpm', overrides)).toBe('EngineRPM_rpm')
   })
 })
 
