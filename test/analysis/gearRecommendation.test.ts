@@ -13,9 +13,13 @@ import {
   usableBand,
   recommendRatioSpacing,
   diagnoseExistingRatios,
+  finalDriveForTopSpeed,
+  rankSprocketCombos,
+  diagnoseTopSpeedGearing,
   type EngineCurveProfile,
   type UsableBand,
 } from '@/domain/analysis/gearRecommendation'
+import { computeMtGearTable, type MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
 
 // ── Unit conversions ────────────────────────────────────────────────────────
 
@@ -458,5 +462,157 @@ describe('diagnoseExistingRatios', () => {
     const gears = [{ ratio: 2.5 }, { ratio: 1.2 }]
     expect(diagnoseExistingRatios(gears, band, 0)).toEqual([])
     expect(diagnoseExistingRatios(gears, band, NaN)).toEqual([])
+  })
+})
+
+// ── finalDriveForTopSpeed ────────────────────────────────────────────────
+
+describe('finalDriveForTopSpeed', () => {
+  it('hand-computed: clean round numbers', () => {
+    // circumference 2000mm -> speed(kmh) = wheelRpm * 0.12; target 120km/h -> wheelRpm=1000.
+    // final = redline / (primary * topGearRatio * wheelRpmTarget) = 10000/(1*1*1000) = 10.
+    const final = finalDriveForTopSpeed({
+      targetTopSpeedKmh: 120,
+      redlineRpm: 10000,
+      topGearRatio: 1,
+      primaryReduction: 1,
+      wheelCircumferenceMm: 2000,
+    })
+    expect(final).toBeCloseTo(10, 9)
+  })
+
+  it('defaults primaryReduction to 1 when omitted', () => {
+    const withDefault = finalDriveForTopSpeed({
+      targetTopSpeedKmh: 120,
+      redlineRpm: 10000,
+      topGearRatio: 1,
+      wheelCircumferenceMm: 2000,
+    })
+    const explicit1 = finalDriveForTopSpeed({
+      targetTopSpeedKmh: 120,
+      redlineRpm: 10000,
+      topGearRatio: 1,
+      primaryReduction: 1,
+      wheelCircumferenceMm: 2000,
+    })
+    expect(withDefault).toBeCloseTo(explicit1!, 9)
+  })
+
+  it('round-trips against computeMtGearTable on a realistic spec', () => {
+    const spec: MtDrivetrainSpec = {
+      primaryReduction: 2.833,
+      gearRatios: [2.615, 1.812, 1.409, 1.16, 1.0, 0.885].map((ratio) => ({ ratio })),
+      finalDrive: { frontTeeth: 15, rearTeeth: 45 },
+      wheelCircumferenceMm: 1870,
+      redlineRpm: 10000,
+    }
+    const table = computeMtGearTable(spec)
+    const topGear = table[table.length - 1]
+    const final = finalDriveForTopSpeed({
+      targetTopSpeedKmh: topGear.speedAtRedlineKmh,
+      redlineRpm: 10000,
+      topGearRatio: 0.885,
+      primaryReduction: 2.833,
+      wheelCircumferenceMm: 1870,
+    })
+    expect(final).toBeCloseTo(3, 6) // finalDriveRatio(15,45) = 45/15 = 3
+  })
+
+  it('rejects non-positive/non-finite inputs', () => {
+    expect(finalDriveForTopSpeed({ targetTopSpeedKmh: 0, redlineRpm: 10000, topGearRatio: 1, wheelCircumferenceMm: 2000 })).toBeNull()
+    expect(finalDriveForTopSpeed({ targetTopSpeedKmh: 120, redlineRpm: -1, topGearRatio: 1, wheelCircumferenceMm: 2000 })).toBeNull()
+    expect(finalDriveForTopSpeed({ targetTopSpeedKmh: 120, redlineRpm: 10000, topGearRatio: 0, wheelCircumferenceMm: 2000 })).toBeNull()
+    expect(finalDriveForTopSpeed({ targetTopSpeedKmh: 120, redlineRpm: 10000, topGearRatio: 1, wheelCircumferenceMm: 0 })).toBeNull()
+    expect(finalDriveForTopSpeed({ targetTopSpeedKmh: NaN, redlineRpm: 10000, topGearRatio: 1, wheelCircumferenceMm: 2000 })).toBeNull()
+  })
+})
+
+// ── rankSprocketCombos ───────────────────────────────────────────────────
+
+describe('rankSprocketCombos', () => {
+  it('finds an exact match (ratio=3) within the default ranges', () => {
+    const combos = rankSprocketCombos(3)
+    expect(combos.length).toBe(5)
+    expect(combos[0].errorFrac).toBeCloseTo(0, 9)
+    expect(combos[0].ratio).toBeCloseTo(3, 9)
+    expect(combos[0].rearTeeth / combos[0].frontTeeth).toBeCloseTo(3, 9)
+  })
+
+  it('sorts results by ascending errorFrac', () => {
+    const combos = rankSprocketCombos(3.07)
+    for (let i = 0; i < combos.length - 1; i++) {
+      expect(combos[i].errorFrac).toBeLessThanOrEqual(combos[i + 1].errorFrac)
+    }
+  })
+
+  it('respects maxResults', () => {
+    expect(rankSprocketCombos(3, { maxResults: 2 })).toHaveLength(2)
+    expect(rankSprocketCombos(3, { maxResults: 1 })).toHaveLength(1)
+  })
+
+  it('respects custom teeth ranges', () => {
+    const combos = rankSprocketCombos(3, { frontTeethRange: [13, 13], rearTeethRange: [39, 39], maxResults: 5 })
+    expect(combos).toHaveLength(1)
+    expect(combos[0]).toMatchObject({ frontTeeth: 13, rearTeeth: 39, ratio: 3, errorFrac: 0 })
+  })
+
+  it('returns [] for a non-positive/non-finite target ratio', () => {
+    expect(rankSprocketCombos(0)).toEqual([])
+    expect(rankSprocketCombos(-1)).toEqual([])
+    expect(rankSprocketCombos(NaN)).toEqual([])
+  })
+
+  it('returns [] for a degenerate teeth range', () => {
+    expect(rankSprocketCombos(3, { frontTeethRange: [18, 11] })).toEqual([])
+    expect(rankSprocketCombos(3, { frontTeethRange: [0, 18] })).toEqual([])
+  })
+})
+
+// ── diagnoseTopSpeedGearing ──────────────────────────────────────────────
+
+describe('diagnoseTopSpeedGearing', () => {
+  const REF_SPEC: MtDrivetrainSpec = {
+    primaryReduction: 2.833,
+    gearRatios: [2.615, 1.812, 1.409, 1.16, 1.0, 0.885].map((ratio) => ({ ratio })),
+    finalDrive: { frontTeeth: 15, rearTeeth: 45 },
+    wheelCircumferenceMm: 1870,
+    redlineRpm: 10000,
+  }
+  const theoreticalTopSpeedKmh = computeMtGearTable(REF_SPEC)[5].speedAtRedlineKmh // ~149.17
+
+  it('reports matched when achieved is close to theoretical', () => {
+    const result = diagnoseTopSpeedGearing(REF_SPEC, theoreticalTopSpeedKmh)
+    expect(result).not.toBeNull()
+    expect(result!.theoreticalTopSpeedKmh).toBeCloseTo(theoreticalTopSpeedKmh, 6)
+    expect(result!.gearingVerdict).toBe('matched')
+    expect(result!.deltaKmh).toBeCloseTo(0, 6)
+  })
+
+  it('reports over-geared when achieved falls well short of theoretical', () => {
+    const result = diagnoseTopSpeedGearing(REF_SPEC, theoreticalTopSpeedKmh * 0.7)
+    expect(result!.gearingVerdict).toBe('over-geared')
+    expect(result!.deltaKmh).toBeLessThan(0)
+  })
+
+  it('reports under-geared when achieved exceeds theoretical', () => {
+    const result = diagnoseTopSpeedGearing(REF_SPEC, theoreticalTopSpeedKmh * 1.3)
+    expect(result!.gearingVerdict).toBe('under-geared')
+    expect(result!.deltaKmh).toBeGreaterThan(0)
+  })
+
+  it('respects a custom toleranceFrac', () => {
+    const slightlyOff = theoreticalTopSpeedKmh * 1.02
+    expect(diagnoseTopSpeedGearing(REF_SPEC, slightlyOff, 0.03)!.gearingVerdict).toBe('matched')
+    expect(diagnoseTopSpeedGearing(REF_SPEC, slightlyOff, 0.01)!.gearingVerdict).toBe('under-geared')
+  })
+
+  it('returns null for an invalid spec (no valid gears)', () => {
+    const badSpec: MtDrivetrainSpec = { ...REF_SPEC, gearRatios: [] }
+    expect(diagnoseTopSpeedGearing(badSpec, 150)).toBeNull()
+  })
+
+  it('returns null for a non-positive achieved top speed', () => {
+    expect(diagnoseTopSpeedGearing(REF_SPEC, 0)).toBeNull()
+    expect(diagnoseTopSpeedGearing(REF_SPEC, -5)).toBeNull()
   })
 })

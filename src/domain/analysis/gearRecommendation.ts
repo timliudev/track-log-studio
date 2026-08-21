@@ -1,5 +1,5 @@
-import type { GearRatioInput } from '@/domain/analysis/drivetrain'
-import { resolveGearRatio } from '@/domain/analysis/drivetrain'
+import type { GearRatioInput, MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
+import { resolveGearRatio, speedKmhToWheelRpm, computeMtGearTable } from '@/domain/analysis/drivetrain'
 
 /**
  * F8 — 齒比建議 (gear-ratio recommendation), motorcycle context.
@@ -467,4 +467,165 @@ export function diagnoseExistingRatios(
     out.push({ gear: i + 1, shiftRpm, landingRpm, deltaFromBottomRpm: landingRpm - band.bottomRpm })
   }
   return out
+}
+
+// ── Stage 3: top-speed / final-drive solving ────────────────────────────
+
+/** Input for {@link finalDriveForTopSpeed}. */
+export interface FinalDriveForTopSpeedInput {
+  targetTopSpeedKmh: number
+  redlineRpm: number
+  /** Top (last) gear's ratio (gearbox ratio only, not total reduction). */
+  topGearRatio: number
+  /** Defaults to 1 (no separate primary stage), matching `drivetrain.ts`'s
+   *  `computeMtGearTable` convention. */
+  primaryReduction?: number
+  wheelCircumferenceMm: number
+}
+
+/**
+ * Solve for the final-drive ratio that puts the vehicle at `targetTopSpeedKmh`
+ * exactly when the engine reaches `redlineRpm` in top gear.
+ *
+ * Derivation, inverting `drivetrain.ts`'s `computeMtGearTable`/
+ * `wheelRpmToSpeedKmh` relationship (totalReduction = primary * topGearRatio
+ * * final; wheelRpm = redlineRpm / totalReduction; speed = wheelRpm *
+ * circumference-derived constant): solve wheelRpm for the TARGET speed via
+ * {@link speedKmhToWheelRpm} (the exact inverse of {@link
+ * wheelRpmToSpeedKmh}, so this is algebraically exact, not iterative), then
+ * `final = redlineRpm / (primary * topGearRatio * wheelRpmTarget)`.
+ *
+ * Returns `null` for any non-finite/non-positive input, or if the solved
+ * final drive isn't finite/positive.
+ */
+export function finalDriveForTopSpeed(input: FinalDriveForTopSpeedInput): number | null {
+  const { targetTopSpeedKmh, redlineRpm, topGearRatio, wheelCircumferenceMm } = input
+  const primary = input.primaryReduction != null && input.primaryReduction > 0 ? input.primaryReduction : 1
+  if (
+    !(targetTopSpeedKmh > 0) ||
+    !(redlineRpm > 0) ||
+    !(topGearRatio > 0) ||
+    !(wheelCircumferenceMm > 0) ||
+    !Number.isFinite(primary)
+  ) {
+    return null
+  }
+  const wheelRpmTarget = speedKmhToWheelRpm(targetTopSpeedKmh, wheelCircumferenceMm)
+  if (!(wheelRpmTarget > 0)) return null
+  const final = redlineRpm / (primary * topGearRatio * wheelRpmTarget)
+  return Number.isFinite(final) && final > 0 ? final : null
+}
+
+/** One ranked candidate front/rear sprocket combination near a target ratio. */
+export interface SprocketCombo {
+  frontTeeth: number
+  rearTeeth: number
+  /** `rearTeeth / frontTeeth`, matching `drivetrain.ts`'s `finalDriveRatio`. */
+  ratio: number
+  /** `|ratio - target| / target` — smaller is closer to the requested ratio. */
+  errorFrac: number
+}
+
+export interface SprocketSearchOptions {
+  /** Front (countershaft) sprocket teeth range to search, inclusive.
+   *  Default `[11, 18]` — the common range for chain-drive motorcycle
+   *  countershaft sprockets (smaller is mechanically unusual/fragile,
+   *  larger is rare on typical sport/naked bikes). */
+  frontTeethRange?: [number, number]
+  /** Rear (wheel) sprocket teeth range to search, inclusive. Default
+   *  `[35, 52]` — the common range for rear sprockets on the same class of
+   *  bike. */
+  rearTeethRange?: [number, number]
+  /** Maximum number of ranked results to return. Default 5. */
+  maxResults?: number
+}
+
+/**
+ * Rank realistic front/rear sprocket tooth combinations by how closely their
+ * ratio (`rearTeeth / frontTeeth`) matches `targetRatio` — for turning a
+ * solved final-drive RATIO (e.g. from {@link finalDriveForTopSpeed}) into
+ * actually-buyable sprocket sizes. Brute-force search over the (small,
+ * bounded) teeth ranges — see {@link SprocketSearchOptions} for the default
+ * ranges and their rationale — sorted by `errorFrac` ascending.
+ *
+ * Returns `[]` for a non-finite/non-positive `targetRatio` or degenerate
+ * teeth ranges (min > max, or any bound non-positive).
+ */
+export function rankSprocketCombos(targetRatio: number, opts: SprocketSearchOptions = {}): SprocketCombo[] {
+  const [frontMin, frontMax] = opts.frontTeethRange ?? [11, 18]
+  const [rearMin, rearMax] = opts.rearTeethRange ?? [35, 52]
+  const maxResults = opts.maxResults ?? 5
+  if (!(targetRatio > 0) || !Number.isFinite(targetRatio)) return []
+  if (!(frontMin > 0) || !(rearMin > 0) || frontMin > frontMax || rearMin > rearMax) return []
+
+  const combos: SprocketCombo[] = []
+  for (let front = frontMin; front <= frontMax; front++) {
+    for (let rear = rearMin; rear <= rearMax; rear++) {
+      const ratio = rear / front
+      combos.push({ frontTeeth: front, rearTeeth: rear, ratio, errorFrac: Math.abs(ratio - targetRatio) / targetRatio })
+    }
+  }
+  combos.sort((a, b) => a.errorFrac - b.errorFrac)
+  return combos.slice(0, Math.max(0, maxResults))
+}
+
+/** Result of {@link diagnoseTopSpeedGearing}. */
+export interface TopSpeedGearingDiagnosis {
+  /** Top-gear speed at redline per the entered spec (via `computeMtGearTable`). */
+  theoreticalTopSpeedKmh: number
+  /** The rider-supplied achieved top speed. */
+  achievedTopSpeedKmh: number
+  /** `achievedTopSpeedKmh - theoreticalTopSpeedKmh`. */
+  deltaKmh: number
+  /**
+   * 'over-geared': achieved speed falls meaningfully short of the
+   * redline-in-top-gear theoretical speed — the gearing is taller than the
+   * engine can actually pull to redline, so a numerically LARGER final
+   * drive (shorter gearing) would let the engine reach redline (and
+   * typically improve real-world acceleration/top speed both).
+   * 'matched': achieved is within `toleranceFrac` of theoretical — the
+   * spec's redline-in-top-gear prediction lines up with reality.
+   * 'under-geared': achieved EXCEEDS theoretical by more than tolerance.
+   * Under normal riding this shouldn't happen (redline caps engine rpm, so
+   * achieved speed can't exceed the redline-in-top-gear prediction without
+   * either over-revving past the entered redline or the entered spec
+   * itself being wrong — e.g. wheel circumference too small). Reported
+   * honestly as 'under-geared' per the requested tri-state, but the caller
+   * should treat it as a prompt to double check the entered spec first.
+   */
+  gearingVerdict: 'over-geared' | 'matched' | 'under-geared'
+}
+
+/**
+ * Compare an MT spec's theoretical top-gear-at-redline speed (reusing {@link
+ * computeMtGearTable} — no reimplementation) against a rider-supplied
+ * ACHIEVED top speed, and classify the gearing — see {@link
+ * TopSpeedGearingDiagnosis} for the verdict semantics and their caveats.
+ *
+ * `toleranceFrac` (default 0.03 = 3%, generous enough to absorb GPS/speedo
+ * measurement slop and minor tyre-wear circumference drift while still
+ * catching a real gearing mismatch) is the relative band around
+ * `theoreticalTopSpeedKmh` that counts as 'matched'.
+ *
+ * Returns `null` if the spec has no valid top gear (empty
+ * `computeMtGearTable` result) or `achievedTopSpeedKmh` isn't finite/positive.
+ */
+export function diagnoseTopSpeedGearing(
+  spec: MtDrivetrainSpec,
+  achievedTopSpeedKmh: number,
+  toleranceFrac = 0.03,
+): TopSpeedGearingDiagnosis | null {
+  if (!(achievedTopSpeedKmh > 0) || !Number.isFinite(toleranceFrac) || toleranceFrac < 0) return null
+  const table = computeMtGearTable(spec)
+  if (table.length === 0) return null
+  const topGear = table[table.length - 1]
+  const theoreticalTopSpeedKmh = topGear.speedAtRedlineKmh
+  if (!(theoreticalTopSpeedKmh > 0)) return null
+
+  const deltaKmh = achievedTopSpeedKmh - theoreticalTopSpeedKmh
+  const relDelta = Math.abs(deltaKmh) / theoreticalTopSpeedKmh
+  const gearingVerdict: TopSpeedGearingDiagnosis['gearingVerdict'] =
+    relDelta <= toleranceFrac ? 'matched' : deltaKmh < 0 ? 'over-geared' : 'under-geared'
+
+  return { theoreticalTopSpeedKmh, achievedTopSpeedKmh, deltaKmh, gearingVerdict }
 }
