@@ -16,7 +16,9 @@ import {
   finalDriveForTopSpeed,
   rankSprocketCombos,
   diagnoseTopSpeedGearing,
+  optimalShiftRpm,
   type EngineCurveProfile,
+  type EngineTwoPointProfile,
   type UsableBand,
 } from '@/domain/analysis/gearRecommendation'
 import { computeMtGearTable, type MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
@@ -614,5 +616,77 @@ describe('diagnoseTopSpeedGearing', () => {
   it('returns null for a non-positive achieved top speed', () => {
     expect(diagnoseTopSpeedGearing(REF_SPEC, 0)).toBeNull()
     expect(diagnoseTopSpeedGearing(REF_SPEC, -5)).toBeNull()
+  })
+})
+
+// ── optimalShiftRpm ──────────────────────────────────────────────────────
+
+describe('optimalShiftRpm', () => {
+  it('crossover branch: finds the rpm where wheel torque is equal either side of the shift', () => {
+    const profile = createEngineCurveProfile(
+      [
+        { rpm: 3000, torqueNm: 40 },
+        { rpm: 6000, torqueNm: 70 }, // peak torque
+        { rpm: 12000, torqueNm: 20 }, // falls after
+      ],
+      12000,
+    ) as EngineCurveProfile
+    const gearRatioN = 2
+    const gearRatioNext = 1.5
+    const result = optimalShiftRpm(profile, gearRatioN, gearRatioNext)
+    expect(result).not.toBeNull()
+    expect(result!.reason).toBe('crossover')
+    const lo = peakPowerRpm(profile)
+    expect(result!.rpm).toBeGreaterThan(lo)
+    expect(result!.rpm).toBeLessThan(12000)
+    // Verify the crossover condition itself: wheel torque equal either side,
+    // to within the bisection's convergence tolerance.
+    const wheelTorqueCurrent = torqueAt(profile, result!.rpm) * gearRatioN
+    const wheelTorqueNext = torqueAt(profile, result!.rpm * (gearRatioNext / gearRatioN)) * gearRatioNext
+    expect(wheelTorqueCurrent).toBeCloseTo(wheelTorqueNext, 4)
+  })
+
+  it('redlineClamped branch: flat torque curve, staying in gear always wins', () => {
+    // Constant torque -> power strictly increases with rpm (peakPowerRpm =
+    // redline-adjacent sample) and wheel torque is ALWAYS higher in the
+    // current (numerically larger) gear ratio, at every rpm -> no crossover.
+    const profile = createEngineCurveProfile(
+      [
+        { rpm: 3000, torqueNm: 50 },
+        { rpm: 6000, torqueNm: 50 },
+        { rpm: 9000, torqueNm: 50 },
+      ],
+      12000,
+    ) as EngineCurveProfile
+    const result = optimalShiftRpm(profile, 2, 1.5)
+    expect(result).not.toBeNull()
+    expect(result!.reason).toBe('redlineClamped')
+    expect(result!.rpm).toBe(12000) // profile.redlineRpm
+  })
+
+  it('rejects a downshift or no-op ratio pair (gearRatioNext must be < gearRatioN)', () => {
+    const profile = createEngineCurveProfile(
+      [
+        { rpm: 3000, torqueNm: 40 },
+        { rpm: 6000, torqueNm: 70 },
+        { rpm: 12000, torqueNm: 20 },
+      ],
+      12000,
+    ) as EngineCurveProfile
+    expect(optimalShiftRpm(profile, 1.5, 2)).toBeNull() // gearRatioNext > gearRatioN
+    expect(optimalShiftRpm(profile, 2, 2)).toBeNull() // equal ratios (no-op)
+    expect(optimalShiftRpm(profile, 0, 1.5)).toBeNull()
+    expect(optimalShiftRpm(profile, 2, 0)).toBeNull()
+  })
+
+  it('the two-point profile is REJECTED by the type system, not accepted at a lower fidelity', () => {
+    const twoPoint: EngineTwoPointProfile = createEngineTwoPointProfile({
+      peakTorqueRpm: 6000,
+      peakPowerRpm: 8500,
+      redlineRpm: 12000,
+    })!
+    // @ts-expect-error optimalShiftRpm requires EngineCurveProfile, not EngineTwoPointProfile —
+    // this is the honesty constraint from the module header, enforced at compile time.
+    optimalShiftRpm(twoPoint, 2, 1.5)
   })
 })

@@ -629,3 +629,100 @@ export function diagnoseTopSpeedGearing(
 
   return { theoreticalTopSpeedKmh, achievedTopSpeedKmh, deltaKmh, gearingVerdict }
 }
+
+// ── Stage 4 (curve-only): true optimal upshift rpm ──────────────────────
+
+/** Result of {@link optimalShiftRpm}. */
+export interface OptimalShiftResult {
+  /** The recommended shift rpm. */
+  rpm: number
+  /**
+   * 'crossover': a genuine wheel-torque crossover was found within
+   * `[peakPowerRpm, redlineRpm]` — `rpm` is that crossover point.
+   * 'redlineClamped': no crossover was found in that window (see {@link
+   * optimalShiftRpm}'s doc for what this means physically) — `rpm` is
+   * simply `profile.redlineRpm`, i.e. "just take it to redline, staying in
+   * gear is never worse before that".
+   */
+  reason: 'crossover' | 'redlineClamped'
+}
+
+/**
+ * The TRUE optimal upshift rpm between two adjacent gears, from the actual
+ * torque curve — not the band-edge heuristic {@link diagnoseExistingRatios}
+ * uses. Requires an {@link EngineCurveProfile} specifically (not the
+ * `EngineProfile` union) — see the module header's honesty constraint: this
+ * genuinely needs the curve's shape, so a two-point profile is a COMPILE
+ * ERROR here, not a silently-wrong approximation.
+ *
+ * Physics: at engine rpm `r` in the current gear, wheel torque is
+ * `T(r) * gearRatioN`. If you instead shift up, road speed is unchanged
+ * through the shift (only engine rpm changes, via the ratio step), so the
+ * new engine rpm is `r * gearRatioNext / gearRatioN` and the new wheel
+ * torque is `T(r * gearRatioNext/gearRatioN) * gearRatioNext`. The optimal
+ * shift point r* is where these are EQUAL — below r*, staying in gear gives
+ * more wheel torque (more acceleration); above r*, shifting up already
+ * gives more. This is found by scanning `diff(r) = wheelTorqueCurrent(r) -
+ * wheelTorqueNext(r)` for a sign change (positive -> negative, i.e. "stay
+ * wins" flipping to "shift wins") over `[peakPowerRpm(profile),
+ * redlineRpm]` — starting the scan at peak power rather than 0 or peak
+ * torque because a crossover below peak power (while power is still
+ * climbing) is not a realistic "should I shift now" question — and
+ * bisecting to convergence once a sign change is confirmed at the window's
+ * two ends.
+ *
+ * When `diff` does NOT go from positive-at-`peakPowerRpm` to
+ * non-positive-at-`redlineRpm` (either it's already non-positive at the
+ * start of the window, meaning any crossover lies below the window and
+ * isn't resolved by this scan, or it stays positive throughout, meaning
+ * staying in gear is better everywhere in the window) there is no
+ * confirmed crossover to report — the honest answer is "ride it to
+ * redline" (`reason: 'redlineClamped'`), never a guessed rpm outside the
+ * scanned window.
+ *
+ * Returns `null` for a non-curve profile reaching this function at runtime
+ * (defensive — the type system should already prevent this at compile
+ * time), non-positive/out-of-order gear ratios (`gearRatioNext` must be
+ * less than `gearRatioN` — an upshift, not a downshift or no-op), or a
+ * degenerate `[peakPowerRpm, redlineRpm]` window.
+ */
+export function optimalShiftRpm(
+  profile: EngineCurveProfile,
+  gearRatioN: number,
+  gearRatioNext: number,
+): OptimalShiftResult | null {
+  if (profile.kind !== 'curve') return null // defensive; the type system should already prevent this
+  if (!(gearRatioN > 0) || !(gearRatioNext > 0) || !(gearRatioNext < gearRatioN)) return null
+  const lo = peakPowerRpm(profile)
+  const hi = profile.redlineRpm
+  if (!Number.isFinite(lo) || !(lo < hi)) return null
+
+  const ratioScale = gearRatioNext / gearRatioN // < 1: engine rpm drops on upshift
+  const diff = (r: number): number => {
+    const wheelTorqueCurrent = torqueAt(profile, r) * gearRatioN
+    const wheelTorqueNext = torqueAt(profile, r * ratioScale) * gearRatioNext
+    return wheelTorqueCurrent - wheelTorqueNext
+  }
+
+  const diffLo = diff(lo)
+  const diffHi = diff(hi)
+  if (!(diffLo > 0) || !(diffHi <= 0)) {
+    return { rpm: hi, reason: 'redlineClamped' }
+  }
+
+  // Bisection for the sign change (diffLo > 0, diffHi <= 0 confirmed above).
+  let a = lo
+  let b = hi
+  let fa = diffLo
+  for (let i = 0; i < 60; i++) {
+    const mid = (a + b) / 2
+    const fm = diff(mid)
+    if (fa > 0 === fm > 0) {
+      a = mid
+      fa = fm
+    } else {
+      b = mid
+    }
+  }
+  return { rpm: (a + b) / 2, reason: 'crossover' }
+}
