@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 import { useDrivetrainStore } from '@/stores/drivetrainStore'
+import { useChannelRoleStore } from '@/stores/channelRoleStore'
 import { cachedGearRatioTrace } from '@/domain/analysis/gearRatioTrace'
 import { MEASURED_TOTAL_RATIO_CHANNEL } from '@/domain/analysis/analyzerChannels'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
@@ -28,12 +29,17 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const drivetrain = useDrivetrainStore()
+const channelRoleStore = useChannelRoleStore()
 const circumferenceMm = computed(() =>
   drivetrain.kind === 'mt'
     ? drivetrain.inversionWheelCircumferenceMm
     : drivetrain.cvt.wheelCircumferenceMm,
 )
-const trace = computed(() => cachedGearRatioTrace(props.session, circumferenceMm.value))
+// B134 — overrides threaded through so a mapping set elsewhere (e.g. via
+// GearPanel's ChannelRolePicker) reactively unblocks this chart too, even
+// though this component doesn't host its own picker — see the module's B134
+// note in TimeSeriesChart.vue for why the picker itself isn't wired HERE.
+const trace = computed(() => cachedGearRatioTrace(props.session, circumferenceMm.value, channelRoleStore.overrides))
 const STORAGE_KEY = 'tracklogstudio.gearChartChannels.v1'
 function loadExtraChannels(): string[] {
   try {

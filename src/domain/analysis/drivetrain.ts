@@ -44,6 +44,7 @@
  */
 
 import type { LogSession } from '@/domain/model/LogSession'
+import { resolveRoleChannel, type ChannelRoleOverrides } from '@/domain/analysis/channelRoles'
 
 /**
  * Resolve the session's engine RPM channel name, or null if absent.
@@ -54,6 +55,14 @@ import type { LogSession } from '@/domain/model/LogSession'
  * do alias resolution, so this is a thin, explicit wrapper — mirroring
  * `resolveSpeedChannel` in `cornerSpeed.ts` — rather than callers hardcoding
  * the string `'RPM'` themselves.
+ *
+ * B134 — this is now the CANONICAL-ONLY step of a larger resolution order;
+ * see `channelRoles.ts`'s `resolveRoleChannel(session, 'rpm', overrides)` for
+ * the full override → canonical → heuristic chain. Kept as its own function
+ * (rather than folded away) for the handful of callers that deliberately
+ * want ONLY this exact, zero-guessing behaviour — see `useLaps.ts`'s speed
+ * counterpart (`resolveSpeedChannel` in `cornerSpeed.ts`) for why lap
+ * detection in particular stays canonical-only.
  */
 export function resolveRpmChannel(session: LogSession): string | null {
   return session.has('RPM') ? 'RPM' : null
@@ -80,12 +89,24 @@ export interface DrivetrainKindInference {
  * single-gear recordings return null so callers can keep the current choice.
  * The nominal circumference only scales every ratio equally and therefore
  * cannot affect the classification.
+ *
+ * B134 — the gear/RPM/speed channel LOOKUPS (not the MT/CVT math itself) now
+ * go through `channelRoles.ts`'s `resolveRoleChannel`, so a user override AND
+ * the name/unit heuristic both reach this classifier — e.g. a `GearPRND`
+ * column (no separator, so it misses the regex below) can now be recognised
+ * as MT evidence via the heuristic alone, with no user action needed. The
+ * regex itself is UNCHANGED and still runs first (as `resolveRoleChannel`'s
+ * canonical step) so any session where it already matched today keeps
+ * resolving to the exact same channel — see the module's test file for the
+ * byte-identical-on-existing-formats proof. `overrides` defaults to `{}`
+ * (no behaviour change for callers that don't pass one).
  */
-export function inferDrivetrainKind(session: LogSession): DrivetrainKindInference | null {
-  const gearChannel = session.channels.find((channel) => {
-    const label = `${channel.name} ${channel.rawName} ${channel.description ?? ''}`.toLowerCase()
-    return /(?:^|[\s_/.-])(gear|gearpos|gearposition)(?:$|[\s_/.-])/.test(label) && !label.includes('ratio')
-  })
+export function inferDrivetrainKind(
+  session: LogSession,
+  overrides: ChannelRoleOverrides = {},
+): DrivetrainKindInference | null {
+  const gearChannelName = resolveRoleChannel(session, 'gear', overrides)
+  const gearChannel = gearChannelName ? session.get(gearChannelName) : undefined
   if (gearChannel) {
     const gears = new Set<number>()
     let valid = 0
@@ -97,8 +118,10 @@ export function inferDrivetrainKind(session: LogSession): DrivetrainKindInferenc
     if (valid >= 12 && gears.size >= 2) return { kind: 'mt', basis: 'gearChannel', sampleCount: valid }
   }
 
-  const rpm = session.get('RPM')?.data
-  const speed = session.get('GPS_Speed')?.data ?? session.get('Vehicle_Speed')?.data
+  const rpmName = resolveRoleChannel(session, 'rpm', overrides)
+  const speedName = resolveRoleChannel(session, 'speed', overrides)
+  const rpm = rpmName ? session.get(rpmName)?.data : undefined
+  const speed = speedName ? session.get(speedName)?.data : undefined
   if (!rpm || !speed) return null
 
   const ratio = computeRatioSeries(rpm, speed, { wheelCircumferenceMm: 1870, minSpeedKmh: 10 })
