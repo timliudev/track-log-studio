@@ -628,7 +628,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 > 機車 `.rcz` 同賽道 LihPao Full 可互比)。除了完整重現 [[B134]] 的三個角色缺口
 > (`EngineRPM_rpm`/`VehicleSpeed_kmh`/`GearPRND` 全認不得)之外,再挖出以下兩條。
 
-- [ ] **B135** `parseVbo` 完全忽略 `[session data]`(`name LihPao Full`)與 `[laptiming]`
+- [x] **B135** `parseVbo` 完全忽略 `[session data]`(`name LihPao Full`)與 `[laptiming]`
   (`Start   -7241.186772 +1459.114540 -7241.175315 +1459.126888 ¬ Start/Finish`)兩個區段
   (grep 全 codebase 零處理)。後果:①`meta.name` 空;②起終點線只能靠 `useLaps` 的
   `defaultLine()` 自動種在第一個有效 fix(= paddock)→ **實測整場 0 圈**(`detectLapsByLine`),
@@ -638,6 +638,14 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   該行分隔符為 U+00AC)存進 `LogMeta` optional 欄位;`useLaps` 種線優先序改為
   「使用者已存的線 > meta 內建線 > defaultLine」。驗收:真檔套線後應得上述 4 圈圈速。
   後續(不在本條):自家 `VboExporter` 匯出時也回寫 `[laptiming]`,讓 round-trip 不掉線。
+  **已落地**:`LogMeta` 加 optional `sessionName`/`startFinishLine`(純新增,他 importer 不動);
+  `parseVbo` 解析兩區段(容錯:缺段/壞行→undefined、忽略 `Split` 行);`useLaps` 兩處種線點
+  改為 `inferLapLineFromChannel > metaLine > defaultLine`(使用者存線經 `useCircuitPersistence`
+  非同步回灌、本就無條件蓋過種線,已追碼確認不需改)。新增 5 測試;真檔複驗 0 圈 → **4 圈
+  300.399/166.120/150.600/151.041s**(與 RaceChrono 自家偵測一致);本分支全套 2463/2463 綠、
+  typecheck/lint/build 過。UI 目視驗證未做(自動化環境 Browser pane 無法 compositing,Vue
+  Transition 卡 rAF,屬環境限制),待真機。 — 本 session 分支 `6250b9d`/`605af87`(hash 待上
+  origin 後確認,tracker 規則:local hash 可能變動)
 - [ ] **B136**(待拍板)VBO 沒有 `[channel units]` 區段時(Circuit Tools flavour 刻意不寫,
   單位嵌在欄名:`EngineRPM_rpm`/`CoolantTemp_degC`/`YawRate_degps`…),全部頻道單位空白。
   可在 importer 加「欄名單位後綴」啟發式(`_rpm`/`_kmh`/`_degC`/`_kPa`/`_pct`/`_deg`/
