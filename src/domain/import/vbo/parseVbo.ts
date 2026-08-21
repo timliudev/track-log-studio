@@ -20,6 +20,13 @@
  *   exporter wrote `lat * 60`  → importer reads  `GPS_Lat = lat_minutes / 60`
  *   exporter wrote `lon * -60` → importer reads  `GPS_Lon = -long_minutes / 60`
  *     (VBOX convention: +longitude minutes = West)
+ *
+ * B136: when `[channel units]` supplies nothing for a telemetry column (the
+ * whole section can be absent, or a positional entry can be blank), a
+ * Circuit Tools name-suffix heuristic tries to recover the unit from the
+ * column name instead (`EngineRPM_rpm` → `'rpm'`) — see {@link
+ * NAME_SUFFIX_UNITS} and `unitAt()` below for the full rationale and
+ * precedence rule.
  */
 import { LogSession } from '@/domain/model/LogSession'
 import type { Channel, LogMeta } from '@/domain/model/types'
@@ -28,6 +35,104 @@ import { decodeExportMetadata, type ExportMetadata } from '@/domain/export/metad
 
 /** The 7 fixed VBO GPS column tokens, in order. */
 const BASE_TOKENS = ['sats', 'time', 'lat', 'long', 'velocity', 'heading', 'height'] as const
+
+/**
+ * B136 — VBO name-suffix unit heuristic (FALLBACK ONLY, never an override).
+ *
+ * The Circuit Tools flavour of `.vbo` (the `u6can` merge tool, e.g.
+ * `lihpao_20260816_ct_full.vbo`) sometimes omits `[channel units]` ENTIRELY
+ * and encodes the unit as a suffix on the column name instead:
+ * `EngineRPM_rpm`, `CoolantTemp_degC`, `YawRate_degps`,
+ * `IntakeManifoldPressure_kPa`, `ThrottleDemand_pct`, `SteeringAngle_deg`,
+ * `LateralAccel_g`, `PhoneMagX_uT`, `Odometer_km`, `WheelSpeedFL_kmh`. With no
+ * `[channel units]` entry every one of those channels would otherwise import
+ * with a blank `unit`, so axis labels and cursor readouts show nothing.
+ *
+ * User decision (B136, 2026-08-21, docs/ISSUES.md): fill ONLY `unit`, never
+ * touch the channel NAME (`rawName`/`description` either) — `EngineRPM_rpm`
+ * keeps that exact name. Two reasons, both load-bearing:
+ *   1. Channel names are the KEYS of B134's device-wide user override table
+ *      (`stores/channelRoleStore.ts`, `channelName → role`). Renaming a
+ *      channel on re-import would silently orphan a mapping the user already
+ *      saved against the old (suffixed) name.
+ *   2. Stripping a suffix like `_g` risks colliding with a genuine name
+ *      ending — there is no way to know from the name alone whether `_g` is
+ *      a unit here or, say, a generation/revision tag the manufacturer chose.
+ *
+ * Precedence (see `unitAt()`): this is a FALLBACK. It only runs once a
+ * positional `[channel units]` value is confirmed ABSENT for that column (no
+ * section, short section, or a blank positional entry) — any explicit unit
+ * from that section always wins untouched, never gets overridden.
+ *
+ * False-positive guard: every suffix below is matched case-insensitively but
+ * requires the token to literally END with `_<suffix>` — an underscore
+ * immediately before the suffix, and nothing after it. This single rule does
+ * a lot of work: `AcCompressorClutch_10Hz` (real column in the reference
+ * file) does NOT match `_hz`, because the character right before `Hz` is `0`,
+ * not `_`; `SteeringAngle_deg` does NOT also match `_g`, because the
+ * character right before the final `g` is `e`, not `_`. That boundary is
+ * exactly what makes the five single-letter suffixes below safe enough to
+ * include (`_g`/`_m`/`_s`/`_v`/`_a` are all in B136's "recognise at minimum"
+ * list) — a false hit would require some OTHER real channel to end in a
+ * literal `_g`/`_m`/`_s`/`_v`/`_a` segment that means something unrelated,
+ * which is rare for underscore-delimited ECU/CAN naming and did not occur
+ * against any existing fixture channel name (checked by grep across
+ * `test/fixtures/`; the VBO golden fixtures don't exercise this fallback at
+ * all regardless, because they always carry a fully-populated `[channel
+ * units]` section — see the module test file for the explicit assertion).
+ *
+ * Unit spelling: chosen to match the closest EXISTING precedent elsewhere in
+ * this codebase rather than invent new ones (grepped
+ * `domain/export/vbo/semantic.ts`, `domain/import/rcz/parseRczCore.ts`, and
+ * this file's own hand-written units below). One spelling is deliberate
+ * rather than copied: `_deg` maps to plain `'deg'` (semantic.ts's
+ * `SA`/`TC_Lean_Angle` convention for a general vehicle-angle channel), NOT
+ * `'°'` — `'°'` is used consistently, across every importer in this
+ * codebase, ONLY for the three GPS channels (`GPS_Lat`/`GPS_Lon`/
+ * `GPS_Course`), never for an arbitrary vehicle angle like steering angle.
+ * Ordered longest-suffix-first defensively (matching stops at the first hit);
+ * in practice no two entries below are suffixes of one another, so the order
+ * doesn't currently change any result, but it protects a future addition
+ * from silently shadowing a more specific existing entry.
+ */
+const NAME_SUFFIX_UNITS: ReadonlyArray<readonly [suffix: string, unit: string]> = [
+  ['_degps', 'deg/s'], // TC_Xangle_dps etc. — semantic.ts
+  ['_degc', 'degC'], // T_Eng / T_Air_indx — semantic.ts
+  ['_degf', 'degF'], // analogous Fahrenheit spelling — no existing precedent, same pattern
+  ['_kmh', 'km/h'], // GPS_Speed (this file) / Vehicle_Speed — semantic.ts
+  ['_kph', 'km/h'], // same physical unit, alternate spelling
+  ['_mph', 'mph'], // conventional abbreviation, unambiguous
+  ['_mps', 'm/s'], // meters/second, mirrors the existing 'deg/s' spelling pattern
+  ['_kpa', 'kPa'], // this file's own reference flavour spells it this way
+  ['_bar', 'bar'],
+  ['_psi', 'psi'],
+  ['_pct', '%'], // TPS_Percent — semantic.ts
+  ['_rpm', 'rpm'], // RPM — semantic.ts
+  ['_deg', 'deg'], // SA / TC_Lean_Angle — semantic.ts (see note above: NOT '°')
+  ['_ms', 'm/s'],
+  ['_ut', 'µT'], // magnetometer ids 28-30 — parseRczCore.ts (only existing precedent)
+  ['_km', 'km'],
+  ['_nm', 'Nm'], // Torque — semantic.ts
+  ['_hz', 'Hz'],
+  ['_g', 'g'], // TC_Xforce/Yforce/Zforce — semantic.ts (this importer is documented
+  // above as the inverse of that same exporter, so its lowercase 'g' is the
+  // precedent that round-trips, not the RCZ importer's unrelated uppercase 'G')
+  ['_m', 'm'], // GPS_Altitude — this file's own convention
+  ['_s', 's'], // GPS_UTC_ss — this file's own convention
+  ['_v', 'V'], // Volt_Batt — semantic.ts
+  ['_a', 'A'], // Amps, SI symbol (uppercase, mirrors 'V')
+]
+
+/** B136 fallback: infer a unit from a column-name suffix (`EngineRPM_rpm` →
+ *  `'rpm'`), or undefined when nothing matches. See {@link NAME_SUFFIX_UNITS}
+ *  for the full table and false-positive-guard rationale. */
+function inferUnitFromNameSuffix(token: string): string | undefined {
+  const lower = token.toLowerCase()
+  for (const [suffix, unit] of NAME_SUFFIX_UNITS) {
+    if (lower.endsWith(suffix)) return unit
+  }
+  return undefined
+}
 
 /**
  * Safety cap on the total grid size (`columns × rows`) we will allocate.
@@ -255,7 +360,12 @@ export function parseVbo(text: string, maxTextChars: number = MAX_VBO_TEXT_CHARS
   const channels: Channel[] = []
   const unitAt = (columnIndex: number): string | undefined => {
     const unit = units[columnIndex]?.trim()
-    return unit ? unit : undefined
+    if (unit) return unit
+    // B136 fallback — only reached when [channel units] gave nothing for this
+    // column (absent section, short section, or a positional blank entry).
+    // Never runs when `unit` above is truthy, so an explicit [channel units]
+    // value always wins untouched.
+    return inferUnitFromNameSuffix(columns[columnIndex])
   }
   const push = (
     name: string,
