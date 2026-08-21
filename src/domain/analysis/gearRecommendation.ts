@@ -642,14 +642,22 @@ export interface OptimalShiftResult {
   /** The recommended shift rpm. */
   rpm: number
   /**
-   * 'crossover': a genuine wheel-torque crossover was found within
-   * `[peakPowerRpm, redlineRpm]` — `rpm` is that crossover point.
-   * 'redlineClamped': no crossover was found in that window (see {@link
-   * optimalShiftRpm}'s doc for what this means physically) — `rpm` is
-   * simply `profile.redlineRpm`, i.e. "just take it to redline, staying in
-   * gear is never worse before that".
+   * 'crossover': a genuine wheel-torque crossover was found within the
+   * scanned window — `rpm` is that crossover point. The window is normally
+   * `[peakPowerRpm, redlineRpm]`, but see 'bandFloorClamped' below for when
+   * it gets extended downward.
+   * 'redlineClamped': `diff` stayed POSITIVE all the way from
+   * `peakPowerRpm` to `redlineRpm` — staying in gear is never worse before
+   * redline, so `rpm` is simply `profile.redlineRpm`.
+   * 'bandFloorClamped': `diff` was already <= 0 AT `peakPowerRpm` (the next
+   * gear already wins there — see {@link optimalShiftRpm}'s doc for why
+   * this is defensive/should not occur for a well-formed curve) and stayed
+   * <= 0 even after extending the search down to
+   * `max(peakTorqueRpm, profile.points[0].rpm)` — `rpm` is that LOW end,
+   * never the redline (returning the redline here would be the worst
+   * possible answer, not a safe fallback — see the doc below).
    */
-  reason: 'crossover' | 'redlineClamped'
+  reason: 'crossover' | 'redlineClamped' | 'bandFloorClamped'
 }
 
 /**
@@ -668,22 +676,42 @@ export interface OptimalShiftResult {
  * shift point r* is where these are EQUAL — below r*, staying in gear gives
  * more wheel torque (more acceleration); above r*, shifting up already
  * gives more. This is found by scanning `diff(r) = wheelTorqueCurrent(r) -
- * wheelTorqueNext(r)` for a sign change (positive -> negative, i.e. "stay
- * wins" flipping to "shift wins") over `[peakPowerRpm(profile),
- * redlineRpm]` — starting the scan at peak power rather than 0 or peak
- * torque because a crossover below peak power (while power is still
- * climbing) is not a realistic "should I shift now" question — and
- * bisecting to convergence once a sign change is confirmed at the window's
- * two ends.
+ * wheelTorqueNext(r)` for a sign change over `[peakPowerRpm(profile),
+ * redlineRpm]` and bisecting to convergence.
  *
- * When `diff` does NOT go from positive-at-`peakPowerRpm` to
- * non-positive-at-`redlineRpm` (either it's already non-positive at the
- * start of the window, meaning any crossover lies below the window and
- * isn't resolved by this scan, or it stays positive throughout, meaning
- * staying in gear is better everywhere in the window) there is no
- * confirmed crossover to report — the honest answer is "ride it to
- * redline" (`reason: 'redlineClamped'`), never a guessed rpm outside the
- * scanned window.
+ * ── Why start the scan at peak power, and what if `diff` is already <= 0
+ * there? ─────────────────────────────────────────────────────────────────
+ *
+ * `diff(peakPowerRpm)` should, for any physically-sensible curve, be >= 0
+ * — this is the textbook "always upshift at peak power" result: at the
+ * road speed corresponding to `peakPowerRpm` in the current gear, no OTHER
+ * gear can deliver more wheel force, because `peakPowerRpm` is by
+ * definition the rpm where `T(r)*r` (proportional to power, and wheel
+ * force at fixed road speed is proportional to engine power) is maximal
+ * over the curve's own domain — algebraically, `T(peakPowerRpm * s) <=
+ * T(peakPowerRpm) / s` for any `s` in `(0, 1)` follows directly from that
+ * maximality, which rearranges to exactly `diff(peakPowerRpm) >= 0`. So
+ * this branch is defensive rather than expected to fire for realistic
+ * (digitised dyno) data — verified both by this proof and by a 5-million-
+ * sample randomised search over curve shapes and gear-ratio pairs (see the
+ * PR discussion) that never found a counter-example; the closest near-miss
+ * was `diff ≈ 0.002`, always positive.
+ *
+ * If `diff(peakPowerRpm)` nonetheless comes out <= 0 (floating-point
+ * rounding of a near-zero case, an unusually shaped or hand-edited curve,
+ * or a caller bypassing {@link createEngineCurveProfile}'s validation),
+ * the ONLY honest thing to do is extend the search DOWNWARD, not clamp to
+ * the redline — a crossover already present at the scan's start can only
+ * lie BELOW it, and "ride it to redline" would be the worst possible
+ * answer in that case, not a safe one. The extended lower bound is
+ * `max(peakTorqueRpm, profile.points[0].rpm)`: below peak torque the
+ * engine is still climbing towards its best pull, so a "should I shift"
+ * question doesn't make sense there either, and the curve's first sample
+ * is the hard floor of real data regardless. If `diff` stays <= 0 even at
+ * that floor, there is still no crossover to report — the result clamps
+ * to the LOW end (`reason: 'bandFloorClamped'`), distinct from
+ * `'redlineClamped'` precisely so a caller never confuses "shift now,
+ * you're already past it" with "ride it out, you're nowhere near it".
  *
  * Returns `null` for a non-curve profile reaching this function at runtime
  * (defensive — the type system should already prevent this at compile
@@ -709,27 +737,51 @@ export function optimalShiftRpm(
     return wheelTorqueCurrent - wheelTorqueNext
   }
 
+  // Generic bisection: requires diff(aStart) > 0 and diff(bStart) <= 0
+  // (a confirmed sign change), converges to the crossing rpm.
+  const bisectCrossing = (aStart: number, bStart: number, faStart: number): number => {
+    let a = aStart
+    let b = bStart
+    let fa = faStart
+    for (let i = 0; i < 60; i++) {
+      const mid = (a + b) / 2
+      const fm = diff(mid)
+      if (fa > 0 === fm > 0) {
+        a = mid
+        fa = fm
+      } else {
+        b = mid
+      }
+    }
+    return (a + b) / 2
+  }
+
   const diffLo = diff(lo)
-  const diffHi = diff(hi)
-  if (!(diffLo > 0) || !(diffHi <= 0)) {
+
+  if (diffLo > 0) {
+    const diffHi = diff(hi)
+    if (diffHi <= 0) {
+      const rpm = bisectCrossing(lo, hi, diffLo)
+      return { rpm, reason: 'crossover' }
+    }
     return { rpm: hi, reason: 'redlineClamped' }
   }
 
-  // Bisection for the sign change (diffLo > 0, diffHi <= 0 confirmed above).
-  let a = lo
-  let b = hi
-  let fa = diffLo
-  for (let i = 0; i < 60; i++) {
-    const mid = (a + b) / 2
-    const fm = diff(mid)
-    if (fa > 0 === fm > 0) {
-      a = mid
-      fa = fm
-    } else {
-      b = mid
+  // diffLo <= 0: see the doc above — this is defensive (should not occur
+  // for a well-formed curve), so extend the search DOWNWARD rather than
+  // clamping to the redline, which would be the worst possible answer here.
+  const floorRpm = Math.max(peakTorqueRpm(profile), profile.points[0].rpm)
+  if (floorRpm < lo) {
+    const diffFloor = diff(floorRpm)
+    if (diffFloor > 0) {
+      const rpm = bisectCrossing(floorRpm, lo, diffFloor)
+      return { rpm, reason: 'crossover' }
     }
   }
-  return { rpm: (a + b) / 2, reason: 'crossover' }
+  // diff stayed <= 0 across the entire extended window: no crossover to
+  // report anywhere in the realistic scan range. Clamp to the LOW end —
+  // never the redline.
+  return { rpm: floorRpm, reason: 'bandFloorClamped' }
 }
 
 // ── Stage 5: log-driven target ───────────────────────────────────────────

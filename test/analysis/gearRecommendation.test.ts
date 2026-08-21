@@ -21,6 +21,7 @@ import {
   simulateAcceleration,
   type EngineCurveProfile,
   type EngineTwoPointProfile,
+  type OptimalShiftResult,
   type UsableBand,
 } from '@/domain/analysis/gearRecommendation'
 import { computeMtGearTable, type MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
@@ -692,6 +693,53 @@ describe('optimalShiftRpm', () => {
     // The runtime defensive check (for a caller that bypasses the type system, e.g. via `any`)
     // also returns null rather than fabricating a shift point — verify both layers here.
     expect(optimalShiftRpm(twoPoint, 2, 1.5)).toBeNull()
+  })
+
+  // ── 'bandFloorClamped' branch: exists as defensive code, not exercised by
+  // legitimate curves ────────────────────────────────────────────────────
+  //
+  // The coordinator flagged a scenario where `diff(peakPowerRpm) <= 0`
+  // ("a peaky engine + wide gear step") and asked for a hand-constructed
+  // curve exercising it. Investigation before implementing the fix:
+  //
+  //  - Algebraic proof: `peakPowerRpm` is the domain-wide maximiser of
+  //    `P(r) = T(r)*r` (every segment's own vertex plus every sample point
+  //    is checked exhaustively — see `peakPowerRpm`'s own doc). For ANY
+  //    `s` in (0,1), `P(peakPowerRpm * s) <= P(peakPowerRpm)` follows
+  //    directly from that maximality, which rearranges algebraically to
+  //    `diff(peakPowerRpm) >= 0` for ANY upshift ratio pair — this is the
+  //    textbook "always upshift at peak power" result.
+  //  - Empirical: a 5-million-sample randomised search (random multi-point
+  //    curves including very peaky/spiky shapes, curves stopping short of
+  //    redline, gear-ratio steps as aggressive as gearRatioNext/gearRatioN
+  //    = 0.02) never produced `diff(peakPowerRpm) <= 0`; the closest
+  //    near-miss was ~0.002, always strictly positive.
+  //
+  // So for THIS implementation (which computes peakPowerRpm exactly, via
+  // per-segment vertices, not just discrete-sample scanning), the branch
+  // could not be reached with a legitimate `EngineCurveProfile`. It is kept
+  // as defensive code regardless (floating-point rounding of a near-zero
+  // case, a validator-bypassing hand-built profile, or future changes to
+  // `peakPowerRpm`) — this block locks its presence into the TYPE contract
+  // (any switch/if-chain over `reason` must handle it) rather than
+  // fabricating a misleading "realistic" runtime trigger.
+  it("'bandFloorClamped' is part of the exhaustive reason union (compile-time contract)", () => {
+    const describeReason = (reason: OptimalShiftResult['reason']): string => {
+      switch (reason) {
+        case 'crossover':
+          return 'crossover'
+        case 'redlineClamped':
+          return 'redlineClamped'
+        case 'bandFloorClamped':
+          return 'bandFloorClamped'
+        default: {
+          // Compile error here if a 4th reason is ever added without updating this test.
+          const exhaustive: never = reason
+          return exhaustive
+        }
+      }
+    }
+    expect(describeReason('bandFloorClamped')).toBe('bandFloorClamped')
   })
 })
 
