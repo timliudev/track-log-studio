@@ -531,7 +531,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   — `99f87bc`/`e3cc1aa`
 
 ## User report — 非自家命名頻道認不得 + MT 齒比建議 (B134, F8)
-- [ ] **B134** 認不得非自家命名的語意頻道 → 齒比/疊圖直接死當,且**無任何手動補救**。實測
+- [x] **B134** 認不得非自家命名的語意頻道 → 齒比/疊圖直接死當,且**無任何手動補救**。實測
   使用者自製 `.vbo`(`lihpao_20260816_ct_full.vbo`,由外部 `u6can` 工具把 Luxgen U6 CAN
   併進 VBO)明明有轉速欄,UI 卻報「此記錄缺少轉速(RPM)頻道」。根因鏈:①該檔轉速欄名為
   **`EngineRPM_rpm`**(且**沒有 `[channel units]` 區塊**,連單位都拿不到);②`parseVbo.ts`
@@ -551,6 +551,18 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   自動套用,同一台車/同一個轉檔工具只需要選一次。⚠️ 實作紅線(記取 [[B125]] 教訓):啟發式
   規則**必須回報 golden fixture diff 規模**,`.loga` 既有頻道分類一個都不許動;localStorage
   讀回的覆寫表必須比照 [[M9]] 的 sanitizer 做白名單+長度/筆數上限。
+  **已落地**(merge `6ef0107`):`domain/analysis/channelRoles.ts` 統一三角色解析(覆寫 >
+  canonical > 啟發式,啟發式只在 canonical 查無時才跑)、`stores/channelRoleStore.ts` 裝置層
+  `channelName→role` 覆寫表(`tracklogstudio.channelRoles.v1`,含 [[M9]] 式 sanitizer、
+  newest-wins)、`ChannelRolePicker.vue` + `ChannelRoleBadge.vue`(抓不到時給下拉;由覆寫或
+  啟發式決定時常駐「轉速：X（自動判定）· 變更」可隨時改,canonical 命中不顯示)。
+  `inferDrivetrainKind` 三頻道改走 resolver;`useLaps`/`useSessionMerge` 刻意不動(避免
+  啟發式改變圈次判定與跨檔對齊語意)。**B125 紅線已證明**:golden fixture 對真
+  `super2.loga` 斷言與 legacy resolver 逐字相同,既有格式零變動。真檔三份複驗:
+  lihpao `.vbo` rpm→`EngineRPM_rpm`、gear→`GearPRND`;自家 `.rcz` rpm→`rc_rpm`;
+  RPM 藏在 `rc_digital_1` 的舊 `.rcz` 維持 null(名稱無訊號時不亂猜——正是需要手動指定的
+  情境)。typecheck 乾淨 · **2514/2514 綠**(211 檔) · lint 0 error · build PWA 29 entries。
+  ⚠️ **尚未經裝置驗證**。
 
 - [ ] **F8**(design-first,user 2026-08-21 拍板要做)MT 齒比計算機:餵入引擎特性後**建議檔位與齒比**。
   現況:MT 模式是**純幾何計算機**——輸入只有 `gearRatios / primaryReduction / finalDrive /
