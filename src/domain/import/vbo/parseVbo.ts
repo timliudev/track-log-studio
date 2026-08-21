@@ -9,6 +9,13 @@
  * rows). The 7 fixed GPS base columns are `sats time lat long velocity heading
  * height`; remaining columns become telemetry channels.
  *
+ * Two more sections (B135, RaceChrono-exported VBOs / the `u6can` converter)
+ * feed `LogMeta` rather than channels: `[session data]`'s `name <value>` line
+ * → `meta.sessionName`, and `[laptiming]`'s `Start <lonA> <latA> <lonB> <latB>
+ * [¬ label]` line → `meta.startFinishLine` (see `parseLaptimingStartLine` for
+ * the unit conversion, same convention as the `long` column below). Other
+ * `[laptiming]` lines (e.g. `Split ...` sector splits) are ignored.
+ *
  * Coordinate inversion mirrors the exporter exactly so a round-trip is faithful:
  *   exporter wrote `lat * 60`  → importer reads  `GPS_Lat = lat_minutes / 60`
  *   exporter wrote `lon * -60` → importer reads  `GPS_Lon = -long_minutes / 60`
@@ -55,6 +62,10 @@ interface Sections {
   /** The "File created on DD/MM/YYYY at HH:MM:SS" preamble line, if present. */
   createdLine: string | null
   comments: string[]
+  /** Raw lines of the `[session data]` section (e.g. `name LihPao Full`), if present. */
+  sessionData: string[]
+  /** Raw lines of the `[laptiming]` section (e.g. the `Start ...` line), if present. */
+  laptiming: string[]
 }
 
 /** Split the raw text into VBO sections. Lines are CR/LF tolerant. */
@@ -67,6 +78,8 @@ function splitSections(text: string): Sections {
     dataLines: [],
     createdLine: null,
     comments: [],
+    sessionData: [],
+    laptiming: [],
   }
   let section = 'preamble'
   for (const raw of lines) {
@@ -104,6 +117,12 @@ function splitSections(text: string): Sections {
       case '[data]':
         if (trimmed) out.dataLines.push(trimmed)
         break
+      case '[session data]':
+        if (trimmed) out.sessionData.push(trimmed)
+        break
+      case '[laptiming]':
+        if (trimmed) out.laptiming.push(trimmed)
+        break
       default:
         break
     }
@@ -131,6 +150,55 @@ function parseCreatedDate(line: string | null): Date | null {
 }
 
 /**
+ * Parse the `[session data]` section's `name <value>` line (B135, RaceChrono /
+ * `u6can`-exported VBOs), e.g. `name LihPao Full`. Case-insensitive on the
+ * `name` token; returns undefined when absent, empty, or malformed.
+ */
+function parseSessionName(lines: string[]): string | undefined {
+  for (const line of lines) {
+    const m = line.match(/^name\s+(.+)$/i)
+    if (m) {
+      const value = m[1].trim()
+      if (value) return value
+    }
+  }
+  return undefined
+}
+
+/**
+ * Parse the `[laptiming]` section's `Start` line (B135) — the start/finish
+ * line as two points, whitespace-separated numbers in the order
+ * `lonA latA lonB latB` (VBO minute units, longitude positive WEST — same
+ * convention as the `long` data column), with an optional `¬ <label>` tail
+ * that is ignored. Other lines in the section (e.g. `Split ...` sector
+ * splits) are ignored gracefully. Returns undefined when the section is
+ * absent, has no `Start` line, or the line is malformed/non-finite.
+ */
+function parseLaptimingStartLine(
+  lines: string[],
+): { a: { lat: number; lon: number }; b: { lat: number; lon: number } } | undefined {
+  for (const line of lines) {
+    if (!/^start\b/i.test(line)) continue
+    const rest = line.replace(/^start\s*/i, '')
+    const tokens = rest.split(/\s+/).filter(Boolean)
+    const nums: number[] = []
+    for (const tok of tokens) {
+      if (nums.length >= 4) break
+      const v = Number(tok)
+      if (!Number.isFinite(v)) break // hit the "¬ label" tail (or garbage) early
+      nums.push(v)
+    }
+    if (nums.length < 4) continue
+    const [lonA, latA, lonB, latB] = nums
+    const a = { lat: latA / 60, lon: -lonA / 60 }
+    const b = { lat: latB / 60, lon: -lonB / 60 }
+    if (![a.lat, a.lon, b.lat, b.lon].every(Number.isFinite)) continue
+    return { a, b }
+  }
+  return undefined
+}
+
+/**
  * Decode an already-parsed VBO `time` value (HHMMSS.sss, UTC time-of-day) into
  * its hours, minutes, seconds and milliseconds parts. Returns null for a
  * non-finite (NaN) cell.
@@ -152,7 +220,8 @@ export function parseVbo(text: string, maxTextChars: number = MAX_VBO_TEXT_CHARS
       `VBO: refusing a ${text.length.toLocaleString()}-character file (limit ${maxTextChars.toLocaleString()})`,
     )
   }
-  const { header, units, columns, dataLines, createdLine, comments } = splitSections(text)
+  const { header, units, columns, dataLines, createdLine, comments, sessionData, laptiming } =
+    splitSections(text)
 
   if (columns.length === 0) {
     throw new Error('VBO: missing [column names] section')
@@ -291,6 +360,8 @@ export function parseVbo(text: string, maxTextChars: number = MAX_VBO_TEXT_CHARS
     createdDate: parseCreatedDate(createdLine),
     headerInfo,
     exportMetadata,
+    sessionName: parseSessionName(sessionData),
+    startFinishLine: parseLaptimingStartLine(laptiming),
   }
   return new LogSession(channels, meta)
 }

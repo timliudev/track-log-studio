@@ -622,6 +622,37 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   **待辦**:UI 接線(引擎特性輸入欄位、建議齒比表、三種目標切換、與已載入 log 的疊圖),
   必須排在 [[B134]] 之後(已滿足)。
 
+## 汽車記錄實測 — VBO `[laptiming]`/`[session data]` 沒吃 (B135–B136)
+> 2026-08-21 實測**第一份汽車 log** `lihpao_20260816_ct_full.vbo`(外部 `u6can` 工具把
+> Luxgen U6 CAN 併進 RaceChrono VBO,63 頻道;同場另有 `.rcz` re-export、與 2025-08-17
+> 機車 `.rcz` 同賽道 LihPao Full 可互比)。除了完整重現 [[B134]] 的三個角色缺口
+> (`EngineRPM_rpm`/`VehicleSpeed_kmh`/`GearPRND` 全認不得)之外,再挖出以下兩條。
+
+- [x] **B135** `parseVbo` 完全忽略 `[session data]`(`name LihPao Full`)與 `[laptiming]`
+  (`Start   -7241.186772 +1459.114540 -7241.175315 +1459.126888 ¬ Start/Finish`)兩個區段
+  (grep 全 codebase 零處理)。後果:①`meta.name` 空;②起終點線只能靠 `useLaps` 的
+  `defaultLine()` 自動種在第一個有效 fix(= paddock)→ **實測整場 0 圈**(`detectLapsByLine`),
+  而同場 `.rcz` re-export 靠 `IR_LapNumber` 有正確 4 圈(300.4/166.1/150.6/151.0s)——
+  帶 `[laptiming]` 的 VBO 其實自己就宣告了正確的線,白白丟掉,per-lap 比較整個廢掉。
+  修法:`parseVbo` 解析兩區段(座標為 VBO 分制、**經度西正**:lat=+min/60、lon=−min/60;
+  該行分隔符為 U+00AC)存進 `LogMeta` optional 欄位;`useLaps` 種線優先序改為
+  「使用者已存的線 > meta 內建線 > defaultLine」。驗收:真檔套線後應得上述 4 圈圈速。
+  後續(不在本條):自家 `VboExporter` 匯出時也回寫 `[laptiming]`,讓 round-trip 不掉線。
+  **已落地**:`LogMeta` 加 optional `sessionName`/`startFinishLine`(純新增,他 importer 不動);
+  `parseVbo` 解析兩區段(容錯:缺段/壞行→undefined、忽略 `Split` 行);`useLaps` 兩處種線點
+  改為 `inferLapLineFromChannel > metaLine > defaultLine`(使用者存線經 `useCircuitPersistence`
+  非同步回灌、本就無條件蓋過種線,已追碼確認不需改)。新增 5 測試;真檔複驗 0 圈 → **4 圈
+  300.399/166.120/150.600/151.041s**(與 RaceChrono 自家偵測一致);本分支全套 2463/2463 綠、
+  typecheck/lint/build 過。UI 目視驗證未做(自動化環境 Browser pane 無法 compositing,Vue
+  Transition 卡 rAF,屬環境限制),待真機。 — 本 session 分支 `6250b9d`/`605af87`(hash 待上
+  origin 後確認,tracker 規則:local hash 可能變動)
+- [ ] **B136**(待拍板)VBO 沒有 `[channel units]` 區段時(Circuit Tools flavour 刻意不寫,
+  單位嵌在欄名:`EngineRPM_rpm`/`CoolantTemp_degC`/`YawRate_degps`…),全部頻道單位空白。
+  可在 importer 加「欄名單位後綴」啟發式(`_rpm`/`_kmh`/`_degC`/`_kPa`/`_pct`/`_deg`/
+  `_degps`/`_g`/`_uT`/`_km`)拆出單位。兩個子選項:(a) 只填 `unit`、名稱保留尾巴(安全,
+  但名稱冗長);(b) 同時把名稱去尾(乾淨,但會動到 [[B134]] 使用者覆寫表的鍵與既有欄名
+  假設,誤拆風險:`_g` 可能撞真名)。屬顯示品質改善、非阻斷,**待 user 拍板要不要做與做哪款**。
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `83fc12a`
