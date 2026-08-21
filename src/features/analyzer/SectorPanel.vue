@@ -99,7 +99,19 @@ const hasOptimalData = computed(
            even when the card is resized short enough that the gate list would
            otherwise scroll it out of view — see CardFillScroll's module doc:
            only the default slot scrolls, `#header` always renders at its
-           natural height. -->
+           natural height (now capped at 50% of the card via CardFillScroll's
+           own B133 fix — see that component's doc).
+
+           B133 — `#header` has no height ceiling of its own even after that
+           cap, so a track with a huge number of sector gates (one `<li>` per
+           sector in `.optimal-sectors` below) can still grow this block large
+           enough to eat most/all of the shared 50% budget, squeezing the
+           auto-detect/add-gate controls above it and the gate list in the
+           scrollable content pane below. Local mitigation: `.optimal-sectors`
+           itself is height-capped and scrolls internally (see its own rule)
+           so it can never grow past a few rows tall, keeping the rest of the
+           header — and the content pane's share of the card — usable
+           regardless of gate count. -->
       <div v-if="gates.length > 0" class="optimal">
         <div class="optimal-title">{{ t('analyzer.optimalLapTitle') }}</div>
         <template v-if="hasOptimalData && optimalLap">
@@ -166,6 +178,17 @@ const hasOptimalData = computed(
   gap: 4px 14px;
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+  /* B133 — a large-circuit auto-detect can produce ~100+ gates (one `<li>`
+     per sector here), and this list sits in CardFillScroll's `#header` slot
+     (see the module-doc note above), which is otherwise unbounded/
+     non-scrolling. Without its own cap the list's natural height swallows
+     the card, pushing the gate list/remove buttons in the content pane below
+     out of view entirely. `min(30vh, 160px)` keeps it usable both on a small
+     dashboard tile (30vh can be tiny) and a tall/maximized card (160px caps
+     it from dominating even then); `overflow-y: auto` keeps every sector's
+     best time reachable via internal scroll instead of being clipped. */
+  max-height: min(30vh, 160px);
+  overflow-y: auto;
 }
 .optimal-empty {
   color: var(--color-text-muted);
