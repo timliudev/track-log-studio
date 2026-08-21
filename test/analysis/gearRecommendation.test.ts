@@ -18,6 +18,7 @@ import {
   diagnoseTopSpeedGearing,
   optimalShiftRpm,
   recommendForMeasuredSpeeds,
+  simulateAcceleration,
   type EngineCurveProfile,
   type EngineTwoPointProfile,
   type UsableBand,
@@ -785,5 +786,182 @@ describe('recommendForMeasuredSpeeds', () => {
   it('returns null when there are no valid speed samples', () => {
     expect(recommendForMeasuredSpeeds({ speedSamplesKmh: [], spec, band })).toBeNull()
     expect(recommendForMeasuredSpeeds({ speedSamplesKmh: [0, -5, NaN], spec, band })).toBeNull()
+  })
+})
+
+// ── simulateAcceleration ─────────────────────────────────────────────────
+
+describe('simulateAcceleration', () => {
+  // Same wheelRpm==speedKmh trick as recommendForMeasuredSpeeds' tests.
+  const CIRCUMFERENCE_MM = 1_000_000 / 60
+  // Constant-torque curve (50Nm everywhere, clamped) removes interpolation
+  // from the picture for the hand-verified single-step test.
+  const flatProfile = createEngineCurveProfile(
+    [
+      { rpm: 1000, torqueNm: 50 },
+      { rpm: 5000, torqueNm: 50 },
+      { rpm: 20000, torqueNm: 50 },
+    ],
+    20000,
+  ) as EngineCurveProfile
+  const singleGearSpec: MtDrivetrainSpec = {
+    primaryReduction: 1,
+    gearRatios: [{ ratio: 1 }],
+    finalDrive: { ratio: 1 },
+    wheelCircumferenceMm: CIRCUMFERENCE_MM,
+    redlineRpm: 20000,
+  }
+
+  it('hand-verified first integration step (drivetrain-force-only)', () => {
+    const massKg = 180
+    const result = simulateAcceleration({
+      curveProfile: flatProfile,
+      spec: singleGearSpec,
+      massKg,
+      maxSpeedKmh: 5,
+    })
+    expect(result).not.toBeNull()
+    expect(result!.isRelativeOnly).toBe(true)
+    expect(result!.points[0]).toEqual({ speedKmh: 0, timeS: 0, gear: 1, engineRpm: 0 })
+
+    // Independent hand computation of the documented per-step formula for
+    // the FIRST step (speed 0 -> 1 km/h, midpoint 0.5 km/h):
+    const midSpeedKmh = 0.5
+    const wheelRpm = midSpeedKmh // wheelRpm==speedKmh by construction (see CIRCUMFERENCE_MM)
+    const reduction = 1 // primary(1) * gearRatio(1) * final(1)
+    const engineRpm = wheelRpm * reduction
+    const driveEfficiency = 0.9 // documented default
+    const wheelTorqueNm = 50 * reduction * driveEfficiency
+    const wheelRadiusM = CIRCUMFERENCE_MM / 2000 / Math.PI
+    const wheelForceN = wheelTorqueNm / wheelRadiusM
+    const netForceN = wheelForceN // no aero/rolling resistance supplied
+    const dSpeedMs = ((1 - 0) * 1000) / 3600
+    const expectedDt = (massKg * dSpeedMs) / netForceN
+
+    const p1 = result!.points[1]
+    expect(p1.speedKmh).toBeCloseTo(1, 9)
+    expect(p1.gear).toBe(1)
+    expect(p1.engineRpm).toBeCloseTo(engineRpm, 9)
+    expect(p1.timeS).toBeCloseTo(expectedDt, 6)
+  })
+
+  it('speed and time are monotonically non-decreasing across points', () => {
+    const result = simulateAcceleration({ curveProfile: flatProfile, spec: singleGearSpec, massKg: 180, maxSpeedKmh: 50 })!
+    for (let i = 1; i < result.points.length; i++) {
+      expect(result.points[i].speedKmh).toBeGreaterThan(result.points[i - 1].speedKmh)
+      expect(result.points[i].timeS).toBeGreaterThan(result.points[i - 1].timeS)
+    }
+    expect(result.totalTimeS).toBeCloseTo(result.points[result.points.length - 1].timeS, 9)
+  })
+
+  it('never downshifts: gear is non-decreasing across points', () => {
+    const risingProfile = createEngineCurveProfile(
+      [
+        { rpm: 3000, torqueNm: 40 },
+        { rpm: 6000, torqueNm: 70 },
+        { rpm: 9000, torqueNm: 55 },
+      ],
+      9000,
+    ) as EngineCurveProfile
+    const multiGearSpec: MtDrivetrainSpec = {
+      primaryReduction: 2,
+      gearRatios: [{ ratio: 3 }, { ratio: 2 }, { ratio: 1.3 }],
+      finalDrive: { ratio: 1 },
+      wheelCircumferenceMm: 1900,
+      redlineRpm: 9000,
+    }
+    const result = simulateAcceleration({ curveProfile: risingProfile, spec: multiGearSpec, massKg: 180 })!
+    let sawUpshift = false
+    for (let i = 1; i < result.points.length; i++) {
+      expect(result.points[i].gear).toBeGreaterThanOrEqual(result.points[i - 1].gear)
+      if (result.points[i].gear > result.points[i - 1].gear) sawUpshift = true
+    }
+    expect(sawUpshift).toBe(true) // sanity: the scenario actually exercises a shift
+  })
+
+  it('isRelativeOnly is false once both aero and rollingResistance are supplied', () => {
+    const withResistance = simulateAcceleration({
+      curveProfile: flatProfile,
+      spec: singleGearSpec,
+      massKg: 180,
+      maxSpeedKmh: 5,
+      aero: { dragCoefficientCd: 0.6, frontalAreaM2: 0.5 },
+      rollingResistance: { coefficient: 0.015 },
+    })!
+    expect(withResistance.isRelativeOnly).toBe(false)
+  })
+
+  it('adding resistance increases the time to reach a common speed vs. drivetrain-force-only', () => {
+    // A realistic wheel circumference here (unlike singleGearSpec's
+    // deliberately huge, precision-friendly wheel above) so wheel force and
+    // resistance forces are in comparable, physically sane magnitudes.
+    const realisticSpec: MtDrivetrainSpec = {
+      primaryReduction: 1,
+      gearRatios: [{ ratio: 3 }],
+      finalDrive: { ratio: 1 },
+      wheelCircumferenceMm: 1900,
+      redlineRpm: 20000,
+    }
+    const target = 60
+    const bare = simulateAcceleration({ curveProfile: flatProfile, spec: realisticSpec, massKg: 180, maxSpeedKmh: target })!
+    const resisted = simulateAcceleration({
+      curveProfile: flatProfile,
+      spec: realisticSpec,
+      massKg: 180,
+      maxSpeedKmh: target,
+      aero: { dragCoefficientCd: 0.6, frontalAreaM2: 0.5 },
+      rollingResistance: { coefficient: 0.015 },
+    })!
+    expect(bare.points[bare.points.length - 1].speedKmh).toBeCloseTo(target, 6)
+    expect(resisted.points[resisted.points.length - 1].speedKmh).toBeCloseTo(target, 6)
+    expect(resisted.totalTimeS).toBeGreaterThan(bare.totalTimeS)
+  })
+
+  it('reports a stall (NaN totalTimeS, single point) when net force is non-positive from a standstill', () => {
+    // Weak torque + enormous, deliberately unrealistic rolling resistance ->
+    // resistance exceeds wheel force even at a near-standstill midpoint speed.
+    const weakProfile = createEngineCurveProfile(
+      [
+        { rpm: 1000, torqueNm: 1 },
+        { rpm: 5000, torqueNm: 1 },
+        { rpm: 9000, torqueNm: 1 },
+      ],
+      9000,
+    ) as EngineCurveProfile
+    const result = simulateAcceleration({
+      curveProfile: weakProfile,
+      spec: singleGearSpec,
+      massKg: 1000,
+      rollingResistance: { coefficient: 5 }, // absurdly high on purpose
+    })
+    expect(result).not.toBeNull()
+    expect(result!.points).toHaveLength(1)
+    expect(result!.totalTimeS).toBeNaN()
+  })
+
+  it('rejects non-positive massKg', () => {
+    expect(simulateAcceleration({ curveProfile: flatProfile, spec: singleGearSpec, massKg: 0 })).toBeNull()
+    expect(simulateAcceleration({ curveProfile: flatProfile, spec: singleGearSpec, massKg: -1 })).toBeNull()
+  })
+
+  it('rejects driveEfficiency outside (0,1]', () => {
+    expect(simulateAcceleration({ curveProfile: flatProfile, spec: singleGearSpec, massKg: 180, driveEfficiency: 0 })).toBeNull()
+    expect(simulateAcceleration({ curveProfile: flatProfile, spec: singleGearSpec, massKg: 180, driveEfficiency: 1.2 })).toBeNull()
+    expect(simulateAcceleration({ curveProfile: flatProfile, spec: singleGearSpec, massKg: 180, driveEfficiency: 1 })).not.toBeNull()
+  })
+
+  it('rejects a spec with no valid gears', () => {
+    const badSpec: MtDrivetrainSpec = { ...singleGearSpec, gearRatios: [] }
+    expect(simulateAcceleration({ curveProfile: flatProfile, spec: badSpec, massKg: 180 })).toBeNull()
+  })
+
+  it('the two-point profile is REJECTED by the type system', () => {
+    const twoPoint: EngineTwoPointProfile = createEngineTwoPointProfile({
+      peakTorqueRpm: 6000,
+      peakPowerRpm: 8500,
+      redlineRpm: 12000,
+    })!
+    // @ts-expect-error simulateAcceleration requires EngineCurveProfile, not EngineTwoPointProfile.
+    simulateAcceleration({ curveProfile: twoPoint, spec: singleGearSpec, massKg: 180 })
   })
 })

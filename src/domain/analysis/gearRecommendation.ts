@@ -921,3 +921,185 @@ export function recommendForMeasuredSpeeds(input: MeasuredSpeedsInput): Measured
     suggestedBandOccupancyFrac: bestScore,
   }
 }
+
+// ── Stage 6 (curve-only): relative acceleration comparison ──────────────
+
+/** Aerodynamic drag parameters for {@link simulateAcceleration}. */
+export interface AeroParams {
+  /** Coefficient of drag (dimensionless), e.g. ~0.5-0.9 for an upright
+   *  street bike + rider. */
+  dragCoefficientCd: number
+  /** Frontal area, m^2. */
+  frontalAreaM2: number
+  /** Air density, kg/m^3. Default 1.225 (sea level, 15C — ISA standard). */
+  airDensityKgM3?: number
+}
+
+/** Rolling resistance parameters for {@link simulateAcceleration}. */
+export interface RollingResistanceParams {
+  /** Rolling resistance coefficient Crr (dimensionless), e.g. ~0.012-0.02
+   *  for street motorcycle tyres on tarmac. Force = Crr * mass * g. */
+  coefficient: number
+}
+
+const DEFAULT_AIR_DENSITY_KG_M3 = 1.225
+/** Default drivetrain mechanical efficiency (chain + gearbox losses) — a
+ *  commonly cited ballpark for chain-drive motorcycles, NOT a measurement.
+ *  Like the missing aero/rolling terms, this is a relative-comparison
+ *  assumption; see {@link AccelerationSimResult.isRelativeOnly}. */
+const DEFAULT_DRIVE_EFFICIENCY = 0.9
+const STANDARD_GRAVITY_M_S2 = 9.80665
+
+/** Input for {@link simulateAcceleration}. */
+export interface AccelerationSimInput {
+  /** Requires the actual curve (torque shape) — see module header's
+   *  honesty constraint; a two-point profile cannot drive a force-balance
+   *  integration. */
+  curveProfile: EngineCurveProfile
+  spec: MtDrivetrainSpec
+  massKg: number
+  /** Omit to run drivetrain-force-only (see `isRelativeOnly` on the result). */
+  aero?: AeroParams
+  /** Omit to run drivetrain-force-only (see `isRelativeOnly` on the result). */
+  rollingResistance?: RollingResistanceParams
+  /** Drivetrain mechanical efficiency, 0 < x <= 1. Default 0.9 (see {@link
+   *  DEFAULT_DRIVE_EFFICIENCY}'s doc). */
+  driveEfficiency?: number
+  /** Integration step size, km/h. Default 1 — force is evaluated at each
+   *  step's midpoint speed (a simple midpoint/RK1-ish quasi-static scheme,
+   *  not a full ODE solver), which is plenty accurate at 1km/h resolution
+   *  for a relative gear-set comparison. Smaller = more accurate + slower. */
+  speedStepKmh?: number
+  /** Stop once this speed (km/h) is reached. Defaults to the spec's own
+   *  top-gear speed at redline (via `computeMtGearTable`). */
+  maxSpeedKmh?: number
+}
+
+/** One integration step's output point. */
+export interface AccelerationSimPoint {
+  speedKmh: number
+  timeS: number
+  /** 1-based engaged gear at this point. */
+  gear: number
+  engineRpm: number
+}
+
+/** Result of {@link simulateAcceleration}. */
+export interface AccelerationSimResult {
+  /**
+   * `true` when NEITHER `aero` NOR `rollingResistance` was supplied — the
+   * integration then includes ONLY drivetrain force (no resistance at all),
+   * so the resulting times are NOT a real-world 0-100 figure, only useful
+   * for comparing two gear sets/specs simulated the SAME way against each
+   * other. Encoded as a flag (rather than just a doc comment) specifically
+   * so a UI consuming this result is forced to branch on it before
+   * presenting a number to the user — see the F8 spec's explicit
+   * requirement that this never be presented as an absolute time.
+   *
+   * Even with both supplied, this remains a SIMPLIFIED model: it ignores
+   * rotational inertia (wheels, crank, gearbox internals all take real
+   * torque to spin up, not just to translate the vehicle) and treats
+   * torque/force as a smooth quasi-static function of speed rather than
+   * simulating clutch engagement, wheelspin, or shift-time gaps. It is a
+   * reasonable RELATIVE tool, never an absolute-performance prediction —
+   * this doc-level caveat applies regardless of the flag's value.
+   */
+  isRelativeOnly: boolean
+  points: AccelerationSimPoint[]
+  /** Time (s) to reach the last point in `points`. NaN if the vehicle could
+   *  not get moving at all from a standstill (net force <= 0 immediately). */
+  totalTimeS: number
+}
+
+/**
+ * Integrate wheel force over speed to compare gear sets' acceleration —
+ * curve-only (see module header). At each speed step, wheel force comes
+ * from the engine torque curve (`torqueAt`) through the engaged gear's
+ * total reduction and wheel radius, minus aero drag and rolling resistance
+ * (when supplied — see {@link AccelerationSimResult.isRelativeOnly}).
+ * `dt = mass * dv / F_net` per step (a simple explicit quasi-static
+ * integration, force evaluated at the step's midpoint speed).
+ *
+ * Gear selection: starts in 1st gear; upshifts to the next gear whenever
+ * the current gear's engine rpm at the step's midpoint speed would exceed
+ * `curveProfile.redlineRpm` and a taller gear exists (never downshifts —
+ * this simulates a straight-line acceleration run, not a lap). The
+ * simulation stops when: `maxSpeedKmh` is reached; the top gear is
+ * exhausted (redline reached with no taller gear to shift into, so the
+ * next step would need `torqueAt` to extrapolate past redline, which it
+ * correctly refuses to do — the vehicle is modelled as topped out at its
+ * last valid point instead); or net force drops to zero or below (can't
+ * accelerate further — the vehicle has hit its terminal speed for the
+ * supplied resistance, or, if this happens immediately from a standstill,
+ * `totalTimeS` is NaN to signal a stall rather than a fabricated time).
+ *
+ * Returns `null` for: a non-curve `curveProfile` (defensive — type system
+ * should already prevent this); non-positive `massKg`; `driveEfficiency`
+ * outside `(0, 1]`; non-positive `speedStepKmh`; a spec with no valid
+ * gears; or a non-positive `wheelCircumferenceMm`/resolved `maxSpeedKmh`.
+ */
+export function simulateAcceleration(input: AccelerationSimInput): AccelerationSimResult | null {
+  const { curveProfile, spec, massKg, aero, rollingResistance } = input
+  if (curveProfile.kind !== 'curve') return null // defensive; the type system should already prevent this
+  if (!(massKg > 0)) return null
+  const driveEfficiency = input.driveEfficiency ?? DEFAULT_DRIVE_EFFICIENCY
+  if (!(driveEfficiency > 0) || driveEfficiency > 1) return null
+  const speedStepKmh = input.speedStepKmh ?? 1
+  if (!(speedStepKmh > 0)) return null
+
+  const table = computeMtGearTable(spec)
+  if (table.length === 0) return null
+  const maxSpeedKmh = input.maxSpeedKmh ?? table[table.length - 1].speedAtRedlineKmh
+  if (!(maxSpeedKmh > 0)) return null
+
+  const wheelRadiusM = spec.wheelCircumferenceMm / 2000 / Math.PI // circumference(mm)/1000 = m; /(2*pi) = radius
+  if (!(wheelRadiusM > 0)) return null
+
+  const airDensity = aero?.airDensityKgM3 ?? DEFAULT_AIR_DENSITY_KG_M3
+  const isRelativeOnly = !aero && !rollingResistance
+
+  const points: AccelerationSimPoint[] = [{ speedKmh: 0, timeS: 0, gear: 1, engineRpm: 0 }]
+  let gearIdx = 0
+  let timeS = 0
+  let speedKmh = 0
+  let stalledAtStandstill = false
+
+  while (speedKmh < maxSpeedKmh && gearIdx < table.length) {
+    const nextSpeedKmh = Math.min(speedKmh + speedStepKmh, maxSpeedKmh)
+    const midSpeedKmh = (speedKmh + nextSpeedKmh) / 2
+    const wheelRpm = speedKmhToWheelRpm(midSpeedKmh, spec.wheelCircumferenceMm)
+
+    let reduction = table[gearIdx].totalReduction
+    let engineRpm = wheelRpm * reduction
+    while (engineRpm > curveProfile.redlineRpm && gearIdx < table.length - 1) {
+      gearIdx++
+      reduction = table[gearIdx].totalReduction
+      engineRpm = wheelRpm * reduction
+    }
+
+    const torqueNm = torqueAt(curveProfile, Math.min(engineRpm, curveProfile.redlineRpm))
+    const wheelTorqueNm = torqueNm * reduction * driveEfficiency
+    const wheelForceN = wheelTorqueNm / wheelRadiusM
+
+    const speedMs = (midSpeedKmh * 1000) / 3600
+    const dragForceN = aero ? 0.5 * airDensity * aero.dragCoefficientCd * aero.frontalAreaM2 * speedMs * speedMs : 0
+    const rollForceN = rollingResistance ? rollingResistance.coefficient * massKg * STANDARD_GRAVITY_M_S2 : 0
+    const netForceN = wheelForceN - dragForceN - rollForceN
+
+    if (!(netForceN > 0)) {
+      if (points.length === 1) stalledAtStandstill = true
+      break
+    }
+
+    const dSpeedMs = ((nextSpeedKmh - speedKmh) * 1000) / 3600
+    timeS += (massKg * dSpeedMs) / netForceN
+    speedKmh = nextSpeedKmh
+    points.push({ speedKmh, timeS, gear: gearIdx + 1, engineRpm })
+  }
+
+  return {
+    isRelativeOnly,
+    points,
+    totalTimeS: stalledAtStandstill ? NaN : points[points.length - 1].timeS,
+  }
+}
