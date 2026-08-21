@@ -434,6 +434,32 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   a9 恆 251、a10 17–100、a11 0–255、a12 8/9、a13–15 無資料;d1 = RPM(固定)、d2 0–100
   (n/255×100 階,疑似 TPS)。UX 待拍板。
 
+## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
+> B132 尚未修(演算法設計待拍板,詳見 develop 分支同一標題下的完整條目);本 worktree 只處理
+> B133 這條 UI 併發症,故此處只列 B133,B132 的完整內容以 develop 為準,合併時請以 develop
+> 版本為準保留。
+- [x] **B133** ([[B132]] 的 UI 併發症,但**根因是通用缺陷**)Sector 卡片在閘門數量爆量時,
+  「理論最佳圈」的各段時間清單會撐滿整張卡片,把下方的閘門清單/移除按鈕整個擠出可視範圍。
+  根因:`SectorPanel.vue` 的 `.optimal` 區塊(含 `<ul class="optimal-sectors">`,**每個 sector
+  一個 `<li>`**)放在 `CardFillScroll` 的 **`#header` slot** 裡——那是 B47 刻意的決定(註解寫明
+  「Moved into the fixed `#header` … so it stays visible even when the card is resized short」),
+  當時假設 sector 只有個位數。而 `CardFillScroll` 的 `.card-fill-scroll__header` 是
+  `flex: 0 0 auto` **無高度上限**,`.card-fill-scroll__content` 則是 `flex: 1 1 auto;
+  min-height: 0` ——header 一長,content 就被壓縮到 0 高度、整個消失。**這是 `CardFillScroll`
+  的通用缺陷**:任何會無限成長的 header 都能餓死 content pane,不只 sector 卡片。**兩層都修
+  了**:(a) 局部——`SectorPanel.vue` 的 `.optimal-sectors` 加 `max-height: min(30vh, 160px)` +
+  `overflow-y: auto`,B47 原意(卡片縮短時理論最佳圈仍留在可視的 `#header` 內)不變,只是限高
+  +可內部捲動;(b) 通用加固——`CardFillScroll.vue` 的 `.card-fill-scroll__header` 加
+  `max-height: 50%` + `overflow-y: auto`,保證 content pane 永遠拿得到至少一半高度。已 grep
+  `CardFillScroll` 的全部既有使用者(`AccelTestPanel`、`CurrentValuesPanel`)確認:兩者的
+  header 都是固定控制項集合(切換鈕/欄位/單行提示),不是隨資料筆數增長的清單,實務上不會
+  接近 50% 上限,故此加固不影響既有版面。因 jsdom/happy-dom 在本專案測試設定下不跑真實
+  layout(`vite.config.ts` 的 `test` 區塊無 `css: true`),新增測試分兩層:CSS 原始碼文字斷言
+  (`test/lint/cardFillScrollHeaderCap.test.ts`,比照既有 `mapOverlayButtonSizing.test.ts` 慣例)
+  + `SectorPanel.test.ts` 用 142 個閘門(對應麗寶真檔實測數字)掛載、斷言 `.gate-list` 仍完整
+  渲染 142 個 `<li>`/移除按鈕於 DOM 中。2448/2448 綠、typecheck/lint/build 皆過。
+  — `99f87bc`/`e3cc1aa`
+
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
 - [x] **M2** Dead `useTrackOverlay` candidates/toggle/clear + `trackOverlay*` i18n removed (verified zero references); the still-live `overlayTracks` path (FileBar 加入分析) kept. — `83fc12a`
