@@ -66,10 +66,10 @@ export interface DetectCornersOptions {
   thetaMinDeg?: number
   /**
    * Curvature path only (B132). Distance-domain smoothing window for the
-   * turn-rate signal, as a fraction of the reference lap's length — e.g. 0.005
-   * means the smoothing window is 0.5% of the lap. Scales the same physical
+   * turn-rate signal, as a fraction of the reference lap's length — e.g. 0.01
+   * means the smoothing window is 1% of the lap. Scales the same physical
    * smoothing extent to any track size, unlike the old fixed-sample-count
-   * `smoothHalfWidth`. Default 0.005.
+   * `smoothHalfWidth`. Default 0.01.
    */
   sigmaFraction?: number
   /**
