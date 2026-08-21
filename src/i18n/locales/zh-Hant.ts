@@ -483,6 +483,15 @@ export default {
       pickerLabel: '這是哪個頻道？',
       auto: '自動',
       applied: '已使用「{channel}」——已記住，未來同來源的記錄會自動套用。',
+      // B134 defect 2 —「猜測(override 或 heuristic)才需要的常駐修正控制」
+      // （ChannelRoleBadge.vue），本廠格式走 canonical 判定時不顯示，避免雜訊。
+      change: '變更',
+      sourceOverride: '手動指定',
+      sourceHeuristic: '自動判定',
+      summary: '{role}：{channel}（{source}）',
+      roleRpm: '轉速',
+      roleSpeed: '速度',
+      roleGear: '檔位',
     },
     gear: {
       heading: '變速齒比計算器',

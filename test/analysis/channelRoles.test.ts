@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   resolveRoleChannel,
+  resolveRoleChannelDetailed,
   heuristicRoleChannel,
   canonicalGearChannel,
   overriddenChannelForRole,
@@ -62,6 +63,34 @@ describe('resolveRoleChannel — resolution order', () => {
     const s = session([channel('RPM')])
     const overrides: ChannelRoleOverrides = { GPS_Speed: 'speed' }
     expect(resolveRoleChannel(s, 'rpm', overrides)).toBe('RPM')
+  })
+})
+
+describe('resolveRoleChannelDetailed — source reporting (B134 defect 2)', () => {
+  it('reports source "canonical" when the canonical step resolves it', () => {
+    const s = session([channel('RPM')])
+    expect(resolveRoleChannelDetailed(s, 'rpm')).toEqual({ name: 'RPM', source: 'canonical' })
+  })
+
+  it('reports source "heuristic" when only the heuristic resolves it', () => {
+    const s = session([channel('EngineRPM_rpm')])
+    expect(resolveRoleChannelDetailed(s, 'rpm')).toEqual({ name: 'EngineRPM_rpm', source: 'heuristic' })
+  })
+
+  it('reports source "override" when an override resolves it, even if canonical/heuristic would also match', () => {
+    const s = session([channel('RPM'), channel('rc_rpm')])
+    const overrides: ChannelRoleOverrides = { rc_rpm: 'rpm' }
+    expect(resolveRoleChannelDetailed(s, 'rpm', overrides)).toEqual({ name: 'rc_rpm', source: 'override' })
+  })
+
+  it('returns null (no source) when nothing resolves', () => {
+    const s = session([channel('CoolantTemp_degC')])
+    expect(resolveRoleChannelDetailed(s, 'rpm')).toBeNull()
+  })
+
+  it('resolveRoleChannel stays a thin name-only wrapper over the detailed result', () => {
+    const s = session([channel('EngineRPM_rpm')])
+    expect(resolveRoleChannel(s, 'rpm')).toBe(resolveRoleChannelDetailed(s, 'rpm')?.name)
   })
 })
 

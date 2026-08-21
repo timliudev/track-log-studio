@@ -46,10 +46,11 @@ import {
   type FinalDriveFormInput,
 } from '@/stores/drivetrainStore'
 import { useChannelRoleStore } from '@/stores/channelRoleStore'
-import { resolveRoleChannel } from '@/domain/analysis/channelRoles'
+import { resolveRoleChannelDetailed, type ChannelRoleSource } from '@/domain/analysis/channelRoles'
 import UPlotChart from '@/components/UPlotChart.vue'
 import GearRatioChart from './GearRatioChart.vue'
 import ChannelRolePicker from './ChannelRolePicker.vue'
+import ChannelRoleBadge from './ChannelRoleBadge.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
@@ -105,15 +106,28 @@ const isMt = computed(() => store.kind === 'mt')
 // `channelRoleStore.overrides` in the dependency list is what makes setting
 // an override reactively re-resolve this (and everything derived from it)
 // with no reload.
-const rpmChannelName = computed(() =>
-  props.session ? resolveRoleChannel(props.session, 'rpm', channelRoleStore.overrides) : null,
+const rpmResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'rpm', channelRoleStore.overrides) : null,
 )
-const speedChannelName = computed(() =>
-  props.session ? resolveRoleChannel(props.session, 'speed', channelRoleStore.overrides) : null,
+const speedResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'speed', channelRoleStore.overrides) : null,
 )
+const rpmChannelName = computed(() => rpmResolution.value?.name ?? null)
+const speedChannelName = computed(() => speedResolution.value?.name ?? null)
 const hasRpmChannel = computed(() => rpmChannelName.value != null)
 const hasSpeedChannel = computed(() => speedChannelName.value != null)
 const channelsAvailable = computed(() => hasRpmChannel.value && hasSpeedChannel.value)
+
+/** B134 defect 2 — a resolution whose source is a GUESS (override or
+ *  heuristic), not our own formats' canonical lookup, needs a persistent
+ *  correction control (`ChannelRoleBadge.vue`) even once it "succeeds" —
+ *  see that component's header comment. `null` means either unresolved (the
+ *  empty-state picker handles that) or resolved canonically (no extra UI). */
+function correctableSource(source: ChannelRoleSource | undefined): 'override' | 'heuristic' | null {
+  return source === 'override' || source === 'heuristic' ? source : null
+}
+const rpmCorrectableSource = computed(() => correctableSource(rpmResolution.value?.source))
+const speedCorrectableSource = computed(() => correctableSource(speedResolution.value?.source))
 
 // ── MT: Layer 1 calculator ───────────────────────────────────────────────
 const mtSpec = computed(() => toMtDrivetrainSpec(store.mt))
@@ -834,6 +848,24 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 
       <!-- Chart: measured RPM/speed scatter + theoretical per-gear lines -->
       <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
+      <!-- B134 defect 2 — independent of the empty-state chain below: shows
+           whenever a role resolved via a GUESS (override/heuristic), so a
+           wrong pick/guess stays correctable even after the chart itself
+           renders. Nothing shown for a 'canonical' resolution. -->
+      <ChannelRoleBadge
+        v-if="props.session && rpmCorrectableSource"
+        :session="props.session"
+        role="rpm"
+        :channel-name="rpmChannelName!"
+        :source="rpmCorrectableSource"
+      />
+      <ChannelRoleBadge
+        v-if="props.session && speedCorrectableSource"
+        :session="props.session"
+        role="speed"
+        :channel-name="speedChannelName!"
+        :source="speedCorrectableSource"
+      />
       <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
       <ChannelRolePicker
         v-else-if="!channelsAvailable && props.session"
@@ -954,6 +986,24 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
       </div>
 
       <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
+      <!-- B134 defect 2 — independent of the empty-state chain below: shows
+           whenever a role resolved via a GUESS (override/heuristic), so a
+           wrong pick/guess stays correctable even after the chart itself
+           renders. Nothing shown for a 'canonical' resolution. -->
+      <ChannelRoleBadge
+        v-if="props.session && rpmCorrectableSource"
+        :session="props.session"
+        role="rpm"
+        :channel-name="rpmChannelName!"
+        :source="rpmCorrectableSource"
+      />
+      <ChannelRoleBadge
+        v-if="props.session && speedCorrectableSource"
+        :session="props.session"
+        role="speed"
+        :channel-name="speedChannelName!"
+        :source="speedCorrectableSource"
+      />
       <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
       <ChannelRolePicker
         v-else-if="!channelsAvailable && props.session"

@@ -10,8 +10,10 @@ import { sweepTotalRollerMass } from '@/domain/analysis/cvtCalibration'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { toCvtForceBalanceInput, toCvtTraceConfig, usesCvtCalibrationFixedReduction, useDrivetrainStore } from '@/stores/drivetrainStore'
 import { useChannelRoleStore } from '@/stores/channelRoleStore'
+import { resolveRoleChannelDetailed, type ChannelRoleSource } from '@/domain/analysis/channelRoles'
 import CvtProfileEditor from './CvtProfileEditor.vue'
 import ChannelRolePicker from './ChannelRolePicker.vue'
+import ChannelRoleBadge from './ChannelRoleBadge.vue'
 
 const props = defineProps<{
   session: LogSession | null
@@ -161,6 +163,23 @@ const geometryErrorRole = computed<'rpm' | 'speed' | null>(() => {
   const error = cvtTrace.value?.geometryError
   return error === 'rpm' || error === 'speed' ? error : null
 })
+
+// B134 defect 2 — independent of whether the CVT trace itself currently
+// succeeds (it might still be blocked on an unrelated geometry field): the
+// underlying rpm/speed channel resolution can still be a GUESS (override or
+// heuristic) that needs to stay correctable. Resolved directly against
+// `props.session`, not derived from `cvtTrace`/`geometryErrorRole` above.
+const rpmResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'rpm', channelRoleStore.overrides) : null,
+)
+const speedResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'speed', channelRoleStore.overrides) : null,
+)
+function correctableSource(source: ChannelRoleSource | undefined): 'override' | 'heuristic' | null {
+  return source === 'override' || source === 'heuristic' ? source : null
+}
+const rpmCorrectableSource = computed(() => correctableSource(rpmResolution.value?.source))
+const speedCorrectableSource = computed(() => correctableSource(speedResolution.value?.source))
 
 const geometryErrorText = computed(() => {
   const error = cvtTrace.value?.geometryError
@@ -332,6 +351,25 @@ const statusLabel = computed(() => {
       <p class="field-note">{{ profile.force.frictionCoefficientMin == null || profile.force.frictionCoefficientMax == null ? t('analyzer.cvt.slipNotAssessed') : t('analyzer.cvt.slipWarningOnly') }}</p>
     </details>
 
+    <!-- B134 defect 2 — independent of geometryErrorRole below: shows
+         whenever rpm/speed resolved via a GUESS (override/heuristic), even
+         if the CVT trace is currently blocked on an unrelated geometry
+         field, so a wrong pick/guess stays correctable. Nothing shown for a
+         'canonical' resolution. -->
+    <ChannelRoleBadge
+      v-if="props.session && rpmCorrectableSource"
+      :session="props.session"
+      role="rpm"
+      :channel-name="rpmResolution!.name"
+      :source="rpmCorrectableSource"
+    />
+    <ChannelRoleBadge
+      v-if="props.session && speedCorrectableSource"
+      :session="props.session"
+      role="speed"
+      :channel-name="speedResolution!.name"
+      :source="speedCorrectableSource"
+    />
     <ChannelRolePicker
       v-if="geometryErrorRole && props.session"
       :session="props.session"

@@ -114,6 +114,21 @@ export const CHANNEL_ROLES: readonly ChannelRole[] = ['rpm', 'speed', 'gear']
  *  without ceremony; small (a handful of entries in practice). */
 export type ChannelRoleOverrides = Readonly<Record<string, ChannelRole>>
 
+/** Which of the three resolution steps actually produced the answer — see
+ *  {@link resolveRoleChannelDetailed}. UI call sites use this (B134 defect 2,
+ *  coordinator review) to decide whether a correction control needs to stay
+ *  visible: `'canonical'` is our own formats' normal path and gets NO extra
+ *  UI (it would just be noise), while `'override'`/`'heuristic'` are both
+ *  "the app guessed, or the user guessed, and either could be wrong" cases
+ *  that must stay correctable — not just visible in the one-shot empty state
+ *  that disappears the moment resolution succeeds. */
+export type ChannelRoleSource = 'override' | 'canonical' | 'heuristic'
+
+export interface ResolvedRoleChannel {
+  name: string
+  source: ChannelRoleSource
+}
+
 const NO_OVERRIDES: ChannelRoleOverrides = {}
 
 // ── Step 2: today's canonical / ALIASES lookups (verbatim, single source) ──
@@ -313,40 +328,60 @@ export function overriddenChannelForRole(
 }
 
 /**
- * Resolve the session's channel for `role`, in strict order:
- * override (if the named channel exists in THIS session) → canonical
- * lookup (today's exact behaviour) → name/unit heuristic. Returns null if
- * none of the three steps find anything — callers should keep showing the
- * existing "缺少 X 頻道" empty state (now paired with `ChannelRolePicker.vue`
- * so the user can supply an override on the spot) rather than guessing.
+ * Resolve the session's channel for `role`, AND report which step produced
+ * it, in strict order: override (if the named channel exists in THIS
+ * session) → canonical lookup (today's exact behaviour) → name/unit
+ * heuristic. Returns null if none of the three steps find anything —
+ * callers should keep showing the existing "缺少 X 頻道" empty state (paired
+ * with `ChannelRolePicker.vue` so the user can supply an override on the
+ * spot) rather than guessing.
+ *
+ * The `source` in the result is what B134 defect 2 (coordinator review) is
+ * for: an `'override'` or `'heuristic'` result is a GUESS — the user's own
+ * pick, or the app's — and either can be wrong, so call sites use `source`
+ * to keep a compact correction control visible even once resolution
+ * "succeeds" (see `ChannelRoleBadge.vue`). A `'canonical'` result is our own
+ * formats' unambiguous normal path and gets no extra UI.
  */
+export function resolveRoleChannelDetailed(
+  session: LogSession,
+  role: ChannelRole,
+  overrides: ChannelRoleOverrides = NO_OVERRIDES,
+): ResolvedRoleChannel | null {
+  const overridden = overriddenChannelForRole(session, role, overrides)
+  if (overridden) return { name: overridden, source: 'override' }
+
+  switch (role) {
+    case 'rpm': {
+      const canonical = canonicalRpmChannel(session)
+      if (canonical) return { name: canonical, source: 'canonical' }
+      break
+    }
+    case 'speed': {
+      const canonical = canonicalSpeedChannel(session)
+      if (canonical) return { name: canonical, source: 'canonical' }
+      break
+    }
+    case 'gear': {
+      const canonical = canonicalGearChannel(session)
+      if (canonical) return { name: canonical.name, source: 'canonical' }
+      break
+    }
+  }
+
+  const heuristic = heuristicRoleChannel(session, role)
+  return heuristic ? { name: heuristic, source: 'heuristic' } : null
+}
+
+/** Thin wrapper over {@link resolveRoleChannelDetailed} for the (majority
+ *  of) callers that only need the resolved channel NAME, not which step
+ *  produced it — every existing call site keeps working unchanged. */
 export function resolveRoleChannel(
   session: LogSession,
   role: ChannelRole,
   overrides: ChannelRoleOverrides = NO_OVERRIDES,
 ): string | null {
-  const overridden = overriddenChannelForRole(session, role, overrides)
-  if (overridden) return overridden
-
-  switch (role) {
-    case 'rpm': {
-      const canonical = canonicalRpmChannel(session)
-      if (canonical) return canonical
-      break
-    }
-    case 'speed': {
-      const canonical = canonicalSpeedChannel(session)
-      if (canonical) return canonical
-      break
-    }
-    case 'gear': {
-      const canonical = canonicalGearChannel(session)
-      if (canonical) return canonical.name
-      break
-    }
-  }
-
-  return heuristicRoleChannel(session, role)
+  return resolveRoleChannelDetailed(session, role, overrides)?.name ?? null
 }
 
 /** Stable string key for a `ChannelRoleOverrides` table, used by the derived-

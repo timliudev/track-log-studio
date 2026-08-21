@@ -491,6 +491,17 @@ export default {
       pickerLabel: 'Which channel is this?',
       auto: 'Auto',
       applied: 'Using "{channel}" — remembered for future recordings from this source.',
+      // B134 defect 2 — the always-available correction control
+      // (ChannelRoleBadge.vue) shown once a role resolved via a GUESS
+      // (override or heuristic) rather than our own formats' canonical
+      // lookup, so a wrong pick/guess stays correctable.
+      change: 'Change',
+      sourceOverride: 'manually set',
+      sourceHeuristic: 'auto-detected',
+      summary: '{role}: {channel} ({source})',
+      roleRpm: 'RPM',
+      roleSpeed: 'Speed',
+      roleGear: 'Gear',
     },
     gear: {
       heading: 'Gear ratio calculator',
