@@ -1,6 +1,9 @@
 import type { LogSession } from '@/domain/model/LogSession'
 import { cachedGearRatioTrace, type GearRatioTraceError } from '@/domain/analysis/gearRatioTrace'
 import { pureCvtRatio, solveCvtGeometry, type RadiusBoundsMm } from '@/domain/analysis/cvtDynamics'
+import { hashChannelRoleOverrides, type ChannelRoleOverrides } from '@/domain/analysis/channelRoles'
+
+const NO_OVERRIDES: ChannelRoleOverrides = {}
 
 export const PURE_CVT_RATIO_CHANNEL = '@derived/cvt/pure-ratio'
 export const CVT_FRONT_RADIUS_CHANNEL = '@derived/cvt/front-pitch-radius-mm'
@@ -88,8 +91,12 @@ export function cvtTraceConfigHash(config: CvtTraceConfig): string {
   ])
 }
 
-export function buildCvtDerivedTraces(session: LogSession, config: CvtTraceConfig): CvtDerivedTraceSet {
-  const total = cachedGearRatioTrace(session, config.wheelCircumferenceMm)
+export function buildCvtDerivedTraces(
+  session: LogSession,
+  config: CvtTraceConfig,
+  overrides: ChannelRoleOverrides = NO_OVERRIDES,
+): CvtDerivedTraceSet {
+  const total = cachedGearRatioTrace(session, config.wheelCircumferenceMm, overrides)
   if (!total.data) {
     return {
       pureRatio: null,
@@ -175,21 +182,26 @@ export function buildCvtDerivedTraces(session: LogSession, config: CvtTraceConfi
 
 const traceCache = new WeakMap<LogSession, Map<string, CvtDerivedTraceSet>>()
 
-/** Cache all CVT series together so cursor consumers never invoke a solver. */
+/** Cache all CVT series together so cursor consumers never invoke a solver.
+ *  `overrides` (B134) folds into the cache key via `hashChannelRoleOverrides`
+ *  so a live channel-role override edit invalidates this cache too — see
+ *  `gearRatioTrace.ts`'s `cachedGearRatioTrace` for the same discipline one
+ *  layer down (this function's `total` computation delegates to it). */
 export function cachedCvtDerivedTraces(
   session: LogSession,
   fileId: number | string,
   config: CvtTraceConfig,
+  overrides: ChannelRoleOverrides = NO_OVERRIDES,
 ): CvtDerivedTraceSet {
   let entries = traceCache.get(session)
   if (!entries) {
     entries = new Map()
     traceCache.set(session, entries)
   }
-  const key = `${fileId}|${cvtTraceConfigHash(config)}`
+  const key = `${fileId}|${cvtTraceConfigHash(config)}|${hashChannelRoleOverrides(overrides)}`
   const cached = entries.get(key)
   if (cached) return cached
-  const result = buildCvtDerivedTraces(session, config)
+  const result = buildCvtDerivedTraces(session, config, overrides)
   entries.set(key, result)
   return result
 }

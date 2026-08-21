@@ -484,6 +484,14 @@ export default {
       sensitivityDisabled: 'The force level is incomplete or has no equilibrium over the specified travel, so roller-mass Δrpm is unavailable.',
       environmentSensitivityBoundary: 'Boss length can shift the whole governing curve only after its effect on the travel zero is measured; otherwise it changes mechanical endpoints only. Air temperature/density must first become rear torque through road-load and aero data. Without CdA, wind, grade, or acceleration, only a manual torque sweep is available—no false-precision weather correction.',
     },
+    // B134 — channel-role override picker (ChannelRolePicker.vue), shown
+    // alongside the existing "missing RPM/speed channel" hints wherever the
+    // resolver (channelRoles.ts) can't find one automatically.
+    channelRole: {
+      pickerLabel: 'Which channel is this?',
+      auto: 'Auto',
+      applied: 'Using "{channel}" — remembered for future recordings from this source.',
+    },
     gear: {
       heading: 'Gear ratio calculator',
       kindMt: 'MT (geared)',

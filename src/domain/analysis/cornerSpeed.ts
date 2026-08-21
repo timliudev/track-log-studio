@@ -180,6 +180,16 @@ export function findGlobalChannelExtremum(
  * Resolve the session's speed channel (km/h), preferring GPS_Speed over
  * Vehicle_Speed — the same fallback used to seed the lap table's default
  * "top speed" column (see `useLaps.ts`). Returns null when neither is present.
+ *
+ * B134 — deliberately left canonical-only (no override, no name/unit
+ * heuristic): this exact function backs lap-line/gate detection
+ * (`useLaps.ts`) and cross-file GPS alignment (`useSessionMerge.ts`), where a
+ * heuristically-GUESSED speed channel (e.g. a noisy individual wheel-speed
+ * sensor) could silently change lap counts or merge offsets — see
+ * `channelRoles.ts`'s module header for the full override → canonical →
+ * heuristic chain used everywhere else (`resolveRoleChannel(session,
+ * 'speed', overrides)`), which this function's canonical step mirrors
+ * exactly and stays in sync with.
  */
 export function resolveSpeedChannel(session: LogSession): string | null {
   if (session.has('GPS_Speed')) return 'GPS_Speed'

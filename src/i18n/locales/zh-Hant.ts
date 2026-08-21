@@ -476,6 +476,14 @@ export default {
       sensitivityDisabled: '力學層不完整或指定行程無平衡根，無法輸出珠重 Δrpm。',
       environmentSensitivityBoundary: '套管長度只有在量得行程零點如何平移後，才能改整條調速曲線；否則只改機械端點。氣溫／密度必須先經風阻與道路負載換成後盤扭矩，缺 CdA、風、坡度或加速度時只允許手動 torque sweep，不顯示假精確天氣修正。',
     },
+    // B134 — 頻道角色手動對應（ChannelRolePicker.vue），顯示在既有的「缺少 RPM/
+    // 速度頻道」提示旁，讓 resolver（channelRoles.ts）自動判斷失敗時使用者仍能
+    // 手動指定。
+    channelRole: {
+      pickerLabel: '這是哪個頻道？',
+      auto: '自動',
+      applied: '已使用「{channel}」——已記住，未來同來源的記錄會自動套用。',
+    },
     gear: {
       heading: '變速齒比計算器',
       kindMt: 'MT（檔車）',

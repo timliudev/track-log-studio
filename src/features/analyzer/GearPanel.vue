@@ -45,16 +45,17 @@ import {
   type MtGearFormInput,
   type FinalDriveFormInput,
 } from '@/stores/drivetrainStore'
-import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { useChannelRoleStore } from '@/stores/channelRoleStore'
+import { resolveRoleChannel } from '@/domain/analysis/channelRoles'
 import UPlotChart from '@/components/UPlotChart.vue'
 import GearRatioChart from './GearRatioChart.vue'
+import ChannelRolePicker from './ChannelRolePicker.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
   tireSpecToCircumferenceMm,
   resolveGearRatio,
   resolveFinalDrive,
-  resolveRpmChannel,
   computeRatioSeries,
   detectGearPlateaus,
   buildCvtRatioSweep,
@@ -89,15 +90,27 @@ const { t } = useI18n()
 const store = useDrivetrainStore()
 const fileStore = useFileStore()
 const navigation = useAppNavigationStore()
+const channelRoleStore = useChannelRoleStore()
 
 const isMt = computed(() => store.kind === 'mt')
 
 // ── Preconditions ────────────────────────────────────────────────────────
 // Both channels are required for the measured overlay/curve — surfaced as an
 // explicit hint (rather than a silently-empty chart) per the user's #11
-// complaint.
-const rpmChannelName = computed(() => (props.session ? resolveRpmChannel(props.session) : null))
-const speedChannelName = computed(() => (props.session ? resolveSpeedChannel(props.session) : null))
+// complaint. B134: goes through the full override → canonical → heuristic
+// resolver (not the old canonical-only resolveRpmChannel/resolveSpeedChannel)
+// so a session whose RPM/speed columns carry an unrecognised name (e.g. a
+// `.vbo` merge tool's `EngineRPM_rpm`) can still resolve automatically, or
+// via the `ChannelRolePicker` wired into the empty states below —
+// `channelRoleStore.overrides` in the dependency list is what makes setting
+// an override reactively re-resolve this (and everything derived from it)
+// with no reload.
+const rpmChannelName = computed(() =>
+  props.session ? resolveRoleChannel(props.session, 'rpm', channelRoleStore.overrides) : null,
+)
+const speedChannelName = computed(() =>
+  props.session ? resolveRoleChannel(props.session, 'speed', channelRoleStore.overrides) : null,
+)
 const hasRpmChannel = computed(() => rpmChannelName.value != null)
 const hasSpeedChannel = computed(() => speedChannelName.value != null)
 const channelsAvailable = computed(() => hasRpmChannel.value && hasSpeedChannel.value)
@@ -225,9 +238,23 @@ watch(
   (session) => {
     estimateResult.value = null
     estimateFailed.value = false
-    store.applyDetectedKind(session ? inferDrivetrainKind(session)?.kind ?? null : null)
+    store.applyDetectedKind(session ? inferDrivetrainKind(session, channelRoleStore.overrides)?.kind ?? null : null)
   },
   { immediate: true },
+)
+
+// B134 — a channel-role override can turn a previously-unresolvable
+// rpm/speed/gear channel into real MT/CVT evidence (e.g. a `GearPRND` column
+// the heuristic already recognises, or a manually-mapped RPM/speed pair), so
+// re-run the SAME detection whenever the override table changes — deliberately
+// separate from the watcher above, which also resets the (unrelated)
+// circumference-estimate result/error on every file switch; an override edit
+// must not clear that.
+watch(
+  () => channelRoleStore.overrides,
+  () => {
+    if (props.session) store.applyDetectedKind(inferDrivetrainKind(props.session, channelRoleStore.overrides)?.kind ?? null)
+  },
 )
 
 watch(
@@ -808,9 +835,12 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
       <!-- Chart: measured RPM/speed scatter + theoretical per-gear lines -->
       <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
       <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
-      <p v-else-if="!channelsAvailable" class="hint">
-        {{ t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') }}
-      </p>
+      <ChannelRolePicker
+        v-else-if="!channelsAvailable && props.session"
+        :session="props.session"
+        :role="!hasRpmChannel ? 'rpm' : 'speed'"
+        :message="t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') as string"
+      />
       <p v-else-if="!mtValid" class="hint">{{ t('analyzer.gear.invalidSpec') }}</p>
       <p v-else-if="!mtChartHasData" class="hint">{{ t('analyzer.gear.noPlateaus') }}</p>
       <UPlotChart
@@ -925,9 +955,12 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
 
       <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
       <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
-      <p v-else-if="!channelsAvailable" class="hint">
-        {{ t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') }}
-      </p>
+      <ChannelRolePicker
+        v-else-if="!channelsAvailable && props.session"
+        :session="props.session"
+        :role="!hasRpmChannel ? 'rpm' : 'speed'"
+        :message="t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') as string"
+      />
       <template v-else>
         <div class="summary-row">
           <span v-if="cvtSummary" class="summary-item">

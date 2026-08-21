@@ -9,7 +9,9 @@ import { solveCvtForceBalance, type CvtForceDisabledReason } from '@/domain/anal
 import { sweepTotalRollerMass } from '@/domain/analysis/cvtCalibration'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { toCvtForceBalanceInput, toCvtTraceConfig, usesCvtCalibrationFixedReduction, useDrivetrainStore } from '@/stores/drivetrainStore'
+import { useChannelRoleStore } from '@/stores/channelRoleStore'
 import CvtProfileEditor from './CvtProfileEditor.vue'
+import ChannelRolePicker from './ChannelRolePicker.vue'
 
 const props = defineProps<{
   session: LogSession | null
@@ -20,6 +22,7 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const drivetrain = useDrivetrainStore()
+const channelRoleStore = useChannelRoleStore()
 const settingsOpen = ref(false)
 const frontPitchCircle = ref<SVGCircleElement | null>(null)
 const rearPitchCircle = ref<SVGCircleElement | null>(null)
@@ -49,12 +52,20 @@ const blankFrame = (): DisplayFrame => ({
 const displayed = ref<DisplayFrame>(blankFrame())
 const profile = computed(() => drivetrain.activeCvtProfile)
 const traceConfig = computed(() => toCvtTraceConfig(profile.value))
+// B134 — threading channelRoleStore.overrides through both derived-trace
+// lookups (and into their computed dependency list) is what makes setting a
+// channel-role override reactively re-resolve this card with no reload; see
+// `gearRatioTrace.ts`/`cvtTrace.ts`'s cache-key handling for why this is safe
+// to call on every render (an override edit is the only thing that changes
+// which cache entry comes back).
 const totalTrace = computed(() =>
-  props.session ? cachedGearRatioTrace(props.session, traceConfig.value.wheelCircumferenceMm) : null,
+  props.session
+    ? cachedGearRatioTrace(props.session, traceConfig.value.wheelCircumferenceMm, channelRoleStore.overrides)
+    : null,
 )
 const cvtTrace = computed(() =>
   props.session
-    ? cachedCvtDerivedTraces(props.session, props.fileId ?? 'unassigned', traceConfig.value)
+    ? cachedCvtDerivedTraces(props.session, props.fileId ?? 'unassigned', traceConfig.value, channelRoleStore.overrides)
     : null,
 )
 
@@ -139,6 +150,16 @@ const forceChart = computed(() => {
     front: points((index) => curve[index].frontRollerForceN),
     rear: points((index) => curve[index].couplingRatio * curve[index].rearTotalForceN),
   }
+})
+
+/** B134 — when the CVT trace is blocked on a missing rpm/speed channel
+ *  specifically (as opposed to a missing/invalid CVT geometry config field),
+ *  the layer-message paragraph below becomes a `ChannelRolePicker` instead of
+ *  plain text — those two error kinds are the only ones a channel-role
+ *  override can actually fix. */
+const geometryErrorRole = computed<'rpm' | 'speed' | null>(() => {
+  const error = cvtTrace.value?.geometryError
+  return error === 'rpm' || error === 'speed' ? error : null
 })
 
 const geometryErrorText = computed(() => {
@@ -311,7 +332,14 @@ const statusLabel = computed(() => {
       <p class="field-note">{{ profile.force.frictionCoefficientMin == null || profile.force.frictionCoefficientMax == null ? t('analyzer.cvt.slipNotAssessed') : t('analyzer.cvt.slipWarningOnly') }}</p>
     </details>
 
-    <p v-if="geometryErrorText" class="layer-message">{{ geometryErrorText }}</p>
+    <ChannelRolePicker
+      v-if="geometryErrorRole && props.session"
+      :session="props.session"
+      :role="geometryErrorRole"
+      :message="geometryErrorText as string"
+      class="layer-message"
+    />
+    <p v-else-if="geometryErrorText" class="layer-message">{{ geometryErrorText }}</p>
     <p v-else-if="displayed.status === 'out-of-bounds' || displayed.status === 'no-root'" class="warning-message">{{ t('analyzer.cvt.nonGeometricWarning') }}</p>
     <p v-if="angleMismatch && Math.abs(angleMismatch.displacementScaleDifferenceRatio) > 0.001" class="warning-message">{{ t('analyzer.cvt.angleMismatchWarning', { percent: Math.abs(angleMismatch.displacementScaleDifferenceRatio * 100).toFixed(2) }) }}</p>
     <p class="confidence-note">{{ t('analyzer.cvt.uncertaintyAlwaysVisible') }}</p>

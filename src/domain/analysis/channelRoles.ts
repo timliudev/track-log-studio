@@ -287,6 +287,23 @@ export function heuristicRoleChannel(session: LogSession, role: ChannelRole): st
 
 // ── Public entry point ──────────────────────────────────────────────────
 
+/** The first override entry (in the table's own key order — a flat
+ *  `Record`, so realistically at most one in practice per session) whose
+ *  channel NAME exists in `session` and whose ROLE matches. Exported so
+ *  `ChannelRolePicker.vue` can show what's currently overridden for THIS
+ *  session/role without duplicating {@link resolveRoleChannel}'s override
+ *  step (step 1 there is literally this function). */
+export function overriddenChannelForRole(
+  session: LogSession,
+  role: ChannelRole,
+  overrides: ChannelRoleOverrides,
+): string | null {
+  for (const [channelName, overriddenRole] of Object.entries(overrides)) {
+    if (overriddenRole === role && session.has(channelName)) return channelName
+  }
+  return null
+}
+
 /**
  * Resolve the session's channel for `role`, in strict order:
  * override (if the named channel exists in THIS session) → canonical
@@ -300,9 +317,8 @@ export function resolveRoleChannel(
   role: ChannelRole,
   overrides: ChannelRoleOverrides = NO_OVERRIDES,
 ): string | null {
-  for (const [channelName, overriddenRole] of Object.entries(overrides)) {
-    if (overriddenRole === role && session.has(channelName)) return channelName
-  }
+  const overridden = overriddenChannelForRole(session, role, overrides)
+  if (overridden) return overridden
 
   switch (role) {
     case 'rpm': {
