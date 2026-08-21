@@ -73,9 +73,14 @@
  *     `sim`, `target`, `limit`, `demand`: all name a MODIFIED/derived/desired
  *     value, not the primary measured signal) plus role-specific ones
  *     (`wheel` for speed — an individual wheel-speed sensor is a valid but
- *     inferior stand-in for the vehicle's own road speed; `ratio` for gear —
- *     mirrors step 2's own exclusion so a computed ratio channel is never
- *     picked as the raw gear-position signal).
+ *     inferior stand-in for the vehicle's own road speed). Soft: a penalised
+ *     candidate can still win if it's the only thing on offer.
+ *   - **Hard VETO (disqualifies outright)** — role-specific tokens that
+ *     mirror an exclusion step 2 already enforces absolutely, so the
+ *     heuristic can never re-admit what the canonical step deliberately
+ *     rejects: `ratio` for gear (a computed "gear ratio" channel must never
+ *     be picked as the raw gear-position signal, matching the canonical
+ *     regex's own `!label.includes('ratio')` check).
  *   - **−2 × (index of the first matching token)** — a small tie-break
  *     nudge, not a tier on its own: when two candidates land in the same
  *     tier with the same bonus/penalty count, the one where the role keyword
@@ -151,8 +156,15 @@ interface RoleKeywords {
   primary: readonly string[]
   /** Extra tokens that, when ALSO present, boost an already-matching candidate. */
   bonus: readonly string[]
-  /** Extra tokens that, when present, penalise an already-matching candidate. */
+  /** Extra tokens that, when present, penalise an already-matching candidate
+   *  (soft — lowers rank but a still-positive score can still win if nothing
+   *  cleaner is on offer). */
   penalty: readonly string[]
+  /** Extra tokens that, when present, DISQUALIFY the candidate outright
+   *  regardless of tier (hard — mirrors an exclusion the canonical step
+   *  already enforces absolutely, e.g. gear's `ratio` exclusion, so the
+   *  heuristic can't accidentally re-admit what step 2 deliberately rejects). */
+  veto: readonly string[]
 }
 
 /** Modifiers that name a derived/desired/limited value rather than the
@@ -164,6 +176,7 @@ const ROLE_KEYWORDS: Readonly<Record<ChannelRole, RoleKeywords>> = {
     primary: ['rpm', 'tach', 'tachometer'],
     bonus: ['engine'],
     penalty: [],
+    veto: [],
   },
   speed: {
     // 'speed' alone also matches wheel-speed channels — the 'wheel' penalty
@@ -172,12 +185,16 @@ const ROLE_KEYWORDS: Readonly<Record<ChannelRole, RoleKeywords>> = {
     primary: ['speed', 'velocity', 'vss'],
     bonus: ['vehicle', 'gps'],
     penalty: ['wheel'],
+    veto: [],
   },
   gear: {
     primary: ['gear', 'gearpos', 'gearposition', 'prnd'],
     bonus: [],
-    // Mirrors the canonical step's `!label.includes('ratio')` exclusion.
-    penalty: ['ratio'],
+    penalty: [],
+    // Mirrors the canonical step's `!label.includes('ratio')` exclusion —
+    // hard veto (not a soft penalty) so the heuristic can never re-admit a
+    // computed "gear ratio" channel as the raw gear-position signal.
+    veto: ['ratio'],
   },
 }
 
@@ -212,6 +229,8 @@ function scoreCandidate(channel: Channel, role: ChannelRole): HeuristicCandidate
   const haystackText = `${channel.name} ${channel.rawName} ${channel.description ?? ''} ${channel.unit ?? ''}`
   const tokens = tokenize(haystackText)
   const haystackNoSep = haystackText.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+  for (const vetoToken of keywords.veto) if (tokens.includes(vetoToken)) return null
 
   let bestTierScore = 0
   let firstMatchIndex = -1
