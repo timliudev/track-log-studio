@@ -605,7 +605,22 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   **排程**:必須排在 [[B134]] 合併之後才能動 UI ——兩者都會改 `drivetrain.ts` 與
   `GearPanel.vue`。純數學核心(新檔 `domain/analysis/gearRecommendation.ts` + 型別 + 測試)
   可與 B130 並行,前提是**完全不碰** `drivetrain.ts`/`GearPanel.vue`/`drivetrainStore.ts`/i18n。
-
+  **純數學核心已落地(merge `975b399`)、UI 未接**:`domain/analysis/gearRecommendation.ts`
+  (+94 條測試)六階段全到位——引擎特性型別與單位換算(hp 預設公制 PS)、`usableBand` +
+  `recommendRatioSpacing`(幾何級數,可加 `progressionFactor` 讓高檔級距變寬)+
+  `diagnoseExistingRatios`(升檔落點 = `shiftRpm × g_next/g_cur`,報與扭力峰的帶正負距離)、
+  `finalDriveForTopSpeed`/`rankSprocketCombos`/`diagnoseTopSpeedGearing`、
+  `optimalShiftRpm`(曲線限定,輪端扭力相等的二分解,三種結果 + `usedClampedTorque` 標示
+  曲線沒延伸到紅線而扭力被夾平)、`recommendForMeasuredSpeeds`(掃 0.6–1.6× 終傳最大化
+  扭力帶佔有率,純函式吃陣列)、`simulateAcceleration`(選配,缺空力/滾阻時以
+  `isRelativeOnly` 標示只能相對比較)。誠實紅線以型別強制:需要曲線形狀的函式只收
+  curve profile,兩點版無法輸入(`@ts-expect-error` 測試釘住)。
+  📌 **審查紀錄**:主線曾指控 `optimalShiftRpm` 在 `diff(peakPower) ≤ 0` 時夾到紅線是方向
+  反了,agent 反證該分支**不可達**——`peakPowerRpm` 是 `T(r)·r` 的極大點,故
+  `T(r·s) ≤ T(r)/s` ⇒ `diff ≥ 0`(另附 500 萬次隨機搜尋無反例),主線驗算後確認 agent 正確;
+  該分支仍保留為防禦性程式碼並在 JSDoc 記下證明。
+  **待辦**:UI 接線(引擎特性輸入欄位、建議齒比表、三種目標切換、與已載入 log 的疊圖),
+  必須排在 [[B134]] 之後(已滿足)。
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
