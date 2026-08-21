@@ -15,6 +15,30 @@ import type {
   RollerTrackPoint,
   TorqueCamPoint,
 } from '@/domain/analysis/cvtForceBalance'
+import {
+  defaultEngineProfileFormState,
+  type EngineCurveValueUnit,
+  type EnginePowerUnit,
+  type EngineCurveFormState,
+  type EngineTwoPointFormState,
+  type EngineProfileFormState,
+  type EngineProfileInputKind,
+} from '@/domain/analysis/engineProfileForm'
+
+// F8 — re-exported so callers that only import from `drivetrainStore.ts`
+// (the store's own public surface) keep working without also reaching into
+// `engineProfileForm.ts` directly — the form-state SHAPES live there (see
+// that module's header) since they're also consumed by pure math (profile
+// building), but this store is still the canonical place to import the
+// persisted/UI-facing MT form types from, same as `MtGearFormInput` etc.
+export type {
+  EngineCurveValueUnit,
+  EnginePowerUnit,
+  EngineCurveFormState,
+  EngineTwoPointFormState,
+  EngineProfileFormState,
+  EngineProfileInputKind,
+}
 
 export type DrivetrainKind = 'mt' | 'cvt'
 export type DrivetrainKindSelection = 'auto' | 'manual'
@@ -69,6 +93,11 @@ export interface MtFormState {
   tireSpec: string
   wheelCircumferenceMm: number
   redlineRpm: number
+  /** F8 — engine torque/power profile feeding `gearRecommendation.ts`'s
+   *  recommendation math. Absent from pre-F8 persisted payloads — {@link
+   *  mergeMtFormState} always backfills a default via {@link
+   *  sanitizeEngineProfileFormState}. */
+  engineProfile: EngineProfileFormState
 }
 
 /** One free-form note field: a label the user assigns (defaults cover the
@@ -340,6 +369,7 @@ const DEFAULT_MT: MtFormState = {
   // default spec into a fresh panel look like a dead control.
   wheelCircumferenceMm: 1884,
   redlineRpm: 10000,
+  engineProfile: defaultEngineProfileFormState(),
 }
 
 /** Defaults for the CVT free-form note fields — labels are pre-filled from
@@ -857,6 +887,66 @@ export function mergeCvtProfile(value: Partial<CvtProfile> | null | undefined, f
   }
 }
 
+// F8 — engine-profile sanitizer constants/helpers, same discipline as the CVT
+// sanitizers above (M9 P2 hardening): reject the entry, don't throw; every
+// numeric field is Number.isFinite + physically-range-clamped via
+// positiveNumberOrNull; unrecognised enum values fall back to the existing
+// value (not a throw). MAX_RPM/MAX_TORQUE_NM are the SAME constants the CVT
+// sanitizers above already use (engine rpm/torque have the same physical
+// ceiling regardless of drivetrain kind) — reused, not duplicated.
+const MAX_ENGINE_POWER_VALUE = 2000 // generous, unit-agnostic (kW/PS/hp all comfortably under 2000 for anything this app targets — a 2000kW engine is science-fiction territory, so this is purely an anti-garbage ceiling, not a realistic bike limit)
+// A pasted dyno/spec-sheet table is realistically at most a few hundred rows
+// of a few characters each; 100k chars comfortably covers even a sloppy
+// paste (extra whitespace, a duplicated table) while bounding a pathological
+// paste (e.g. someone pasting an entire log file by mistake) from being
+// carried around in every persisted-store write from here on.
+const MAX_ENGINE_CURVE_TEXT_LENGTH = 100_000
+
+function sanitizeEnginePowerUnit(value: unknown, fallback: EnginePowerUnit): EnginePowerUnit {
+  return value === 'kW' || value === 'PS' || value === 'hp' ? value : fallback
+}
+
+function sanitizeEngineCurveValueUnit(value: unknown, fallback: EngineCurveValueUnit): EngineCurveValueUnit {
+  return value === 'Nm' || value === 'kW' || value === 'PS' || value === 'hp' ? value : fallback
+}
+
+function sanitizeEngineTwoPoint(value: unknown, fallback: EngineTwoPointFormState): EngineTwoPointFormState {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<EngineTwoPointFormState>) : {}
+  return {
+    peakTorqueRpm: positiveNumberOrNull(raw.peakTorqueRpm, MAX_RPM),
+    peakPowerRpm: positiveNumberOrNull(raw.peakPowerRpm, MAX_RPM),
+    peakTorqueNm: positiveNumberOrNull(raw.peakTorqueNm, MAX_TORQUE_NM),
+    peakPowerValue: positiveNumberOrNull(raw.peakPowerValue, MAX_ENGINE_POWER_VALUE),
+    peakPowerUnit: sanitizeEnginePowerUnit(raw.peakPowerUnit, fallback.peakPowerUnit),
+  }
+}
+
+function sanitizeEngineCurve(value: unknown, fallback: EngineCurveFormState): EngineCurveFormState {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<EngineCurveFormState>) : {}
+  return {
+    rawText: typeof raw.rawText === 'string' ? raw.rawText.slice(0, MAX_ENGINE_CURVE_TEXT_LENGTH) : fallback.rawText,
+    valueUnit: sanitizeEngineCurveValueUnit(raw.valueUnit, fallback.valueUnit),
+  }
+}
+
+/** Sanitize a possibly-partial/garbage/hostile persisted `engineProfile`
+ *  payload over a fallback (defaults to a fresh {@link
+ *  defaultEngineProfileFormState}) — same "reject the entry, don't throw"
+ *  discipline as {@link mergeCvtProfile}/the CVT array sanitizers above.
+ *  Exported for direct sanitizer tests (malformed/hostile payloads) without
+ *  needing to round-trip through the full store. */
+export function sanitizeEngineProfileFormState(
+  value: unknown,
+  fallback: EngineProfileFormState = defaultEngineProfileFormState(),
+): EngineProfileFormState {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? (value as Partial<EngineProfileFormState>) : {}
+  return {
+    activeKind: raw.activeKind === 'curve' ? 'curve' : 'twoPoint',
+    twoPoint: sanitizeEngineTwoPoint(raw.twoPoint, fallback.twoPoint),
+    curve: sanitizeEngineCurve(raw.curve, fallback.curve),
+  }
+}
+
 /**
  * Merge a possibly-partial/garbage MT payload (an older persisted blob, or an
  * imported settings JSON — see B19) over {@link DEFAULT_MT} — same per-array
@@ -872,6 +962,7 @@ export function mergeMtFormState(partial: Partial<MtFormState> | null | undefine
     ...p,
     gearRatios: p?.gearRatios ? p.gearRatios.map((g) => ({ ...g })) : DEFAULT_MT.gearRatios.map((g) => ({ ...g })),
     finalDrive: { ...DEFAULT_MT.finalDrive, ...p?.finalDrive },
+    engineProfile: sanitizeEngineProfileFormState(p?.engineProfile, DEFAULT_MT.engineProfile),
   }
 }
 
@@ -998,12 +1089,35 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     return true
   }
 
-  function setMt(patch: Partial<Omit<MtFormState, 'gearRatios' | 'finalDrive'>>): void {
+  function setMt(patch: Partial<Omit<MtFormState, 'gearRatios' | 'finalDrive' | 'engineProfile'>>): void {
     mt.value = { ...mt.value, ...patch }
   }
 
   function setFinalDrive(patch: Partial<FinalDriveFormInput>): void {
     mt.value = { ...mt.value, finalDrive: { ...mt.value.finalDrive, ...patch } }
+  }
+
+  /** F8 — switch which engine-profile input (two-point vs curve) is
+   *  authoritative for the recommendation math. Both forms' data stays
+   *  around either way (see {@link EngineProfileFormState}'s doc). */
+  function setEngineProfileActiveKind(activeKind: EngineProfileInputKind): void {
+    mt.value = { ...mt.value, engineProfile: { ...mt.value.engineProfile, activeKind } }
+  }
+
+  /** F8 — patch the two-point engine-profile form fields. */
+  function setEngineTwoPoint(patch: Partial<EngineTwoPointFormState>): void {
+    mt.value = {
+      ...mt.value,
+      engineProfile: { ...mt.value.engineProfile, twoPoint: { ...mt.value.engineProfile.twoPoint, ...patch } },
+    }
+  }
+
+  /** F8 — patch the curve-paste engine-profile form fields. */
+  function setEngineCurve(patch: Partial<EngineCurveFormState>): void {
+    mt.value = {
+      ...mt.value,
+      engineProfile: { ...mt.value.engineProfile, curve: { ...mt.value.engineProfile.curve, ...patch } },
+    }
   }
 
   function setCvtWheelCircumferenceMm(mm: number): void {
@@ -1238,6 +1352,9 @@ export const useDrivetrainStore = defineStore('drivetrain', () => {
     applyDetectedKind,
     setMt,
     setFinalDrive,
+    setEngineProfileActiveKind,
+    setEngineTwoPoint,
+    setEngineCurve,
     setCvtWheelCircumferenceMm,
     setCvtTireSpec,
     setActiveCvtProfile,

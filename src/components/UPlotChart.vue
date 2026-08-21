@@ -87,6 +87,36 @@ export function valueAtPlotX(
 }
 
 /**
+ * F8 — canvas-pixel-space rect for one `xBands` entry, given a `valToPos`-
+ * style x mapper (canvas-pixel space, i.e. `u.valToPos(val, 'x', true)` —
+ * NOT the CSS-px `valueAtPlotX` above) and the plot's bbox (`u.bbox`).
+ * Returns `null` for a degenerate band (zero/negative width once mapped to
+ * pixels, or either edge maps to a non-finite pixel — e.g. before the x
+ * scale has real min/max) so the caller can skip drawing it. Handles
+ * `min`/`max` arriving in either order (uses the min/abs of the two mapped
+ * pixels, not the input order) since nothing about `xBands` requires the
+ * caller to pass them pre-sorted.
+ *
+ * Plain-script export, same pattern as `valueAtPlotX`/`fillPlotHeight`
+ * above, so the geometry is unit-testable without mounting a real uPlot
+ * instance (real uPlot geometry needs actual canvas/layout measurement,
+ * unavailable in this repo's happy-dom test environment).
+ */
+export function xBandRect(
+  band: { min: number; max: number },
+  valToPosX: (val: number) => number,
+  bbox: { top: number; height: number },
+): { x: number; y: number; width: number; height: number } | null {
+  const x0 = valToPosX(band.min)
+  const x1 = valToPosX(band.max)
+  if (!Number.isFinite(x0) || !Number.isFinite(x1)) return null
+  const left = Math.min(x0, x1)
+  const width = Math.abs(x1 - x0)
+  if (!(width > 0)) return null
+  return { x: left, y: bbox.top, width, height: bbox.height }
+}
+
+/**
  * B31b — the fixed needle's CSS-px offset from `wrap`'s left edge: the exact
  * horizontal CENTRE of uPlot's OWN plot area (`plotLeft` .. `plotLeft +
  * plotWidth`), NOT `wrap`/`host`'s own centre — uPlot reserves a left-side
@@ -220,6 +250,18 @@ const props = defineProps<{
    *    behaviour is completely unchanged.
    */
   centreCursorMode?: boolean
+  /**
+   * F8 — vertical band(s) to shade on the X (data) scale, e.g. an engine's
+   * usable RPM band (torque-peak rpm .. shift rpm) on `GearPanel.vue`'s MT
+   * chart. Drawn via a `drawClear` hook (BEFORE series/axes are painted, so
+   * the shading sits behind the data — a plain filled rect between
+   * `valToPos(min)`/`valToPos(max)`, using `u.bbox` for full plot-height
+   * coverage) rather than as an extra series: a vertical span isn't a
+   * function of x the way a uPlot series is, so no combination of `series`
+   * entries could draw one. Default/omitted draws nothing — every existing
+   * caller is unaffected.
+   */
+  xBands?: Array<{ min: number; max: number }>
 }>()
 
 const emit = defineEmits<{
@@ -418,6 +460,27 @@ function buildOptions(width: number): uPlot.Options {
       ? { focus: { prox: 16 }, x: false, y: false, drag: { setScale: false, x: false, y: false } }
       : { focus: { prox: 16 } },
     hooks: {
+      // F8 — `xBands` shading. `drawClear` fires before uPlot paints axes and
+      // series for this frame, so the band sits BEHIND the data (a plain
+      // canvas fillRect, not a series — see the `xBands` prop doc for why a
+      // series can't express a vertical span). Guarded on an empty/absent
+      // list so every existing caller (which never passes `xBands`) pays
+      // nothing extra per frame.
+      drawClear: [
+        (u: uPlot) => {
+          const bands = props.xBands
+          if (!bands || bands.length === 0) return
+          const { ctx } = u
+          ctx.save()
+          ctx.fillStyle = themeColor('--color-accent', '#4a90d9')
+          ctx.globalAlpha = 0.12
+          for (const band of bands) {
+            const rect = xBandRect(band, (val) => u.valToPos(val, 'x', true), u.bbox)
+            if (rect) ctx.fillRect(rect.x, rect.y, rect.width, rect.height)
+          }
+          ctx.restore()
+        },
+      ],
       setCursor: [
         (u: uPlot) => {
           // B31 — in centre-needle mode the emitted cursor comes from the
@@ -1407,6 +1470,17 @@ watch(
 watch(
   () => props.centreCursorMode,
   () => create(),
+)
+
+// F8 — unlike `centreCursorMode` above, the `drawClear` hook reads
+// `props.xBands` LIVE at draw time (a closure over the prop, not a value
+// baked into `buildOptions()`'s returned object) — so a plain `redraw()`
+// (no full `create()`/teardown) is enough to repaint the shading with the
+// new band(s) whenever the prop changes without any other chart update.
+watch(
+  () => props.xBands,
+  () => plot?.redraw(),
+  { deep: true },
 )
 
 // B94 — `grab` while the axis band is draggable and idle, `grabbing` while
