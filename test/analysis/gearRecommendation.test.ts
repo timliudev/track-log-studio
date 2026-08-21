@@ -689,7 +689,9 @@ describe('optimalShiftRpm', () => {
     })!
     // @ts-expect-error optimalShiftRpm requires EngineCurveProfile, not EngineTwoPointProfile —
     // this is the honesty constraint from the module header, enforced at compile time.
-    optimalShiftRpm(twoPoint, 2, 1.5)
+    // The runtime defensive check (for a caller that bypasses the type system, e.g. via `any`)
+    // also returns null rather than fabricating a shift point — verify both layers here.
+    expect(optimalShiftRpm(twoPoint, 2, 1.5)).toBeNull()
   })
 })
 
@@ -962,6 +964,7 @@ describe('simulateAcceleration', () => {
       redlineRpm: 12000,
     })!
     // @ts-expect-error simulateAcceleration requires EngineCurveProfile, not EngineTwoPointProfile.
-    simulateAcceleration({ curveProfile: twoPoint, spec: singleGearSpec, massKg: 180 })
+    // The runtime defensive check also returns null rather than fabricating a result — verify both layers.
+    expect(simulateAcceleration({ curveProfile: twoPoint, spec: singleGearSpec, massKg: 180 })).toBeNull()
   })
 })
