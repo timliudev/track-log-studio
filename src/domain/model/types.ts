@@ -48,4 +48,19 @@ export interface LogMeta {
    * (the "File created on …" stamp) is unaffected.
    */
   readonly firstSampleEpochMs?: number
+  /**
+   * Session/session-name string recovered from the source file, when the
+   * format carries one — currently only the `.vbo` importer's `[session
+   * data]` `name` line (B135). Purely informational (no display wiring is
+   * assumed); undefined when the source has none.
+   */
+  readonly sessionName?: string
+  /**
+   * Start/finish line recovered from the source file itself, when the format
+   * carries one — currently only the `.vbo` importer's `[laptiming]` `Start`
+   * line (B135, RaceChrono/`u6can`-exported VBOs). `useLaps.ts` seeds this as
+   * a fallback, below any user-stored (idb-persisted) line but above the
+   * generic `defaultLine()` placeholder. Undefined when the source has none.
+   */
+  readonly startFinishLine?: { a: { lat: number; lon: number }; b: { lat: number; lon: number } }
 }

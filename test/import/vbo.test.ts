@@ -55,6 +55,56 @@ describe('parseVbo fixtures', () => {
     expect(session.get('first')?.unit).toBeUndefined()
     expect(session.get('second')?.unit).toBe('bar')
   })
+
+  it('B135: parses [session data] name and [laptiming] Start into meta', () => {
+    const session = parseVbo(
+      [
+        '[header]',
+        'time',
+        '[channel units]',
+        's',
+        '[column names]',
+        'time',
+        '[data]',
+        '120000.000 1',
+        '',
+        '[session data]',
+        'name LihPao Full',
+        '',
+        '[laptiming]',
+        'Start   -7241.186772 +1459.114540 -7241.175315 +1459.126888 ¬ Start/Finish',
+      ].join('\n'),
+    )
+
+    expect(session.meta.sessionName).toBe('LihPao Full')
+    expect(session.meta.startFinishLine).toBeDefined()
+    const line = session.meta.startFinishLine!
+    expect(line.a.lat).toBeCloseTo(24.31858, 5)
+    expect(line.a.lon).toBeCloseTo(120.68645, 5)
+    expect(line.b.lat).toBeCloseTo(24.31878, 5)
+    expect(line.b.lon).toBeCloseTo(120.68626, 5)
+  })
+
+  it('B135: tolerates a [laptiming] section with only Split lines (no Start)', () => {
+    const session = parseVbo(
+      [
+        '[column names]',
+        'time',
+        '[data]',
+        '120000.000 1',
+        '',
+        '[laptiming]',
+        'Split 1   -7241.1 +1459.1 -7241.1 +1459.1 ¬ Sector 1',
+      ].join('\n'),
+    )
+    expect(session.meta.startFinishLine).toBeUndefined()
+  })
+
+  it('B135: sessionName and startFinishLine are undefined when the sections are absent', () => {
+    const session = parseVbo(loadFixture('vbo.expected_ct.vbo'))
+    expect(session.meta.sessionName).toBeUndefined()
+    expect(session.meta.startFinishLine).toBeUndefined()
+  })
 })
 
 describe('VBO importer ⇄ exporter round-trip', () => {
