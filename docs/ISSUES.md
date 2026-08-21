@@ -673,7 +673,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   風險也高。實作紅線:①只在單位原本為空時才套用(有 `[channel units]` 值一律優先);
   ②僅 VBO importer 內生效,既有 golden fixture 不得變動;③新填的單位會餵進 B134 啟發式的
   計分(unit 是訊號之一),須複驗真檔三個角色解析不變。
-  **已落地(merge 見下一則 commit 訊息 / `git log --grep B136`)**:`parseVbo` 新增
+  **已落地(merge `d20c876`)**:`parseVbo` 新增
   `NAME_SUFFIX_UNITS` 表與 `inferUnitFromNameSuffix()`,接在既有 `unitAt()` 之後當
   **fallback**——`[channel units]` 有值一律優先且原封不動,`name`/`rawName`/`description`
   完全不碰。誤拆防線:後綴必須緊接底線且位於結尾,巢狀項目依長度排序在前
