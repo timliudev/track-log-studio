@@ -51,6 +51,8 @@ import UPlotChart from '@/components/UPlotChart.vue'
 import GearRatioChart from './GearRatioChart.vue'
 import ChannelRolePicker from './ChannelRolePicker.vue'
 import ChannelRoleBadge from './ChannelRoleBadge.vue'
+import EngineProfileInput from './EngineProfileInput.vue'
+import GearRecommendationPanel from './GearRecommendationPanel.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
@@ -66,6 +68,8 @@ import {
   inferDrivetrainKind,
   type CircumferenceFromLogEstimate,
 } from '@/domain/analysis/drivetrain'
+import { buildEngineProfile } from '@/domain/analysis/engineProfileForm'
+import { usableBand as computeEngineUsableBand } from '@/domain/analysis/gearRecommendation'
 
 const props = defineProps<{
   /** The active session, for the log-inversion (由記錄反推) section — null when
@@ -489,6 +493,21 @@ const mtChartAxes: uPlot.Axis[] = [
   { label: 'km/h' },
 ]
 
+// F8 Stage 5 — shade the engine's usable RPM band (torque-peak rpm .. shift
+// rpm) on the MT chart, so it's visible at a glance which gears' theoretical
+// lines actually cross the measured scatter INSIDE the band. Reuses the same
+// `buildEngineProfile`/`usableBand` (aliased `computeEngineUsableBand` to
+// avoid shadowing this file's own local vars) that `EngineProfileInput.vue`/
+// `GearRecommendationPanel.vue` use — one source of truth for "is there a
+// usable profile right now", never recomputed differently here.
+const mtEngineProfile = computed(() =>
+  isMt.value ? buildEngineProfile(store.mt.engineProfile, store.mt.redlineRpm > 0 ? store.mt.redlineRpm : null) : null,
+)
+const engineUsableBand = computed(() => (mtEngineProfile.value ? computeEngineUsableBand(mtEngineProfile.value) : null))
+const mtChartXBands = computed(() =>
+  engineUsableBand.value ? [{ min: engineUsableBand.value.bottomRpm, max: engineUsableBand.value.topRpm }] : [],
+)
+
 // ── MT: detected plateaus vs configured ───────────────────────────────────
 const detectedPlateaus = computed(() => {
   const series = ratioSeries.value
@@ -822,6 +841,10 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         </div>
       </div>
 
+      <!-- F8 Stage 1 — engine torque/power profile, feeding the recommendation
+           panel below and this chart's usable-band shading (Stage 5). -->
+      <EngineProfileInput />
+
       <h4 class="sub-heading">{{ t('analyzer.gear.resultsHeading') }}</h4>
       <p v-if="!mtValid" class="hint">{{ t('analyzer.gear.invalidSpec') }}</p>
       <template v-else>
@@ -846,8 +869,13 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         </p>
       </template>
 
+      <!-- F8 Stages 2/3/4 — gear-ratio recommendations on top of the spec +
+           engine profile above. -->
+      <GearRecommendationPanel :session="props.session" />
+
       <!-- Chart: measured RPM/speed scatter + theoretical per-gear lines -->
       <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
+      <p v-if="engineUsableBand" class="hint inline-hint">{{ t('analyzer.gearRec.chartUsableBandHint') }}</p>
       <!-- B134 defect 2 — independent of the empty-state chain below: shows
            whenever a role resolved via a GUESS (override/heuristic), so a
            wrong pick/guess stays correctable even after the chart itself
@@ -880,6 +908,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         :data="mtChartData"
         :series="mtChartSeries"
         :axes="mtChartAxes"
+        :x-bands="mtChartXBands"
         :height="280"
       />
 
