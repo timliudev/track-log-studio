@@ -17,6 +17,7 @@ import {
   rankSprocketCombos,
   diagnoseTopSpeedGearing,
   optimalShiftRpm,
+  recommendForMeasuredSpeeds,
   type EngineCurveProfile,
   type EngineTwoPointProfile,
   type UsableBand,
@@ -688,5 +689,101 @@ describe('optimalShiftRpm', () => {
     // @ts-expect-error optimalShiftRpm requires EngineCurveProfile, not EngineTwoPointProfile —
     // this is the honesty constraint from the module header, enforced at compile time.
     optimalShiftRpm(twoPoint, 2, 1.5)
+  })
+})
+
+// ── recommendForMeasuredSpeeds ───────────────────────────────────────────
+
+describe('recommendForMeasuredSpeeds', () => {
+  // Circumference chosen so wheelRpm == speedKmh exactly (C = 1e6/60mm),
+  // making every rpm computation trivial to hand-verify: engineRpm =
+  // speedKmh * totalReduction.
+  const CIRCUMFERENCE_MM = 1_000_000 / 60
+
+  // 3 gears with reductions 4/2/1 (well-separated, no overlap with a
+  // [6000,10000] band) so each speed sample's gear membership is unambiguous.
+  const spec: MtDrivetrainSpec = {
+    primaryReduction: 1,
+    gearRatios: [{ ratio: 4 }, { ratio: 2 }, { ratio: 1 }],
+    finalDrive: { ratio: 1 },
+    wheelCircumferenceMm: CIRCUMFERENCE_MM,
+    redlineRpm: 10000,
+  }
+  const band: UsableBand = { bottomRpm: 6000, topRpm: 10000 }
+
+  it('hand-computed band occupancy over a mixed in/out-of-band sample set', () => {
+    // 2000 -> gear0 rpm=8000 (in); 4000 -> gear1 rpm=8000 (in);
+    // 8000 -> gear2 rpm=8000 (in); 2800 -> best miss is gear1 rpm=5600 (out);
+    // 5500 -> best miss is gear2 rpm=5500 (out). 3/5 in-band.
+    const result = recommendForMeasuredSpeeds({
+      speedSamplesKmh: [2000, 4000, 8000, 2800, 5500],
+      spec,
+      band,
+    })
+    expect(result).not.toBeNull()
+    expect(result!.bandOccupancyFrac).toBeCloseTo(0.6, 9)
+    expect(result!.cornerExitBandOccupancyFrac).toBeNull()
+  })
+
+  it('scores cornerExitSpeedsKmh separately from speedSamplesKmh', () => {
+    // Corner exits: 8000 (in, gear2) and 2800 (out, best miss gear1) -> 1/2.
+    const result = recommendForMeasuredSpeeds({
+      speedSamplesKmh: [2000, 4000, 8000, 2800, 5500],
+      cornerExitSpeedsKmh: [8000, 2800],
+      spec,
+      band,
+    })
+    expect(result!.cornerExitBandOccupancyFrac).toBeCloseTo(0.5, 9)
+    // The overall (non-corner) score is unaffected by supplying corner exits.
+    expect(result!.bandOccupancyFrac).toBeCloseTo(0.6, 9)
+  })
+
+  it('never suggests a scale that scores worse than the current gearing', () => {
+    const result = recommendForMeasuredSpeeds({
+      speedSamplesKmh: [2000, 4000, 8000, 2800, 5500],
+      spec,
+      band,
+    })!
+    expect(result.suggestedBandOccupancyFrac).toBeGreaterThanOrEqual(result.bandOccupancyFrac)
+  })
+
+  it('finds a final-drive rescale that fixes a badly under-geared spec', () => {
+    // Single gear, ratio=1: at the current final drive (scale=1), engineRpm
+    // = speedKmh = 5000 for every sample -> entirely below band.bottomRpm
+    // (6000), so baseline occupancy is 0. Scaling the final drive up by
+    // anywhere in roughly [1.2, 1.6] brings rpm into [6000,8000] -> in-band.
+    const singleGearSpec: MtDrivetrainSpec = {
+      primaryReduction: 1,
+      gearRatios: [{ ratio: 1 }],
+      finalDrive: { ratio: 1 },
+      wheelCircumferenceMm: CIRCUMFERENCE_MM,
+      redlineRpm: 10000,
+    }
+    const result = recommendForMeasuredSpeeds({
+      speedSamplesKmh: [5000, 5000, 5000],
+      spec: singleGearSpec,
+      band,
+    })!
+    expect(result.bandOccupancyFrac).toBeCloseTo(0, 9)
+    expect(result.suggestedBandOccupancyFrac).toBeCloseTo(1, 9)
+    expect(result.suggestedFinalDriveScale).toBeGreaterThan(1.15)
+    expect(result.suggestedFinalDriveScale).toBeLessThanOrEqual(1.6)
+    expect(result.suggestedFinalDrive).toBeCloseTo(1 * result.suggestedFinalDriveScale, 9)
+  })
+
+  it('returns null for a degenerate band', () => {
+    expect(
+      recommendForMeasuredSpeeds({ speedSamplesKmh: [5000], spec, band: { bottomRpm: 6000, topRpm: 6000 } }),
+    ).toBeNull()
+  })
+
+  it('returns null when the spec has no valid gears', () => {
+    const badSpec: MtDrivetrainSpec = { ...spec, gearRatios: [] }
+    expect(recommendForMeasuredSpeeds({ speedSamplesKmh: [5000], spec: badSpec, band })).toBeNull()
+  })
+
+  it('returns null when there are no valid speed samples', () => {
+    expect(recommendForMeasuredSpeeds({ speedSamplesKmh: [], spec, band })).toBeNull()
+    expect(recommendForMeasuredSpeeds({ speedSamplesKmh: [0, -5, NaN], spec, band })).toBeNull()
   })
 })

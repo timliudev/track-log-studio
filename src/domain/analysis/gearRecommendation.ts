@@ -1,5 +1,10 @@
 import type { GearRatioInput, MtDrivetrainSpec } from '@/domain/analysis/drivetrain'
-import { resolveGearRatio, speedKmhToWheelRpm, computeMtGearTable } from '@/domain/analysis/drivetrain'
+import {
+  resolveGearRatio,
+  resolveFinalDrive,
+  speedKmhToWheelRpm,
+  computeMtGearTable,
+} from '@/domain/analysis/drivetrain'
 
 /**
  * F8 — 齒比建議 (gear-ratio recommendation), motorcycle context.
@@ -725,4 +730,194 @@ export function optimalShiftRpm(
     }
   }
   return { rpm: (a + b) / 2, reason: 'crossover' }
+}
+
+// ── Stage 5: log-driven target ───────────────────────────────────────────
+
+/**
+ * Which gear a rider realistically selects at a given road speed, and
+ * whether that gear keeps the engine within the usable band. See {@link
+ * recommendForMeasuredSpeeds}'s doc for the scoring-rule rationale this
+ * implements: prefer the TALLEST (highest-numbered) gear whose rpm at this
+ * speed falls in-band — riders don't rev a low gear just because it's
+ * technically in-band when a taller gear is equally in-band and quieter/
+ * more efficient — falling back to whichever gear's rpm is CLOSEST to the
+ * band when none qualify.
+ */
+function selectGearForSpeed(
+  speedKmh: number,
+  totalReductions: readonly number[],
+  wheelCircumferenceMm: number,
+  band: UsableBand,
+): { gearIndex: number; rpm: number; inBand: boolean } | null {
+  const wheelRpm = speedKmhToWheelRpm(speedKmh, wheelCircumferenceMm)
+  if (!(wheelRpm > 0)) return null
+  let best: { gearIndex: number; rpm: number; inBand: boolean; missDistance: number } | null = null
+  for (let i = 0; i < totalReductions.length; i++) {
+    const reduction = totalReductions[i]
+    if (!(reduction > 0)) continue
+    const rpm = wheelRpm * reduction
+    if (!(rpm > 0)) continue
+    const inBand = rpm >= band.bottomRpm && rpm <= band.topRpm
+    if (inBand) {
+      // Ascending i = ascending gear number here (see the module's spec-
+      // input convention), so unconditionally overwriting on every in-band
+      // match keeps the TALLEST (highest-index) qualifying gear.
+      best = { gearIndex: i, rpm, inBand: true, missDistance: 0 }
+    } else if (!best || !best.inBand) {
+      const missDistance = rpm < band.bottomRpm ? band.bottomRpm - rpm : rpm - band.topRpm
+      if (!best || missDistance < best.missDistance) best = { gearIndex: i, rpm, inBand: false, missDistance }
+    }
+  }
+  return best ? { gearIndex: best.gearIndex, rpm: best.rpm, inBand: best.inBand } : null
+}
+
+/** Input for {@link recommendForMeasuredSpeeds}. */
+export interface MeasuredSpeedsInput {
+  /** Plain road-speed samples (km/h) from the log — the caller extracts
+   *  these from a `LogSession`; this module stays pure and never touches
+   *  `LogSession` itself. */
+  speedSamplesKmh: number[]
+  /** Optional corner-EXIT speeds specifically (km/h) — where band occupancy
+   *  matters most for lap time, since that's where the rider is asking for
+   *  maximum acceleration. */
+  cornerExitSpeedsKmh?: number[]
+  spec: MtDrivetrainSpec
+  band: UsableBand
+}
+
+/** Result of {@link recommendForMeasuredSpeeds}. */
+export interface MeasuredSpeedsScore {
+  /** Fraction (0-1) of `speedSamplesKmh` where the realistically-selected
+   *  gear (see {@link selectGearForSpeed}) keeps engine rpm within the band,
+   *  using the CURRENT spec's gearing. */
+  bandOccupancyFrac: number
+  /** Same metric restricted to `cornerExitSpeedsKmh`, or `null` when that
+   *  array was omitted/empty. */
+  cornerExitBandOccupancyFrac: number | null
+  /** The multiplicative scale applied to the current final drive that
+   *  maximises band occupancy over the combined sample pool (1 = no change
+   *  is already optimal within the searched range). */
+  suggestedFinalDriveScale: number
+  /** `resolveFinalDrive(spec.finalDrive) * suggestedFinalDriveScale`, or NaN
+   *  if the current spec has no resolvable final drive. */
+  suggestedFinalDrive: number
+  /** Band occupancy achieved by `suggestedFinalDrive`, over the same pool
+   *  used to search for it (samples + corner exits combined, when corner
+   *  exits were supplied — see the module doc below for why). */
+  suggestedBandOccupancyFrac: number
+}
+
+/** Final-drive search range as a multiplicative scale on the CURRENT final
+ *  drive — 0.6-1.6x covers realistic front/rear sprocket swaps (e.g. -2/+2
+ *  teeth on a typical 15/45 setup spans roughly this range) without
+ *  wandering into physically silly gearing. */
+const FINAL_DRIVE_SEARCH_MIN_SCALE = 0.6
+const FINAL_DRIVE_SEARCH_MAX_SCALE = 1.6
+/** Scan resolution: 240 steps across the search range above gives ~0.42%
+ *  scale resolution — finer than any real sprocket-tooth granularity, so it
+ *  won't miss the true optimum for lack of resolution. */
+const FINAL_DRIVE_SEARCH_STEPS = 240
+
+/**
+ * Score an MT spec's CURRENT gearing against a rider's actually-measured
+ * speed distribution, and suggest a final-drive rescale that maximises how
+ * often the realistically-selected gear keeps the engine in its usable
+ * band.
+ *
+ * ── Scoring rule (stated explicitly, no unstated magic constants) ────────
+ *
+ * For every speed sample, {@link selectGearForSpeed} picks the gear a rider
+ * would realistically be in: the TALLEST gear whose rpm at that speed falls
+ * within `[band.bottomRpm, band.topRpm]`, or — when no gear qualifies — the
+ * gear whose rpm is numerically closest to the band (so an over-tall or
+ * over-short spec still gets a defined nearest-gear answer instead of an
+ * arbitrary one). `bandOccupancyFrac` is simply the fraction of samples
+ * where that selected gear DID qualify (was actually in-band). This mirrors
+ * how a rider actually rides: they don't rev a lower gear "for style" when
+ * a taller one is equally in the meat of the powerband.
+ *
+ * `cornerExitSpeedsKmh`, when supplied, gets the SAME scoring separately
+ * (`cornerExitBandOccupancyFrac`) because corner-exit acceleration is where
+ * gearing choice affects lap time the most — every other sample is just
+ * "how the engine happens to be loafing at that moment", but a corner exit
+ * is specifically a moment the rider is asking for everything the engine
+ * has.
+ *
+ * ── Final-drive suggestion ────────────────────────────────────────────────
+ *
+ * Holding the gearbox ratios and primary reduction fixed (the practical,
+ * cheap adjustment is a front/rear sprocket swap, i.e. final drive only —
+ * see {@link rankSprocketCombos} for turning the result into buyable teeth),
+ * this brute-force scans a multiplicative scale on the CURRENT final drive
+ * over `[0.6, 1.6]` in 240 steps (see the constants above for why that
+ * range/resolution) and reports whichever scale maximises band occupancy.
+ * The search pool is `speedSamplesKmh` plus `cornerExitSpeedsKmh` (when
+ * supplied) POOLED TOGETHER, un-weighted — corner exits already get their
+ * own separate diagnostic score above, so folding them into the search pool
+ * without double-weighting keeps "what final drive is best overall" honest
+ * rather than secretly over-indexing on corners.
+ *
+ * Returns `null` when: the band is degenerate; the spec resolves to no
+ * valid gears (`computeMtGearTable` returns `[]`); or `speedSamplesKmh` has
+ * no valid (finite, positive) samples.
+ */
+export function recommendForMeasuredSpeeds(input: MeasuredSpeedsInput): MeasuredSpeedsScore | null {
+  const { speedSamplesKmh, cornerExitSpeedsKmh, spec, band } = input
+  if (!Number.isFinite(band.bottomRpm) || !Number.isFinite(band.topRpm) || !(band.topRpm > band.bottomRpm)) return null
+
+  const baseTable = computeMtGearTable(spec)
+  if (baseTable.length === 0) return null
+  const baseReductions = baseTable.map((r) => r.totalReduction)
+
+  const validSpeeds = speedSamplesKmh.filter((s) => Number.isFinite(s) && s > 0)
+  if (validSpeeds.length === 0) return null
+  const validCornerExits = (cornerExitSpeedsKmh ?? []).filter((s) => Number.isFinite(s) && s > 0)
+
+  const scoreFor = (reductions: number[], speeds: number[]): number => {
+    let inBandCount = 0
+    let counted = 0
+    for (const s of speeds) {
+      const sel = selectGearForSpeed(s, reductions, spec.wheelCircumferenceMm, band)
+      if (!sel) continue
+      counted++
+      if (sel.inBand) inBandCount++
+    }
+    return counted > 0 ? inBandCount / counted : 0
+  }
+
+  const bandOccupancyFrac = scoreFor(baseReductions, validSpeeds)
+  const cornerExitBandOccupancyFrac = validCornerExits.length > 0 ? scoreFor(baseReductions, validCornerExits) : null
+
+  const pool = validCornerExits.length > 0 ? [...validSpeeds, ...validCornerExits] : validSpeeds
+  const baseFinal = resolveFinalDrive(spec.finalDrive)
+
+  let bestScale = 1
+  let bestScore = scoreFor(baseReductions, pool)
+  if (Number.isFinite(baseFinal) && baseFinal > 0) {
+    for (let i = 0; i <= FINAL_DRIVE_SEARCH_STEPS; i++) {
+      const scale =
+        FINAL_DRIVE_SEARCH_MIN_SCALE +
+        ((FINAL_DRIVE_SEARCH_MAX_SCALE - FINAL_DRIVE_SEARCH_MIN_SCALE) * i) / FINAL_DRIVE_SEARCH_STEPS
+      // Scaling the final drive scales every gear's totalReduction equally
+      // (primary * gearRatio are unaffected), so this avoids recomputing
+      // computeMtGearTable per step.
+      const reductions = baseReductions.map((r) => r * scale)
+      const score = scoreFor(reductions, pool)
+      if (score > bestScore) {
+        bestScore = score
+        bestScale = scale
+      }
+    }
+  }
+
+  const suggestedFinalDrive = Number.isFinite(baseFinal) && baseFinal > 0 ? baseFinal * bestScale : NaN
+
+  return {
+    bandOccupancyFrac,
+    cornerExitBandOccupancyFrac,
+    suggestedFinalDriveScale: bestScale,
+    suggestedFinalDrive,
+    suggestedBandOccupancyFrac: bestScore,
+  }
 }
