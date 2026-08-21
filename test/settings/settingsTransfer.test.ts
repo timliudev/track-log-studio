@@ -7,7 +7,7 @@ import {
   type SettingsExportBundle,
 } from '@/domain/settings/settingsTransfer'
 import { defaultAppearanceSettings } from '@/stores/settingsStore'
-import { mergeCvtFormState, type MtFormState } from '@/stores/drivetrainStore'
+import { mergeCvtFormState, mergeMtFormState, type MtFormState } from '@/stores/drivetrainStore'
 import { defaultLayout } from '@/domain/layout/dashboardLayout'
 import { defaultPanelState } from '@/domain/layout/panelState'
 import { defaultCurrentValuesFieldPrefs } from '@/domain/analysis/currentValuesFieldPrefs'
@@ -21,7 +21,10 @@ const APPEARANCE = {
   trackLineSmoothing: 0,
 }
 
-const SAMPLE_MT: MtFormState = {
+// F8 — routed through mergeMtFormState (not a hand-written literal) so this
+// sample automatically picks up new MtFormState fields (e.g. engineProfile)
+// with their proper defaults instead of needing a matching edit here.
+const SAMPLE_MT: MtFormState = mergeMtFormState({
   primaryReduction: 2.833,
   gearRatios: [{ mode: 'ratio', ratio: 2.615, drivenTeeth: 0, driveTeeth: 0 }],
   finalDrive: { mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 },
@@ -29,7 +32,7 @@ const SAMPLE_MT: MtFormState = {
   tireSpec: '120/70-17',
   wheelCircumferenceMm: 1884,
   redlineRpm: 10000,
-}
+})
 
 const DRIVETRAIN = {
   kind: 'mt' as const,
