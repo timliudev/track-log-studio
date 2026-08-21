@@ -646,6 +646,9 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   typecheck/lint/build 過。UI 目視驗證未做(自動化環境 Browser pane 無法 compositing,Vue
   Transition 卡 rAF,屬環境限制),待真機。 — 本 session 分支 `6250b9d`/`605af87`(hash 待上
   origin 後確認,tracker 規則:local hash 可能變動)
+  **合入 develop:merge `76c547f`**(由 car-log-comparison peer session 完成,本 session
+  rebase 到 develop 實際 tip 後獨立複驗:typecheck 乾淨、2613/2613 綠 212 檔)。
+
 - [ ] **B136**(待拍板)VBO 沒有 `[channel units]` 區段時(Circuit Tools flavour 刻意不寫,
   單位嵌在欄名:`EngineRPM_rpm`/`CoolantTemp_degC`/`YawRate_degps`…),全部頻道單位空白。
   可在 importer 加「欄名單位後綴」啟發式(`_rpm`/`_kmh`/`_degC`/`_kPa`/`_pct`/`_deg`/
