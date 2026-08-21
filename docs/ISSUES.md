@@ -474,7 +474,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   agent 是在拍手機版截圖時遇到的,未深究。若為刻意(避免手機一次載入太多),應在 UI 上給提示。
 
 ## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
-- [ ] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
+- [x] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
   一鍵自動偵測產生 **~142 個 sector 閘門**(平均約每 25 m 一個),整張賽道地圖被切成一片
   編號圓點,完全不可用。根因就寫在 `src/domain/analysis/cornerDetection.ts` 的
   `CURVATURE_DEFAULTS` 註解裡:那組門檻(`minProminence=0.9`、`minValue=1.4` deg/m、
@@ -507,6 +507,24 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   集中在 `cornerDetection.ts`),②當 `.loga` 有 lean angle 時的優先路徑保留,③⑤ 視效果再議;
   無論如何都要補上硬上限當保險絲。**繞道方案(現在可用)**:sector 面板「清除全部」
   後手動加閘門,幾何會依賽道存下來、不會再被自動偵測蓋掉。
+  **落地(2026-08-21)**:採建議的 ①+④ 路線,**只動 curvature 路徑**(`leanAngleSignal`/
+  `LEAN_ANGLE_DEFAULTS`/`detectCorners` 的 lean-angle 分支完全未動,b1(9).loga 的
+  reference-lap 彎數驗證前後皆為 12)。`detectCornersByCurvature` 改為 turning-function
+  管線:訊號用 `distanceSmooth`(新增,真距離滑動平均)取代 index-domain `boxSmooth`;
+  依正負號切「轉向段」;段落 `|Δθ|` 未達 `thetaMinDeg`(預設 **30°**)整段丟棄;段內用既有
+  `findPeaks` 依相對峰值比例(`SUBPEAK_PROMINENCE_FRACTION`,實測校正到 **0.45**,而非文獻
+  回顧建議的起始猜測)拆多頂點同向連續彎(如 ARK 8-9-10);`minSpacingM` 隨圈長縮放
+  (`max(15, lapLenM/100)`);④ persistence-gap 有實作但**實測發現 1.6 的落差比門檻在真實
+  雜訊資料上會誤觸**(把一個 16 候選的 reference lap 砍到 5,某圈甚至砍到 1)——真實 prominence
+  分布是連續漸變、不是乾淨雙峰,調高到 **4.0** 後在所有 ARK 尺度真檔案上都不再觸發,純作保險絲
+  保留;`sigmaFraction` 實測 **1%**(非建議起始值 0.5%)在真檔案上更穩定。⑤ MDL 分割未做
+  (超出本輪範圍)。硬上限 `maxGates=40` 已加。真機文件三個手上有的檔案(麗寶大賽道
+  `session_20260816_0945_lihpao_full.rcz` 不在 repo 內、無法實測)reference-lap 彎數
+  before→after:`b1(5).loga` 11→10、`session_..._極限.rcz` 19→11、`session_..._rcvbo.rcz`
+  17→11(ARK 已知 ~12,且每圈變異大幅收斂,如 極限.rcz 從 `[20,21,19,17,21]` 收斂到
+  `[12,11,11,11,11]`)。合成尺度不變性測試(同形狀放大 5x)通過:彎數相同、apex 距離按比例縮放。
+  Commit `2fef597`(分支 `fix/corner-detection-scale-invariant-b132`,base develop `9f9bcec`,
+  尚未 merge/push)。
 
 - [x] **B133** ([[B132]] 的 UI 併發症,但**根因是通用缺陷**)Sector 卡片在閘門數量爆量時,
   「理論最佳圈」的各段時間清單會撐滿整張卡片,把下方的閘門清單/移除按鈕整個擠出可視範圍。
