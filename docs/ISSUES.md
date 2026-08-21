@@ -582,7 +582,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   情境)。typecheck 乾淨 · **2514/2514 綠**(211 檔) · lint 0 error · build PWA 29 entries。
   ⚠️ **尚未經裝置驗證**。
 
-- [ ] **F8**(design-first,user 2026-08-21 拍板要做)MT 齒比計算機:餵入引擎特性後**建議檔位與齒比**。
+- [x] **F8**(design-first,user 2026-08-21 拍板要做)MT 齒比計算機:餵入引擎特性後**建議檔位與齒比**。
   現況:MT 模式是**純幾何計算機**——輸入只有 `gearRatios / primaryReduction / finalDrive /
   wheelCircumferenceMm / redlineRpm`(`MtFormState`),輸出只有每檔總減速比與紅線極速
   (`computeMtGearTable`)。**引擎特性完全不在模型內**,所以它能算「這組齒比跑多快」,
@@ -621,6 +621,19 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   該分支仍保留為防禦性程式碼並在 JSDoc 記下證明。
   **待辦**:UI 接線(引擎特性輸入欄位、建議齒比表、三種目標切換、與已載入 log 的疊圖),
   必須排在 [[B134]] 之後(已滿足)。
+  **UI 已接線(merge `b9fb353`)**:新增 `domain/analysis/engineProfileForm.ts`(曲線貼上解析
+  /單位換算/驗證診斷/表單型別,輸入 UI 與輸出 UI 共用同一組建構函式)、
+  `EngineProfileInput.vue`(兩點版 + 曲線貼上,行內驗證訊息)、`GearRecommendationPanel.vue`
+  (建議齒比表 + 升檔落點診斷 + 曲線限定建議換檔轉速 + 終傳/齒盤建議 + 三種目標切換);
+  `drivetrainStore` 的 `MtFormState` 增 `engineProfile`(沿用 reject-don't-throw sanitizer、
+  範圍夾限、曲線文字 100k 字上限,18 條 sanitizer 測試,持久化仍在
+  `tracklogstudio.drivetrain.v2`);`UPlotChart` 新增 optional `xBands` prop 把可用轉速帶
+  畫成底色(像素幾何抽成可測的 `xBandRect`)。**誠實紅線型別+UI 雙重把關**:曲線限定輸出
+  只在「目前選的就是曲線版且該曲線通過驗證」時解鎖,只有兩點版時區塊仍可見但明說原因。
+  **刻意未接**:`simulateAcceleration`(需車重輸入、且無空力/滾阻時只能相對比較)、
+  出彎速度擷取(`recommendForMeasuredSpeeds` 視其為 optional,寫新的彎道啟發式超出範圍)、
+  齒比級距錨點切換(固定錨在現有頂檔齒比)。typecheck 乾淨 · **2707/2707 綠**(218 檔) ·
+  lint 0 error · build PWA 29 entries。⚠️ **尚未經裝置驗證**。
 
 ## 汽車記錄實測 — VBO `[laptiming]`/`[session data]` 沒吃 (B135–B136)
 > 2026-08-21 實測**第一份汽車 log** `lihpao_20260816_ct_full.vbo`(外部 `u6can` 工具把
