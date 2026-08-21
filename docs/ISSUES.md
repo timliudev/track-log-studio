@@ -662,7 +662,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   **合入 develop:merge `76c547f`**(由 car-log-comparison peer session 完成,本 session
   rebase 到 develop 實際 tip 後獨立複驗:typecheck 乾淨、2613/2613 綠 212 檔)。
 
-- [ ] **B136**(待拍板)VBO 沒有 `[channel units]` 區段時(Circuit Tools flavour 刻意不寫,
+- [x] **B136**(待拍板)VBO 沒有 `[channel units]` 區段時(Circuit Tools flavour 刻意不寫,
   單位嵌在欄名:`EngineRPM_rpm`/`CoolantTemp_degC`/`YawRate_degps`…),全部頻道單位空白。
   可在 importer 加「欄名單位後綴」啟發式(`_rpm`/`_kmh`/`_degC`/`_kPa`/`_pct`/`_deg`/
   `_degps`/`_g`/`_uT`/`_km`)拆出單位。兩個子選項:(a) 只填 `unit`、名稱保留尾巴(安全,
@@ -673,6 +673,16 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   風險也高。實作紅線:①只在單位原本為空時才套用(有 `[channel units]` 值一律優先);
   ②僅 VBO importer 內生效,既有 golden fixture 不得變動;③新填的單位會餵進 B134 啟發式的
   計分(unit 是訊號之一),須複驗真檔三個角色解析不變。
+  **已落地(merge 見下一則 commit 訊息 / `git log --grep B136`)**:`parseVbo` 新增
+  `NAME_SUFFIX_UNITS` 表與 `inferUnitFromNameSuffix()`,接在既有 `unitAt()` 之後當
+  **fallback**——`[channel units]` 有值一律優先且原封不動,`name`/`rawName`/`description`
+  完全不碰。誤拆防線:後綴必須緊接底線且位於結尾,巢狀項目依長度排序在前
+  (`_degps`/`_degC`/`_deg`、`_kmh`/`_km`、`_mps`/`_ms`);實測 `AcCompressorClutch_10Hz`
+  不會被 `_hz` 認領。單位拼寫沿用既有 importer/`semantic.ts` 寫法(`_deg`→`deg` 而非 `°`,
+  `_g`→小寫 `g` 以與匯出器 round-trip,`_uT`→`µT`)。真檔複驗:52 個 telemetry 頻道 34 個
+  取得單位,其餘 18 個為布林/狀態/raw 正確維持無單位;[[B134]] 三個角色解析不變。
+  兩個 VBO golden fixture 皆帶完整 `[channel units]`,不會走到 fallback。
+  typecheck 乾淨 · **2737/2737 綠**(218 檔) · lint 0 error。⚠️ **尚未經裝置驗證**。
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
