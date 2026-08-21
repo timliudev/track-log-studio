@@ -7,6 +7,7 @@ import { suggestLapTimeBand, suggestLapDistanceBand } from '@/domain/analysis/la
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
 import { toRadians } from '@/domain/export/rc3Nmea/geo'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
+import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
 
 /** Index of the first valid fix, or -1 when the track has none. */
@@ -74,6 +75,22 @@ function defaultLine(track: GpsTrack): LapLine | null {
 }
 
 /**
+ * B135: the start/finish line recovered from the source file itself (e.g. a
+ * RaceChrono/`u6can`-exported `.vbo`'s `[laptiming]` `Start` line, wired
+ * through `parseVbo.ts` into `LogMeta.startFinishLine`), if the active
+ * session's importer supplied one and it is well-formed. Sits between an
+ * ECU-channel-inferred line and the generic {@link defaultLine} placeholder
+ * in the seeding priority below — a real user-drawn/persisted line (restored
+ * async by `useCircuitPersistence.ts`) always wins because it's applied
+ * later and unconditionally overwrites whatever was seeded here.
+ */
+function metaLine(session: LogSession | null): LapLine | null {
+  const l = session?.meta.startFinishLine
+  if (!l) return null
+  return [l.a.lat, l.a.lon, l.b.lat, l.b.lon].every(Number.isFinite) ? l : null
+}
+
+/**
  * Lap detection wiring for the analyzer: exposes a millisecond time axis, the
  * detected laps for the active session, and auto-seeds a sensible default
  * start/finish line into the lapStore when a track first appears (and reseeds
@@ -130,7 +147,7 @@ export function useLaps(): {
    */
   function resetLine(): void {
     const seeded = track.value && session.value
-      ? inferLapLineFromChannel(session.value, track.value) ?? defaultLine(track.value)
+      ? inferLapLineFromChannel(session.value, track.value) ?? metaLine(session.value) ?? defaultLine(track.value)
       : null
     if (seeded) lapStore.setLine(seeded)
     else lapStore.clearLine()
@@ -180,7 +197,7 @@ export function useLaps(): {
       }
       if (next && lapStore.line == null) {
         const seeded = session.value
-          ? inferLapLineFromChannel(session.value, next) ?? defaultLine(next)
+          ? inferLapLineFromChannel(session.value, next) ?? metaLine(session.value) ?? defaultLine(next)
           : defaultLine(next)
         if (seeded) lapStore.setLine(seeded)
       }

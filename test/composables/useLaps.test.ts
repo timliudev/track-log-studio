@@ -32,6 +32,20 @@ function gpsSession(latBase: number): LogSession {
   )
 }
 
+/** Same shape as {@link gpsSession}, but carries a B135 `meta.startFinishLine`
+ *  so useLaps's seeding-priority tests can assert it is picked up ahead of
+ *  the generic default-line placeholder. */
+function gpsSessionWithMetaLine(latBase: number, line: LapLine): LogSession {
+  return new LogSession(
+    [
+      channel('Time', [0, 1000]),
+      channel('GPS_Lat', [latBase, latBase + 0.001]),
+      channel('GPS_Lon', [120, 120.001]),
+    ],
+    { formatId: 'vbo', createdDate: null, headerInfo: {}, startFinishLine: line },
+  )
+}
+
 /** ECU-lap session with three equal-distance laps, sufficient for band suggestions. */
 function ecuLapSession(latBase: number): LogSession {
   const n = 41
@@ -218,6 +232,46 @@ describe('useLaps file-change watcher', () => {
     await Promise.resolve()
 
     expect(sectorStore.gates).toHaveLength(1)
+  })
+})
+
+// B135 — a VBO importer (RaceChrono / u6can-exported) can supply the file's
+// own start/finish line via LogMeta.startFinishLine. The seeding priority
+// below `resetLine()`/the track watcher use is: ECU-channel-inferred line >
+// meta.startFinishLine > the generic defaultLine() placeholder. (A
+// user-stored/persisted line, applied async by useCircuitPersistence.ts,
+// beats all of these by construction — it's set later and unconditionally —
+// so it isn't exercised here; see that composable's own tests.)
+describe('useLaps start/finish line seeding priority (B135)', () => {
+  it('seeds meta.startFinishLine when present and no ECU-channel line is inferable', async () => {
+    const analyzer = useAnalyzerStore()
+    const lapStore = useLapStore()
+    const fileStore = useFileStore()
+    const metaSfLine: LapLine = {
+      a: { lat: 24.31858, lon: 120.68645 },
+      b: { lat: 24.31878, lon: 120.68626 },
+    }
+    const id = fileStore.addMergedSession('meta.vbo', gpsSessionWithMetaLine(24, metaSfLine))
+    analyzer.activeFileId = id
+    useLaps()
+    await Promise.resolve()
+
+    expect(lapStore.line).toEqual(metaSfLine)
+  })
+
+  it('falls back to defaultLine() when no meta.startFinishLine is present', async () => {
+    const analyzer = useAnalyzerStore()
+    const lapStore = useLapStore()
+    const id = loadSession(23)
+    analyzer.activeFileId = id
+    useLaps()
+    await Promise.resolve()
+
+    // gpsSession() carries no meta.startFinishLine -- the seeded line must be
+    // the generic default centred on the first GPS fix (lat ~23), not a
+    // meta-supplied line.
+    expect(lapStore.line).not.toBeNull()
+    expect(lapStore.line!.a.lat).toBeCloseTo(23, 1)
   })
 })
 
