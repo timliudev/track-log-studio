@@ -17,15 +17,14 @@ describe('B127 — name evidence demotes constant quantity-named channels to ana
   const FIXTURES = ['vbo.loga', 'mxApp.loga', 'raceAmp.loga', 'super2.loga', 'superX.loga']
   const sessions = FIXTURES.map((f) => ({ f, s: parseLoga(loadFixture(f)) }))
 
-  /** Every occurrence across the fixtures must have `expected`; at least one must exist. */
-  function expectKind(name: string, expected: string): void {
-    const kinds = sessions.map(({ s }) => kindOf(s, name)).filter((k) => k !== undefined)
-    expect(kinds.length, `${name} present in some fixture`).toBeGreaterThan(0)
-    for (const k of kinds) expect(k, name).toBe(expected)
-  }
+  /** Kinds of `name` in every fixture that contains it. */
+  const kindsAcross = (name: string): string[] =>
+    sessions.map(({ s }) => kindOf(s, name)).filter((k): k is NonNullable<typeof k> => k !== undefined)
 
   it.each(['IR_LapNumber', 'IR_LapTime', 'SimRPM', 'MapNum'])('%s is analog', (name) => {
-    expectKind(name, 'analog')
+    const kinds = kindsAcross(name)
+    expect(kinds.length, `${name} present in some fixture`).toBeGreaterThan(0)
+    expect(new Set(kinds), name).toEqual(new Set(['analog']))
   })
 
   it.each([
@@ -40,7 +39,9 @@ describe('B127 — name evidence demotes constant quantity-named channels to ana
     'LC_SW_On',
     'Quick_Shift_Act',
   ])('%s stays digital', (name) => {
-    expectKind(name, 'digital')
+    const kinds = kindsAcross(name)
+    expect(kinds.length, `${name} present in some fixture`).toBeGreaterThan(0)
+    expect(new Set(kinds), name).toEqual(new Set(['digital']))
   })
 
   it('never demotes a boolean-convention name that also reads as a quantity (allowlist wins)', () => {
