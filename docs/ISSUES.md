@@ -418,7 +418,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   要的是真正的 epoch number 可直接 `new Date()`,不是還要再解析回數字的字串,且是純新增的
   optional 欄位,其餘 9 個 importer 的既有 `LogMeta` 建構語法完全不用動。真檔複驗:首筆
   `time`=162112.xxx(非改前的 162105.xxx)。 — `d3b15a6`
-- [ ] **B127** [[B125]] 的殘留限制:值域啟發式規則分辨不出「整場都沒觸發過的真實數位旗標」跟
+- [x] **B127** [[B125]] 的殘留限制:值域啟發式規則分辨不出「整場都沒觸發過的真實數位旗標」跟
   「值剛好恆為某個常數的類比頻道」。`.loga` 裡整趟記錄都停在 0 的 ECU 旗標(如
   `IR_LapNumber`/`IR_LapTime`/`SimRPM`/`MapNum` 這類本質是類比、但剛好也全程恆 0/某常數的頻道)
   跟真正未觸發的數位旗標一樣,都會落進數位槽——單靠值域完全無法區分。正確修法需要**頻道名稱/
@@ -433,7 +433,42 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   結構性事實:`rc_digital_*` 僅 63 格、.loga 動輒 94–209 個 digital → 數位桶**永遠溢位**,digital
   數量一動 generic 槽位就大規模重編(69–106/119),「挑最小改動」不成立——真正選項是
   **V0 完全不改(wontfix)vs V4 一次到位**,待 user 拍板(另見 [[B128]] 槽位不穩定性)。
-- [ ] **B128**(2026-08-21 開單;源自 [[B127]] 決策素材實測的結構性發現 + 2026-08-17 handoff
+  **✅ 已修(2026-10-04,user 拍板 V4,與 [[B128]] 同批;merge `3cc13f2`,實作 `825349c`)**:
+  照搬實驗分支的 V4(regex 逐字相同,未重新發明),移到新模組 `src/domain/export/vbo/channelNaming.ts`
+  (`BOOL_NAME`/`NUMERIC_NAME`/`demoteConstantToAnalog`,註解寫明「啟發式、以不誤殺旗標為原則」並附數據)。
+  規則:通過值域檢查的頻道,**只有「整場恆常數 ∧ 名稱像數值量 ∧ 名稱不像布林」三條同時成立**才降成
+  analog;有切換過的頻道不管叫什麼都不動。**實測與實驗數字完全一致**(改分類數):vbo.loga 33、
+  mxApp 9、raceAmp 24、super2 25、superX 48、兩個真 .rcz 皆 0;全部是 digital→analog,
+  **0 個 analog→digital、0 個像布林名稱被降級**。點名四個(`IR_LapNumber`/`IR_LapTime`/`SimRPM`/
+  `MapNum`)全修好,並有永久迴歸測試 `test/export/vboClassification.test.ts`(四個必為 analog;
+  `Malf8.Malf_On`/`Pit_SW_On`/`TCCtrAct`/`EngineBrakeEn`/`GPS_Weak`/`Fuel8.RPM_Limit`/`Fuel10.MAPSW0`/
+  `Fuel1.Dec_FC_En`/`LC_SW_On`/`Quick_Shift_Act` 必為 digital)。已知殘留:vbo.loga 仍有 7 個名稱
+  太含糊的常數類比量留在 digital(`Fuel_CL`、`TPS_indx`、`Engine_Brake`、`DragPhase`、`DragRound`、
+  `SuspensionAD1/2`),要擴充 `NUMERIC_NAME` 時必須重跑量測並維持「0 誤殺」。
+  **變更報告(fixture 重生前產出、coordinator 審過)**——每樣本:非 GPS 頻道數 / 改分類 / 僅 V4 造成的
+  槽號變動 / B128 額外造成的槽號變動 / 總槽號變動:
+
+  | 樣本 | 頻道 | 改分類 | V4 槽變 | B128 額外 | 總槽變 |
+  |---|---|---|---|---|---|
+  | vbo.loga(golden) | 139 | 33 | 80 | 114 | 118 |
+  | mxApp.loga | 147 | 9 | 0 | 138 | 138 |
+  | raceAmp.loga | 139 | 24 | 84 | 115 | 116 |
+  | super2.loga | 242 | 25 | 20 | 226 | 226 |
+  | superX.loga | 258 | 48 | 142 | 240 | 242 |
+  | b1(5)_rcvbo.rcz | 142 | 0 | 0 | 6 | 6 |
+  | 極限.rcz | 28 | 0 | 0 | 5 | 5 |
+
+  vbo.loga 的 33 個改分類頻道:`Miss_CRK_Cnt`、`IR_LapNumber`、`IR_LapTime`、`Cyl1s/2/3/4_Comn_FuelPW`、
+  `SimRPM`、`TC_Slip_Thre`、`TC_Slip_Rate`、`MapNum`、`TC_VSSFRRate`、`TC_VSSREstRate`、
+  `DragTargetPhaseMin/Max`、`DragTargetMode`、`DragTargetUnit`、`DragDist`、`DragTime`、`DragSpeed`、
+  `EXIN_AD1–3`、`CO_PW_Mult`、`Acc_Fuel_Mult`、`GearPosition_AD`、`QuickShift_AD`、`TC_TorqRedSASum`、
+  `QuickShift_CL_CutTime`、`QSDeltaRPMTarget`、`LaunchTorqRedSASum`、`TC_Launch_Level`、`Horsepower`
+  (單位皆 `bool`→`raw`)。golden fixture 重生一次(`10a33e5`),只動 `[header]`/`[channel units]`/
+  `[comments]`/`[column names]` 與 CSV 對照列,`[data]` 數值零變動。
+  ⚠️ **使用者影響**:既有在 RaceChrono 裡對著舊 `_rc.vbo` 設好的頻道對應,幾乎全部會失效(一次性)。
+  驗證(coordinator 在 rebase 後的乾淨 worktree 親跑):typecheck 0 錯、**2771/2771 綠(221 檔)**、
+  lint 0 error(4 個 warning 皆在本批未動的既有檔)。**⚠️ 尚未經裝置驗證。**
+- [x] **B128**(2026-08-21 開單;源自 [[B127]] 決策素材實測的結構性發現 + 2026-08-17 handoff
   未開單小瑕疵)`_rc` flavour 的 generic 槽號**跨場次不穩定**:配號依「哪些頻道有資料」而浮動
   (例:`GPS_CoordinatePrecision` 拿到 `rc_analog_13` 只因來源自己的 analog 13 恰好沒資料),且
   `rc_digital_*` 僅 63 格、.loga 常態 94–209 個 digital,溢位進 `rc_analog_*` 的量隨場次而變,
@@ -441,6 +476,21 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   B120–B126 造成;影響的是跨場次比對 `_rc.vbo` 欄名的使用情境。可能修法:穩定排序鍵(按頻道
   名 hash 而非出現順序)或每頻道固定配號表——**皆屬行為變更,會動 golden fixture,待 user
   決定要不要修**;若 [[B127]] 拍板 V4,建議同一批處理(反正 fixture 要重生)。
+  **✅ 已修(2026-10-04,與 [[B127]] 同批;merge `3cc13f2`,實作 `9ba0f87`)**:user 在三案中選
+  **「按名稱排序」**(另兩案:名稱 hash——頻道 >63 必撞號、無法保證;固定對照表——需維護 200+ 筆)。
+  `buildVboCatalog` 改三段式:①passthrough `rc_` 名稱**即使整欄 NaN 也先保留槽號**(修掉
+  `GPS_CoordinatePrecision` 搶到 `rc_analog_13` 的案例,極限.rcz 中改為 `rc_analog_16`);
+  ②分類照舊;③generic analog 依名稱排序(code-unit 比較,不用 `localeCompare`,跨語系一致)**先**配
+  `rc_analog_*`,再由排序後的 digital 配 `rc_digital_1..63`,溢位接在 analog 之後——analog 槽號因此
+  不再受 digital 數量影響。輸出欄位順序仍是原始頻道順序,只有槽號名稱來自排序。
+  **保證**:頻道名稱集合相同 + 分類相同 → 槽號完全相同,與頻道出現順序、passthrough/全 NaN 頻道有無
+  資料無關。**限制**(寫在 `buildVboCatalog` 註解):(a) 同桶多/少一個頻道,排在它後面的槽號會位移;
+  (b) 某頻道跨場次分類不同(這場有切換、那場恆常數;或這場有資料、那場全 NaN 被丟)會換桶並牽動
+  其他頻道;(c) digital 超過 63 的溢位排在 analog 之後,analog 數量一變,所有溢位槽號跟著動。
+  副作用:排序後字母較後的真旗標(`Malf8.*`、`Mode.*`、`Pit_SW_On`、`TCCtrAct`、`Quick_Shift_Act`)
+  落進 `rc_analog_*` 溢位區——仍是 63 格上限的同一問題,只是換了哪些旗標溢位。
+  測試 `test/export/vboSlots.test.ts`(打亂頻道順序 rcName 不變、全 NaN passthrough 仍保留槽號、
+  真 fixture 兩種順序結果一致)。各樣本槽號變動數見 [[B127]] 變更報告表。**⚠️ 尚未經裝置驗證。**
 - [ ] **F7**(design-first,**本批不實作、待拍板**)RC3 Analog 自訂命名表。`.rcz` 內沒有任何
   頻道文字標籤,Analog 1–15 的語意只存在使用者的 RaceChrono / ECU 設定裡,程式無從得知——
   這是 [[B120]]–[[B125]] 修完之後**剩下的唯一**「名字看不懂」來源。需要一個可存成 preset、
