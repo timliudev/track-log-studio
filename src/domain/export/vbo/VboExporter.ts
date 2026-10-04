@@ -2,6 +2,7 @@ import type { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { computeSmoothedCourses } from '@/domain/export/rc3Nmea/heading'
 import { fmtNum, padFloat, padInt } from './format'
+import { demoteConstantToAnalog } from './channelNaming'
 import {
   ANALOG_BASES,
   Allocator,
@@ -135,10 +136,13 @@ function isAllNaN(data: Float32Array, n: number): boolean {
  * version of this fix did, to auto-reject constant channels, but that
  * misfires on real ECU boolean flags that simply never fired in a given
  * log — e.g. `Malf8.Malf_On`, `Pit_SW_On` — which are still genuinely
- * digital signals, just constant-0 in this particular recording. There is
- * no way to tell those apart from a constant-0 analog using value range
- * alone; see B127 for the residual limitation and why a fix needs
- * name/description evidence instead, deferred pending a user decision).
+ * digital signals, just constant-0 in this particular recording). Value range
+ * alone cannot tell those apart from a constant-0 analog quantity
+ * (`IR_LapNumber`, `SimRPM`, …); that residual ambiguity (B127) is resolved
+ * by the caller, which applies the channel-NAME rule in `channelNaming.ts`
+ * (`demoteConstantToAnalog`) on top of this function: a constant channel
+ * whose name positively reads as a quantity and not as a flag is demoted to
+ * analog. This function itself stays a pure value-range test.
  * B124 already removes the one case that motivated the "both values" rule
  * in .rcz — an all-NaN channel — before this function ever runs.
  */
@@ -290,8 +294,10 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
       // int32ScaleFor has no validated physical unit).
       unit = ch.unit || 'raw'
       kind = 'passthrough'
-    } else if (looksDigital(ch, n)) {
-      // digital bucket spills into analog when full. looksDigital() already
+    } else if (looksDigital(ch, n) && !demoteConstantToAnalog(name, ch.data, n)) {
+      // digital bucket spills into analog when full (B127: a constant channel
+      // with a quantity-like name was already routed to analog above).
+      // looksDigital() already
       // requires an empty source unit (see its doc), so 'bool' here is never
       // overwriting a real physical unit.
       rcName = alloc.take([...DIGITAL_BASES, ...ANALOG_BASES])
