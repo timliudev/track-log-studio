@@ -471,11 +471,17 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   lint 0 錯(4 個既有 warning 不在本次檔案);**既有真檔/golden 測試圈數零變化**。
   已知限制(與 `walkLapGates` 相同):連續兩個以上 fix 都落在線上時仍會漏算,需兩函式一起改。
   ⚠️ 尚未經裝置驗證。
-- [ ] **B130** 自動種下的起終點線,方向取自「前兩個有效 fix」(`src/composables/useLaps.ts:25`
+- [x] **B130** 自動種下的起終點線,方向取自「前兩個有效 fix」(`src/composables/useLaps.ts:25`
   的 `defaultLine()`)。**已讀碼確認**:`defaultLine` 取 `firstValidIdx` 與其後第一個 valid fix
   當方向基準。若記錄從靜止或極慢速開頭(常見:按下記錄後才起步),這兩點的位移可能小於
   float32 量化誤差 → 方向等同雜訊 → 種出來的線角度歪掉,大部分圈次因而漏算。修法建議:改取
   「與起點相距 ≥N 公尺的第一個 fix」當方向基準(N 待定),而非固定取下一個 fix。
+  **已修(merge `c9034a2`;復現測試 `635faf7`、修正 `a2b6984`)**:user 拍板 N = 10 m,新增常數
+  `DEFAULT_LINE_DIRECTION_MIN_DIST_M = 10`;`defaultLine()` 改取「與起點 haversine 距離 ≥10 m 的
+  第一個有效 fix」當方向基準,整段都不到 10 m 時退回舊行為(下一個有效 fix)。新增
+  `test/composables/useLapsDefaultLine.test.ts`(靜止抖動起步→舊碼偏約 72°、fallback、少於兩點)。
+  與 B129 合併後實測:typecheck 綠、2743/2743 綠、lint 0 error;真檔 fixture 圈數無任何變動
+  (沒有真檔測試走 `defaultLine`)。⚠️ 尚未經裝置驗證。
 - [ ] **B131**(信心較低,**待確認是刻意設計還是 bug**)手機寬度下匯入記錄後**不會自動啟用**:
   勾選框未打勾,切到分析頁是空白,要手動勾選才有內容;桌面版匯入後直接是「主要」。
   agent 是在拍手機版截圖時遇到的,未深究。若為刻意(避免手機一次載入太多),應在 UI 上給提示。
