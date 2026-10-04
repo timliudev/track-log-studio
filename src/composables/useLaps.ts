@@ -23,7 +23,7 @@ function firstValidIdx(track: GpsTrack): number {
  * by cos(lat) on the longitude axis so it looks perpendicular on screen.
  * Returns null if there are fewer than two valid fixes.
  */
-function defaultLine(track: GpsTrack): LapLine | null {
+export function defaultLine(track: GpsTrack): LapLine | null {
   const i0 = firstValidIdx(track)
   if (i0 < 0) return null
   let i1 = -1
