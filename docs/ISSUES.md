@@ -485,6 +485,16 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 - [ ] **B131**(信心較低,**待確認是刻意設計還是 bug**)手機寬度下匯入記錄後**不會自動啟用**:
   勾選框未打勾,切到分析頁是空白,要手動勾選才有內容;桌面版匯入後直接是「主要」。
   agent 是在拍手機版截圖時遇到的,未深究。若為刻意(避免手機一次載入太多),應在 UI 上給提示。
+  **2026-10-04 調查結論:非 app bug,是 Claude 內建瀏覽器窗格的量測假象(待 user 拍板是否關閉)。**
+  根因:`src/App.vue:113-117` 的 `<Transition mode="out-in">` 要等 `ConverterView` 離場動畫跑完才掛載
+  (async 的)`AnalyzerView`;Vue 靠 `requestAnimationFrame` 收尾離場動畫,而窗格沒在繪製時 rAF 完全
+  不觸發(實測 1 秒內 "no raf"、輪詢 5 秒 `.analyzer` 始終不存在)。此時 `tab` 已是 `'analyzer'`,
+  FileBar 進入分析模式,但負責自動選主要記錄的 `watch(readyFiles, …, {immediate:true})`
+  (`AnalyzerView.vue:377`)根本還沒跑 → 勾選框空、無「主要」、內容空白,與本條描述完全一致。
+  任何觸發繪製的動作(截圖、手動勾選)都會讓動畫收尾、`AnalyzerView` 掛載並自動選為主要(實測 375 寬
+  與 1024 寬皆確認)。手機版無任何專屬程式碼碰 `activeFileId`/`selectedSessions`,也無刻意設計的註解。
+  真機會持續繪製,不會卡住;唯一真實殘留是 0.25 s 離場動畫+chunk 載入期間 FileBar 短暫顯示「未選取」的閃爍。
+  **未改任何程式碼**(`fix/b131` 分支零 commit)。
 
 ## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
 - [x] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
