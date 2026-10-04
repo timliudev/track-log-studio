@@ -5,10 +5,18 @@ import { timeSeconds } from '@/domain/analysis/timeAxis'
 import { detectLapsByChannel, detectLapsByLine, inferLapLineFromChannel, type LapLine } from '@/domain/analysis/laps'
 import { suggestLapTimeBand, suggestLapDistanceBand } from '@/domain/analysis/lapValidity'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
-import { toRadians } from '@/domain/export/rc3Nmea/geo'
+import { haversineM, toRadians } from '@/domain/export/rc3Nmea/geo'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
+
+/**
+ * B130: minimum distance (m) from the start fix before a later fix is trusted
+ * as the heading reference for the auto-seeded start/finish line. A stationary
+ * or very slow start yields fixes within GPS/float32 noise of each other, so
+ * the direction from the first two fixes would be random.
+ */
+export const DEFAULT_LINE_DIRECTION_MIN_DIST_M = 10
 
 /** Index of the first valid fix, or -1 when the track has none. */
 function firstValidIdx(track: GpsTrack): number {
@@ -18,7 +26,7 @@ function firstValidIdx(track: GpsTrack): number {
 
 /**
  * A small default start/finish line: centred on the first valid fix and drawn
- * perpendicular to the initial heading (from the first two valid fixes). Its
+ * perpendicular to the initial heading (from the first valid fix to the first one >= 10 m away, B130). Its
  * half-length is a small fraction of the track's lat/lon bbox diagonal, scaled
  * by cos(lat) on the longitude axis so it looks perpendicular on screen.
  * Returns null if there are fewer than two valid fixes.
@@ -26,13 +34,22 @@ function firstValidIdx(track: GpsTrack): number {
 export function defaultLine(track: GpsTrack): LapLine | null {
   const i0 = firstValidIdx(track)
   if (i0 < 0) return null
+  // B130: prefer the first fix >= DEFAULT_LINE_DIRECTION_MIN_DIST_M away; fall
+  // back to the next valid fix if the track never moves that far.
   let i1 = -1
+  let nextValid = -1
   for (let i = i0 + 1; i < track.valid.length; i++) {
-    if (track.valid[i]) {
+    if (!track.valid[i]) continue
+    if (nextValid < 0) nextValid = i
+    if (
+      haversineM(track.lat[i0], track.lon[i0], track.lat[i], track.lon[i]) >=
+      DEFAULT_LINE_DIRECTION_MIN_DIST_M
+    ) {
       i1 = i
       break
     }
   }
+  if (i1 < 0) i1 = nextValid
   if (i1 < 0) return null
 
   // bbox over valid fixes for a length reference.
