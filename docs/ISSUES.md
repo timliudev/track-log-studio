@@ -454,7 +454,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 > 反推出來的。**B129/B130 我已讀碼確認屬實**(證據見各條),但**都還沒寫復現測試**,實際影響
 > 範圍待評估;修法皆會動到圈次偵測這個核心路徑,**待 user 拍板要不要修**。
 
-- [ ] **B129** `detectLapsByLine`(起終點線圈次偵測,`src/domain/analysis/laps.ts:257`)缺少
+- [x] **B129** `detectLapsByLine`(起終點線圈次偵測,`src/domain/analysis/laps.ts:257`)缺少
   `walkLapGates` 有的「取樣點正好落在線上」補救。**已讀碼確認**:`walkLapGates`(同檔 :170)
   明文處理這個情況——註解寫著「A GPS fix can land exactly on the gate line. The two adjacent
   segments then only TOUCH the gate at their endpoint, so the strict pairwise test below rejects
@@ -464,6 +464,13 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   觸發條件:軌跡每圈幾乎完全重疊時會系統性發生——float32 經度在 121°E 的 ulp 約 0.85 m,
   座標會吸附到同一格點,取樣點就可能正好落在線上。修法:把 `crossesThroughSample` 的三點
   檢查套進 `detectLapsByLine`(該函式已存在、已被 sector 路徑用了,不必新寫演算法)。
+  **✅ 已修(2026-10-04,merge `e0f7cc4`;repro 測試 `e763d63`、修正 `36d5b1a`)**:crossing 迴圈改維護
+  `before/prev/i` 三點視窗,`crossesThroughSample` 成立時在線上那個 fix(`idx = prev`)記一次穿越,
+  並略過該段的嚴格判斷——嚴格 straddle 不可能涉及線上端點,故不會重複計數;同側擦過仍拒絕。
+  新增 3 個測試(線上穿越算一次、線上與嚴格穿越混合、擦線折返不算)。typecheck 0 錯、2740/2740 綠、
+  lint 0 錯(4 個既有 warning 不在本次檔案);**既有真檔/golden 測試圈數零變化**。
+  已知限制(與 `walkLapGates` 相同):連續兩個以上 fix 都落在線上時仍會漏算,需兩函式一起改。
+  ⚠️ 尚未經裝置驗證。
 - [ ] **B130** 自動種下的起終點線,方向取自「前兩個有效 fix」(`src/composables/useLaps.ts:25`
   的 `defaultLine()`)。**已讀碼確認**:`defaultLine` 取 `firstValidIdx` 與其後第一個 valid fix
   當方向基準。若記錄從靜止或極慢速開頭(常見:按下記錄後才起步),這兩點的位移可能小於
