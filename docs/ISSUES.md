@@ -433,7 +433,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   結構性事實:`rc_digital_*` 僅 63 格、.loga 動輒 94–209 個 digital → 數位桶**永遠溢位**,digital
   數量一動 generic 槽位就大規模重編(69–106/119),「挑最小改動」不成立——真正選項是
   **V0 完全不改(wontfix)vs V4 一次到位**,待 user 拍板(另見 [[B128]] 槽位不穩定性)。
-  **✅ 已修(2026-10-04,user 拍板 V4,與 [[B128]] 同批;merge `3cc13f2`,實作 `825349c`)**:
+  **✅ 已修(2026-10-04,user 拍板 V4,與 [[B128]] 同批;merge `693d5a2`,實作 `5edbadf`)**:
   照搬實驗分支的 V4(regex 逐字相同,未重新發明),移到新模組 `src/domain/export/vbo/channelNaming.ts`
   (`BOOL_NAME`/`NUMERIC_NAME`/`demoteConstantToAnalog`,註解寫明「啟發式、以不誤殺旗標為原則」並附數據)。
   規則:通過值域檢查的頻道,**只有「整場恆常數 ∧ 名稱像數值量 ∧ 名稱不像布林」三條同時成立**才降成
@@ -463,7 +463,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   `DragTargetPhaseMin/Max`、`DragTargetMode`、`DragTargetUnit`、`DragDist`、`DragTime`、`DragSpeed`、
   `EXIN_AD1–3`、`CO_PW_Mult`、`Acc_Fuel_Mult`、`GearPosition_AD`、`QuickShift_AD`、`TC_TorqRedSASum`、
   `QuickShift_CL_CutTime`、`QSDeltaRPMTarget`、`LaunchTorqRedSASum`、`TC_Launch_Level`、`Horsepower`
-  (單位皆 `bool`→`raw`)。golden fixture 重生一次(`10a33e5`),只動 `[header]`/`[channel units]`/
+  (單位皆 `bool`→`raw`)。golden fixture 重生一次(`e99a15e`),只動 `[header]`/`[channel units]`/
   `[comments]`/`[column names]` 與 CSV 對照列,`[data]` 數值零變動。
   ⚠️ **使用者影響**:既有在 RaceChrono 裡對著舊 `_rc.vbo` 設好的頻道對應,幾乎全部會失效(一次性)。
   驗證(coordinator 在 rebase 後的乾淨 worktree 親跑):typecheck 0 錯、**2771/2771 綠(221 檔)**、
@@ -476,7 +476,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   B120–B126 造成;影響的是跨場次比對 `_rc.vbo` 欄名的使用情境。可能修法:穩定排序鍵(按頻道
   名 hash 而非出現順序)或每頻道固定配號表——**皆屬行為變更,會動 golden fixture,待 user
   決定要不要修**;若 [[B127]] 拍板 V4,建議同一批處理(反正 fixture 要重生)。
-  **✅ 已修(2026-10-04,與 [[B127]] 同批;merge `3cc13f2`,實作 `9ba0f87`)**:user 在三案中選
+  **✅ 已修(2026-10-04,與 [[B127]] 同批;merge `693d5a2`,實作 `0478736`)**:user 在三案中選
   **「按名稱排序」**(另兩案:名稱 hash——頻道 >63 必撞號、無法保證;固定對照表——需維護 200+ 筆)。
   `buildVboCatalog` 改三段式:①passthrough `rc_` 名稱**即使整欄 NaN 也先保留槽號**(修掉
   `GPS_CoordinatePrecision` 搶到 `rc_analog_13` 的案例,極限.rcz 中改為 `rc_analog_16`);
@@ -514,7 +514,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   觸發條件:軌跡每圈幾乎完全重疊時會系統性發生——float32 經度在 121°E 的 ulp 約 0.85 m,
   座標會吸附到同一格點,取樣點就可能正好落在線上。修法:把 `crossesThroughSample` 的三點
   檢查套進 `detectLapsByLine`(該函式已存在、已被 sector 路徑用了,不必新寫演算法)。
-  **✅ 已修(2026-10-04,merge `e0f7cc4`;repro 測試 `e763d63`、修正 `36d5b1a`)**:crossing 迴圈改維護
+  **✅ 已修(2026-10-04,merge `7cc5793`;repro 測試 `3c9dda0`、修正 `4c63f10`)**:crossing 迴圈改維護
   `before/prev/i` 三點視窗,`crossesThroughSample` 成立時在線上那個 fix(`idx = prev`)記一次穿越,
   並略過該段的嚴格判斷——嚴格 straddle 不可能涉及線上端點,故不會重複計數;同側擦過仍拒絕。
   新增 3 個測試(線上穿越算一次、線上與嚴格穿越混合、擦線折返不算)。typecheck 0 錯、2740/2740 綠、
@@ -526,13 +526,13 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   當方向基準。若記錄從靜止或極慢速開頭(常見:按下記錄後才起步),這兩點的位移可能小於
   float32 量化誤差 → 方向等同雜訊 → 種出來的線角度歪掉,大部分圈次因而漏算。修法建議:改取
   「與起點相距 ≥N 公尺的第一個 fix」當方向基準(N 待定),而非固定取下一個 fix。
-  **已修(merge `c9034a2`;復現測試 `635faf7`、修正 `a2b6984`)**:user 拍板 N = 10 m,新增常數
+  **已修(merge `77d881d`;復現測試 `f88d662`、修正 `4534ce4`)**:user 拍板 N = 10 m,新增常數
   `DEFAULT_LINE_DIRECTION_MIN_DIST_M = 10`;`defaultLine()` 改取「與起點 haversine 距離 ≥10 m 的
   第一個有效 fix」當方向基準,整段都不到 10 m 時退回舊行為(下一個有效 fix)。新增
   `test/composables/useLapsDefaultLine.test.ts`(靜止抖動起步→舊碼偏約 72°、fallback、少於兩點)。
   與 B129 合併後實測:typecheck 綠、2743/2743 綠、lint 0 error;真檔 fixture 圈數無任何變動
   (沒有真檔測試走 `defaultLine`)。⚠️ 尚未經裝置驗證。
-- [ ] **B131**(信心較低,**待確認是刻意設計還是 bug**)手機寬度下匯入記錄後**不會自動啟用**:
+- [x] **B131**(**2026-10-06 user 拍板關單:非 bug**;殘留閃爍另開 [[B137]])(信心較低,**待確認是刻意設計還是 bug**)手機寬度下匯入記錄後**不會自動啟用**:
   勾選框未打勾,切到分析頁是空白,要手動勾選才有內容;桌面版匯入後直接是「主要」。
   agent 是在拍手機版截圖時遇到的,未深究。若為刻意(避免手機一次載入太多),應在 UI 上給提示。
   **2026-10-04 調查結論:非 app bug,是 Claude 內建瀏覽器窗格的量測假象(待 user 拍板是否關閉)。**
@@ -545,6 +545,11 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   與 1024 寬皆確認)。手機版無任何專屬程式碼碰 `activeFileId`/`selectedSessions`,也無刻意設計的註解。
   真機會持續繪製,不會卡住;唯一真實殘留是 0.25 s 離場動畫+chunk 載入期間 FileBar 短暫顯示「未選取」的閃爍。
   **未改任何程式碼**(`fix/b131` 分支零 commit)。
+- [ ] **B137**(2026-10-06 開單,源自 [[B131]] 調查;user 拍板要修)切到分析頁時,`App.vue` 的
+  `<Transition mode="out-in">` 離場動畫(0.25 s)+ `AnalyzerView` async chunk 載入期間,FileBar 已進入分析模式但
+  自動選主要記錄的 `watch(readyFiles, …, {immediate:true})`(`AnalyzerView.vue:377`)尚未執行 → 勾選框短暫顯示
+  「未選取」的閃爍。修法方向:把「無主要記錄時自動選第一個 ready 檔」的邏輯移到不依賴 `AnalyzerView` 掛載的位置
+  (如 store 或 FileBar),讓 FileBar 一進分析模式就有正確選取狀態。
 
 ## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
 - [x] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
@@ -596,7 +601,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   before→after:`b1(5).loga` 11→10、`session_..._極限.rcz` 19→11、`session_..._rcvbo.rcz`
   17→11(ARK 已知 ~12,且每圈變異大幅收斂,如 極限.rcz 從 `[20,21,19,17,21]` 收斂到
   `[12,11,11,11,11]`)。合成尺度不變性測試(同形狀放大 5x)通過:彎數相同、apex 距離按比例縮放。
-  Commit `2fef597`(分支 `fix/corner-detection-scale-invariant-b132`,base develop `9f9bcec`,
+  Commit `c20e467`(分支 `fix/corner-detection-scale-invariant-b132`,base develop `cbd65dd`,
   尚未 merge/push)。
 
 - [x] **B133** ([[B132]] 的 UI 併發症,但**根因是通用缺陷**)Sector 卡片在閘門數量爆量時,
@@ -619,7 +624,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   (`test/lint/cardFillScrollHeaderCap.test.ts`,比照既有 `mapOverlayButtonSizing.test.ts` 慣例)
   + `SectorPanel.test.ts` 用 142 個閘門(對應麗寶真檔實測數字)掛載、斷言 `.gate-list` 仍完整
   渲染 142 個 `<li>`/移除按鈕於 DOM 中。2448/2448 綠、typecheck/lint/build 皆過。
-  — `99f87bc`/`e3cc1aa`
+  — `7402b01`/`409e833`
 
 ## User report — 非自家命名頻道認不得 + MT 齒比建議 (B134, F8)
 - [x] **B134** 認不得非自家命名的語意頻道 → 齒比/疊圖直接死當,且**無任何手動補救**。實測
@@ -642,7 +647,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   自動套用,同一台車/同一個轉檔工具只需要選一次。⚠️ 實作紅線(記取 [[B125]] 教訓):啟發式
   規則**必須回報 golden fixture diff 規模**,`.loga` 既有頻道分類一個都不許動;localStorage
   讀回的覆寫表必須比照 [[M9]] 的 sanitizer 做白名單+長度/筆數上限。
-  **已落地**(merge `6ef0107`):`domain/analysis/channelRoles.ts` 統一三角色解析(覆寫 >
+  **已落地**(merge `3c000c3`):`domain/analysis/channelRoles.ts` 統一三角色解析(覆寫 >
   canonical > 啟發式,啟發式只在 canonical 查無時才跑)、`stores/channelRoleStore.ts` 裝置層
   `channelName→role` 覆寫表(`tracklogstudio.channelRoles.v1`,含 [[M9]] 式 sanitizer、
   newest-wins)、`ChannelRolePicker.vue` + `ChannelRoleBadge.vue`(抓不到時給下拉;由覆寫或
@@ -678,7 +683,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   **排程**:必須排在 [[B134]] 合併之後才能動 UI ——兩者都會改 `drivetrain.ts` 與
   `GearPanel.vue`。純數學核心(新檔 `domain/analysis/gearRecommendation.ts` + 型別 + 測試)
   可與 B130 並行,前提是**完全不碰** `drivetrain.ts`/`GearPanel.vue`/`drivetrainStore.ts`/i18n。
-  **純數學核心已落地(merge `975b399`)、UI 未接**:`domain/analysis/gearRecommendation.ts`
+  **純數學核心已落地(merge `5e406bc`)、UI 未接**:`domain/analysis/gearRecommendation.ts`
   (+94 條測試)六階段全到位——引擎特性型別與單位換算(hp 預設公制 PS)、`usableBand` +
   `recommendRatioSpacing`(幾何級數,可加 `progressionFactor` 讓高檔級距變寬)+
   `diagnoseExistingRatios`(升檔落點 = `shiftRpm × g_next/g_cur`,報與扭力峰的帶正負距離)、
@@ -694,7 +699,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   該分支仍保留為防禦性程式碼並在 JSDoc 記下證明。
   **待辦**:UI 接線(引擎特性輸入欄位、建議齒比表、三種目標切換、與已載入 log 的疊圖),
   必須排在 [[B134]] 之後(已滿足)。
-  **UI 已接線(merge `b9fb353`)**:新增 `domain/analysis/engineProfileForm.ts`(曲線貼上解析
+  **UI 已接線(merge `b7fa04d`)**:新增 `domain/analysis/engineProfileForm.ts`(曲線貼上解析
   /單位換算/驗證診斷/表單型別,輸入 UI 與輸出 UI 共用同一組建構函式)、
   `EngineProfileInput.vue`(兩點版 + 曲線貼上,行內驗證訊息)、`GearRecommendationPanel.vue`
   (建議齒比表 + 升檔落點診斷 + 曲線限定建議換檔轉速 + 終傳/齒盤建議 + 三種目標切換);
@@ -732,7 +737,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   typecheck/lint/build 過。UI 目視驗證未做(自動化環境 Browser pane 無法 compositing,Vue
   Transition 卡 rAF,屬環境限制),待真機。 — 本 session 分支 `6250b9d`/`605af87`(hash 待上
   origin 後確認,tracker 規則:local hash 可能變動)
-  **合入 develop:merge `76c547f`**(由 car-log-comparison peer session 完成,本 session
+  **合入 develop:merge `24f9e04`**(由 car-log-comparison peer session 完成,本 session
   rebase 到 develop 實際 tip 後獨立複驗:typecheck 乾淨、2613/2613 綠 212 檔)。
 
 - [x] **B136**(待拍板)VBO 沒有 `[channel units]` 區段時(Circuit Tools flavour 刻意不寫,
@@ -746,7 +751,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   風險也高。實作紅線:①只在單位原本為空時才套用(有 `[channel units]` 值一律優先);
   ②僅 VBO importer 內生效,既有 golden fixture 不得變動;③新填的單位會餵進 B134 啟發式的
   計分(unit 是訊號之一),須複驗真檔三個角色解析不變。
-  **已落地(merge `d20c876`)**:`parseVbo` 新增
+  **已落地(merge `b53791e`)**:`parseVbo` 新增
   `NAME_SUFFIX_UNITS` 表與 `inferUnitFromNameSuffix()`,接在既有 `unitAt()` 之後當
   **fallback**——`[channel units]` 有值一律優先且原封不動,`name`/`rawName`/`description`
   完全不碰。誤拆防線:後綴必須緊接底線且位於結尾,巢狀項目依長度排序在前
