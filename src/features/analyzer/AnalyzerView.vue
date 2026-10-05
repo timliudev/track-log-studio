@@ -374,30 +374,9 @@ watch(xAxis, () => {
   analyzer.setXRange(null)
 })
 
-watch(
-  readyFiles,
-  (files) => {
-    const readyIds = new Set(files.map((file) => file.id))
-    const comparisons = analyzer.selectedSessions.filter(
-      (id) => readyIds.has(id) && id !== analyzer.activeFileId,
-    )
-    const activeExists = analyzer.activeFileId != null && readyIds.has(analyzer.activeFileId)
-    if (!activeExists) {
-      const nextPrimary = comparisons[0] ?? files[0]?.id ?? null
-      // B55 — the outgoing primary's file is GONE (removed/failed), so
-      // there's nothing to fold it back into; but if a comparison recording
-      // is being promoted in its place, that recording's own per-lap state
-      // should become the new primary-facet state, same as an explicit
-      // FileBar makePrimary swap (see lapStore.swapPrimarySession).
-      if (nextPrimary != null) lapStore.swapPrimarySession(null, nextPrimary)
-      analyzer.activeFileId = nextPrimary
-      analyzer.selectedSessions = comparisons.filter((id) => id !== nextPrimary)
-    } else if (comparisons.length !== analyzer.selectedSessions.length) {
-      analyzer.selectedSessions = comparisons
-    }
-  },
-  { immediate: true },
-)
+// B137 — primary/comparison auto-selection (incl. the B55 swap) now lives in
+// useAnalyzerSelectionSync(), installed from App.vue so it does not wait for
+// this lazy view to mount.
 
 // Fired ONLY on user drag-zoom or double-click-reset (the programmatic
 // select→zoom path sets a guard in UPlotChart so it never echoes here).
