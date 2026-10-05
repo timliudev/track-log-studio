@@ -13,6 +13,7 @@ import {
   type CvtTraceConfig,
   type CvtTraceError,
 } from '@/domain/analysis/cvtTrace'
+import type { ChannelRoleOverrides } from '@/domain/analysis/channelRoles'
 
 /** Stable config identifier. Chart persistence stores this string, never the
  * derived Float64Array or a translated display label. */
@@ -22,6 +23,11 @@ export interface AnalyzerChannelContext {
   wheelCircumferenceMm: number
   fileId?: number | string
   cvtConfig?: CvtTraceConfig | null
+  /** B134 — device-wide rpm/speed/gear channel-name overrides, forwarded to
+   *  `resolveRoleChannel` inside the gear-ratio/CVT derived traces below so
+   *  a user-mapped (or heuristically-resolved) channel unlocks these derived
+   *  channels too. Omitted/undefined behaves exactly as before (no overrides). */
+  channelRoleOverrides?: ChannelRoleOverrides
 }
 
 export interface AnalyzerChannelResolution {
@@ -45,12 +51,17 @@ export function resolveAnalyzerChannel(
   context: AnalyzerChannelContext,
 ): AnalyzerChannelResolution {
   if (id === MEASURED_TOTAL_RATIO_CHANNEL) {
-    const result = cachedGearRatioTrace(session, context.wheelCircumferenceMm)
+    const result = cachedGearRatioTrace(session, context.wheelCircumferenceMm, context.channelRoleOverrides)
     return { data: result.data, error: result.error, derived: true }
   }
   if (CVT_DERIVED_CHANNELS.includes(id as CvtDerivedChannelId)) {
     if (!context.cvtConfig) return { data: null, error: 'fixed-reduction', derived: true }
-    const result = cachedCvtDerivedTraces(session, context.fileId ?? 'unassigned', context.cvtConfig)
+    const result = cachedCvtDerivedTraces(
+      session,
+      context.fileId ?? 'unassigned',
+      context.cvtConfig,
+      context.channelRoleOverrides,
+    )
     const channelId = id as CvtDerivedChannelId
     return { data: cvtChannelData(result, channelId), error: cvtChannelError(result, channelId), derived: true }
   }
@@ -63,10 +74,15 @@ export function availableDerivedAnalyzerChannels(
   session: LogSession,
   context: AnalyzerChannelContext,
 ): string[] {
-  if (gearRatioTraceError(session, context.wheelCircumferenceMm) != null) return []
+  if (gearRatioTraceError(session, context.wheelCircumferenceMm, context.channelRoleOverrides) != null) return []
   const available = [MEASURED_TOTAL_RATIO_CHANNEL]
   if (!context.cvtConfig) return available
-  const result = cachedCvtDerivedTraces(session, context.fileId ?? 'unassigned', context.cvtConfig)
+  const result = cachedCvtDerivedTraces(
+    session,
+    context.fileId ?? 'unassigned',
+    context.cvtConfig,
+    context.channelRoleOverrides,
+  )
   for (const id of CVT_DERIVED_CHANNELS) {
     if (cvtChannelData(result, id)) available.push(id)
   }

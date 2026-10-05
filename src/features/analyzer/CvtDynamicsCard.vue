@@ -9,7 +9,11 @@ import { solveCvtForceBalance, type CvtForceDisabledReason } from '@/domain/anal
 import { sweepTotalRollerMass } from '@/domain/analysis/cvtCalibration'
 import { xRangeToFocusIndices } from '@/domain/analysis/focusRange'
 import { toCvtForceBalanceInput, toCvtTraceConfig, usesCvtCalibrationFixedReduction, useDrivetrainStore } from '@/stores/drivetrainStore'
+import { useChannelRoleStore } from '@/stores/channelRoleStore'
+import { resolveRoleChannelDetailed, type ChannelRoleSource } from '@/domain/analysis/channelRoles'
 import CvtProfileEditor from './CvtProfileEditor.vue'
+import ChannelRolePicker from './ChannelRolePicker.vue'
+import ChannelRoleBadge from './ChannelRoleBadge.vue'
 
 const props = defineProps<{
   session: LogSession | null
@@ -20,6 +24,7 @@ const props = defineProps<{
 }>()
 const { t } = useI18n()
 const drivetrain = useDrivetrainStore()
+const channelRoleStore = useChannelRoleStore()
 const settingsOpen = ref(false)
 const frontPitchCircle = ref<SVGCircleElement | null>(null)
 const rearPitchCircle = ref<SVGCircleElement | null>(null)
@@ -49,12 +54,20 @@ const blankFrame = (): DisplayFrame => ({
 const displayed = ref<DisplayFrame>(blankFrame())
 const profile = computed(() => drivetrain.activeCvtProfile)
 const traceConfig = computed(() => toCvtTraceConfig(profile.value))
+// B134 — threading channelRoleStore.overrides through both derived-trace
+// lookups (and into their computed dependency list) is what makes setting a
+// channel-role override reactively re-resolve this card with no reload; see
+// `gearRatioTrace.ts`/`cvtTrace.ts`'s cache-key handling for why this is safe
+// to call on every render (an override edit is the only thing that changes
+// which cache entry comes back).
 const totalTrace = computed(() =>
-  props.session ? cachedGearRatioTrace(props.session, traceConfig.value.wheelCircumferenceMm) : null,
+  props.session
+    ? cachedGearRatioTrace(props.session, traceConfig.value.wheelCircumferenceMm, channelRoleStore.overrides)
+    : null,
 )
 const cvtTrace = computed(() =>
   props.session
-    ? cachedCvtDerivedTraces(props.session, props.fileId ?? 'unassigned', traceConfig.value)
+    ? cachedCvtDerivedTraces(props.session, props.fileId ?? 'unassigned', traceConfig.value, channelRoleStore.overrides)
     : null,
 )
 
@@ -140,6 +153,33 @@ const forceChart = computed(() => {
     rear: points((index) => curve[index].couplingRatio * curve[index].rearTotalForceN),
   }
 })
+
+/** B134 — when the CVT trace is blocked on a missing rpm/speed channel
+ *  specifically (as opposed to a missing/invalid CVT geometry config field),
+ *  the layer-message paragraph below becomes a `ChannelRolePicker` instead of
+ *  plain text — those two error kinds are the only ones a channel-role
+ *  override can actually fix. */
+const geometryErrorRole = computed<'rpm' | 'speed' | null>(() => {
+  const error = cvtTrace.value?.geometryError
+  return error === 'rpm' || error === 'speed' ? error : null
+})
+
+// B134 defect 2 — independent of whether the CVT trace itself currently
+// succeeds (it might still be blocked on an unrelated geometry field): the
+// underlying rpm/speed channel resolution can still be a GUESS (override or
+// heuristic) that needs to stay correctable. Resolved directly against
+// `props.session`, not derived from `cvtTrace`/`geometryErrorRole` above.
+const rpmResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'rpm', channelRoleStore.overrides) : null,
+)
+const speedResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'speed', channelRoleStore.overrides) : null,
+)
+function correctableSource(source: ChannelRoleSource | undefined): 'override' | 'heuristic' | null {
+  return source === 'override' || source === 'heuristic' ? source : null
+}
+const rpmCorrectableSource = computed(() => correctableSource(rpmResolution.value?.source))
+const speedCorrectableSource = computed(() => correctableSource(speedResolution.value?.source))
 
 const geometryErrorText = computed(() => {
   const error = cvtTrace.value?.geometryError
@@ -311,7 +351,33 @@ const statusLabel = computed(() => {
       <p class="field-note">{{ profile.force.frictionCoefficientMin == null || profile.force.frictionCoefficientMax == null ? t('analyzer.cvt.slipNotAssessed') : t('analyzer.cvt.slipWarningOnly') }}</p>
     </details>
 
-    <p v-if="geometryErrorText" class="layer-message">{{ geometryErrorText }}</p>
+    <!-- B134 defect 2 — independent of geometryErrorRole below: shows
+         whenever rpm/speed resolved via a GUESS (override/heuristic), even
+         if the CVT trace is currently blocked on an unrelated geometry
+         field, so a wrong pick/guess stays correctable. Nothing shown for a
+         'canonical' resolution. -->
+    <ChannelRoleBadge
+      v-if="props.session && rpmCorrectableSource"
+      :session="props.session"
+      role="rpm"
+      :channel-name="rpmResolution!.name"
+      :source="rpmCorrectableSource"
+    />
+    <ChannelRoleBadge
+      v-if="props.session && speedCorrectableSource"
+      :session="props.session"
+      role="speed"
+      :channel-name="speedResolution!.name"
+      :source="speedCorrectableSource"
+    />
+    <ChannelRolePicker
+      v-if="geometryErrorRole && props.session"
+      :session="props.session"
+      :role="geometryErrorRole"
+      :message="geometryErrorText as string"
+      class="layer-message"
+    />
+    <p v-else-if="geometryErrorText" class="layer-message">{{ geometryErrorText }}</p>
     <p v-else-if="displayed.status === 'out-of-bounds' || displayed.status === 'no-root'" class="warning-message">{{ t('analyzer.cvt.nonGeometricWarning') }}</p>
     <p v-if="angleMismatch && Math.abs(angleMismatch.displacementScaleDifferenceRatio) > 0.001" class="warning-message">{{ t('analyzer.cvt.angleMismatchWarning', { percent: Math.abs(angleMismatch.displacementScaleDifferenceRatio * 100).toFixed(2) }) }}</p>
     <p class="confidence-note">{{ t('analyzer.cvt.uncertaintyAlwaysVisible') }}</p>

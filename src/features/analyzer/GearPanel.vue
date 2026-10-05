@@ -45,16 +45,20 @@ import {
   type MtGearFormInput,
   type FinalDriveFormInput,
 } from '@/stores/drivetrainStore'
-import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
+import { useChannelRoleStore } from '@/stores/channelRoleStore'
+import { resolveRoleChannelDetailed, type ChannelRoleSource } from '@/domain/analysis/channelRoles'
 import UPlotChart from '@/components/UPlotChart.vue'
 import GearRatioChart from './GearRatioChart.vue'
+import ChannelRolePicker from './ChannelRolePicker.vue'
+import ChannelRoleBadge from './ChannelRoleBadge.vue'
+import EngineProfileInput from './EngineProfileInput.vue'
+import GearRecommendationPanel from './GearRecommendationPanel.vue'
 import {
   computeMtGearTable,
   mtGearSpeedLine,
   tireSpecToCircumferenceMm,
   resolveGearRatio,
   resolveFinalDrive,
-  resolveRpmChannel,
   computeRatioSeries,
   detectGearPlateaus,
   buildCvtRatioSweep,
@@ -64,6 +68,8 @@ import {
   inferDrivetrainKind,
   type CircumferenceFromLogEstimate,
 } from '@/domain/analysis/drivetrain'
+import { buildEngineProfile } from '@/domain/analysis/engineProfileForm'
+import { usableBand as computeEngineUsableBand } from '@/domain/analysis/gearRecommendation'
 
 const props = defineProps<{
   /** The active session, for the log-inversion (由記錄反推) section — null when
@@ -89,18 +95,43 @@ const { t } = useI18n()
 const store = useDrivetrainStore()
 const fileStore = useFileStore()
 const navigation = useAppNavigationStore()
+const channelRoleStore = useChannelRoleStore()
 
 const isMt = computed(() => store.kind === 'mt')
 
 // ── Preconditions ────────────────────────────────────────────────────────
 // Both channels are required for the measured overlay/curve — surfaced as an
 // explicit hint (rather than a silently-empty chart) per the user's #11
-// complaint.
-const rpmChannelName = computed(() => (props.session ? resolveRpmChannel(props.session) : null))
-const speedChannelName = computed(() => (props.session ? resolveSpeedChannel(props.session) : null))
+// complaint. B134: goes through the full override → canonical → heuristic
+// resolver (not the old canonical-only resolveRpmChannel/resolveSpeedChannel)
+// so a session whose RPM/speed columns carry an unrecognised name (e.g. a
+// `.vbo` merge tool's `EngineRPM_rpm`) can still resolve automatically, or
+// via the `ChannelRolePicker` wired into the empty states below —
+// `channelRoleStore.overrides` in the dependency list is what makes setting
+// an override reactively re-resolve this (and everything derived from it)
+// with no reload.
+const rpmResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'rpm', channelRoleStore.overrides) : null,
+)
+const speedResolution = computed(() =>
+  props.session ? resolveRoleChannelDetailed(props.session, 'speed', channelRoleStore.overrides) : null,
+)
+const rpmChannelName = computed(() => rpmResolution.value?.name ?? null)
+const speedChannelName = computed(() => speedResolution.value?.name ?? null)
 const hasRpmChannel = computed(() => rpmChannelName.value != null)
 const hasSpeedChannel = computed(() => speedChannelName.value != null)
 const channelsAvailable = computed(() => hasRpmChannel.value && hasSpeedChannel.value)
+
+/** B134 defect 2 — a resolution whose source is a GUESS (override or
+ *  heuristic), not our own formats' canonical lookup, needs a persistent
+ *  correction control (`ChannelRoleBadge.vue`) even once it "succeeds" —
+ *  see that component's header comment. `null` means either unresolved (the
+ *  empty-state picker handles that) or resolved canonically (no extra UI). */
+function correctableSource(source: ChannelRoleSource | undefined): 'override' | 'heuristic' | null {
+  return source === 'override' || source === 'heuristic' ? source : null
+}
+const rpmCorrectableSource = computed(() => correctableSource(rpmResolution.value?.source))
+const speedCorrectableSource = computed(() => correctableSource(speedResolution.value?.source))
 
 // ── MT: Layer 1 calculator ───────────────────────────────────────────────
 const mtSpec = computed(() => toMtDrivetrainSpec(store.mt))
@@ -225,9 +256,23 @@ watch(
   (session) => {
     estimateResult.value = null
     estimateFailed.value = false
-    store.applyDetectedKind(session ? inferDrivetrainKind(session)?.kind ?? null : null)
+    store.applyDetectedKind(session ? inferDrivetrainKind(session, channelRoleStore.overrides)?.kind ?? null : null)
   },
   { immediate: true },
+)
+
+// B134 — a channel-role override can turn a previously-unresolvable
+// rpm/speed/gear channel into real MT/CVT evidence (e.g. a `GearPRND` column
+// the heuristic already recognises, or a manually-mapped RPM/speed pair), so
+// re-run the SAME detection whenever the override table changes — deliberately
+// separate from the watcher above, which also resets the (unrelated)
+// circumference-estimate result/error on every file switch; an override edit
+// must not clear that.
+watch(
+  () => channelRoleStore.overrides,
+  () => {
+    if (props.session) store.applyDetectedKind(inferDrivetrainKind(props.session, channelRoleStore.overrides)?.kind ?? null)
+  },
 )
 
 watch(
@@ -447,6 +492,21 @@ const mtChartAxes: uPlot.Axis[] = [
   { label: 'RPM' },
   { label: 'km/h' },
 ]
+
+// F8 Stage 5 — shade the engine's usable RPM band (torque-peak rpm .. shift
+// rpm) on the MT chart, so it's visible at a glance which gears' theoretical
+// lines actually cross the measured scatter INSIDE the band. Reuses the same
+// `buildEngineProfile`/`usableBand` (aliased `computeEngineUsableBand` to
+// avoid shadowing this file's own local vars) that `EngineProfileInput.vue`/
+// `GearRecommendationPanel.vue` use — one source of truth for "is there a
+// usable profile right now", never recomputed differently here.
+const mtEngineProfile = computed(() =>
+  isMt.value ? buildEngineProfile(store.mt.engineProfile, store.mt.redlineRpm > 0 ? store.mt.redlineRpm : null) : null,
+)
+const engineUsableBand = computed(() => (mtEngineProfile.value ? computeEngineUsableBand(mtEngineProfile.value) : null))
+const mtChartXBands = computed(() =>
+  engineUsableBand.value ? [{ min: engineUsableBand.value.bottomRpm, max: engineUsableBand.value.topRpm }] : [],
+)
 
 // ── MT: detected plateaus vs configured ───────────────────────────────────
 const detectedPlateaus = computed(() => {
@@ -781,6 +841,10 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         </div>
       </div>
 
+      <!-- F8 Stage 1 — engine torque/power profile, feeding the recommendation
+           panel below and this chart's usable-band shading (Stage 5). -->
+      <EngineProfileInput />
+
       <h4 class="sub-heading">{{ t('analyzer.gear.resultsHeading') }}</h4>
       <p v-if="!mtValid" class="hint">{{ t('analyzer.gear.invalidSpec') }}</p>
       <template v-else>
@@ -805,12 +869,38 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         </p>
       </template>
 
+      <!-- F8 Stages 2/3/4 — gear-ratio recommendations on top of the spec +
+           engine profile above. -->
+      <GearRecommendationPanel :session="props.session" />
+
       <!-- Chart: measured RPM/speed scatter + theoretical per-gear lines -->
       <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
+      <p v-if="engineUsableBand" class="hint inline-hint">{{ t('analyzer.gearRec.chartUsableBandHint') }}</p>
+      <!-- B134 defect 2 — independent of the empty-state chain below: shows
+           whenever a role resolved via a GUESS (override/heuristic), so a
+           wrong pick/guess stays correctable even after the chart itself
+           renders. Nothing shown for a 'canonical' resolution. -->
+      <ChannelRoleBadge
+        v-if="props.session && rpmCorrectableSource"
+        :session="props.session"
+        role="rpm"
+        :channel-name="rpmChannelName!"
+        :source="rpmCorrectableSource"
+      />
+      <ChannelRoleBadge
+        v-if="props.session && speedCorrectableSource"
+        :session="props.session"
+        role="speed"
+        :channel-name="speedChannelName!"
+        :source="speedCorrectableSource"
+      />
       <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
-      <p v-else-if="!channelsAvailable" class="hint">
-        {{ t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') }}
-      </p>
+      <ChannelRolePicker
+        v-else-if="!channelsAvailable && props.session"
+        :session="props.session"
+        :role="!hasRpmChannel ? 'rpm' : 'speed'"
+        :message="t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') as string"
+      />
       <p v-else-if="!mtValid" class="hint">{{ t('analyzer.gear.invalidSpec') }}</p>
       <p v-else-if="!mtChartHasData" class="hint">{{ t('analyzer.gear.noPlateaus') }}</p>
       <UPlotChart
@@ -818,6 +908,7 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
         :data="mtChartData"
         :series="mtChartSeries"
         :axes="mtChartAxes"
+        :x-bands="mtChartXBands"
         :height="280"
       />
 
@@ -924,10 +1015,31 @@ function setFinalDriveMode(mode: FinalDriveFormInput['mode']): void {
       </div>
 
       <h4 class="sub-heading">{{ t('analyzer.gear.chartHeading') }}</h4>
+      <!-- B134 defect 2 — independent of the empty-state chain below: shows
+           whenever a role resolved via a GUESS (override/heuristic), so a
+           wrong pick/guess stays correctable even after the chart itself
+           renders. Nothing shown for a 'canonical' resolution. -->
+      <ChannelRoleBadge
+        v-if="props.session && rpmCorrectableSource"
+        :session="props.session"
+        role="rpm"
+        :channel-name="rpmChannelName!"
+        :source="rpmCorrectableSource"
+      />
+      <ChannelRoleBadge
+        v-if="props.session && speedCorrectableSource"
+        :session="props.session"
+        role="speed"
+        :channel-name="speedChannelName!"
+        :source="speedCorrectableSource"
+      />
       <p v-if="!props.session" class="hint">{{ t('analyzer.gear.noSession') }}</p>
-      <p v-else-if="!channelsAvailable" class="hint">
-        {{ t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') }}
-      </p>
+      <ChannelRolePicker
+        v-else-if="!channelsAvailable && props.session"
+        :session="props.session"
+        :role="!hasRpmChannel ? 'rpm' : 'speed'"
+        :message="t(!hasRpmChannel ? 'analyzer.gear.noRpmChannel' : 'analyzer.gear.noSpeedChannel') as string"
+      />
       <template v-else>
         <div class="summary-row">
           <span v-if="cvtSummary" class="summary-item">

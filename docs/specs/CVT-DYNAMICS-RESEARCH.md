@@ -1,7 +1,7 @@
 # CVT 動力學研究：速可達 rubber V-belt 變速平衡與逆向調教
 
 > 狀態：**已依本規格實作**（M5：`cvtDynamics.ts` / `cvtForceBalance.ts` + `CvtDynamicsCard.vue`），
-> 惟動力卡片目前依 B98 暫時隱藏（待實測，後續改由 M10 卡片選單控制）。本文件保留為實作依據：模型 / 資料需求 / 驗證方式定義。
+> 惟動力卡片**預設不顯示**：現由 `src/config/featureFlags.ts` 的 `cvtDynamics` 功能旗標控制（B98 的硬編隱藏已由 F2 的 flag 註冊表取代），預設關閉，開發者/測試者可從設定頁的「開發者選項」切換，或以 `?ff=cvtDynamics` 網址參數開啟。本文件保留為實作依據：模型 / 資料需求 / 驗證方式定義。
 > 撰寫日期：2026-07-17
 > 對應分支：`research/cvt-dynamics`
 > 適用範圍：速可達常見「前普利盤離心滾珠＋後開閉盤大彈簧／扭力凸輪＋橡膠 V 型皮帶」

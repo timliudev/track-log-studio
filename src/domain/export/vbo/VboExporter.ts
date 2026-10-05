@@ -2,6 +2,7 @@ import type { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { computeSmoothedCourses } from '@/domain/export/rc3Nmea/heading'
 import { fmtNum, padFloat, padInt } from './format'
+import { demoteConstantToAnalog } from './channelNaming'
 import {
   ANALOG_BASES,
   Allocator,
@@ -135,10 +136,13 @@ function isAllNaN(data: Float32Array, n: number): boolean {
  * version of this fix did, to auto-reject constant channels, but that
  * misfires on real ECU boolean flags that simply never fired in a given
  * log — e.g. `Malf8.Malf_On`, `Pit_SW_On` — which are still genuinely
- * digital signals, just constant-0 in this particular recording. There is
- * no way to tell those apart from a constant-0 analog using value range
- * alone; see B127 for the residual limitation and why a fix needs
- * name/description evidence instead, deferred pending a user decision).
+ * digital signals, just constant-0 in this particular recording). Value range
+ * alone cannot tell those apart from a constant-0 analog quantity
+ * (`IR_LapNumber`, `SimRPM`, …); that residual ambiguity (B127) is resolved
+ * by the caller, which applies the channel-NAME rule in `channelNaming.ts`
+ * (`demoteConstantToAnalog`) on top of this function: a constant channel
+ * whose name positively reads as a quantity and not as a flag is demoted to
+ * analog. This function itself stays a pure value-range test.
  * B124 already removes the one case that motivated the "both values" rule
  * in .rcz — an all-NaN channel — before this function ever runs.
  */
@@ -231,21 +235,71 @@ function dd(v: number): string {
 }
 
 /**
+ * Code-unit (locale-independent) string comparison. Deliberately NOT
+ * `localeCompare`: slot names are part of an exported file format, so the
+ * order must be identical on every machine/browser locale (B128).
+ */
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/** A generic channel classified in pass 2 whose `rc_` slot is assigned in pass 3 (B128). */
+interface PendingGeneric {
+  readonly ch: Channel
+  readonly kind: 'digital' | 'analog'
+}
+
+/** A pass-2 result: either a fixed identity (semantic / passthrough) or a pending generic slot. */
+type CatalogEntry =
+  | { readonly ch: Channel; readonly fixed: { rcName: string; scale: number; unit: string; kind: VboKind } }
+  | { readonly ch: Channel; readonly pending: PendingGeneric }
+
+/**
  * Classify every non-GPS channel and assign its RaceChrono `rc_` identifier:
  *  1. a SEMANTIC override (known ECU name, or a fixed RC3 slot like
  *     `rc_digital_1` -> `rc_rpm`, B121) — a semantic identifier + SI unit;
  *  2. a name that's already a valid RaceChrono `rc_` identifier (B120) —
  *     passed through unchanged, never re-bucketed;
- *  3. pure 0/1 columns — generic digital;
- *  4. everything else — generic analog (sequential allocation, so the order
- *     matches the .vbo output).
+ *  3. pure 0/1 columns — generic digital (B127: minus constant channels whose
+ *     NAME reads as a quantity, see `channelNaming.ts`);
+ *  4. everything else — generic analog.
  * Channels whose data is entirely NaN (B124) are dropped from the output and
  * reported separately as `skipped`. Shared by the exporter and the UI preview.
+ *
+ * ## Slot assignment is deterministic by channel name (B128)
+ * Generic slot NAMES (`rc_analog_N`, `rc_digital_N`, overflow into the other
+ * `rc_*` bases) are NOT handed out in appearance order. Instead:
+ *  - pass 1 reserves every passthrough `rc_` identifier up front, EVEN IF its
+ *    data is all-NaN (so a dataless source `rc_analog_13` still blocks slot 13
+ *    instead of letting a different channel take it only in sessions where
+ *    that source channel happens to be empty);
+ *  - the generic ANALOG channels are sorted by `ctTitle` (code-unit order,
+ *    not locale) and take `rc_analog_*` slots in that order, FIRST;
+ *  - then the sorted generic DIGITAL channels take `rc_digital_1..63`, and the
+ *    digital overflow takes the remaining `rc_analog_*` (then the other analog
+ *    bases) slots AFTER the analog channels. Doing analog first means the
+ *    analog slots never depend on how many digital channels exist (.loga logs
+ *    routinely have 94–209 digital, vs. only 63 digital slots).
+ * The OUTPUT order of `channels` (hence .vbo columns / CSV rows) is still the
+ * session's original channel order; only the slot names come from the sorted
+ * allocation.
+ *
+ * GUARANTEE: the same set of channel names with the same classification gets
+ * identical slot names, independent of the session's channel order and of
+ * whether passthrough / all-NaN channels have data.
+ *
+ * LIMITS — what is NOT stable across sessions:
+ *  (a) adding or removing a generic channel shifts the slots of the
+ *      same-bucket channels that sort after it by name;
+ *  (b) a channel whose classification differs between sessions (toggling in
+ *      one session but constant in another; data present vs. all-NaN-dropped)
+ *      changes bucket and shifts the others;
+ *  (c) digital overflow beyond 63 lands in `rc_analog_*` AFTER the analog
+ *      channels, so a change in the analog count shifts every overflow slot.
  */
 export function buildVboCatalog(session: LogSession): VboCatalog {
   const n = session.rowCount
   const alloc = new Allocator()
-  const channels: VboChannel[] = []
   const skipped: VboSkippedChannel[] = []
 
   // Pass 1: reserve every channel whose name is ALREADY a valid rc_
@@ -253,16 +307,21 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
   // any generic bucket assignment happens. This makes a collision between a
   // passed-through name (e.g. source `rc_analog_5`) and a later generically
   // numbered channel impossible, not merely unlikely — regardless of which
-  // one appears first in the session's channel order (B120).
+  // one appears first in the session's channel order (B120). B128: the
+  // reservation is made even for an all-NaN channel (which pass 2 drops), so
+  // slot numbering does not depend on whether that channel has data.
   for (const ch of session.channels) {
     const name = ch.name
     if (name === '' || GPS_CONSUMED.has(name) || VBO_ONLY_CONSUMED.has(name)) continue
-    if (isAllNaN(ch.data, n)) continue // B124: handled (and only decided) in pass 2
     if (SEMANTIC[name]) continue // overridden — not an identity passthrough
     if (isRcIdentifier(name)) alloc.reserve(name)
   }
 
-  // Pass 2: classify + emit, in the session's original channel order.
+  // Pass 2: classify in the session's original channel order. Generic
+  // channels get their slot in pass 3 (sorted by name, B128).
+  const entries: CatalogEntry[] = []
+  const pendingAnalog: PendingGeneric[] = []
+  const pendingDigital: PendingGeneric[] = []
   for (const ch of session.channels) {
     const name = ch.name
     if (name === '' || GPS_CONSUMED.has(name) || VBO_ONLY_CONSUMED.has(name)) continue
@@ -272,40 +331,57 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
       continue
     }
 
+    const sem = SEMANTIC[name]
+    if (sem) {
+      entries.push({
+        ch,
+        fixed: { rcName: `rc_${sem.ident}`, scale: sem.scale, unit: sem.unit, kind: 'semantic' },
+      })
+    } else if (isRcIdentifier(name)) {
+      // Preserve the source-supplied unit (B123) — 'raw' only when the
+      // importer didn't give one (e.g. the RC3 analog/digital bank, whose
+      // int32ScaleFor has no validated physical unit).
+      entries.push({ ch, fixed: { rcName: name, scale: 1, unit: ch.unit || 'raw', kind: 'passthrough' } })
+    } else {
+      // looksDigital() already requires an empty source unit (see its doc), so
+      // 'bool' is never overwriting a real physical unit. B127: a constant
+      // channel with a quantity-like name is routed to analog.
+      const isDigital = looksDigital(ch, n) && !demoteConstantToAnalog(name, ch.data, n)
+      const pending: PendingGeneric = { ch, kind: isDigital ? 'digital' : 'analog' }
+      ;(isDigital ? pendingDigital : pendingAnalog).push(pending)
+      entries.push({ ch, pending })
+    }
+  }
+
+  // Pass 3: deterministic slot assignment (B128) — analog first, then the
+  // digital channels (which spill into analog bases once rc_digital_* is full).
+  const slotOf = new Map<Channel, string>()
+  for (const p of [...pendingAnalog].sort((a, b) => byCodeUnit(a.ch.name, b.ch.name))) {
+    slotOf.set(p.ch, alloc.take(ANALOG_BASES))
+  }
+  for (const p of [...pendingDigital].sort((a, b) => byCodeUnit(a.ch.name, b.ch.name))) {
+    slotOf.set(p.ch, alloc.take([...DIGITAL_BASES, ...ANALOG_BASES]))
+  }
+
+  // Emit in the session's original channel order.
+  const channels: VboChannel[] = entries.map((e) => {
+    const { ch } = e
+    const name = ch.name
     let rcName: string
     let scale: number
     let unit: string
     let kind: VboKind
-    const sem = SEMANTIC[name]
-    if (sem) {
-      rcName = `rc_${sem.ident}`
-      scale = sem.scale
-      unit = sem.unit
-      kind = 'semantic'
-    } else if (isRcIdentifier(name)) {
-      rcName = name
-      scale = 1
-      // Preserve the source-supplied unit (B123) — 'raw' only when the
-      // importer didn't give one (e.g. the RC3 analog/digital bank, whose
-      // int32ScaleFor has no validated physical unit).
-      unit = ch.unit || 'raw'
-      kind = 'passthrough'
-    } else if (looksDigital(ch, n)) {
-      // digital bucket spills into analog when full. looksDigital() already
-      // requires an empty source unit (see its doc), so 'bool' here is never
-      // overwriting a real physical unit.
-      rcName = alloc.take([...DIGITAL_BASES, ...ANALOG_BASES])
-      scale = 1
-      unit = 'bool'
-      kind = 'digital'
+    if ('fixed' in e) {
+      ;({ rcName, scale, unit, kind } = e.fixed)
     } else {
-      rcName = alloc.take(ANALOG_BASES)
+      rcName = slotOf.get(ch)!
       scale = 1
-      unit = ch.unit || 'raw' // B123: preserve the source unit when the importer supplied one
-      kind = 'analog'
+      kind = e.pending.kind
+      // digital -> 'bool'; analog keeps the source unit when the importer
+      // supplied one (B123), else 'raw'.
+      unit = kind === 'digital' ? 'bool' : ch.unit || 'raw'
     }
-
-    channels.push({
+    return {
       ctTitle: name,
       ctToken: name.replace(/ /g, '_').replace(/\./g, '_'),
       rcName,
@@ -315,8 +391,8 @@ export function buildVboCatalog(session: LogSession): VboCatalog {
       scale,
       kind,
       description: ch.description ?? '',
-    })
-  }
+    }
+  })
   return { channels, skipped }
 }
 

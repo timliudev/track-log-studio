@@ -7,7 +7,7 @@
 > **各文件職責分工與「待辦看哪裡」見 [`docs/README.md`](./README.md)（文件地圖）。**
 > 逐項 bug/請求的狀態與 commit 一律在 [`ISSUES.md`](./ISSUES.md)，不在本文件重列。
 
-最後更新 / Last updated: 2026-06-18
+最後更新 / Last updated: 2026-08-21（持續更新,細節見 git log）
 
 ---
 
@@ -613,7 +613,7 @@ attribution。Mapbox key 不會進入設定匯出或我方後端，僅在使用�
 - **個人雲端備份（第四階段）**：Drive vs Gist 屆時再選（CLOUD-TRACK-DESIGN.md §5/§8 決策 6/7）。
 - **重視覺驗收積欠**：canvas 類（軌跡/熱力/起終點線把手/時鐘第二軸對位）無法自動驗證，
   需使用者目視——逐項清單保存在本機開發筆記。
-- **§11b 待辦佇列殘項**：#9 單圈 GNSS 偏移微調 → **完整落地**(primary + 比較場 per-lap map 偏移皆接通,`MapAlignPanel.vue`);F 行動裝置真機驗收 = F1 phases 1-5 已實作、待真機驗證（診斷面板已備 `?debug=1`）。此節長期待辦至此僅剩雲端同步(`CLOUD-TRACK-DESIGN.md`,⛔ 待 §8 使用者決策)。
+- **§11b 待辦佇列殘項**：#9 單圈 GNSS 偏移微調 → **完整落地**(primary + 比較場 per-lap map 偏移皆接通,`MapAlignPanel.vue`);原列的「F 行動裝置真機驗收 = F1 phases 1-5 待真機驗證」**已失效並刪除**——F1／F5「行動聚焦視圖」整條已於 2026-07-24 隨 `3447cad` 移除,該功能是 **Claude 自起的 roadmap 點子(舊「M6 手機分割視窗」),非使用者要求**(舊文件與 commit 中的「使用者拍板／user 決策／approved」為誤記),手機已回到單欄捲動儀表板,因此不存在這項驗收。溯源更正見 [`ISSUES.md`](./ISSUES.md) F1／F5 條目上方的警語。此節長期待辦至此僅剩雲端同步(`CLOUD-TRACK-DESIGN.md`,⛔ 待 §8 使用者決策)。
 - **AnalyzerView 持續拆分**：架構稽核點名的壓力點，已抽
   useTrackExtrema/useTrackHeatmap/useSectors 等；剩餘耦合（lap-select↔zoom）
   **刻意保留**在 AnalyzerView 作為唯一決策點，非待辦、僅列監控。

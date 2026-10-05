@@ -13,7 +13,7 @@ import {
   serializeExportBundle,
 } from '@/domain/settings/settingsTransfer'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { mergeCvtFormState } from '@/stores/drivetrainStore'
+import { mergeCvtFormState, mergeMtFormState } from '@/stores/drivetrainStore'
 
 // settingsStore reads/writes localStorage on construction — happy-dom's jsdom
 // shim doesn't ship one here, so stub an in-memory implementation (mirrors
@@ -170,7 +170,7 @@ describe('SettingsView', () => {
         appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto', centreCursorMode: false, trackLineSmoothing: 0 },
         drivetrain: {
           kind: 'mt',
-          mt: {
+          mt: mergeMtFormState({
             primaryReduction: 2.833,
             gearRatios: [],
             finalDrive: { mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 },
@@ -178,7 +178,7 @@ describe('SettingsView', () => {
             tireSpec: '',
             wheelCircumferenceMm: 1884,
             redlineRpm: 10000,
-          },
+          }),
           cvt: mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] }),
           inversionWheelCircumferenceMm: 1870,
         },
@@ -209,7 +209,7 @@ describe('SettingsView', () => {
         appearance: { themePref: 'dark', localePref: 'en', tzOverride: 480, inputModePref: 'auto', centreCursorMode: false, trackLineSmoothing: 0 },
         drivetrain: {
           kind: 'mt',
-          mt: {
+          mt: mergeMtFormState({
             primaryReduction: 2.833,
             gearRatios: [],
             finalDrive: { mode: 'teeth', ratio: 0, frontTeeth: 15, rearTeeth: 45 },
@@ -217,7 +217,7 @@ describe('SettingsView', () => {
             tireSpec: '',
             wheelCircumferenceMm: 1884,
             redlineRpm: 10000,
-          },
+          }),
           cvt: mergeCvtFormState({ wheelCircumferenceMm: 1400, tireSpec: '', notes: [] }),
           inversionWheelCircumferenceMm: 1870,
         },

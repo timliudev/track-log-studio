@@ -278,23 +278,41 @@ export function detectLapsByLine(
 
   // Collect raw crossings over consecutive valid fixes.
   const raw: Crossing[] = []
+  const gate: PlanarGate = { a: qa, b: qb, lat0, lon0, cosLat0 }
+  const lineDx = qb.x - qa.x
+  const lineDy = qb.y - qa.y
+  let before = -1
   let prev = -1
   for (let i = 0; i < n; i++) {
     if (!valid[i]) continue
     if (prev >= 0) {
       const p1 = project(lat[prev], lon[prev], lat0, lon0, cosLat0)
       const p2 = project(lat[i], lon[i], lat0, lon0, cosLat0)
-      if (segmentsIntersect(p1, p2, qa, qb)) {
+      let rescued = false
+      // A fix exactly on the line only TOUCHES both adjacent segments at an
+      // endpoint, so the strict test rejects both. Mirror walkLapGates: when
+      // the fixes on either side are strictly opposite, count one crossing AT
+      // the on-line fix (idx = prev). Same-side grazes stay rejected, and a
+      // proper straddle can never involve an on-line endpoint, so the strict
+      // test below cannot double-count it.
+      if (before >= 0) {
+        const p0 = project(lat[before], lon[before], lat0, lon0, cosLat0)
+        if (crossesThroughSample(p0, p1, p2, gate)) {
+          const s = lineDx * (p2.y - p0.y) - lineDy * (p2.x - p0.x)
+          raw.push({ idx: prev, t: timeMs[prev], sign: Math.sign(s) })
+          rescued = true
+        }
+      }
+      if (!rescued && segmentsIntersect(p1, p2, qa, qb)) {
         // Direction sign: orientation of the line direction (a->b) relative to
         // the track segment direction (p1->p2), via cross of the two vectors.
-        const lineDx = qb.x - qa.x
-        const lineDy = qb.y - qa.y
         const segDx = p2.x - p1.x
         const segDy = p2.y - p1.y
         const s = lineDx * segDy - lineDy * segDx
         raw.push({ idx: i, t: timeMs[i], sign: Math.sign(s) })
       }
     }
+    before = prev
     prev = i
   }
 

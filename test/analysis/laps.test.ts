@@ -143,6 +143,58 @@ describe('detectLapsByLine', () => {
   })
 })
 
+describe('detectLapsByLine fix exactly on the line (B129)', () => {
+  // Vertical start/finish line at lon = 0, lat in [-1, 1]; all values exactly
+  // representable so on-line fixes are truly collinear.
+  const line: LapLine = { a: { lat: -1, lon: 0 }, b: { lat: 1, lon: 0 } }
+  // One pass left->right at lat 0, then back round the north end (lat 2, past
+  // the line endpoint) so the next pass again goes left->right.
+  const detour: Array<[number, number]> = [[2, 1], [2, -1]]
+  function build(pass: Array<Array<[number, number]>>): { track: GpsTrack; timeMs: Float64Array } {
+    const pts: Array<[number, number]> = []
+    pass.forEach((p, k) => {
+      pts.push(...p)
+      if (k < pass.length - 1) pts.push(...detour)
+    })
+    return {
+      track: makeTrack(pts.map((p) => p[0]), pts.map((p) => p[1])),
+      timeMs: Float64Array.from(pts.map((_, i) => i * 10000)),
+    }
+  }
+
+  it('counts a fix lying exactly on the line once (3 crossings -> 2 laps)', () => {
+    const { track, timeMs } = build([
+      [[0, -1], [0, 0], [0, 1]], // on-line fix at idx 1
+      [[0, -1], [0, 0], [0, 1]], // on-line fix at idx 6
+      [[0, -1], [0, 0], [0, 1]], // on-line fix at idx 11
+    ])
+    const laps = detectLapsByLine(track, timeMs, line)
+    expect(laps.map((l) => [l.startIdx, l.endIdx, l.lapTimeMs])).toEqual([
+      [1, 6, 50000],
+      [6, 11, 50000],
+    ])
+  })
+
+  it('mixes on-line fixes with ordinary strict crossings', () => {
+    const { track, timeMs } = build([
+      [[0, -1], [0, 1]], // strict, boundary idx 1
+      [[0, -1], [0, 0], [0, 1]], // on-line fix at idx 5
+      [[0, -1], [0, 1]], // strict, boundary idx 10
+    ])
+    const laps = detectLapsByLine(track, timeMs, line)
+    expect(laps.map((l) => [l.startIdx, l.endIdx])).toEqual([[1, 5], [5, 10]])
+  })
+
+  it('does not count a touch that bounces back to the same side', () => {
+    const { track, timeMs } = build([
+      [[0, -1], [0, 0], [0, -1], [0, 1]], // touch at idx 1, real strict crossing idx 3
+      [[0, -1], [0, 1]], // strict, idx 7
+    ])
+    const laps = detectLapsByLine(track, timeMs, line)
+    expect(laps.map((l) => [l.startIdx, l.endIdx])).toEqual([[3, 7]])
+  })
+})
+
 describe('detectLapsByChannel', () => {
   it('finds N-1 laps from an incrementing IR_LapNumber channel', () => {
     // IR_LapNumber steps 1,1,1,2,2,3,3 -> boundaries at idx 3 (1->2) and 5 (2->3)

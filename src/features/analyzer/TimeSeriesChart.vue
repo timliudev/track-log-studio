@@ -32,6 +32,7 @@ import {
 } from '@/domain/analysis/cvtTrace'
 import type { ComparisonSession } from '@/composables/useSessionComparison'
 import { toCvtTraceConfig, useDrivetrainStore } from '@/stores/drivetrainStore'
+import { useChannelRoleStore } from '@/stores/channelRoleStore'
 import UPlotChart from '@/components/UPlotChart.vue'
 import SearchableSelect from '@/components/SearchableSelect.vue'
 import { cachedChannelUpdateRateHz } from '@/composables/channelUpdateRateCache'
@@ -76,6 +77,7 @@ const { xAxis } = storeToRefs(analyzer)
 const lapStore = useLapStore()
 const settings = useSettingsStore()
 const drivetrain = useDrivetrainStore()
+const channelRoleStore = useChannelRoleStore()
 const { tzOverride, centreCursorMode } = storeToRefs(settings)
 const documentTheme = useDocumentTheme()
 
@@ -85,6 +87,11 @@ const traceStroke = (channelIndex: number, traceOrder: number): string =>
 
 const xUnit = computed(() => (xAxis.value === 'distance' ? 'm' : 's'))
 const laps = computed<Lap[]>(() => props.selectedLaps ?? [])
+// B134 — channelRoleOverrides is threaded all the way down to
+// resolveAnalyzerChannel's rpm/speed lookups so an override set elsewhere
+// (this generic, widely-reused chart component does NOT host its own
+// ChannelRolePicker — see `unavailableDerivedMessage` below) still
+// reactively unblocks a derived channel plotted here.
 function derivedContextFor(fileId?: number | null) {
   return {
     wheelCircumferenceMm: drivetrain.kind === 'mt'
@@ -92,6 +99,7 @@ function derivedContextFor(fileId?: number | null) {
       : drivetrain.activeCvtProfile.wheelCircumferenceMm,
     fileId: fileId ?? 'unassigned',
     cvtConfig: drivetrain.kind === 'cvt' ? toCvtTraceConfig(drivetrain.activeCvtProfile) : null,
+    channelRoleOverrides: channelRoleStore.overrides,
   }
 }
 const derivedContext = computed(() => derivedContextFor(props.primaryFileId))
@@ -547,6 +555,14 @@ function removeChannel(name: string): void {
         {{ channelDisplayLabel(name) }}
         <button v-if="canEditChannels && !lockedChannels?.includes(name)" type="button" class="x" @click="removeChannel(name)">×</button>
       </span>
+      <!-- B134: deliberately plain text, not a ChannelRolePicker — this
+           component is reused for every generic chart (dashboard cards, the
+           lap table overlay, the scatter chart, ordinary channel picking),
+           not just the gear/CVT derived channels, so it has no single
+           `session`+`role` pairing to hand a picker; the actual pickers live
+           at GearPanel.vue/CvtDynamicsCard.vue's more specific empty states.
+           This message still auto-resolves once an override is set there —
+           see `derivedContextFor`'s `channelRoleOverrides` above. -->
       <span v-if="present.length === 0" class="muted">{{ unavailableDerivedMessage ?? emptyMessage ?? t('analyzer.pickChannel') }}</span>
     </div>
 

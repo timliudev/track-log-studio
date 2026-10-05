@@ -5,9 +5,18 @@ import { timeSeconds } from '@/domain/analysis/timeAxis'
 import { detectLapsByChannel, detectLapsByLine, inferLapLineFromChannel, type LapLine } from '@/domain/analysis/laps'
 import { suggestLapTimeBand, suggestLapDistanceBand } from '@/domain/analysis/lapValidity'
 import { resolveSpeedChannel } from '@/domain/analysis/cornerSpeed'
-import { toRadians } from '@/domain/export/rc3Nmea/geo'
+import { haversineM, toRadians } from '@/domain/export/rc3Nmea/geo'
 import type { GpsTrack } from '@/domain/analysis/gpsTrack'
+import type { LogSession } from '@/domain/model/LogSession'
 import type { Lap } from '@/domain/model/Lap'
+
+/**
+ * B130: minimum distance (m) from the start fix before a later fix is trusted
+ * as the heading reference for the auto-seeded start/finish line. A stationary
+ * or very slow start yields fixes within GPS/float32 noise of each other, so
+ * the direction from the first two fixes would be random.
+ */
+export const DEFAULT_LINE_DIRECTION_MIN_DIST_M = 10
 
 /** Index of the first valid fix, or -1 when the track has none. */
 function firstValidIdx(track: GpsTrack): number {
@@ -17,21 +26,30 @@ function firstValidIdx(track: GpsTrack): number {
 
 /**
  * A small default start/finish line: centred on the first valid fix and drawn
- * perpendicular to the initial heading (from the first two valid fixes). Its
+ * perpendicular to the initial heading (from the first valid fix to the first one >= 10 m away, B130). Its
  * half-length is a small fraction of the track's lat/lon bbox diagonal, scaled
  * by cos(lat) on the longitude axis so it looks perpendicular on screen.
  * Returns null if there are fewer than two valid fixes.
  */
-function defaultLine(track: GpsTrack): LapLine | null {
+export function defaultLine(track: GpsTrack): LapLine | null {
   const i0 = firstValidIdx(track)
   if (i0 < 0) return null
+  // B130: prefer the first fix >= DEFAULT_LINE_DIRECTION_MIN_DIST_M away; fall
+  // back to the next valid fix if the track never moves that far.
   let i1 = -1
+  let nextValid = -1
   for (let i = i0 + 1; i < track.valid.length; i++) {
-    if (track.valid[i]) {
+    if (!track.valid[i]) continue
+    if (nextValid < 0) nextValid = i
+    if (
+      haversineM(track.lat[i0], track.lon[i0], track.lat[i], track.lon[i]) >=
+      DEFAULT_LINE_DIRECTION_MIN_DIST_M
+    ) {
       i1 = i
       break
     }
   }
+  if (i1 < 0) i1 = nextValid
   if (i1 < 0) return null
 
   // bbox over valid fixes for a length reference.
@@ -71,6 +89,22 @@ function defaultLine(track: GpsTrack): LapLine | null {
     a: { lat: lat0 + dLat, lon: lon0 + dLon },
     b: { lat: lat0 - dLat, lon: lon0 - dLon },
   }
+}
+
+/**
+ * B135: the start/finish line recovered from the source file itself (e.g. a
+ * RaceChrono/`u6can`-exported `.vbo`'s `[laptiming]` `Start` line, wired
+ * through `parseVbo.ts` into `LogMeta.startFinishLine`), if the active
+ * session's importer supplied one and it is well-formed. Sits between an
+ * ECU-channel-inferred line and the generic {@link defaultLine} placeholder
+ * in the seeding priority below — a real user-drawn/persisted line (restored
+ * async by `useCircuitPersistence.ts`) always wins because it's applied
+ * later and unconditionally overwrites whatever was seeded here.
+ */
+function metaLine(session: LogSession | null): LapLine | null {
+  const l = session?.meta.startFinishLine
+  if (!l) return null
+  return [l.a.lat, l.a.lon, l.b.lat, l.b.lon].every(Number.isFinite) ? l : null
 }
 
 /**
@@ -130,7 +164,7 @@ export function useLaps(): {
    */
   function resetLine(): void {
     const seeded = track.value && session.value
-      ? inferLapLineFromChannel(session.value, track.value) ?? defaultLine(track.value)
+      ? inferLapLineFromChannel(session.value, track.value) ?? metaLine(session.value) ?? defaultLine(track.value)
       : null
     if (seeded) lapStore.setLine(seeded)
     else lapStore.clearLine()
@@ -180,7 +214,7 @@ export function useLaps(): {
       }
       if (next && lapStore.line == null) {
         const seeded = session.value
-          ? inferLapLineFromChannel(session.value, next) ?? defaultLine(next)
+          ? inferLapLineFromChannel(session.value, next) ?? metaLine(session.value) ?? defaultLine(next)
           : defaultLine(next)
         if (seeded) lapStore.setLine(seeded)
       }

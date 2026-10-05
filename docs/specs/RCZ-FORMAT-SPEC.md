@@ -80,6 +80,27 @@ channel_<A>_<dev>_0_<id>_<type>      每通道一個裸二進位陣列
   但這是 RaceChrono 自己判定的圈次，可直接當 lap marker 匯入（見 §8 待辦 D）。
 - 本檔**沒有** `title` 欄位（只有 `trackName`）；`parseRcz` 讀的 `session.title` 恆為 undefined。
 
+#### ⚠️ `timeCreated` ≠ `firstTimestamp`（B126）
+
+這兩個 epoch-ms 欄位**都存在、意義不同、而且會差好幾秒**：
+
+| 欄位 | 意義 | 本樣本值 |
+| --- | --- | --- |
+| `timeCreated` | **場次被建立的時刻**（RaceChrono 開場／App 起動那一刻） | 1773564129663 |
+| `firstTimestamp` | **第一筆主時鐘樣本**的真實 epoch（資料真正開始的時間） | 1773564128806 |
+
+另一個實測樣本（`session_20250817_1621_lihpao_full.rcz`）兩者差 **6.5 秒**
+（`timeCreated` 08:21:05.518 UTC vs `firstTimestamp` 08:21:12.023 UTC）。
+
+- **匯入端**：`LogMeta.createdDate` 取的是 `timeCreated`（顯示語意＝「這場什麼時候建立的」，
+  不變）；`firstTimestamp` 另外以型別化欄位 **`LogMeta.firstSampleEpochMs`** 帶出來
+  （`parseRczCore.ts` 的 `t0`）。
+- **下游規則**：任何需要**精確絕對時間**的消費端——最典型的是 `.vbo` 匯出（`.rcz` 沒有
+  `GPS_UTC_*` 頻道，`VboExporter.ts` 只能用「基準時刻 + 相對 `Time`」組出 time-of-day）、
+  或是要跟影片／RaceChrono 自家匯出對時——**必須採 `firstTimestamp` / `firstSampleEpochMs`，
+  不可用 `timeCreated`**。用錯會讓整份輸出的絕對時鐘平移（相對時間與圈速不受影響）。
+  這正是 B126 的 bug 與修法，詳見 docs/ISSUES.md B126。
+
 ### 3.2 `sessionfragment.json` ★
 
 ```json
@@ -170,6 +191,16 @@ GPS 另有 id 3（int64 檔，實際是 **int32 成對**：`[lat, lon]`）。
 | 8 magn | 28 / 29 / 30 | `x/y/z_magnetic_field` (µT) | **nT** | `/ 1000` |
 
 ### 5.3 RC3 資料裝置（type 4 且通道為 int32，本檔 dev 200，3,241 筆 = 10 Hz）
+
+> ⚠️ **Analog / Digital 槽位在 `.rcz` 檔內沒有任何文字標籤。**
+> 整個 ZIP（`session.json` / `sessionfragment.json` / `trackId.json` / `channel_*`）裡都**只有
+> 數字 channel id 與 device id/model/type**，沒有任何一處存放頻道名稱、單位或說明。
+> 「analog3 是水溫、analog5 是電瓶電壓」這類語意**只存在於使用者自己的 RaceChrono／ECU 設定**，
+> 檔案端無從得知。因此匯入時只能依 id 造出 `rc_analog_N` / `rc_digital_N` 這種代號，匯出的
+> `.vbo` 欄名同樣只能是代號——**這是格式本身的限制，不是解析器的疏漏**，任何「自動猜名字」的做法
+> 都會是臆測。使用者自訂命名表（可存成 preset）的設計討論見 docs/ISSUES.md 的 **F7** 條目與
+> [`F7-RC3-ANALOG-NAMING-DESIGN.md`](./F7-RC3-ANALOG-NAMING-DESIGN.md)（待拍板，尚未實作），
+> 實測值域見本檔 **§10 附錄**。
 
 | id | 對應 | 換算 |
 | --- | --- | --- |
@@ -298,3 +329,40 @@ lean angle」，只有 CSV/VBO 匯出才有。`sessionfragment.json` 的 `imuUse
 - 舊樣本 float64 通道的單位是逐點驗證不了的（`b1(5)_rc.vbo` 是**本專案自己匯出**的，
   不是 RaceChrono 的輸出，不能當對照）；§5.4 的單位是由數值範圍與物理常識判定（z 軸中位數
   0.839 G ≈ 重力）。若要 100% 確定，需要再匯一份同場的 RaceChrono CSV。
+
+
+---
+
+## 10. 附錄：RC3 Analog / Digital 槽位實測值域（F7 對照用）
+
+> 來源樣本：`session_20250817_1621_lihpao_full.rcz`（LihPao Full，7 圈，5 個裝置：
+> 100 accel / 101 gyro / 102 magn / 200 GPS / 300 RC3 資料裝置 model 404），
+> 數值取自 docs/ISSUES.md 的 **F7** 條目實測紀錄。
+>
+> ⚠️ **本表只是「這些槽位在這台車上量到什麼數字」，不是語意宣告。**
+> 如 §5.3 所述，`.rcz` 內沒有任何頻道標籤，下表的「疑似」欄位純屬人眼看數字的推測，
+> **解析器不會、也不該據此自動命名**。它的用途是：當使用者要手動填 F7 的命名表時，
+> 可以拿值域當線索對回自己的 RaceChrono／ECU 設定。
+
+| 槽位 | 匯入後的頻道名 | 實測值域 | 人眼推測（**非結論**） |
+| --- | --- | --- | --- |
+| d1 | `rc_rpm` | — | **固定語意 = 引擎轉速**（RaceChrono `$RC3` 的 d1 槽是硬性 RPM，見 §5.3 / ISSUES B121），唯一不需使用者命名的槽 |
+| d2 | `rc_digital_2` | 0–100，呈 `n/255 × 100` 的離散階 | 疑似節氣門開度 TPS（%）——**使用者自訂槽，不得硬編** |
+| a1 | `rc_analog_1` | 0–118 | — |
+| a2 | `rc_analog_2` | 0–255 | 值域滿刻度 8-bit |
+| a3 | `rc_analog_3` | −53…61 | 有負值 → 溫度／角度之類 |
+| a4 | `rc_analog_4` | 0–99.84（0.78 階＝ 200/256） | 8-bit 量化的百分比類訊號 |
+| a5 | `rc_analog_5` | 0.5–14.7 | 疑似電瓶電壓（V） |
+| a6 | `rc_analog_6` | 64–98 | — |
+| a7 | `rc_analog_7` | 37–54 | — |
+| a8 | `rc_analog_8` | 恆 9（常數） | 未使用槽？或整場未變的設定值 |
+| a9 | `rc_analog_9` | 恆 251（常數） | 未使用槽？ |
+| a10 | `rc_analog_10` | 17–100 | — |
+| a11 | `rc_analog_11` | 0–255 | 值域滿刻度 8-bit |
+| a12 | `rc_analog_12` | 只有 8 與 9 兩個值 | 疑似檔位／模式之類的離散量 |
+| a13–a15 | `rc_analog_13` … `rc_analog_15` | **整條 `INT32_MAX`（無資料）** | 未接訊號；匯出時由 B124 整欄略過 |
+
+註：`a8`/`a9` 這類恆常數頻道，以及 `a12` 這種只有兩個離散值的頻道，正是 **B127**
+（值域啟發式分不出「未觸發的真旗標」vs「恆常數的類比」）會踩到的案例；有了 F7 的使用者
+命名表之後，名稱本身可望成為比值域更可靠的佐證——但那條規則的優先權仍待拍板，見
+`F7-RC3-ANALOG-NAMING-DESIGN.md` 的「與 B127 的交互」段。

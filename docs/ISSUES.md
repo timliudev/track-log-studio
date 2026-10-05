@@ -418,7 +418,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   要的是真正的 epoch number 可直接 `new Date()`,不是還要再解析回數字的字串,且是純新增的
   optional 欄位,其餘 9 個 importer 的既有 `LogMeta` 建構語法完全不用動。真檔複驗:首筆
   `time`=162112.xxx(非改前的 162105.xxx)。 — `d3b15a6`
-- [ ] **B127** [[B125]] 的殘留限制:值域啟發式規則分辨不出「整場都沒觸發過的真實數位旗標」跟
+- [x] **B127** [[B125]] 的殘留限制:值域啟發式規則分辨不出「整場都沒觸發過的真實數位旗標」跟
   「值剛好恆為某個常數的類比頻道」。`.loga` 裡整趟記錄都停在 0 的 ECU 旗標(如
   `IR_LapNumber`/`IR_LapTime`/`SimRPM`/`MapNum` 這類本質是類比、但剛好也全程恆 0/某常數的頻道)
   跟真正未觸發的數位旗標一樣,都會落進數位槽——單靠值域完全無法區分。正確修法需要**頻道名稱/
@@ -426,6 +426,71 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   規則需要涵蓋所有既有 ECU 命名慣例、有誤判風險,屬於待拍板的設計決策,**本批刻意不實作**。
   背景:[[B125]] 第一版曾嘗試改用純值域規則(要求同時出現 0 與 1)來繞開這個問題,結果誤傷了
   `.loga` golden fixture 裡 108 個頻道(含真的數位旗標),已還原為歷史語意並記錄在案。
+  **決策素材已備(2026-08-21,實驗分支 `experiment/b127-candidates`,不 merge)**:四個名稱規則
+  候選(V1 允許清單/V2 tiebreak/V3 拒絕清單/V4 三條件複合)各對 7 個樣本(5 個 .loga fixture +
+  2 個真 .rcz,共 1095 頻道)實測。四者皆可修正點名的 4 個誤判;V4(恆常數 ∧ 名字像數值 ∧
+  名字不像布林才降級)**零誤殺**、真 .rcz 零影響,V3 看似改動最小(10 頻道)卻誤殺 13 個真旗標。
+  結構性事實:`rc_digital_*` 僅 63 格、.loga 動輒 94–209 個 digital → 數位桶**永遠溢位**,digital
+  數量一動 generic 槽位就大規模重編(69–106/119),「挑最小改動」不成立——真正選項是
+  **V0 完全不改(wontfix)vs V4 一次到位**,待 user 拍板(另見 [[B128]] 槽位不穩定性)。
+  **✅ 已修(2026-10-04,user 拍板 V4,與 [[B128]] 同批;merge `693d5a2`,實作 `5edbadf`)**:
+  照搬實驗分支的 V4(regex 逐字相同,未重新發明),移到新模組 `src/domain/export/vbo/channelNaming.ts`
+  (`BOOL_NAME`/`NUMERIC_NAME`/`demoteConstantToAnalog`,註解寫明「啟發式、以不誤殺旗標為原則」並附數據)。
+  規則:通過值域檢查的頻道,**只有「整場恆常數 ∧ 名稱像數值量 ∧ 名稱不像布林」三條同時成立**才降成
+  analog;有切換過的頻道不管叫什麼都不動。**實測與實驗數字完全一致**(改分類數):vbo.loga 33、
+  mxApp 9、raceAmp 24、super2 25、superX 48、兩個真 .rcz 皆 0;全部是 digital→analog,
+  **0 個 analog→digital、0 個像布林名稱被降級**。點名四個(`IR_LapNumber`/`IR_LapTime`/`SimRPM`/
+  `MapNum`)全修好,並有永久迴歸測試 `test/export/vboClassification.test.ts`(四個必為 analog;
+  `Malf8.Malf_On`/`Pit_SW_On`/`TCCtrAct`/`EngineBrakeEn`/`GPS_Weak`/`Fuel8.RPM_Limit`/`Fuel10.MAPSW0`/
+  `Fuel1.Dec_FC_En`/`LC_SW_On`/`Quick_Shift_Act` 必為 digital)。已知殘留:vbo.loga 仍有 7 個名稱
+  太含糊的常數類比量留在 digital(`Fuel_CL`、`TPS_indx`、`Engine_Brake`、`DragPhase`、`DragRound`、
+  `SuspensionAD1/2`),要擴充 `NUMERIC_NAME` 時必須重跑量測並維持「0 誤殺」。
+  **變更報告(fixture 重生前產出、coordinator 審過)**——每樣本:非 GPS 頻道數 / 改分類 / 僅 V4 造成的
+  槽號變動 / B128 額外造成的槽號變動 / 總槽號變動:
+
+  | 樣本 | 頻道 | 改分類 | V4 槽變 | B128 額外 | 總槽變 |
+  |---|---|---|---|---|---|
+  | vbo.loga(golden) | 139 | 33 | 80 | 114 | 118 |
+  | mxApp.loga | 147 | 9 | 0 | 138 | 138 |
+  | raceAmp.loga | 139 | 24 | 84 | 115 | 116 |
+  | super2.loga | 242 | 25 | 20 | 226 | 226 |
+  | superX.loga | 258 | 48 | 142 | 240 | 242 |
+  | b1(5)_rcvbo.rcz | 142 | 0 | 0 | 6 | 6 |
+  | 極限.rcz | 28 | 0 | 0 | 5 | 5 |
+
+  vbo.loga 的 33 個改分類頻道:`Miss_CRK_Cnt`、`IR_LapNumber`、`IR_LapTime`、`Cyl1s/2/3/4_Comn_FuelPW`、
+  `SimRPM`、`TC_Slip_Thre`、`TC_Slip_Rate`、`MapNum`、`TC_VSSFRRate`、`TC_VSSREstRate`、
+  `DragTargetPhaseMin/Max`、`DragTargetMode`、`DragTargetUnit`、`DragDist`、`DragTime`、`DragSpeed`、
+  `EXIN_AD1–3`、`CO_PW_Mult`、`Acc_Fuel_Mult`、`GearPosition_AD`、`QuickShift_AD`、`TC_TorqRedSASum`、
+  `QuickShift_CL_CutTime`、`QSDeltaRPMTarget`、`LaunchTorqRedSASum`、`TC_Launch_Level`、`Horsepower`
+  (單位皆 `bool`→`raw`)。golden fixture 重生一次(`e99a15e`),只動 `[header]`/`[channel units]`/
+  `[comments]`/`[column names]` 與 CSV 對照列,`[data]` 數值零變動。
+  ⚠️ **使用者影響**:既有在 RaceChrono 裡對著舊 `_rc.vbo` 設好的頻道對應,幾乎全部會失效(一次性)。
+  驗證(coordinator 在 rebase 後的乾淨 worktree 親跑):typecheck 0 錯、**2771/2771 綠(221 檔)**、
+  lint 0 error(4 個 warning 皆在本批未動的既有檔)。**⚠️ 尚未經裝置驗證。**
+- [x] **B128**(2026-08-21 開單;源自 [[B127]] 決策素材實測的結構性發現 + 2026-08-17 handoff
+  未開單小瑕疵)`_rc` flavour 的 generic 槽號**跨場次不穩定**:配號依「哪些頻道有資料」而浮動
+  (例:`GPS_CoordinatePrecision` 拿到 `rc_analog_13` 只因來源自己的 analog 13 恰好沒資料),且
+  `rc_digital_*` 僅 63 格、.loga 常態 94–209 個 digital,溢位進 `rc_analog_*` 的量隨場次而變,
+  同一頻道在不同場次可能拿到不同槽號。這是 Allocator 的既有設計(B120 之前就如此),不是
+  B120–B126 造成;影響的是跨場次比對 `_rc.vbo` 欄名的使用情境。可能修法:穩定排序鍵(按頻道
+  名 hash 而非出現順序)或每頻道固定配號表——**皆屬行為變更,會動 golden fixture,待 user
+  決定要不要修**;若 [[B127]] 拍板 V4,建議同一批處理(反正 fixture 要重生)。
+  **✅ 已修(2026-10-04,與 [[B127]] 同批;merge `693d5a2`,實作 `0478736`)**:user 在三案中選
+  **「按名稱排序」**(另兩案:名稱 hash——頻道 >63 必撞號、無法保證;固定對照表——需維護 200+ 筆)。
+  `buildVboCatalog` 改三段式:①passthrough `rc_` 名稱**即使整欄 NaN 也先保留槽號**(修掉
+  `GPS_CoordinatePrecision` 搶到 `rc_analog_13` 的案例,極限.rcz 中改為 `rc_analog_16`);
+  ②分類照舊;③generic analog 依名稱排序(code-unit 比較,不用 `localeCompare`,跨語系一致)**先**配
+  `rc_analog_*`,再由排序後的 digital 配 `rc_digital_1..63`,溢位接在 analog 之後——analog 槽號因此
+  不再受 digital 數量影響。輸出欄位順序仍是原始頻道順序,只有槽號名稱來自排序。
+  **保證**:頻道名稱集合相同 + 分類相同 → 槽號完全相同,與頻道出現順序、passthrough/全 NaN 頻道有無
+  資料無關。**限制**(寫在 `buildVboCatalog` 註解):(a) 同桶多/少一個頻道,排在它後面的槽號會位移;
+  (b) 某頻道跨場次分類不同(這場有切換、那場恆常數;或這場有資料、那場全 NaN 被丟)會換桶並牽動
+  其他頻道;(c) digital 超過 63 的溢位排在 analog 之後,analog 數量一變,所有溢位槽號跟著動。
+  副作用:排序後字母較後的真旗標(`Malf8.*`、`Mode.*`、`Pit_SW_On`、`TCCtrAct`、`Quick_Shift_Act`)
+  落進 `rc_analog_*` 溢位區——仍是 63 格上限的同一問題,只是換了哪些旗標溢位。
+  測試 `test/export/vboSlots.test.ts`(打亂頻道順序 rcName 不變、全 NaN passthrough 仍保留槽號、
+  真 fixture 兩種順序結果一致)。各樣本槽號變動數見 [[B127]] 變更報告表。**⚠️ 尚未經裝置驗證。**
 - [ ] **F7**(design-first,**本批不實作、待拍板**)RC3 Analog 自訂命名表。`.rcz` 內沒有任何
   頻道文字標籤,Analog 1–15 的語意只存在使用者的 RaceChrono / ECU 設定裡,程式無從得知——
   這是 [[B120]]–[[B125]] 修完之後**剩下的唯一**「名字看不懂」來源。需要一個可存成 preset、
@@ -433,6 +498,269 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   a2 0–255、a3 −53…61、a4 0–99.84(0.78 階)、a5 0.5–14.7、a6 64–98、a7 37–54、a8 恆 9、
   a9 恆 251、a10 17–100、a11 0–255、a12 8/9、a13–15 無資料;d1 = RPM(固定)、d2 0–100
   (n/255×100 階,疑似 TPS)。UX 待拍板。
+
+## 圈次偵測 — M4 截圖作業順帶發現 (B129–B131)
+> 這三條是 2026-08-21 做 [[M4]] 截圖手冊時,agent 為了讓示範記錄跑出完整圈而反覆調參,從行為
+> 反推出來的。**B129/B130 我已讀碼確認屬實**(證據見各條),但**都還沒寫復現測試**,實際影響
+> 範圍待評估;修法皆會動到圈次偵測這個核心路徑,**待 user 拍板要不要修**。
+
+- [x] **B129** `detectLapsByLine`(起終點線圈次偵測,`src/domain/analysis/laps.ts:257`)缺少
+  `walkLapGates` 有的「取樣點正好落在線上」補救。**已讀碼確認**:`walkLapGates`(同檔 :170)
+  明文處理這個情況——註解寫著「A GPS fix can land exactly on the gate line. The two adjacent
+  segments then only TOUCH the gate at their endpoint, so the strict pairwise test below rejects
+  both」,並以 `crossesThroughSample()`(:145,檢查前後兩個有效 fix 分屬異側)救回;但
+  `detectLapsByLine` 的 raw crossing 迴圈(:282-299)**只有** `segmentsIntersect()` 這個嚴格
+  proper-straddle 判斷,端點接觸一律拒絕。後果:該圈被漏算、與下一圈合併成一圈。
+  觸發條件:軌跡每圈幾乎完全重疊時會系統性發生——float32 經度在 121°E 的 ulp 約 0.85 m,
+  座標會吸附到同一格點,取樣點就可能正好落在線上。修法:把 `crossesThroughSample` 的三點
+  檢查套進 `detectLapsByLine`(該函式已存在、已被 sector 路徑用了,不必新寫演算法)。
+  **✅ 已修(2026-10-04,merge `7cc5793`;repro 測試 `3c9dda0`、修正 `4c63f10`)**:crossing 迴圈改維護
+  `before/prev/i` 三點視窗,`crossesThroughSample` 成立時在線上那個 fix(`idx = prev`)記一次穿越,
+  並略過該段的嚴格判斷——嚴格 straddle 不可能涉及線上端點,故不會重複計數;同側擦過仍拒絕。
+  新增 3 個測試(線上穿越算一次、線上與嚴格穿越混合、擦線折返不算)。typecheck 0 錯、2740/2740 綠、
+  lint 0 錯(4 個既有 warning 不在本次檔案);**既有真檔/golden 測試圈數零變化**。
+  已知限制(與 `walkLapGates` 相同):連續兩個以上 fix 都落在線上時仍會漏算,需兩函式一起改。
+  ⚠️ 尚未經裝置驗證。
+- [x] **B130** 自動種下的起終點線,方向取自「前兩個有效 fix」(`src/composables/useLaps.ts:25`
+  的 `defaultLine()`)。**已讀碼確認**:`defaultLine` 取 `firstValidIdx` 與其後第一個 valid fix
+  當方向基準。若記錄從靜止或極慢速開頭(常見:按下記錄後才起步),這兩點的位移可能小於
+  float32 量化誤差 → 方向等同雜訊 → 種出來的線角度歪掉,大部分圈次因而漏算。修法建議:改取
+  「與起點相距 ≥N 公尺的第一個 fix」當方向基準(N 待定),而非固定取下一個 fix。
+  **已修(merge `77d881d`;復現測試 `f88d662`、修正 `4534ce4`)**:user 拍板 N = 10 m,新增常數
+  `DEFAULT_LINE_DIRECTION_MIN_DIST_M = 10`;`defaultLine()` 改取「與起點 haversine 距離 ≥10 m 的
+  第一個有效 fix」當方向基準,整段都不到 10 m 時退回舊行為(下一個有效 fix)。新增
+  `test/composables/useLapsDefaultLine.test.ts`(靜止抖動起步→舊碼偏約 72°、fallback、少於兩點)。
+  與 B129 合併後實測:typecheck 綠、2743/2743 綠、lint 0 error;真檔 fixture 圈數無任何變動
+  (沒有真檔測試走 `defaultLine`)。⚠️ 尚未經裝置驗證。
+- [x] **B131**(**2026-10-06 user 拍板關單:非 bug**;殘留閃爍另開 [[B137]])(信心較低,**待確認是刻意設計還是 bug**)手機寬度下匯入記錄後**不會自動啟用**:
+  勾選框未打勾,切到分析頁是空白,要手動勾選才有內容;桌面版匯入後直接是「主要」。
+  agent 是在拍手機版截圖時遇到的,未深究。若為刻意(避免手機一次載入太多),應在 UI 上給提示。
+  **2026-10-04 調查結論:非 app bug,是 Claude 內建瀏覽器窗格的量測假象(待 user 拍板是否關閉)。**
+  根因:`src/App.vue:113-117` 的 `<Transition mode="out-in">` 要等 `ConverterView` 離場動畫跑完才掛載
+  (async 的)`AnalyzerView`;Vue 靠 `requestAnimationFrame` 收尾離場動畫,而窗格沒在繪製時 rAF 完全
+  不觸發(實測 1 秒內 "no raf"、輪詢 5 秒 `.analyzer` 始終不存在)。此時 `tab` 已是 `'analyzer'`,
+  FileBar 進入分析模式,但負責自動選主要記錄的 `watch(readyFiles, …, {immediate:true})`
+  (`AnalyzerView.vue:377`)根本還沒跑 → 勾選框空、無「主要」、內容空白,與本條描述完全一致。
+  任何觸發繪製的動作(截圖、手動勾選)都會讓動畫收尾、`AnalyzerView` 掛載並自動選為主要(實測 375 寬
+  與 1024 寬皆確認)。手機版無任何專屬程式碼碰 `activeFileId`/`selectedSessions`,也無刻意設計的註解。
+  真機會持續繪製,不會卡住;唯一真實殘留是 0.25 s 離場動畫+chunk 載入期間 FileBar 短暫顯示「未選取」的閃爍。
+  **未改任何程式碼**(`fix/b131` 分支零 commit)。
+- [ ] **B137**(2026-10-06 開單,源自 [[B131]] 調查;user 拍板要修)切到分析頁時,`App.vue` 的
+  `<Transition mode="out-in">` 離場動畫(0.25 s)+ `AnalyzerView` async chunk 載入期間,FileBar 已進入分析模式但
+  自動選主要記錄的 `watch(readyFiles, …, {immediate:true})`(`AnalyzerView.vue:377`)尚未執行 → 勾選框短暫顯示
+  「未選取」的閃爍。修法方向:把「無主要記錄時自動選第一個 ready 檔」的邏輯移到不依賴 `AnalyzerView` 掛載的位置
+  (如 store 或 FileBar),讓 FileBar 一進分析模式就有正確選取狀態。
+
+## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
+- [x] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
+  一鍵自動偵測產生 **~142 個 sector 閘門**(平均約每 25 m 一個),整張賽道地圖被切成一片
+  編號圓點,完全不可用。根因就寫在 `src/domain/analysis/cornerDetection.ts` 的
+  `CURVATURE_DEFAULTS` 註解裡:那組門檻(`minProminence=0.9`、`minValue=1.4` deg/m、
+  `minSpacingM=15`)是 2026-07-01/02 針對 **ARK(~750 m/圈、~12 彎)** 的 `.loga` 校正的,
+  註解自己也寫「NOT yet proven to generalise to a differently-scaled track (e.g. a big
+  circuit with long, gentle corners)」。放到 3.5 km 賽道上:①`minSpacingM=15` 的理論上限
+  就有 ~233 個閘門,毫無天花板;②`minValue=1.4` deg/m 在低速段等同「相鄰兩點差 ~3° / 2 m」,
+  GPS 航向雜訊就能過關;③`boxSmooth` 是 **index-domain**(註解已註明),在大賽道上高低速
+  區段的實際平滑弧長差好幾倍;④`.rcz` 無 `TC_Lean_Angle`,一定退回較不穩的 curvature 路徑。
+  另外 `detectSectorGates`/`sectorStore.loadDetected` 全鏈路**沒有任何數量上限或合理性檢查**。
+  可能修法(待拍板):(a) 依參考圈長度縮放 `minSpacingM`(如 `max(15, lapLenM/100)`);
+  (b) 加「彎道最短持續弧長」條件,單點尖峰不算彎;(c) 以 prominence 排序取 top-N(N 隨圈長,
+  或硬上限 ~30);(d) `boxSmooth` 改距離域窗。**演算法研究(2026-08-21,文獻回顧見下)**:
+  問題的本質是現行判據 κ = Δψ/Δs 的單位是 **deg/m —— 有量綱、與彎道半徑成反比**,所以門檻
+  `minValue=1.4` 等同「半徑 ≤ 41 m 才算彎」(57.3/1.4);ARK 的彎大多在這之內所以剛好能用,
+  麗寶的高速 sweeper(R≈150–200 m → κ≈0.29–0.38 deg/m)本質上就在門檻之下,而低速段的 GPS
+  航向雜訊除以極小的 Δs 後又衝過門檻——**同時發生漏抓真彎與抓爆雜訊兩種錯誤**。而且 κ 是
+  一階微分量,天生放大雜訊。真正「大小賽道通吃」的方向是換成**無量綱/積分量**:
+  ①**turning function θ(s)**(累積航向 vs 弧長,平移與縮放不變)——「一個彎」= θ 的一段單調
+  變化且 **|Δθ| ≥ 30°** 之類的角度門檻,單位是度、與賽道尺度無關,且積分會讓零均值的 GPS
+  雜訊互相抵消而非放大;②**側向 G**(a_lat = v·ω = v²κ)——賽車手在任何尺度的彎都開到輪胎
+  極限,所以 a_lat 天生跨尺度一致(小迴轉 40 km/h 與大 sweeper 160 km/h 都約 0.8–1.0 G),
+  這也是 MoTeC/AiM 這類專業分析軟體的慣用判據,且 `.loga` 的 `TC_Lean_Angle` 本質就是
+  atan(a_lat/g)——即現行 lean-angle 路徑之所以比 curvature 穩的原因;③**尺度相對的平滑窗**
+  (σ 取圈長的百分比而非固定樣本數),即 Curvature Scale Space(Mokhtarian)的作法,並只保留
+  跨多個尺度都存活的彎;④**自動決定數量**取代固定門檻:把候選依 prominence(= 1-D 拓樸
+  persistence)排序後,在**最大落差處切**(persistence-gap),小賽道自然停在 ~12、大賽道停在
+  ~16,無需針對賽道調參;⑤ 更徹底的 **MDL 分割**(TRACLUS 的 partitioning 階段,以
+  L(H)+L(D|H) 最小化自動選出特徵點數量,真正無參數)。建議落地順序:先做 ①+④(治本且改動
+  集中在 `cornerDetection.ts`),②當 `.loga` 有 lean angle 時的優先路徑保留,③⑤ 視效果再議;
+  無論如何都要補上硬上限當保險絲。**繞道方案(現在可用)**:sector 面板「清除全部」
+  後手動加閘門,幾何會依賽道存下來、不會再被自動偵測蓋掉。
+  **落地(2026-08-21)**:採建議的 ①+④ 路線,**只動 curvature 路徑**(`leanAngleSignal`/
+  `LEAN_ANGLE_DEFAULTS`/`detectCorners` 的 lean-angle 分支完全未動,b1(9).loga 的
+  reference-lap 彎數驗證前後皆為 12)。`detectCornersByCurvature` 改為 turning-function
+  管線:訊號用 `distanceSmooth`(新增,真距離滑動平均)取代 index-domain `boxSmooth`;
+  依正負號切「轉向段」;段落 `|Δθ|` 未達 `thetaMinDeg`(預設 **30°**)整段丟棄;段內用既有
+  `findPeaks` 依相對峰值比例(`SUBPEAK_PROMINENCE_FRACTION`,實測校正到 **0.45**,而非文獻
+  回顧建議的起始猜測)拆多頂點同向連續彎(如 ARK 8-9-10);`minSpacingM` 隨圈長縮放
+  (`max(15, lapLenM/100)`);④ persistence-gap 有實作但**實測發現 1.6 的落差比門檻在真實
+  雜訊資料上會誤觸**(把一個 16 候選的 reference lap 砍到 5,某圈甚至砍到 1)——真實 prominence
+  分布是連續漸變、不是乾淨雙峰,調高到 **4.0** 後在所有 ARK 尺度真檔案上都不再觸發,純作保險絲
+  保留;`sigmaFraction` 實測 **1%**(非建議起始值 0.5%)在真檔案上更穩定。⑤ MDL 分割未做
+  (超出本輪範圍)。硬上限 `maxGates=40` 已加。真機文件三個手上有的檔案(麗寶大賽道
+  `session_20260816_0945_lihpao_full.rcz` 不在 repo 內、無法實測)reference-lap 彎數
+  before→after:`b1(5).loga` 11→10、`session_..._極限.rcz` 19→11、`session_..._rcvbo.rcz`
+  17→11(ARK 已知 ~12,且每圈變異大幅收斂,如 極限.rcz 從 `[20,21,19,17,21]` 收斂到
+  `[12,11,11,11,11]`)。合成尺度不變性測試(同形狀放大 5x)通過:彎數相同、apex 距離按比例縮放。
+  Commit `c20e467`(分支 `fix/corner-detection-scale-invariant-b132`,base develop `cbd65dd`,
+  尚未 merge/push)。
+
+- [x] **B133** ([[B132]] 的 UI 併發症,但**根因是通用缺陷**)Sector 卡片在閘門數量爆量時,
+  「理論最佳圈」的各段時間清單會撐滿整張卡片,把下方的閘門清單/移除按鈕整個擠出可視範圍。
+  根因:`SectorPanel.vue` 的 `.optimal` 區塊(含 `<ul class="optimal-sectors">`,**每個 sector
+  一個 `<li>`**)放在 `CardFillScroll` 的 **`#header` slot** 裡——那是 B47 刻意的決定(註解寫明
+  「Moved into the fixed `#header` … so it stays visible even when the card is resized short」),
+  當時假設 sector 只有個位數。而 `CardFillScroll` 的 `.card-fill-scroll__header` 是
+  `flex: 0 0 auto` **無高度上限**,`.card-fill-scroll__content` 則是 `flex: 1 1 auto;
+  min-height: 0` ——header 一長,content 就被壓縮到 0 高度、整個消失。**這是 `CardFillScroll`
+  的通用缺陷**:任何會無限成長的 header 都能餓死 content pane,不只 sector 卡片。**兩層都修
+  了**:(a) 局部——`SectorPanel.vue` 的 `.optimal-sectors` 加 `max-height: min(30vh, 160px)` +
+  `overflow-y: auto`,B47 原意(卡片縮短時理論最佳圈仍留在可視的 `#header` 內)不變,只是限高
+  +可內部捲動;(b) 通用加固——`CardFillScroll.vue` 的 `.card-fill-scroll__header` 加
+  `max-height: 50%` + `overflow-y: auto`,保證 content pane 永遠拿得到至少一半高度。已 grep
+  `CardFillScroll` 的全部既有使用者(`AccelTestPanel`、`CurrentValuesPanel`)確認:兩者的
+  header 都是固定控制項集合(切換鈕/欄位/單行提示),不是隨資料筆數增長的清單,實務上不會
+  接近 50% 上限,故此加固不影響既有版面。因 jsdom/happy-dom 在本專案測試設定下不跑真實
+  layout(`vite.config.ts` 的 `test` 區塊無 `css: true`),新增測試分兩層:CSS 原始碼文字斷言
+  (`test/lint/cardFillScrollHeaderCap.test.ts`,比照既有 `mapOverlayButtonSizing.test.ts` 慣例)
+  + `SectorPanel.test.ts` 用 142 個閘門(對應麗寶真檔實測數字)掛載、斷言 `.gate-list` 仍完整
+  渲染 142 個 `<li>`/移除按鈕於 DOM 中。2448/2448 綠、typecheck/lint/build 皆過。
+  — `7402b01`/`409e833`
+
+## User report — 非自家命名頻道認不得 + MT 齒比建議 (B134, F8)
+- [x] **B134** 認不得非自家命名的語意頻道 → 齒比/疊圖直接死當,且**無任何手動補救**。實測
+  使用者自製 `.vbo`(`lihpao_20260816_ct_full.vbo`,由外部 `u6can` 工具把 Luxgen U6 CAN
+  併進 VBO)明明有轉速欄,UI 卻報「此記錄缺少轉速(RPM)頻道」。根因鏈:①該檔轉速欄名為
+  **`EngineRPM_rpm`**(且**沒有 `[channel units]` 區塊**,連單位都拿不到);②`parseVbo.ts`
+  對非 GPS 基本欄一律 `canonicalName(header[c])` 原樣落地,不做語意對應;③
+  `drivetrain.ts` 的 `resolveRpmChannel()` 只有 `session.has('RPM') ? 'RPM' : null`,而
+  `canonical.ts` 的 `ALIASES` **根本沒有 RPM 這組**。連帶同檔還有兩處同病:`VehicleSpeed_kmh`
+  認不得(目前只是靠 GPS `velocity` 欄補上 `GPS_Speed` 才沒爆)、`GearPRND` 過不了
+  `inferDrivetrainKind()` 的檔位頻道正則(該正則要求 `gear` 前後有分隔符)。結論:**只要不是
+  自家匯出器產的檔,所有 role-based 功能都會瞎掉,而使用者完全沒有救援手段。**
+  修法(user 2026-08-21 拍板,兩層都做、範圍涵蓋**轉速+速度+檔位三個角色**):
+  **①自動辨識加強**——把三個 resolver 收斂成單一 `channel roles` 模組,解析順序
+  `使用者覆寫 > 既有 canonical/ALIASES > 名稱/單位啟發式`;啟發式只在 canonical 查無時才跑,
+  確保既有格式(`.loga`/`.rcz`/`.xrk`/自家 `.vbo`)解析結果**逐字不變**。
+  **②手動指定 UI**——自動抓不到時,在原本只會顯示「缺少 X 頻道」的空狀態直接給下拉選單,
+  列出本 session 所有頻道讓使用者指定;選擇**以「頻道名稱→角色」為鍵存進裝置**
+  (`settingsStore`/localStorage,`tracklogstudio.*` 前綴),日後任何 session 只要出現同名頻道就
+  自動套用,同一台車/同一個轉檔工具只需要選一次。⚠️ 實作紅線(記取 [[B125]] 教訓):啟發式
+  規則**必須回報 golden fixture diff 規模**,`.loga` 既有頻道分類一個都不許動;localStorage
+  讀回的覆寫表必須比照 [[M9]] 的 sanitizer 做白名單+長度/筆數上限。
+  **已落地**(merge `3c000c3`):`domain/analysis/channelRoles.ts` 統一三角色解析(覆寫 >
+  canonical > 啟發式,啟發式只在 canonical 查無時才跑)、`stores/channelRoleStore.ts` 裝置層
+  `channelName→role` 覆寫表(`tracklogstudio.channelRoles.v1`,含 [[M9]] 式 sanitizer、
+  newest-wins)、`ChannelRolePicker.vue` + `ChannelRoleBadge.vue`(抓不到時給下拉;由覆寫或
+  啟發式決定時常駐「轉速：X（自動判定）· 變更」可隨時改,canonical 命中不顯示)。
+  `inferDrivetrainKind` 三頻道改走 resolver;`useLaps`/`useSessionMerge` 刻意不動(避免
+  啟發式改變圈次判定與跨檔對齊語意)。**B125 紅線已證明**:golden fixture 對真
+  `super2.loga` 斷言與 legacy resolver 逐字相同,既有格式零變動。真檔三份複驗:
+  lihpao `.vbo` rpm→`EngineRPM_rpm`、gear→`GearPRND`;自家 `.rcz` rpm→`rc_rpm`;
+  RPM 藏在 `rc_digital_1` 的舊 `.rcz` 維持 null(名稱無訊號時不亂猜——正是需要手動指定的
+  情境)。typecheck 乾淨 · **2514/2514 綠**(211 檔) · lint 0 error · build PWA 29 entries。
+  ⚠️ **尚未經裝置驗證**。
+
+- [x] **F8**(design-first,user 2026-08-21 拍板要做)MT 齒比計算機:餵入引擎特性後**建議檔位與齒比**。
+  現況:MT 模式是**純幾何計算機**——輸入只有 `gearRatios / primaryReduction / finalDrive /
+  wheelCircumferenceMm / redlineRpm`(`MtFormState`),輸出只有每檔總減速比與紅線極速
+  (`computeMtGearTable`)。**引擎特性完全不在模型內**,所以它能算「這組齒比跑多快」,
+  不能算「這組齒比好不好」。
+  **輸入(雙軌,user 拍板:兩者都要,拿不到曲線就退化成兩點)**:
+  (a) **曲線版**——可貼上/匯入 `(rpm, Nm)` 或 `(rpm, hp/kW)` 數對(P[kW] = T·rpm/9549 互轉);
+  (b) **兩點版**——只有峰值扭力 rpm 與峰值馬力 rpm(+選填量值)。
+  ⚠️ **誠實紅線**:兩點版**只准**產出 band-edge 啟發式結果(級距齒比、換檔轉速近似、
+  過長/過短診斷),**不得**輸出加速模擬或「真正的」換檔交叉點——那需要完整曲線,
+  兩點捏造曲線再報秒數等於騙人。此限制要用型別/API 形狀強制(需要曲線的函式只收曲線 profile)。
+  **輸出(三種最佳化目標,user 拍板全要)**:①**加速優先**——可用轉速帶 =
+  [峰值扭力 rpm, 換檔 rpm],理想級比 = 換檔rpm/落點rpm,產出幾何級數建議齒比表並逐檔對照
+  現有齒比報「升檔後掉出扭力帶多少 rpm」;②**依實測 log 速域量身訂做**——用已載入 session 的
+  速度分布/彎道出彎速度,建議讓主要出彎點落在扭力帶內的齒比(這是本 App 才做得到、
+  外部計算機做不到的一項,且可直接複用既有的 `detectGearPlateaus` 實測齒比反推);
+  ③**極速優先**——由目標極速/紅線/輪周反推所需終傳,並在齒盤模式下給齒數組合建議。
+  曲線版另可算**真正的最佳升檔轉速**(輪端推力相等:T(r)·g_n = T(r·g_{n+1}/g_n)·g_{n+1},
+  於 [峰值馬力 rpm, 紅線] 掃描變號點)與**逐檔加速模擬**(需車重;無空力/滾阻輸入時只報
+  齒比組之間的**相對**比較並明確標示)。
+  **排程**:必須排在 [[B134]] 合併之後才能動 UI ——兩者都會改 `drivetrain.ts` 與
+  `GearPanel.vue`。純數學核心(新檔 `domain/analysis/gearRecommendation.ts` + 型別 + 測試)
+  可與 B130 並行,前提是**完全不碰** `drivetrain.ts`/`GearPanel.vue`/`drivetrainStore.ts`/i18n。
+  **純數學核心已落地(merge `5e406bc`)、UI 未接**:`domain/analysis/gearRecommendation.ts`
+  (+94 條測試)六階段全到位——引擎特性型別與單位換算(hp 預設公制 PS)、`usableBand` +
+  `recommendRatioSpacing`(幾何級數,可加 `progressionFactor` 讓高檔級距變寬)+
+  `diagnoseExistingRatios`(升檔落點 = `shiftRpm × g_next/g_cur`,報與扭力峰的帶正負距離)、
+  `finalDriveForTopSpeed`/`rankSprocketCombos`/`diagnoseTopSpeedGearing`、
+  `optimalShiftRpm`(曲線限定,輪端扭力相等的二分解,三種結果 + `usedClampedTorque` 標示
+  曲線沒延伸到紅線而扭力被夾平)、`recommendForMeasuredSpeeds`(掃 0.6–1.6× 終傳最大化
+  扭力帶佔有率,純函式吃陣列)、`simulateAcceleration`(選配,缺空力/滾阻時以
+  `isRelativeOnly` 標示只能相對比較)。誠實紅線以型別強制:需要曲線形狀的函式只收
+  curve profile,兩點版無法輸入(`@ts-expect-error` 測試釘住)。
+  📌 **審查紀錄**:主線曾指控 `optimalShiftRpm` 在 `diff(peakPower) ≤ 0` 時夾到紅線是方向
+  反了,agent 反證該分支**不可達**——`peakPowerRpm` 是 `T(r)·r` 的極大點,故
+  `T(r·s) ≤ T(r)/s` ⇒ `diff ≥ 0`(另附 500 萬次隨機搜尋無反例),主線驗算後確認 agent 正確;
+  該分支仍保留為防禦性程式碼並在 JSDoc 記下證明。
+  **待辦**:UI 接線(引擎特性輸入欄位、建議齒比表、三種目標切換、與已載入 log 的疊圖),
+  必須排在 [[B134]] 之後(已滿足)。
+  **UI 已接線(merge `b7fa04d`)**:新增 `domain/analysis/engineProfileForm.ts`(曲線貼上解析
+  /單位換算/驗證診斷/表單型別,輸入 UI 與輸出 UI 共用同一組建構函式)、
+  `EngineProfileInput.vue`(兩點版 + 曲線貼上,行內驗證訊息)、`GearRecommendationPanel.vue`
+  (建議齒比表 + 升檔落點診斷 + 曲線限定建議換檔轉速 + 終傳/齒盤建議 + 三種目標切換);
+  `drivetrainStore` 的 `MtFormState` 增 `engineProfile`(沿用 reject-don't-throw sanitizer、
+  範圍夾限、曲線文字 100k 字上限,18 條 sanitizer 測試,持久化仍在
+  `tracklogstudio.drivetrain.v2`);`UPlotChart` 新增 optional `xBands` prop 把可用轉速帶
+  畫成底色(像素幾何抽成可測的 `xBandRect`)。**誠實紅線型別+UI 雙重把關**:曲線限定輸出
+  只在「目前選的就是曲線版且該曲線通過驗證」時解鎖,只有兩點版時區塊仍可見但明說原因。
+  **刻意未接**:`simulateAcceleration`(需車重輸入、且無空力/滾阻時只能相對比較)、
+  出彎速度擷取(`recommendForMeasuredSpeeds` 視其為 optional,寫新的彎道啟發式超出範圍)、
+  齒比級距錨點切換(固定錨在現有頂檔齒比)。typecheck 乾淨 · **2707/2707 綠**(218 檔) ·
+  lint 0 error · build PWA 29 entries。⚠️ **尚未經裝置驗證**。
+
+## 汽車記錄實測 — VBO `[laptiming]`/`[session data]` 沒吃 (B135–B136)
+> 2026-08-21 實測**第一份汽車 log** `lihpao_20260816_ct_full.vbo`(外部 `u6can` 工具把
+> Luxgen U6 CAN 併進 RaceChrono VBO,63 頻道;同場另有 `.rcz` re-export、與 2025-08-17
+> 機車 `.rcz` 同賽道 LihPao Full 可互比)。除了完整重現 [[B134]] 的三個角色缺口
+> (`EngineRPM_rpm`/`VehicleSpeed_kmh`/`GearPRND` 全認不得)之外,再挖出以下兩條。
+
+- [x] **B135** `parseVbo` 完全忽略 `[session data]`(`name LihPao Full`)與 `[laptiming]`
+  (`Start   -7241.186772 +1459.114540 -7241.175315 +1459.126888 ¬ Start/Finish`)兩個區段
+  (grep 全 codebase 零處理)。後果:①`meta.name` 空;②起終點線只能靠 `useLaps` 的
+  `defaultLine()` 自動種在第一個有效 fix(= paddock)→ **實測整場 0 圈**(`detectLapsByLine`),
+  而同場 `.rcz` re-export 靠 `IR_LapNumber` 有正確 4 圈(300.4/166.1/150.6/151.0s)——
+  帶 `[laptiming]` 的 VBO 其實自己就宣告了正確的線,白白丟掉,per-lap 比較整個廢掉。
+  修法:`parseVbo` 解析兩區段(座標為 VBO 分制、**經度西正**:lat=+min/60、lon=−min/60;
+  該行分隔符為 U+00AC)存進 `LogMeta` optional 欄位;`useLaps` 種線優先序改為
+  「使用者已存的線 > meta 內建線 > defaultLine」。驗收:真檔套線後應得上述 4 圈圈速。
+  後續(不在本條):自家 `VboExporter` 匯出時也回寫 `[laptiming]`,讓 round-trip 不掉線。
+  **已落地**:`LogMeta` 加 optional `sessionName`/`startFinishLine`(純新增,他 importer 不動);
+  `parseVbo` 解析兩區段(容錯:缺段/壞行→undefined、忽略 `Split` 行);`useLaps` 兩處種線點
+  改為 `inferLapLineFromChannel > metaLine > defaultLine`(使用者存線經 `useCircuitPersistence`
+  非同步回灌、本就無條件蓋過種線,已追碼確認不需改)。新增 5 測試;真檔複驗 0 圈 → **4 圈
+  300.399/166.120/150.600/151.041s**(與 RaceChrono 自家偵測一致);本分支全套 2463/2463 綠、
+  typecheck/lint/build 過。UI 目視驗證未做(自動化環境 Browser pane 無法 compositing,Vue
+  Transition 卡 rAF,屬環境限制),待真機。 — 本 session 分支 `6250b9d`/`605af87`(hash 待上
+  origin 後確認,tracker 規則:local hash 可能變動)
+  **合入 develop:merge `24f9e04`**(由 car-log-comparison peer session 完成,本 session
+  rebase 到 develop 實際 tip 後獨立複驗:typecheck 乾淨、2613/2613 綠 212 檔)。
+
+- [x] **B136**(待拍板)VBO 沒有 `[channel units]` 區段時(Circuit Tools flavour 刻意不寫,
+  單位嵌在欄名:`EngineRPM_rpm`/`CoolantTemp_degC`/`YawRate_degps`…),全部頻道單位空白。
+  可在 importer 加「欄名單位後綴」啟發式(`_rpm`/`_kmh`/`_degC`/`_kPa`/`_pct`/`_deg`/
+  `_degps`/`_g`/`_uT`/`_km`)拆出單位。兩個子選項:(a) 只填 `unit`、名稱保留尾巴(安全,
+  但名稱冗長);(b) 同時把名稱去尾(乾淨,但會動到 [[B134]] 使用者覆寫表的鍵與既有欄名
+  假設,誤拆風險:`_g` 可能撞真名)。屬顯示品質改善、非阻斷,**待 user 拍板要不要做與做哪款**。
+  **user 拍板(2026-08-21):做,採 (a) 只填 `unit`、名稱完全不動。** 理由:頻道名稱正是
+  [[B134]] 裝置層覆寫表的**鍵**,改名會讓使用者已存的對應變孤兒;`_g` 這類單字母後綴誤拆
+  風險也高。實作紅線:①只在單位原本為空時才套用(有 `[channel units]` 值一律優先);
+  ②僅 VBO importer 內生效,既有 golden fixture 不得變動;③新填的單位會餵進 B134 啟發式的
+  計分(unit 是訊號之一),須複驗真檔三個角色解析不變。
+  **已落地(merge `b53791e`)**:`parseVbo` 新增
+  `NAME_SUFFIX_UNITS` 表與 `inferUnitFromNameSuffix()`,接在既有 `unitAt()` 之後當
+  **fallback**——`[channel units]` 有值一律優先且原封不動,`name`/`rawName`/`description`
+  完全不碰。誤拆防線:後綴必須緊接底線且位於結尾,巢狀項目依長度排序在前
+  (`_degps`/`_degC`/`_deg`、`_kmh`/`_km`、`_mps`/`_ms`);實測 `AcCompressorClutch_10Hz`
+  不會被 `_hz` 認領。單位拼寫沿用既有 importer/`semantic.ts` 寫法(`_deg`→`deg` 而非 `°`,
+  `_g`→小寫 `g` 以與匯出器 round-trip,`_uT`→`µT`)。真檔複驗:52 個 telemetry 頻道 34 個
+  取得單位,其餘 18 個為布林/狀態/raw 正確維持無單位;[[B134]] 三個角色解析不變。
+  兩個 VBO golden fixture 皆帶完整 `[channel units]`,不會走到 fallback。
+  typecheck 乾淨 · **2737/2737 綠**(218 檔) · lint 0 error。⚠️ **尚未經裝置驗證**。
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
@@ -442,9 +770,15 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 - [x] **M14** 相依 minor/patch 刷新(caret range 內,`package.json` 範圍未動、僅 lockfile 前進):`@cloudflare/vite-plugin` 1.46.0→1.48.0、`wrangler` 4.113.0→4.115.0、`vue-i18n` 11.4.7→11.4.8、`eslint` 10.7.0→10.8.0、`globals` 17.7.0→17.8.0、`@types/node` 26.1.1→26.1.2。**`overrides` 三項(sharp/fast-uri/brace-expansion)完整存活**(brace-expansion 是 [[M13]] 當日才加、掉了 CI audit 會再紅,已列為驗收第一項)。主線於**合併狀態**(含播放鈕疊層)獨立複驗:`npm audit --audit-level=high` **0 漏洞**、**2166/2166 綠**(188 檔)、build 成功 PWA 31 entries、lint 0 error。 — `c3eccd2`/merge `2e82e5b`
 - [x] **M15** CI `npm audit --audit-level=high` 閘門第四度紅燈(同 [[M11]]/[[M12]]/[[M13]] 家族),三則**新公告**同時命中,皆為 dev/build 期依賴、不進出貨 bundle:① `brace-expansion` — `GHSA-rgw5-rvv9-x895`「無界中間陣列致 DoS,繞過 CVE-2026-14257 的緩解」,受害範圍 **4.0.0–5.0.8**,**連 [[M13]] 當初加的 `^5.0.8` override 本身也落在範圍內**,修補版 5.0.9;② `fast-uri` — `GHSA-7p8r-x3mc-p8w7`「反斜線 authority 前導字元造成 host confusion」,範圍 3.0.0–3.1.4,即 [[M11]] 的 `^3.1.4` override 亦已失效,修補版 3.1.5(**留在 3.x 線**,不跳 4.x —— `ajv` 要求 `fast-uri ^3.0.1`);③ `undici` — 5 則公告(retry interceptor 回應去同步、私有快取指令解析致跨使用者資訊洩漏/崩潰、blob body `type` 的 CRLF injection、Cache-Control 等號空白、cookie 屬性注入),範圍 7.0.0–7.28.0,而 `miniflare` **精確釘死 `undici@7.28.0`**、即使 wrangler/@cloudflare/vite-plugin 都在最新版仍如此,故 `npm audit fix --force` 的「解法」是把 `@cloudflare/vite-plugin` 降到 **1.12.4**(破壞性,不採用),改以 override 拉到修補版 7.29.0。修法一律沿用 M11–M13 慣例:top-level `overrides`(`brace-expansion ^5.0.9`、`fast-uri ^3.1.5`、新增 `undici ^7.29.0`;`sharp ^0.35.3` 原封保留)並重新產生 lockfile。主線獨立複驗:`npm audit --audit-level=high` **0 漏洞**(全嚴重度亦 0)、`npm ls` 三者全樹分別收斂至 5.0.9/3.1.5/7.29.0 無漏網、typecheck 乾淨、**2307/2307 綠**(197 檔)、build 成功 PWA 31 entries(1367.90 KiB)、lint 0 error。**體質修正(user 拍板採用建議)**:此閘門原本排在 typecheck/test/build **之前**,任一 dev 期公告一出現就整條 workflow 17 秒閃退、連測試結果都看不到(純文件 commit 亦紅)——已把該步移到 job **最後**。把關強度完全不變(照樣讓 job 失敗、照樣 `--audit-level=high`),但公告出現時仍看得到 typecheck/測試/build 的真實結果。未採用 `continue-on-error`(會退化成純提醒、漏擋真該擋的)與放寬到 `--audit-level=critical`。 — `f6fb3fb`/merge `87d2bb8`,CI 順序調整見下一則 commit
 - [x] **M16** 相依 minor/patch 刷新(全部落在既有 caret range 內,`package.json` 版本字串未動、僅 lockfile 前進;`npm install` 因 lockfile 已滿足範圍而不會自動前進,需顯式 `npm update <pkgs>`):`@cloudflare/vite-plugin` 1.49.0→1.51.0、`@vitest/eslint-plugin` 1.6.24→1.6.26、`globals` 17.8.0→17.9.0、`typescript-eslint` 8.65.0→8.66.0、`vite` 8.2.0→8.2.1、`vue` 3.5.40→3.5.41、`vue-tsc` 3.3.8→3.3.9、`wrangler` 4.116.0→4.119.0。`typescript` 維持 `^6.0.3` 不動(TS7 阻擋原因未解,見上方再評估條目)。與 [[M15]] 同一 commit 落地、共用同一次驗證。連帶效果:GitHub PR #14(Dependabot minor-and-patch 群組 5 項:@cloudflare/vite-plugin 1.50.0、@vitest/eslint-plugin 1.6.25、globals 17.9.0、vue-tsc 3.3.9、wrangler 4.118.0)為本條的**真子集**且其 CI 因 M15 的閘門而紅,故不合併、直接關閉並註明由本次取代。 — `f6fb3fb`/merge `87d2bb8`
-- [x] **TypeScript 6→7 再評估(M1/M7/M12 續案)—— 實測後維持 TS6,不升級。** `vue-tsc` 已到 3.3.8、其 `peerDependencies` 宣告 `typescript: ">=5.0.0"` 看似允許 TS7,但**宣告寬鬆不等於實際可用**,實測抓到兩個獨立阻擋:**(1)** 連裝都裝不起來——`typescript-eslint@8.65.0` 的 peer 為 `typescript: ">=4.8.4 <6.1.0"`,`npm install typescript@7.0.2` 直接 ERESOLVE 失敗(非 `--force` 不可);**(2)** 強制安裝後單獨驗 vue-tsc,**與 M1 當初完全相同的崩潰重現**:`Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './lib/tsc' is not defined by "exports" in node_modules/typescript/package.json (at resolveTscPath, vue-tsc/index.js:73)`。已完整還原 `package.json`/`package-lock.json` 至 `^6.0.3` 並重裝,**全程未動任何原始碼**。結論:M1 的阻擋原因**尚未解除**,`npm outdated` 中 typescript 是唯一刻意保留落後的項目;待 vue-tsc 真正支援 TS7(而非只是放寬 peer 宣告)且 typescript-eslint 放行後再評估。
+- [x] **TypeScript 6→7 再評估(M1/M7/M12 續案)—— 實測後維持 TS6,不升級。** `vue-tsc` 已到 3.3.8、其 `peerDependencies` 宣告 `typescript: ">=5.0.0"` 看似允許 TS7,但**宣告寬鬆不等於實際可用**,實測抓到兩個獨立阻擋:**(1)** 連裝都裝不起來——`typescript-eslint@8.65.0` 的 peer 為 `typescript: ">=4.8.4 <6.1.0"`,`npm install typescript@7.0.2` 直接 ERESOLVE 失敗(非 `--force` 不可);**(2)** 強制安裝後單獨驗 vue-tsc,**與 M1 當初完全相同的崩潰重現**:`Error [ERR_PACKAGE_PATH_NOT_EXPORTED]: Package subpath './lib/tsc' is not defined by "exports" in node_modules/typescript/package.json (at resolveTscPath, vue-tsc/index.js:73)`。已完整還原 `package.json`/`package-lock.json` 至 `^6.0.3` 並重裝,**全程未動任何原始碼**。結論:M1 的阻擋原因**尚未解除**,`npm outdated` 中 typescript 是唯一刻意保留落後的項目;待 vue-tsc 真正支援 TS7(而非只是放寬 peer 宣告)且 typescript-eslint 放行後再評估。 **2026-08-21 生態系查證更新**:TS 7.0(Go 原生編譯器)已於 2026-07 GA,但**未附穩定
+  programmatic API**——vue-tsc 嵌 compiler in-process 檢查 SFC 的作法因此完全動不了,Angular/
+  Svelte/typescript-eslint 同卡,官方建議 Vue 專案留在 TS 6.x;TS 7.1(目標 2026 秋)承諾穩定該
+  API,屆時才有升級的前提。升級條件三項:①TS 7.1 落地 ②vue-tsc release notes 明確宣告支援
+  (宣告寬鬆 ≠ 可用,勿只看 peer range)③typescript-eslint 放行。
 - [x] **M18** CI `npm audit --audit-level=high` 閘門第五度紅燈(同 [[M11]]/[[M12]]/[[M13]]/[[M15]] 家族,又一則新收錄公告):`GHSA-2v37-7h3g-55p8` — nanoid「custom generators can loop indefinitely when size is zero」,受害範圍 `<3.3.17`,經 `vite` 8.2.1 → `postcss` 8.5.25 → `nanoid` 3.3.16 間接引入,屬 build 期依賴、不進出貨 bundle,但該閘門仍會擋。**與 M13/M15 不同,本則不需要 overrides**:`npm audit fix`(未加 `--force`)解出的 3.3.18 仍落在既有 caret range 內,故 `package.json` 未動、只有 lockfile 前進。主線實測:audit 0 漏洞、typecheck 乾淨、2353 綠、build 31 entries。 — `e713104`
-- [ ] **M4** Optional: screenshot user manual. (Deferred until the current batch wraps.)
+- [x] **M19** 相依 minor/patch 刷新(caret range 內,`package.json` 範圍未動、僅 lockfile 前進),取代 Dependabot PR #16(本條為其真超集):`@cloudflare/vite-plugin` 1.51.0→1.53.0、`@types/node` 26.1.2→26.2.0、`@vitest/eslint-plugin` 1.6.26→1.6.27、`eslint` 10.8.0→10.8.1、`globals` 17.9.0→17.11.0、`happy-dom` 20.11.1→20.11.6、`pinia` 4.0.2→4.0.3、`sql.js` 1.14.1→1.14.2、`typescript-eslint` 8.66.0→8.67.0、`vite` 8.2.1→8.2.2、`vitest` 4.1.10→4.1.11、`vue-tsc` 3.3.9→3.3.10、`wrangler` 4.119.0→4.124.0。TypeScript 續留 `^6.0.3` 不動(TS7 崩潰 + typescript-eslint peer 擋,見上方「TypeScript 6→7 再評估」條)。`overrides` 四項完整存活(`npm ls --all` 逐一核對):`sharp` 0.35.3、`fast-uri` 3.1.5、`brace-expansion` 5.0.9、`undici` 7.29.0。pinia/sql.js 為出貨期 runtime 依賴(非單純 dev 期),已額外確認測試/build 正常。主線獨立複驗:`npm audit --audit-level=high` 0 漏洞、typecheck 乾淨、**2443/2443 綠**(207 檔)、lint 0 error(既有 4 個警告與本次無關)、build 成功。⚠️ **PWA precache 由 31→29 entries**(1384.07 KiB→1383.65 KiB,體積幾乎不變):已用新舊 lockfile 各自 `npm ci`+build 並 diff `sw.js` precache 清單交叉核實——並非內容遺失,是 vite 8.2.2 chunking 行為改變,把兩個小 chunk(`preload-helper-*.js`、`useInputCapabilities-*.js`)併入其他 chunk(如新出現的 `index-*.js`),檔名雜湊全數改變但內容總量不變,判斷為良性合併、非回歸。 — `8ad9b67`
+- [x] **M20** 收斂 B88 遺留的 importer 物件複本,讓測試改對「出貨路徑」斷言。B88(`8ad0890`)把格式處理拆成兩階段——**辨識**走 `src/domain/import/formatDefinitions.ts` 的 `IMPORT_FORMATS`(只有 id/extensions/detect,在初始 bundle 內)、**解析**走 `src/workers/parse.worker.ts` 的 `WORKER_PARSERS`(選檔後才載入)——但 B88 之前的**七個** `Importer` 物件全數留著:`csv/CsvImporter`、`loga/LogaImporter`、`nmea/NmeaImporter`、`rcnx/RcnxImporter`、`rcz/RczImporter`、`vbo/VboImporter`、`xrk/XrkImporter`。**真正的問題不是死碼,是測試盲區**:這些物件把 `detect` 判斷式**逐字複製**了一份(例:`VboImporter` 的 `fileName.endsWith('.vbo') || /\[header\]/i.test(headText)` 與 `formatDefinitions.ts` 一字不差),而四個測試檔(`test/import/importer.test.ts`、`test/import/vboRobustness.test.ts`、`test/import/xrk.test.ts`、`test/export/registry.test.ts`)斷言的全是**複本**——出貨用的 `IMPORT_FORMATS.detect` 哪天改壞或漂移,測試照樣綠。**方向**:刪物件、測試改接出貨路徑(不採「讓 `IMPORT_FORMATS` 從物件推導」,那會讓 `formatDefinitions.ts` 靜態 import 到各 parser,FileBar 一載入就打包全部 parser 與解壓相依,等於回歸 B88)。**刪除範圍**:七個 `*Importer.ts` 全刪;`Importer.ts` 保留但收斂成兩個仍在用的共用型別(`ImportCandidate` 供 `formatDefinitions`、`ImportProgress` 改由 `parse.worker.ts` import 取代自己重宣告的 `ProgressFn`),`TextImporter`/`BinaryImporter`/`Importer` 一併刪除——它們描述的正是「一個物件同時帶 detect 與 parse」這個 ARCHITECTURE-FORMATS §5 明文叫人別再寫的形狀,留著只會繼續教一套已廢止的架構。**測試如何改接**:①detect 斷言全部改走 `detectImporter()`/`IMPORT_FORMATS`,`importer.test.ts` 重寫成 16 條表格化案例、逐條指定「該由**誰**勝出」(不只是「有人命中」,所以 first-match-wins 的排序回歸也會紅),另補「bare ZIP 不得被 rcz/rcnx 認領」「`IMPORT_FORMATS` 每個項目不得帶 `parse`」「`extensionsForImporter`」;②原本「與 importer 物件比對 id/extensions 順序」改成寫死預期順序表;③新增 **`IMPORT_FORMATS` ↔ `WORKER_PARSERS` id 雙向對齊**檢查(讀 worker 原始碼比對鍵,因為 worker 模組在 vitest 的 node 環境 import 會炸在模組層的 `self`;正反兩向都驗,擋「格式加了但 worker 沒對應條目」與「worker 條目沒人派送」);④parse 斷言改直接呼叫 `WORKER_PARSERS` 所派送的函式(`parseLoga`/`nmeaToSession`/`parsePlainCsv`),測試檔頂端註明為何這樣接;⑤`export/registry.test.ts` 原本繞 `nmeaImporter.parse` 取 parser,改直接 import `nmeaToSession`;⑥xrk 另補一條:`formatDefinitions.ts` 內聯的 RFC 1950 zlib 檢查 vs `isZlibMagic` 等價性——**這份複製是 B88 lazy 邊界刻意保留的**(import `isZlibMagic` 會把 fflate 的 `Unzlib` 拉進初始 bundle),刪不掉,只能用測試釘住。**驗證**:typecheck 乾淨、**2458/2458 綠**(207 檔,較基準 2443 多 15 條新斷言、檔數不變)、lint 0 error 4 warning(既有,與本次無關)、build 成功 PWA **29 entries**。**lazy 邊界複驗**:`formatDefinitions.ts` 的靜態 import 仍只有 `./Importer`(type-only)與 `HeaderDetector`;build 後逐 chunk grep,`parseVbo`/`parseRcz`/`inflateXrz`/`parseXrk` 的專屬字串**只出現在 `parse.worker-*.js`**,`index-*.js` 入口只有辨識用的副檔名字串與匯出側程式碼,B88 的切分完好。文件同步:`docs/ARCHITECTURE-FORMATS.md` §1 資料流圖、§2、§3(`Importer.ts` 段落改寫 + M20 註記,原本「兩個物件已無任何引用」的敘述**是錯的**——是七個、且測試仍引用,已更正)、§4 支援矩陣(七個 `xxxImporter` 名稱改為實際 parser 函式名)、§5 步驟 2、§6 二進位擴充敘述;`docs/IMPORT-FORMATS-STATUS.md` 的架構行(原本寫 `Importer` 介面 + `parseBinary`,M20 後完全不成立)亦改寫為兩階段。`docs/specs/FORMAT-SUPPORT-RESEARCH.md` 內的 `parseBinary`/`vboImporter` 字樣**刻意不動**——該檔是實作前的格式研究紀錄(point-in-time),不是現況敘述。 — `9cfa163`/merge `7f93191`
+- [x] **M4** 截圖使用手冊。`docs/manual/zh-Hant.md` 與 `en.md` 各插入 **28 張截圖**(`docs/manual/images/`,1.3 MB,兩語版共用同一組繁中介面截圖、手冊開頭已加註說明)。**產生方式可重現**:`scripts/manual-screenshots/`(capture.mjs / demoLog.mjs / lib.mjs),puppeteer-core + 系統 Chrome headless 打本機 dev server,fixture 經 vite `/@fs/` 取得後以 DataTransfer 塞進隱藏 file input 觸發 change 事件完成匯入;puppeteer-core **刻意不寫進 `package.json`**(僅手動開發工具,`npm i --no-save` 即可)。重跑指令見腳本註解,給定 seed 下 28 張有 27 張 byte-identical。**分析頁用合成示範記錄**——既有 fixture 全是 200 列截斷檔、跑不出完整圈,畫面會全空;`demoLog.mjs` 產生多邊形倒角賽道 3.7 km、5 圈 1:50–1:55、含靜止起步加速。轉換頁則用真檔 `test/fixtures/super2.loga`。**沒拍到的**(已知限制,非缺漏):①底圖圖磚(headless 無 DNS,地圖只有軌跡無底圖)②疊圈/地圖對位微調卡片(載兩份記錄並各選一圈仍未出現,`cardHasData` 預設 true、AnalyzerView 另有 gating,觸發條件未查明)③PWA 安裝提示 §2.2、`?debug=1` 診斷 §6.1、RCNX 場次挑選 §2.4、公開賽道庫命中提示 §4.9(各需真實安裝流程/特定檔案/特定 GPS 座標)。驗證:build **不受影響**(precache 29 entries 與本批基準相同,docs 圖片不進 bundle——vite 只打包 src/public)、typecheck 乾淨、2458 綠、lint 0 error。 — `94b7358`/merge `5fa5b97`
 - [x] **M7** Dependency refresh round 2: vite 8.1.5 / wrangler 4.112.0 / @cloudflare/vite-plugin 1.45.1 / happy-dom 20.11.0; `npm outdated` clean除 typescript、`npm audit` 0 vulnerabilities。TS7 續留 skip——vue-tsc 仍為 3.3.7（M1 驗證過與 TS7 不相容），等 vue-tsc 支援再升。 — `16a1831`/merge `9ef0ae7`
 - [x] **M8** 架構清理（knip 掃描 + 逐項人工確認）：25 個無引用死 i18n 鍵移除（en/zh-Hant 同步，各 676 鍵、集合一致；`mapBackground.upload*Error` 為樣板字串動態組鍵、確認保留）`b3c7a7d`；Phase 0 遺留 `sessionStore.ts` 死檔移除 `8bcef37`；`accelTest.ts` 內重複 `crossingFrac`/`lerp` 收斂 `c334412`；`Rc3NmeaExporter` 改用 `vbo/format.ts` 既有 `padInt` `d159878`。未動（審查過、不值得或需確認）：knip 的 26+43 個「未使用 export」實為檔內仍用、僅可收窄 export 面（~30 檔、風險/效益不划算）；`suspension.ts` `OUTPUT_NAME`/`ECU_NAME` 為刻意語意別名；`scripts/`+`bench-*.ts` 為手動開發工具、是否保留待使用者確認；`src/debug/diagnostics.ts` 有 main.ts 引用（`?debug=1` 面板）非死碼。 — merge `9ef0ae7`
 - [x] **M9** 發版前資安審查（`f6c681a..develop`，round7 B68-B94 + CVT M5 + M7/M8）：審查 CSV importer RFC4180 解析/size cap、CVT 筆記與懸吊校正 metadata 在 NMEA/VBO/CSV/LOGA round-trip、SVG 自訂底圖(最高風險項——確認全程走 `<img>`+blob URL+canvas，無 `v-html`/`innerHTML`，無 XSS 面)、OSM tile 抓取(host 寫死、z/x/y 有邊界處理，無 SSRF)、settings/CVT profile import sanitizer(全用 `Number.isFinite`+白名單建構，無 prototype pollution)、`worker/redirect.ts`(本次未變更，另行確認安全)、M7 依賴供應鏈(`npm audit` 0 漏洞，lockfile 全部 `registry.npmjs.org`)。未發現 P0；修復 2 個 P1：①CSV 匯入超長無換行單行可繞過 `MAX_PLAIN_CSV_CELLS`(逐欄位改為即時計數) `8077888`；②CSV/VBO 匯出的 CVT 筆記/頻道名稱(可能源自惡意匯入檔的 TLS-Metadata)缺公式注入防護，補上 OWASP 建議的前導單引號中和 `7245f38`。P2+ 僅記錄未修：CVT 陣列 sanitizer 無長度上限、數值僅檢查有限性無範圍夾限、底圖 blob 重傳不清舊 IndexedDB、既有文字匯入器無檔案大小上限(技術債)。獨立驗證 typecheck 乾淨、1883/1883 測試綠、build 成功。結論：不擋 release。 — merge `de62fc5`。**P2 後續已補（merge `9080e99`）**：CVT sanitizer 陣列上限 4096 + 數值寬鬆物理範圍夾限（`startX`/`endX`/`sampleCount` 語意不明維持 finite-only）`8bb00be`；底圖重傳成功後才刪舊 IndexedDB blob（失敗不動舊圖；控制面無「移除底圖」動作、重傳為唯一洩漏路徑）`96138d2`；NMEA/VBO/LOGA 文字匯入器補 200M 字元上限（比照 B85 模式，錯誤走 e.message 非 i18n）`e47803d`。附帶：scripts 接電 `icons:generate`/`fixtures:make`/`bench:parse`/`bench:pipeline`（bench 走新 `scripts/perf/run-with-vite.mjs` ssrLoadModule loader，零新依賴；`icons:generate` 依賴的 sharp 目前僅為 wrangler 的 optional 傳遞依賴，未宣告——日後乾淨安裝可能缺）`b4274ef`。1895/1895 綠。
@@ -454,5 +788,8 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 ## Release verification (B95)
 - [x] **B95** Prod console「cross-world service worker resource mismatch」×4：index.html 的 modulepreload 在 Workbox SW 控制下永遠配對不到（模組由 CacheStorage 回應）→ 4 chunk 重複下載 + 警告，功能無影響。修法採 vite `build.modulePreload:false`（SW 控制下本來就走 cache；驗證 dist/client/index.html 零 modulepreload、entry script 與 precache 29 entries 不變）。 — `6649c52`/merge `9080e99`。同場加映（非 bug，勿修）：`beacon.min.js ERR_BLOCKED_BY_CLIENT` = 使用者擋廣告器（B23 已記載）；`inject.js StorageManager settings timeout` = 瀏覽器擴充功能的 content script，非本站程式。
 
-## Done (recent)
+## Done (早期歷史片段)
+
+> ⚠️ 本段是**專案早期**的一批完成項殘留,不是最新進度。**最新完成項見上方各輪 acceptance round 與 B/M 編號條目**(那些才是逐項狀態與 commit 的真實來源)。
+
 - [x] Comparison laps rendered as a per-lap table; cross-file selected laps drawn on the map; overlay↔map cursor link; collapse vertical reflow (no cross-column jump); chart-mode label 時間軸→時序; accel-test "distance from launch speed" (0=standstill); GitHub star button opens reliably; docs de-staled; PWA meta/manifest scaffolding. (Released to main.)

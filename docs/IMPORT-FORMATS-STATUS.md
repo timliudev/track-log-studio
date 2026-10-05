@@ -10,7 +10,7 @@
 [XRK-FORMAT-SPEC.md](specs/XRK-FORMAT-SPEC.md)。
 
 ## ✅ 已完成
-- **可插拔 Importer 架構**：`Importer` 介面（`id` / `extensions` / `detect` / `parse`）+ registry，對稱於既有 `Exporter`；`detect`/`parse` 支援文字與二進位（`headBytes` + `parseBinary`）。parse worker 依 `importerId` 路由，所有格式走同一條 worker 路徑。
+- **可插拔格式架構（B88 起為兩階段，M20 收尾）**：**辨識**＝`IMPORT_FORMATS`（`formatDefinitions.ts`，`id` / `extensions` / `detect`，在初始 bundle 內、不含任何 parser）；**解析**＝`WORKER_PARSERS`（`parse.worker.ts`，依 `importerId` 路由，選檔後才載入）。文字與二進位皆支援（`detect` 看 `headText` + `headBytes`；解析側由 `WorkerParser.binary` 旗標決定餵 `string` 還是 `Uint8Array`）。所有格式走同一條 worker 路徑。B88 之前那種「一個 `Importer` 物件同時帶 `detect` 與 `parse`」的形狀已於 M20 連同七個殘留物件刪除，勿再新增。
 - **匯入格式**：
   - `loga`、`nmea`（既有，包裝進 registry）
   - `vbo`（RaceLogic）—— 新增 `parseVbo`，為 VBO 匯出的逆運算，round-trip 驗證通過；可在分析器開啟。
@@ -31,6 +31,20 @@
 ## 🛠️ 待修 / 已知限制
 - RCZ 同名通道後綴為 cosmetic 差異（AFR 第二份命名為 `rc_air_fuel_ratio_3`，與 VBO 端 `_2` 不一致）；不影響資料。
 - VBO 匯入的時間為相對重建（VBO 僅存 time-of-day，屬格式本身的有損特性）。
+- **數位/類比誤判殘留（B127，[[B125]] 的殘留限制）** —— 匯出時判斷一個頻道該進 `.vbo` 的
+  digital 還是 analog 槽，目前只有「值域啟發式」可用，而值域**分不出**「整場都沒觸發過的真實
+  數位旗標」（如 `Malf8.Malf_On`、`Pit_SW_On`）與「值剛好恆為某個常數的類比頻道」。`.loga` 的
+  `IR_LapNumber` / `IR_LapTime` / `SimRPM` / `MapNum` 這類本質是類比、但整趟記錄恆 0/恆某常數的
+  頻道，因此仍被誤判進數位槽。正確修法要靠**頻道名稱／說明文字**慣例（`_SW`/`Malf`/`_Act`/`_En`
+  …）當佐證，但那條規則得涵蓋所有既有 ECU 命名慣例、有誤判風險（B125 第一版誤傷 `.loga` golden
+  fixture 108 個頻道），屬待 user 拍板的設計決策，**刻意未實作**。→ [ISSUES.md B127](ISSUES.md)
+- **RC3 Analog 槽位仍只能顯示代號（F7，design-first、待拍板）** —— `.rcz` 檔內沒有任何頻道文字
+  標籤，Analog 1–15 / Digital 2 的語意只存在使用者的 RaceChrono / ECU 設定裡，程式無從得知，
+  因此匯入顯示與匯出欄名只能用 `rc_analog_N` / `rc_digital_N` 這種代號。這是 B120–B126 修完後
+  **剩下的唯一**「名字看不懂」來源。需要一個可存成 preset、隨裝置記憶的「槽位→真名（含單位）」
+  對應表；schema 與 UX 皆待 user 拍板，**拍板前不實作**。設計草案見
+  [`specs/F7-RC3-ANALOG-NAMING-DESIGN.md`](specs/F7-RC3-ANALOG-NAMING-DESIGN.md)。
+  → [ISSUES.md F7](ISSUES.md)
 
 ## 📋 待完成
 > 原列於此的兩項 RCNX 待辦均已落地（本節先前過期，2026-07-23 更正）：
