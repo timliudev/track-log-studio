@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import { useInputCapabilities } from '@/composables/useInputCapabilities'
+import { useAnalyzerSelectionSync } from '@/composables/useAnalyzerSelectionSync'
 import FileBar from '@/components/FileBar.vue'
 import BottomNav from '@/components/BottomNav.vue'
 import GithubStarButton from '@/components/GithubStarButton.vue'
@@ -31,6 +32,8 @@ useLocale()
 // <html data-*> (see useInputCapabilities.ts) once for the whole app, same
 // singleton-side-effect pattern as useTheme/useLocale above.
 useInputCapabilities()
+// B137 — primary/comparison selection must not wait for the lazy AnalyzerView.
+useAnalyzerSelectionSync()
 
 type Tab = 'converter' | 'analyzer' | 'settings'
 const tabOrder: Tab[] = ['converter', 'analyzer', 'settings']
