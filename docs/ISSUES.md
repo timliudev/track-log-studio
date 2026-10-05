@@ -545,11 +545,20 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   與 1024 寬皆確認)。手機版無任何專屬程式碼碰 `activeFileId`/`selectedSessions`,也無刻意設計的註解。
   真機會持續繪製,不會卡住;唯一真實殘留是 0.25 s 離場動畫+chunk 載入期間 FileBar 短暫顯示「未選取」的閃爍。
   **未改任何程式碼**(`fix/b131` 分支零 commit)。
-- [ ] **B137**(2026-10-06 開單,源自 [[B131]] 調查;user 拍板要修)切到分析頁時,`App.vue` 的
+- [x] **B137**(2026-10-06 修復:fix `74c86b4`、merge `ba4bb1c`;⚠️ 尚未經裝置驗證)切到分析頁時,`App.vue` 的
   `<Transition mode="out-in">` 離場動畫(0.25 s)+ `AnalyzerView` async chunk 載入期間,FileBar 已進入分析模式但
   自動選主要記錄的 `watch(readyFiles, …, {immediate:true})`(`AnalyzerView.vue:377`)尚未執行 → 勾選框短暫顯示
   「未選取」的閃爍。修法方向:把「無主要記錄時自動選第一個 ready 檔」的邏輯移到不依賴 `AnalyzerView` 掛載的位置
   (如 store 或 FileBar),讓 FileBar 一進分析模式就有正確選取狀態。
+  **修法(2026-10-06):** 整段 watcher 原封搬到新 composable `src/composables/useAnalyzerSelectionSync.ts`,
+  由 `App.vue` setup 安裝一次(常駐,不分頁籤;converter/settings 不讀 `activeFileId`/`selectedSessions`,
+  故無副作用);`AnalyzerView.vue` 刪除重複 watcher,只留指向新位置的註解。語意不變:`immediate`、主要消失時
+  先升第一個比較檔否則第一個 ready 檔、B55 `lapStore.swapPrimarySession(null, next)` 在改 `activeFileId` 之前、
+  其餘只修剪消失的比較檔。新增 `test/composables/useAnalyzerSelectionSync.test.ts`(5 條,不掛 AnalyzerView,
+  含 B55 升格)。develop 合併後實測:typecheck 0 錯、vitest **222 檔 / 2776 測試全綠**、lint 0 錯 4 警告
+  (皆為既有測試檔警告,與修前基線相同)。瀏覽器實測:在轉換頁匯入 `superX.loga` 即已 `activeFileId=1`
+  (AnalyzerView 未掛載);點「分析」後 30 ms、AnalyzerView 尚未掛載時 FileBar 已顯示勾選+「主要」,並以截圖強制
+  繪製確認(避開 [[B131]] rAF 假象)。
 
 ## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
 - [x] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
