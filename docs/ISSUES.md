@@ -773,7 +773,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
 
 ## User report — 圈時與 RaceChrono 不一致 / 匯出 vbo 日期錯 (B138–B139)
 同一趟騎乘(2026-10-09 極限,`b1(13).loga` / RaceChrono 即時 `.rcz` / 本站匯出 `b1(13)_rc.vbo`)。
-- [ ] **B138** 圈時沒有內插:本站最佳圈 0:46.188,RaceChrono 46.31;其餘各圈差 ±0.03–0.17 s 且非固定偏移,
+- [x] **B138** 圈時沒有內插:本站最佳圈 0:46.188,RaceChrono 46.31;其餘各圈差 ±0.03–0.17 s 且非固定偏移,
   本站數值全落在 1/32 s 格點。根因:`src/domain/analysis/laps.ts` 起終點線模式(約 :286-313)以 ECU 列時鐘
   `timeMs[i]`(31.25 ms)記穿越時間、不內插;GPS 約 9.7 Hz 被「保持」進 32 Hz 列,相鄰保持列線段長度為 0,
   穿越只會在**新 fix 第一列**被看到 → 每次穿越晚 0–125 ms 不等 + 31 ms 量化。ECU 模式(`detectLapsByChannel`
@@ -781,7 +781,19 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   分析實測(RMS vs RaceChrono,lap 4–15):現行 0.098 s → 在「前一個不同 fix 首列」與「新 fix 首列」之間依
   到線有號距離線性內插 0.074 s,lap 9/10/11 誤差 <0.01 s(最佳圈 46.305)。另注意 RaceChrono 自己的即時 `.rcz`
   圈時與它匯入 vbo 的結果也差到 0.26 s,GPS 穿越本身約 ±0.1 s 不確定。
-  修法:線模式改為 fix 間內插;ECU 模式以 `inferLapLineFromChannel` 推線後套同一內插(或至少註明量化)。
+  **已修**:`laps.ts` 抽出 `collectLineCrossings`,線模式追蹤「目前 GPS fix 的首列」,穿越時間取
+  `t = timeMs[前 fix 首列] + f·(timeMs[新 fix 首列] − timeMs[前 fix 首列])`,`f = d1/(d1−d2)`(到線有號距離);
+  `Crossing.idx` 仍為整數列(圈範圍不變)、`t` 為浮點。on-line 命中(B129)改用該 fix 首列時間。
+  ECU 模式:`detectLapsByChannel(session, timeMs, track?)` 多一個可選 `track`,有 track 時以
+  `inferLapLineFromChannel` 推線,對每個 `IR_LapNumber` 跳號邊界在 ±600 ms 內找同方向的內插穿越時間取代列時間;
+  找不到或無 track 則維持原列時間。`useLaps`/`useSessionComparison` 已傳入 track;`startIdx/endIdx` 不變。
+  撕裂讀(lat/lon 分列更新)以「(lat,lon) 與前列不同」視為新 fix,未特別處理。
+  驗證(`b1(13).loga`,lap 4–15 vs RaceChrono):線模式 舊 0.098 → 新 **0.074 s RMS**(48.313 46.530 46.568 46.536 99.323
+  46.357 46.302 46.990 46.621 101.396 46.650 47.317,與先前分析一致);ECU 模式 舊 0.083 → 新 0.074(與線模式逐圈相同,
+  最佳圈 46.188 → 46.302)。合成測試:held 9.7 Hz/32 Hz 圈時還原誤差 <1 ms。既有測試僅 1 個(laps.test 的 held 資料案例,
+  40000→35000 ms)因語意修正而更新,**無 golden/snapshot fixture 變動、圈數不變**。typecheck 乾淨 · **2780/2780 綠** ·
+  lint 0 error。**未處理**:`walkLapGates` 的分段計時(sectorTiming)同樣在保持列間插值,屬另案。
+  — `1323472`。⚠️ **尚未經裝置驗證**。
 - [ ] **B139** 匯出 `.vbo` 匯入 RaceChrono 後日期顯示 2026/10/10 00:53(真實騎乘約 10/9 16:29–16:48 本地)。
   兩個錯疊加:①**時區**:`src/domain/export/vbo/VboExporter.ts`(約 :450-473、header :546)以 `getHours()` 等
   **本地**欄位填 VBO `time`(規格為 **UTC** hhmmss),RaceChrono 再 +8h → 00:53;②**起點錯**:`.loga` 沒有
