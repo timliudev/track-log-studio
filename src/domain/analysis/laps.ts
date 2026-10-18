@@ -23,7 +23,9 @@ export interface DetectLapsOptions {
 interface Crossing {
   /** Sample index of the second point of the crossing segment (lap boundary). */
   idx: number
-  /** Time at the boundary sample, in the same units as the caller's time axis. */
+  /** Interpolated crossing time (float, NOT necessarily on the row grid), in the
+   *  same units as the caller's time axis. `idx` stays the integer row used for
+   *  lap sample ranges. */
   t: number
   /** Sign of the 2D cross product (line direction x track-segment direction). */
   sign: number
@@ -242,25 +244,15 @@ function lapsFromCrossings(crossings: Crossing[]): Lap[] {
 }
 
 /**
- * Detect laps by counting where the GPS track crosses the start/finish line.
- * Walks consecutive VALID fixes; for each adjacent pair (p_i -> p_{i+1}) tests
- * 2D segment intersection against the line a-b (treat lat/lon as planar with a
- * cos(lat) longitude scale around the line's mean latitude — fine at track
- * scale). A crossing marks a lap boundary at sample i+1. Apply the direction
- * filter and minLapMs debounce. Returns laps BETWEEN consecutive crossings
- * (N crossings -> N-1 laps); the partial out-lap before the first crossing and
- * in-lap after the last are NOT laps.
- *
- * `timeMs` is the per-sample time axis. Its units and `minLapMs` must match;
- * the default minLapMs (5000) assumes milliseconds.
+ * Every raw start/finish crossing (all directions, no debounce) with its
+ * interpolated time. Shared by {@link detectLapsByLine} and the ECU-mode
+ * refinement in {@link detectLapsByChannel}.
  */
-export function detectLapsByLine(
+function collectLineCrossings(
   track: GpsTrack,
   timeMs: Float64Array,
   line: LapLine,
-  opts: DetectLapsOptions = {},
-): Lap[] {
-  const minLapMs = opts.minLapMs ?? 5000
+): Crossing[] {
   const { lat, lon, valid } = track
   const n = lat.length
 
@@ -283,6 +275,11 @@ export function detectLapsByLine(
   const lineDy = qb.y - qa.y
   let before = -1
   let prev = -1
+  // First row of the distinct GPS fix that `prev` belongs to. GPS (~10 Hz) is
+  // HELD across several faster ECU rows, so a new fix only shows up at the
+  // first row of the next fix; the true crossing lies between the first rows of
+  // the two fixes, not at the row where we happen to notice it (B138).
+  let curFixFirst = -1
   for (let i = 0; i < n; i++) {
     if (!valid[i]) continue
     if (prev >= 0) {
@@ -299,7 +296,7 @@ export function detectLapsByLine(
         const p0 = project(lat[before], lon[before], lat0, lon0, cosLat0)
         if (crossesThroughSample(p0, p1, p2, gate)) {
           const s = lineDx * (p2.y - p0.y) - lineDy * (p2.x - p0.x)
-          raw.push({ idx: prev, t: timeMs[prev], sign: Math.sign(s) })
+          raw.push({ idx: prev, t: timeMs[curFixFirst], sign: Math.sign(s) })
           rescued = true
         }
       }
@@ -309,13 +306,44 @@ export function detectLapsByLine(
         const segDx = p2.x - p1.x
         const segDy = p2.y - p1.y
         const s = lineDx * segDy - lineDy * segDx
-        raw.push({ idx: i, t: timeMs[i], sign: Math.sign(s) })
+        // Signed distance (up to a common scale) of both fixes to the line;
+        // they have opposite signs, so f in (0,1) is the crossing fraction.
+        const d1 = cross(qa, qb, p1)
+        const d2 = cross(qa, qb, p2)
+        const f = Math.min(1, Math.max(0, d1 / (d1 - d2)))
+        const t0 = timeMs[curFixFirst]
+        raw.push({ idx: i, t: t0 + f * (timeMs[i] - t0), sign: Math.sign(s) })
       }
     }
+    if (prev < 0 || lat[i] !== lat[prev] || lon[i] !== lon[prev]) curFixFirst = i
     before = prev
     prev = i
   }
 
+  return raw
+}
+
+/**
+ * Detect laps by counting where the GPS track crosses the start/finish line.
+ * Walks consecutive VALID fixes; for each adjacent pair (p_i -> p_{i+1}) tests
+ * 2D segment intersection against the line a-b (treat lat/lon as planar with a
+ * cos(lat) longitude scale around the line's mean latitude — fine at track
+ * scale). A crossing marks a lap boundary at sample i+1. Apply the direction
+ * filter and minLapMs debounce. Returns laps BETWEEN consecutive crossings
+ * (N crossings -> N-1 laps); the partial out-lap before the first crossing and
+ * in-lap after the last are NOT laps.
+ *
+ * `timeMs` is the per-sample time axis. Its units and `minLapMs` must match;
+ * the default minLapMs (5000) assumes milliseconds.
+ */
+export function detectLapsByLine(
+  track: GpsTrack,
+  timeMs: Float64Array,
+  line: LapLine,
+  opts: DetectLapsOptions = {},
+): Lap[] {
+  const minLapMs = opts.minLapMs ?? 5000
+  const raw = collectLineCrossings(track, timeMs, line)
   if (raw.length < 2) return []
 
   // Direction filter: explicit, or auto (majority sign).
@@ -351,18 +379,24 @@ export function detectLapsByLine(
  * logged sample after its value changes. Lap duration comes from the time axis
  * between those boundaries to stay consistent with the line method.
  *
- * The boundary is therefore limited by the source Time sampling interval
- * (commonly 31.25 ms). Do not mix or interpolate the undocumented IR_LapTime
- * counter here: its clock and reset semantics are not verified. A vendor tool
- * that timestamps another edge or clock can consequently differ by a fixed
- * offset; this detector deliberately does not force a correction.
+ * Without `track`, the boundary is limited by the source Time sampling interval
+ * (commonly 31.25 ms). With `track` (B138) each boundary time is refined to the
+ * interpolated GPS crossing of a line inferred from the counter steps (see
+ * `refinedBoundaryTimes`); `startIdx`/`endIdx` are unchanged. Do not mix the
+ * undocumented IR_LapTime counter here: its clock and reset semantics are not
+ * verified.
  * Returns [] if there is no IR_LapNumber channel or fewer than two boundaries.
  *
  * `timeMs` is the per-sample time axis; its units determine lapTimeMs units.
  */
-export function detectLapsByChannel(session: LogSession, timeMs: Float64Array): Lap[] {
+export function detectLapsByChannel(
+  session: LogSession,
+  timeMs: Float64Array,
+  track?: GpsTrack,
+): Lap[] {
   const boundaries = lapChannelBoundaries(session)
   if (boundaries.length < 2) return []
+  const times = refinedBoundaryTimes(session, timeMs, boundaries, track)
 
   const laps: Lap[] = []
   for (let i = 0; i < boundaries.length - 1; i++) {
@@ -372,10 +406,56 @@ export function detectLapsByChannel(session: LogSession, timeMs: Float64Array): 
       index: i,
       startIdx,
       endIdx,
-      lapTimeMs: timeMs[endIdx] - timeMs[startIdx],
+      lapTimeMs: times[i + 1] - times[i],
     })
   }
   return laps
+}
+
+/** Search window (ms) around an ECU counter step for the matching GPS crossing. */
+const ECU_REFINE_WINDOW_MS = 600
+
+/**
+ * B138: boundary times for ECU mode. Default is the un-interpolated row time of
+ * the counter step. When a GPS track is supplied and a line can be inferred
+ * from the counter transitions, each boundary is replaced by the interpolated
+ * GPS line-crossing time found within {@link ECU_REFINE_WINDOW_MS} of the step
+ * (same interpolation as {@link detectLapsByLine}); boundaries with no such
+ * crossing keep the row time. `idx` ranges are never changed.
+ */
+function refinedBoundaryTimes(
+  session: LogSession,
+  timeMs: Float64Array,
+  boundaries: number[],
+  track: GpsTrack | undefined,
+): number[] {
+  const times = boundaries.map((b) => timeMs[b])
+  if (!track) return times
+  const line = inferLapLineFromChannel(session, track)
+  if (!line) return times
+  const crossings = collectLineCrossings(track, timeMs, line)
+  if (crossings.length === 0) return times
+  let pos = 0
+  let neg = 0
+  for (const c of crossings) {
+    if (c.sign > 0) pos++
+    else if (c.sign < 0) neg++
+  }
+  const wanted = neg > pos ? -1 : 1
+  const dirCrossings = crossings.filter((c) => c.sign === wanted)
+  for (let k = 0; k < boundaries.length; k++) {
+    let best = -1
+    let bestDist = ECU_REFINE_WINDOW_MS
+    for (const c of dirCrossings) {
+      const dist = Math.abs(c.t - times[k])
+      if (dist <= bestDist) {
+        bestDist = dist
+        best = c.t
+      }
+    }
+    if (best >= 0) times[k] = best
+  }
+  return times
 }
 
 /** Sample indices where the ECU lap counter increases. */
