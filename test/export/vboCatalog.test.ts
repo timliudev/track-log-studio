@@ -391,7 +391,7 @@ describe('convertToVbo — B126 time-of-day anchors on the first-sample epoch, n
     return lines[lines.indexOf('[data]') + 1].split(' ')[1]
   }
   const pad = (v: number) => String(v).padStart(2, '0')
-  const hms = (d: Date) => `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  const hms = (d: Date) => `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`
 
   // Real-world B126 scenario: session.json's timeCreated (createdDate) is
   // ~6.5s BEFORE firstTimestamp (firstSampleEpochMs) — the moment RaceChrono
@@ -425,8 +425,8 @@ describe('convertToVbo — B126 time-of-day anchors on the first-sample epoch, n
     const ct = convertToVbo(session, 'test.rcz').find((a) => a.suffix === '_ct')!.content
     const stampLine = ct.split('\r\n')[0]
     expect(stampLine).toBe(
-      `File created on ${pad(created.getDate())}/${pad(created.getMonth() + 1)}/` +
-        `${created.getFullYear()} at ${hms(created).replace(/(\d\d)(\d\d)(\d\d)/, '$1:$2:$3')}`,
+      `File created on ${pad(created.getUTCDate())}/${pad(created.getUTCMonth() + 1)}/` +
+        `${created.getUTCFullYear()} at ${hms(created).replace(/(\d\d)(\d\d)(\d\d)/, '$1:$2:$3')}`,
     )
   })
 

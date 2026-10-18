@@ -68,3 +68,22 @@ describe('resolveClockTimezoneOffset', () => {
     expect(resolveClockTimezoneOffset('auto', NaN)).toBe(0)
   })
 })
+
+describe('sessionStartAnchor — createdDateIsEnd (B139)', () => {
+  it('back-dates a readback created date by the data duration', () => {
+    const created = new Date('2026-10-09T16:53:05+08:00')
+    const session = new LogSession(
+      [ch('Time', [0, 557484, 1114968]), ch('RPM', [1, 2, 3])],
+      { ...meta(created), createdDateIsEnd: true },
+    )
+    const anchor = sessionStartAnchor(session)!
+    expect(anchor.startUtcMs).toBe(created.getTime() - 1114968)
+    expect(formatClock(anchor.startUtcMs, 480)).toBe('16:34:30')
+  })
+
+  it('uses a synthesized interval when there is no Time channel', () => {
+    const created = new Date('2026-10-09T16:53:05+08:00')
+    const session = new LogSession([ch('RPM', [1, 2, 3])], { ...meta(created), createdDateIsEnd: true })
+    expect(sessionStartAnchor(session)!.startUtcMs).toBe(created.getTime() - 2 * 100)
+  })
+})

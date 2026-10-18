@@ -108,6 +108,9 @@ export function parseLoga(
   return new LogSession(channels, {
     formatId: format.id,
     createdDate: header.createdDate,
+    // B139: the .loga `Created Date:` header is the logger readback moment
+    // (end of the ride), not the first sample.
+    createdDateIsEnd: header.createdDate !== null ? true : undefined,
     headerInfo: header.headerInfo,
     exportMetadata,
   })

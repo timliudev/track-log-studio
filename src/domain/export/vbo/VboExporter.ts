@@ -1,3 +1,4 @@
+import { createdDateToStartMs } from '@/domain/model/sessionStart'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { computeSmoothedCourses } from '@/domain/export/rc3Nmea/heading'
@@ -468,10 +469,19 @@ export function convertToVbo(
   const stepMs = session.sampleIntervalMs ?? 100
   const t0 = timeCh && n > 0 ? cell(timeCh, 0) : 0
   const firstSampleEpochMs = session.meta.firstSampleEpochMs
-  const timeBase = typeof firstSampleEpochMs === 'number' ? new Date(firstSampleEpochMs) : created
-  const baseSecs = timeBase
-    ? timeBase.getHours() * 3600 + timeBase.getMinutes() * 60 + timeBase.getSeconds()
-    : 0
+  // Elapsed ms of the last sample relative to the first (data duration).
+  const durationMs =
+    n > 0 ? (timeCh ? cell(timeCh, n - 1) - t0 : (n - 1) * stepMs) : 0
+  // First-sample instant (epoch ms). B139: for a .loga the createdDate is the
+  // logger readback (END of ride) so back-date by the data duration; for every
+  // other source createdDate is the start and is used as is.
+  let startMs: number | null = null
+  if (typeof firstSampleEpochMs === 'number') startMs = firstSampleEpochMs
+  else if (created) {
+    startMs = createdDateToStartMs(created, session.meta.createdDateIsEnd === true, durationMs)
+  }
+  // Time-of-day is UTC (VBO spec) — epoch math, never local getHours() (B139).
+  const baseSecs = startMs !== null ? ((startMs / 1000) % 86400 + 86400) % 86400 : 0
 
   const cUtcHh = session.get('GPS_UTC_hh')?.data
   const cUtcMm = session.get('GPS_UTC_mm')?.data
@@ -541,11 +551,18 @@ export function convertToVbo(
   const metadataPayload = encodeExportMetadata(metadata)
 
   // --- Render a .vbo (ct = ECU names, rc = rc_ identifiers) ---
-  const stamp = created ?? now
+  // B139: header date/time written in UTC so it is self-consistent with the
+  // UTC `time` column (RaceChrono derives the session date from the pair and
+  // then applies the viewer's local offset). Non-GPS path: the first-sample
+  // instant (so the date is right across midnight); GPS path: createdDate.
+  const stamp =
+    !hasUtc && startMs !== null && session.meta.createdDateIsEnd === true
+      ? new Date(startMs)
+      : (created ?? now)
   const stampLine =
-    `File created on ${dd(stamp.getDate())}/${dd(stamp.getMonth() + 1)}/` +
-    `${stamp.getFullYear()} at ${dd(stamp.getHours())}:${dd(stamp.getMinutes())}:` +
-    `${dd(stamp.getSeconds())}`
+    `File created on ${dd(stamp.getUTCDate())}/${dd(stamp.getUTCMonth() + 1)}/` +
+    `${stamp.getUTCFullYear()} at ${dd(stamp.getUTCHours())}:${dd(stamp.getUTCMinutes())}:` +
+    `${dd(stamp.getUTCSeconds())}`
 
   const renderVbo = (variant: 'ct' | 'rc'): string => {
     const out: string[] = []
