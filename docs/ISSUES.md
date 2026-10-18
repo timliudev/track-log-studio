@@ -793,7 +793,7 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   最佳圈 46.188 → 46.302)。合成測試:held 9.7 Hz/32 Hz 圈時還原誤差 <1 ms。既有測試僅 1 個(laps.test 的 held 資料案例,
   40000→35000 ms)因語意修正而更新,**無 golden/snapshot fixture 變動、圈數不變**。typecheck 乾淨 · **2780/2780 綠** ·
   lint 0 error。**未處理**:`walkLapGates` 的分段計時(sectorTiming)同樣在保持列間插值,屬另案。
-  — `1323472`。⚠️ **尚未經裝置驗證**。
+  — `1323472`(+`7151306` 文件)、合入 develop merge `1f8f6a3`。⚠️ **尚未經裝置驗證**。
 - [x] **B139** 匯出 `.vbo` 匯入 RaceChrono 後日期顯示 2026/10/10 00:53(真實騎乘約 10/9 16:29–16:48 本地)。
   兩個錯疊加:①**時區**:`src/domain/export/vbo/VboExporter.ts`(約 :450-473、header :546)以 `getHours()` 等
   **本地**欄位填 VBO `time`(規格為 **UTC** hhmmss),RaceChrono 再 +8h → 00:53;②**起點錯**:`.loga` 沒有
@@ -809,8 +809,17 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   驗證:createdDate 2026-10-09 16:53:05(+08)+1114.968 s → 首筆 083430.032、header 09/10/2026 08:34:30(新單測);
   真檔 `b1(13).loga` 匯出 _rc.vbo:首 083430.063、末 085305.000(35679 列);vbo.loga golden 兩檔各僅 41 行變動
   (header 1 行 + 40 筆 time 欄,其餘不動)已更新;2779/2779 綠、typecheck/lint 0 error。
-  ⚠️ 尚未經裝置驗證(需重新匯入 RaceChrono 確認日期)。注意:分析頁時間軸 `startTime.ts` 仍把 createdDate 當起點(未動);
-  本站匯出的 .vbo 再匯入時,header 日期以本地時間解析(UTC 字串),近午夜可能差一天(未動)。
+  **後續(`eaeefb0`)**:①分析頁 `startTime.ts` 與匯出器共用 `domain/model/sessionStart.ts` 的 `createdDateToStartMs`
+  (`createdDateIsEnd` 時起點=createdDate−資料長度;`sessionDurationMs` 取 Time 通道首末差,無 Time 則 (n−1)×取樣間隔),
+  不再各算各的;②`parseVbo` 起點改為「header 取日期、第一筆有效 `time` 欄(UTC 時刻,以 float64 保留)取時刻」:在 header 日期
+  前後 ±1 個 UTC 日中,挑最接近「header 當 UTC」或「header 當本地」任一解讀的候選。理由:Racelogic 的 header 是 PC 本地時間、
+  本站匯出是 UTC,但 time 欄一律 UTC,因此不必猜 header 時區,跨午夜也正確;無 time 欄時沿用舊行為(header 當本地)。
+  既有 VBO 匯入 golden/測試無期望值變動。新增 round-trip 測試(b1(13) 型匯出→parseVbo 的 createdDate 等於匯出起點、
+  跨本地午夜、第三方本地 header + UTC time)與 startTime 單測。
+  **合入 develop**:B138 merge `1f8f6a3`、B139 merge `2dce0fa`。合併後樹:typecheck 乾淨 · **2788/2788 綠** · lint 0 error · build 通過。
+  真檔 `b1(13).loga` 複驗:lap 4–15(線模式與 ECU 模式相同)48.313 46.530 46.568 46.536 99.323 46.357 46.302 46.990
+  46.621 101.396 46.650 47.317(最佳 46.302);匯出 vbo 首 083430.063 / 末 085305.000 UTC;分析頁起點 16:34:30(+08)。
+  ⚠️ 尚未經裝置驗證(需重新匯入 RaceChrono 確認日期)。
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
