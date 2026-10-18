@@ -235,23 +235,55 @@ function splitSections(text: string): Sections {
   return out
 }
 
-/** Parse "File created on DD/MM/YYYY at HH:MM:SS" → Date, or null. */
-function parseCreatedDate(line: string | null): Date | null {
+/** Parse "File created on DD/MM/YYYY at HH:MM:SS" → wall-clock parts, or null. */
+function parseCreatedParts(
+  line: string | null,
+): { y: number; mo: number; d: number; h: number; mi: number; s: number } | null {
   if (!line) return null
   const m = line.match(
     /File created on (\d{2})\/(\d{2})\/(\d{4}) at (\d{2}):(\d{2}):(\d{2})/i,
   )
   if (!m) return null
   const [, dd, mm, yyyy, hh, min, ss] = m
-  const d = new Date(
-    Number(yyyy),
-    Number(mm) - 1,
-    Number(dd),
-    Number(hh),
-    Number(min),
-    Number(ss),
-  )
-  return Number.isNaN(d.getTime()) ? null : d
+  return { y: Number(yyyy), mo: Number(mm) - 1, d: Number(dd), h: Number(hh), mi: Number(min), s: Number(ss) }
+}
+
+/**
+ * Resolve the session's absolute START instant (B139 round-trip).
+ *
+ * The header stamp's timezone is ambiguous: Racelogic writes PC LOCAL time,
+ * while our own exporter (B139) writes UTC — but in both cases the `time`
+ * column is UTC time-of-day. So the instant is built from the first data row's
+ * UTC time-of-day, and the header only supplies the DATE: among that
+ * time-of-day on the UTC days around the header date (−1/0/+1), pick the one
+ * nearest to the header read either as UTC or as local time. A correct
+ * candidate is always within 12 h of one of the two readings (offsets are
+ * ≤ 14 h but the header is near the session start), so this survives both
+ * conventions and midnight rollovers without knowing which one was used.
+ * Without a usable time column the header is read as local time (legacy).
+ */
+function resolveCreatedDate(
+  line: string | null,
+  firstTimeValue: number | null,
+): Date | null {
+  const p = parseCreatedParts(line)
+  if (!p) return null
+  const local = new Date(p.y, p.mo, p.d, p.h, p.mi, p.s)
+  if (Number.isNaN(local.getTime())) return null
+  const tod = firstTimeValue !== null ? decodeVboTime(firstTimeValue) : null
+  if (!tod || tod.hh > 23 || tod.mm > 59 || tod.ss > 59) return local
+  const asUtc = Date.UTC(p.y, p.mo, p.d, p.h, p.mi, p.s)
+  let best = NaN
+  let bestDist = Infinity
+  for (let dayShift = -1; dayShift <= 1; dayShift++) {
+    const cand = Date.UTC(p.y, p.mo, p.d + dayShift, tod.hh, tod.mm, tod.ss, tod.ms)
+    const dist = Math.min(Math.abs(cand - asUtc), Math.abs(cand - local.getTime()))
+    if (dist < bestDist) {
+      bestDist = dist
+      best = cand
+    }
+  }
+  return Number.isFinite(best) ? new Date(best) : local
 }
 
 /**
@@ -346,12 +378,17 @@ export function parseVbo(text: string, maxTextChars: number = MAX_VBO_TEXT_CHARS
   }
 
   // Parse the [data] grid into one Float32Array per column.
+  const timeColIdx = columns.indexOf('time')
+  let firstTimeValue: number | null = null
   const colData: Float32Array[] = columns.map(() => new Float32Array(n))
   for (let i = 0; i < n; i++) {
     const fields = dataLines[i].split(/\s+/)
     for (let c = 0; c < ncol; c++) {
       const v = Number(fields[c])
       colData[c][i] = Number.isFinite(v) ? v : NaN
+      // Keep the first finite time cell at full float64 precision (Float32
+      // storage is only ~8 ms at HHMMSS magnitudes) for the start instant.
+      if (c === timeColIdx && firstTimeValue === null && Number.isFinite(v)) firstTimeValue = v
     }
   }
 
@@ -467,7 +504,7 @@ export function parseVbo(text: string, maxTextChars: number = MAX_VBO_TEXT_CHARS
 
   const meta: LogMeta = {
     formatId: 'vbo',
-    createdDate: parseCreatedDate(createdLine),
+    createdDate: resolveCreatedDate(createdLine, firstTimeValue),
     headerInfo,
     exportMetadata,
     sessionName: parseSessionName(sessionData),

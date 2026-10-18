@@ -1,3 +1,4 @@
+import { createdDateToStartMs } from '@/domain/model/sessionStart'
 import type { LogSession } from '@/domain/model/LogSession'
 import type { Channel } from '@/domain/model/types'
 import { computeSmoothedCourses } from '@/domain/export/rc3Nmea/heading'
@@ -477,10 +478,7 @@ export function convertToVbo(
   let startMs: number | null = null
   if (typeof firstSampleEpochMs === 'number') startMs = firstSampleEpochMs
   else if (created) {
-    startMs =
-      session.meta.createdDateIsEnd === true && Number.isFinite(durationMs)
-        ? created.getTime() - durationMs
-        : created.getTime()
+    startMs = createdDateToStartMs(created, session.meta.createdDateIsEnd === true, durationMs)
   }
   // Time-of-day is UTC (VBO spec) — epoch math, never local getHours() (B139).
   const baseSecs = startMs !== null ? ((startMs / 1000) % 86400 + 86400) % 86400 : 0

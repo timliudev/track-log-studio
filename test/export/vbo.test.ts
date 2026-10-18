@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { parseLoga } from '@/domain/parsing/LogaParser'
 import { convertToVbo } from '@/domain/export/vbo/VboExporter'
 import { LogSession } from '@/domain/model/LogSession'
+import { parseVbo } from '@/domain/import/vbo/parseVbo'
+import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { loadFixture } from '../fixtures'
 
 /** Decimal places shown in a formatted field. */
@@ -231,5 +233,50 @@ describe('convertToVbo time source', () => {
     )
     const ct = convertToVbo(session, 'x.vbo').find((a) => a.suffix === '_ct')!.content
     expect(firstTime(ct)).toBe('080000.000')
+  })
+
+  describe('B139 round-trip: export → parseVbo keeps the start instant', () => {
+    const mk = (created: Date, isEnd: boolean) =>
+      new LogSession(
+        [
+          { name: 'Time', rawName: 'Time', description: '', data: new Float32Array([0, 557484, 1114968]) },
+          { name: 'RPM', rawName: 'RPM', description: '', data: new Float32Array([1, 2, 3]) },
+        ],
+        { formatId: 'raceAmp', createdDate: created, createdDateIsEnd: isEnd, headerInfo: {} },
+      )
+    const roundTrip = (s: LogSession) => {
+      const ct = convertToVbo(s, 'x.loga').find((a) => a.suffix === '_ct')!.content
+      return parseVbo(ct)
+    }
+
+    it('b1(13)-like session: re-imported createdDate == exporter start == analysis anchor', () => {
+      const s = mk(new Date(2026, 9, 9, 16, 53, 5), true)
+      const startMs = new Date(2026, 9, 9, 16, 53, 5).getTime() - 1114968
+      const back = roundTrip(s)
+      expect(back.meta.createdDate!.getTime()).toBe(startMs)
+      expect(sessionStartAnchor(s)!.startUtcMs).toBe(startMs)
+    })
+
+    it('survives a local-midnight crossing (local 02:00 → UTC previous day)', () => {
+      const s = mk(new Date(2026, 9, 10, 2, 0, 30), true)
+      const startMs = new Date(2026, 9, 10, 2, 0, 30).getTime() - 1114968
+      expect(roundTrip(s).meta.createdDate!.getTime()).toBe(startMs)
+    })
+
+    it('third-party style: local-time header + UTC time column resolves to the real instant', () => {
+      // Racelogic: header = PC local (+08) 16:34:30, time column = UTC 083430.
+      const vbo = [
+        'File created on 09/10/2026 at 16:34:30',
+        '',
+        '[column names]',
+        'sats time lat long velocity heading height',
+        '',
+        '[data]',
+        '008 083430.000 +1500.0 -7300.0 010.0 090.0 +00010.0',
+        '008 083431.000 +1500.0 -7300.0 010.0 090.0 +00010.0',
+        '',
+      ].join(String.fromCharCode(13, 10))
+      expect(parseVbo(vbo).meta.createdDate!.getTime()).toBe(Date.UTC(2026, 9, 9, 8, 34, 30))
+    })
   })
 })
