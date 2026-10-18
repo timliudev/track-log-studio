@@ -782,13 +782,23 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   到線有號距離線性內插 0.074 s,lap 9/10/11 誤差 <0.01 s(最佳圈 46.305)。另注意 RaceChrono 自己的即時 `.rcz`
   圈時與它匯入 vbo 的結果也差到 0.26 s,GPS 穿越本身約 ±0.1 s 不確定。
   修法:線模式改為 fix 間內插;ECU 模式以 `inferLapLineFromChannel` 推線後套同一內插(或至少註明量化)。
-- [ ] **B139** 匯出 `.vbo` 匯入 RaceChrono 後日期顯示 2026/10/10 00:53(真實騎乘約 10/9 16:29–16:48 本地)。
+- [x] **B139** 匯出 `.vbo` 匯入 RaceChrono 後日期顯示 2026/10/10 00:53(真實騎乘約 10/9 16:29–16:48 本地)。
   兩個錯疊加:①**時區**:`src/domain/export/vbo/VboExporter.ts`(約 :450-473、header :546)以 `getHours()` 等
   **本地**欄位填 VBO `time`(規格為 **UTC** hhmmss),RaceChrono 再 +8h → 00:53;②**起點錯**:`.loga` 沒有
   GPS UTC 頻道,`createdDate` 取自 header `Created Date:2026/10/9 16:53:05` = **回讀時刻**(與檔案 mtime 差 4 s),
   被當成第一筆樣本時間,資料結尾因此落在 17:11,晚於檔案本身。修法:時間欄與 header 以 UTC 寫出;
   無 GPS UTC 時以「Created Date − 資料長度」當起點(b1(13) 得約 16:34,仍比實際晚約 5 min,為回讀前的等待時間,
   無資料可補)。有 `GPS_UTC_*` 的檔案行為不變。
+  **已修 — `02ba580`**:`VboExporter` 的 `time` 欄改用 epoch 數學(UTC,跨日正確),header「File created on」同寫 UTC
+  (與 time 欄自洽);`LogMeta` 新增 `createdDateIsEnd`,僅 `LogaParser`(.loga 的 Created Date=回讀時刻)設 true,
+  匯出時起點=createdDate−資料長度(優先序:GPS_UTC → firstSampleEpochMs → createdDate[−長度])。.rcz/.rcnx/.xrk/.vbo/csv/nmea
+  的 createdDate 即起點,不套用。其他匯出器:NMEA(無 GPS_UTC 時本就用 UTC 合成時間)、CSV、.loga 存檔無此 bug。
+  測試 TZ 固定:`vite.config.ts` 於 VITEST 下設 `TZ=Asia/Taipei`。
+  驗證:createdDate 2026-10-09 16:53:05(+08)+1114.968 s → 首筆 083430.032、header 09/10/2026 08:34:30(新單測);
+  真檔 `b1(13).loga` 匯出 _rc.vbo:首 083430.063、末 085305.000(35679 列);vbo.loga golden 兩檔各僅 41 行變動
+  (header 1 行 + 40 筆 time 欄,其餘不動)已更新;2779/2779 綠、typecheck/lint 0 error。
+  ⚠️ 尚未經裝置驗證(需重新匯入 RaceChrono 確認日期)。注意:分析頁時間軸 `startTime.ts` 仍把 createdDate 當起點(未動);
+  本站匯出的 .vbo 再匯入時,header 日期以本地時間解析(UTC 字串),近午夜可能差一天(未動)。
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`
