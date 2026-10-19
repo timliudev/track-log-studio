@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { parseLoga } from '@/domain/parsing/LogaParser'
 import { convertToVbo } from '@/domain/export/vbo/VboExporter'
+import { LogSession } from '@/domain/model/LogSession'
+import { parseVbo } from '@/domain/import/vbo/parseVbo'
+import { sessionStartAnchor } from '@/domain/analysis/startTime'
 import { loadFixture } from '../fixtures'
 
 /** Decimal places shown in a formatted field. */
@@ -167,11 +170,113 @@ describe('convertToVbo time source', () => {
     expect(ct).not.toContain('\r\nGPS_UTC_hh\r\n')
   })
 
-  it('falls back to the created-date clock when there is no GPS_UTC (b1(5))', () => {
-    // vbo.loga has no GPS_UTC, created 16:25:24, Time[0] = Time[0] (elapsed 0),
-    // so the first row reads 162524.xxx — proves the created-date anchor.
+  it('anchors a .loga without GPS_UTC at createdDate minus data duration, in UTC (b1(5), B139)', () => {
+    // vbo.loga: created 16:25:24 local (+08, TZ pinned in vite.config); the last
+    // row must land exactly on createdDate (readback) expressed in UTC.
     const session = parseLoga(loadFixture('vbo.loga'))
     const ct = convertToVbo(session, 'vbo.loga').find((a) => a.suffix === '_ct')!.content
-    expect(firstTime(ct).startsWith('162524')).toBe(true)
+    expect(firstTime(ct).startsWith('0825')).toBe(true)
+    const lines = ct.split('\r\n')
+    const lastTime = lines[lines.length - 2].split(' ')[1]
+    expect(lastTime).toBe('082524.000') // = createdDate (readback) 16:25:24 +08 in UTC
+  })
+
+  it('B139: exports UTC time + header for createdDate 2026-10-09 16:53:05 (+08) with 1114.968 s of data', () => {
+    const n = 3
+    const time = new Float32Array([0, 557484, 1114968])
+    const session = new LogSession(
+      [
+        { name: 'Time', rawName: 'Time', description: '', data: time },
+        { name: 'RPM', rawName: 'RPM', description: '', data: new Float32Array([1, 2, 3]) },
+      ],
+      {
+        formatId: 'raceAmp',
+        createdDate: new Date(2026, 9, 9, 16, 53, 5),
+        createdDateIsEnd: true,
+        headerInfo: {},
+      },
+    )
+    expect(session.rowCount).toBe(n)
+    const ct = convertToVbo(session, 'x.loga').find((a) => a.suffix === '_ct')!.content
+    expect(ct.split('\r\n')[0]).toBe('File created on 09/10/2026 at 08:34:30')
+    const lines = ct.split('\r\n')
+    const d = lines.indexOf('[data]')
+    expect(lines[d + 1].split(' ')[1]).toBe('083430.032')
+    expect(lines[d + 3].split(' ')[1]).toBe('085305.000')
+  })
+
+  it('B139: rolls the UTC day over correctly (local 02:00 +08 → previous UTC day 18:xx)', () => {
+    const session = new LogSession(
+      [
+        { name: 'Time', rawName: 'Time', description: '', data: new Float32Array([0, 60000]) },
+        { name: 'RPM', rawName: 'RPM', description: '', data: new Float32Array([1, 2]) },
+      ],
+      {
+        formatId: 'raceAmp',
+        createdDate: new Date(2026, 9, 10, 2, 0, 30),
+        createdDateIsEnd: true,
+        headerInfo: {},
+      },
+    )
+    const ct = convertToVbo(session, 'x.loga').find((a) => a.suffix === '_ct')!.content
+    expect(ct.split('\r\n')[0]).toBe('File created on 09/10/2026 at 17:59:30')
+    expect(firstTime(ct)).toBe('175930.000')
+  })
+
+  it('B139: createdDate without createdDateIsEnd is the start (non-.loga sources)', () => {
+    const session = new LogSession(
+      [
+        { name: 'Time', rawName: 'Time', description: '', data: new Float32Array([0, 60000]) },
+        { name: 'RPM', rawName: 'RPM', description: '', data: new Float32Array([1, 2]) },
+      ],
+      { formatId: 'vbo', createdDate: new Date(2026, 9, 9, 16, 0, 0), headerInfo: {} },
+    )
+    const ct = convertToVbo(session, 'x.vbo').find((a) => a.suffix === '_ct')!.content
+    expect(firstTime(ct)).toBe('080000.000')
+  })
+
+  describe('B139 round-trip: export → parseVbo keeps the start instant', () => {
+    const mk = (created: Date, isEnd: boolean) =>
+      new LogSession(
+        [
+          { name: 'Time', rawName: 'Time', description: '', data: new Float32Array([0, 557484, 1114968]) },
+          { name: 'RPM', rawName: 'RPM', description: '', data: new Float32Array([1, 2, 3]) },
+        ],
+        { formatId: 'raceAmp', createdDate: created, createdDateIsEnd: isEnd, headerInfo: {} },
+      )
+    const roundTrip = (s: LogSession) => {
+      const ct = convertToVbo(s, 'x.loga').find((a) => a.suffix === '_ct')!.content
+      return parseVbo(ct)
+    }
+
+    it('b1(13)-like session: re-imported createdDate == exporter start == analysis anchor', () => {
+      const s = mk(new Date(2026, 9, 9, 16, 53, 5), true)
+      const startMs = new Date(2026, 9, 9, 16, 53, 5).getTime() - 1114968
+      const back = roundTrip(s)
+      expect(back.meta.createdDate!.getTime()).toBe(startMs)
+      expect(sessionStartAnchor(s)!.startUtcMs).toBe(startMs)
+    })
+
+    it('survives a local-midnight crossing (local 02:00 → UTC previous day)', () => {
+      const s = mk(new Date(2026, 9, 10, 2, 0, 30), true)
+      const startMs = new Date(2026, 9, 10, 2, 0, 30).getTime() - 1114968
+      expect(roundTrip(s).meta.createdDate!.getTime()).toBe(startMs)
+    })
+
+    it('third-party style: local-time header + UTC time column resolves to the real instant', () => {
+      // Racelogic: header = PC local (+08) 16:34:30, time column = UTC 083430.
+      const vbo = [
+        'File created on 09/10/2026 at 16:34:30',
+        '',
+        '[column names]',
+        'sats time lat long velocity heading height',
+        '',
+        '[data]',
+        '008 083430.000 +1500.0 -7300.0 010.0 090.0 +00010.0',
+        '008 083431.000 +1500.0 -7300.0 010.0 090.0 +00010.0',
+        '',
+      ].join(String.fromCharCode(13, 10))
+      expect(parseVbo(vbo).meta.createdDate!.getTime()).toBe(Date.UTC(2026, 9, 9, 8, 34, 30))
+    })
   })
 })

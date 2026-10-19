@@ -545,11 +545,20 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   與 1024 寬皆確認)。手機版無任何專屬程式碼碰 `activeFileId`/`selectedSessions`,也無刻意設計的註解。
   真機會持續繪製,不會卡住;唯一真實殘留是 0.25 s 離場動畫+chunk 載入期間 FileBar 短暫顯示「未選取」的閃爍。
   **未改任何程式碼**(`fix/b131` 分支零 commit)。
-- [ ] **B137**(2026-10-06 開單,源自 [[B131]] 調查;user 拍板要修)切到分析頁時,`App.vue` 的
+- [x] **B137**(2026-10-06 修復:fix `74c86b4`、merge `ba4bb1c`;⚠️ 尚未經裝置驗證)切到分析頁時,`App.vue` 的
   `<Transition mode="out-in">` 離場動畫(0.25 s)+ `AnalyzerView` async chunk 載入期間,FileBar 已進入分析模式但
   自動選主要記錄的 `watch(readyFiles, …, {immediate:true})`(`AnalyzerView.vue:377`)尚未執行 → 勾選框短暫顯示
   「未選取」的閃爍。修法方向:把「無主要記錄時自動選第一個 ready 檔」的邏輯移到不依賴 `AnalyzerView` 掛載的位置
   (如 store 或 FileBar),讓 FileBar 一進分析模式就有正確選取狀態。
+  **修法(2026-10-06):** 整段 watcher 原封搬到新 composable `src/composables/useAnalyzerSelectionSync.ts`,
+  由 `App.vue` setup 安裝一次(常駐,不分頁籤;converter/settings 不讀 `activeFileId`/`selectedSessions`,
+  故無副作用);`AnalyzerView.vue` 刪除重複 watcher,只留指向新位置的註解。語意不變:`immediate`、主要消失時
+  先升第一個比較檔否則第一個 ready 檔、B55 `lapStore.swapPrimarySession(null, next)` 在改 `activeFileId` 之前、
+  其餘只修剪消失的比較檔。新增 `test/composables/useAnalyzerSelectionSync.test.ts`(5 條,不掛 AnalyzerView,
+  含 B55 升格)。develop 合併後實測:typecheck 0 錯、vitest **222 檔 / 2776 測試全綠**、lint 0 錯 4 警告
+  (皆為既有測試檔警告,與修前基線相同)。瀏覽器實測:在轉換頁匯入 `superX.loga` 即已 `activeFileId=1`
+  (AnalyzerView 未掛載);點「分析」後 30 ms、AnalyzerView 尚未掛載時 FileBar 已顯示勾選+「主要」,並以截圖強制
+  繪製確認(避開 [[B131]] rAF 假象)。
 
 ## User report — 大賽道 sector 爆量 / 卡片撐爆 (B132–B133)
 - [x] **B132** 大賽道(長 circuit)自動彎道偵測爆量:實測麗寶大賽道 `.rcz`(~3.5 km/圈)
@@ -761,6 +770,56 @@ FLIP 從 presentation 值出發、reduced-motion 覆蓋 7 檔、粗指標政策�
   取得單位,其餘 18 個為布林/狀態/raw 正確維持無單位;[[B134]] 三個角色解析不變。
   兩個 VBO golden fixture 皆帶完整 `[channel units]`,不會走到 fallback。
   typecheck 乾淨 · **2737/2737 綠**(218 檔) · lint 0 error。⚠️ **尚未經裝置驗證**。
+
+## User report — 圈時與 RaceChrono 不一致 / 匯出 vbo 日期錯 (B138–B139)
+同一趟騎乘(2026-10-09 極限,`b1(13).loga` / RaceChrono 即時 `.rcz` / 本站匯出 `b1(13)_rc.vbo`)。
+- [x] **B138** 圈時沒有內插:本站最佳圈 0:46.188,RaceChrono 46.31;其餘各圈差 ±0.03–0.17 s 且非固定偏移,
+  本站數值全落在 1/32 s 格點。根因:`src/domain/analysis/laps.ts` 起終點線模式(約 :286-313)以 ECU 列時鐘
+  `timeMs[i]`(31.25 ms)記穿越時間、不內插;GPS 約 9.7 Hz 被「保持」進 32 Hz 列,相鄰保持列線段長度為 0,
+  穿越只會在**新 fix 第一列**被看到 → 每次穿越晚 0–125 ms 不等 + 31 ms 量化。ECU 模式(`detectLapsByChannel`
+  約 :363-378)用 `IR_LapNumber` 跳號列,同樣不內插;`IR_LapTime` 是自由計數器、不可用。
+  分析實測(RMS vs RaceChrono,lap 4–15):現行 0.098 s → 在「前一個不同 fix 首列」與「新 fix 首列」之間依
+  到線有號距離線性內插 0.074 s,lap 9/10/11 誤差 <0.01 s(最佳圈 46.305)。另注意 RaceChrono 自己的即時 `.rcz`
+  圈時與它匯入 vbo 的結果也差到 0.26 s,GPS 穿越本身約 ±0.1 s 不確定。
+  **已修**:`laps.ts` 抽出 `collectLineCrossings`,線模式追蹤「目前 GPS fix 的首列」,穿越時間取
+  `t = timeMs[前 fix 首列] + f·(timeMs[新 fix 首列] − timeMs[前 fix 首列])`,`f = d1/(d1−d2)`(到線有號距離);
+  `Crossing.idx` 仍為整數列(圈範圍不變)、`t` 為浮點。on-line 命中(B129)改用該 fix 首列時間。
+  ECU 模式:`detectLapsByChannel(session, timeMs, track?)` 多一個可選 `track`,有 track 時以
+  `inferLapLineFromChannel` 推線,對每個 `IR_LapNumber` 跳號邊界在 ±600 ms 內找同方向的內插穿越時間取代列時間;
+  找不到或無 track 則維持原列時間。`useLaps`/`useSessionComparison` 已傳入 track;`startIdx/endIdx` 不變。
+  撕裂讀(lat/lon 分列更新)以「(lat,lon) 與前列不同」視為新 fix,未特別處理。
+  驗證(`b1(13).loga`,lap 4–15 vs RaceChrono):線模式 舊 0.098 → 新 **0.074 s RMS**(48.313 46.530 46.568 46.536 99.323
+  46.357 46.302 46.990 46.621 101.396 46.650 47.317,與先前分析一致);ECU 模式 舊 0.083 → 新 0.074(與線模式逐圈相同,
+  最佳圈 46.188 → 46.302)。合成測試:held 9.7 Hz/32 Hz 圈時還原誤差 <1 ms。既有測試僅 1 個(laps.test 的 held 資料案例,
+  40000→35000 ms)因語意修正而更新,**無 golden/snapshot fixture 變動、圈數不變**。typecheck 乾淨 · **2780/2780 綠** ·
+  lint 0 error。**未處理**:`walkLapGates` 的分段計時(sectorTiming)同樣在保持列間插值,屬另案。
+  — `1323472`(+`7151306` 文件)、合入 develop merge `1f8f6a3`。⚠️ **尚未經裝置驗證**。
+- [x] **B139** 匯出 `.vbo` 匯入 RaceChrono 後日期顯示 2026/10/10 00:53(真實騎乘約 10/9 16:29–16:48 本地)。
+  兩個錯疊加:①**時區**:`src/domain/export/vbo/VboExporter.ts`(約 :450-473、header :546)以 `getHours()` 等
+  **本地**欄位填 VBO `time`(規格為 **UTC** hhmmss),RaceChrono 再 +8h → 00:53;②**起點錯**:`.loga` 沒有
+  GPS UTC 頻道,`createdDate` 取自 header `Created Date:2026/10/9 16:53:05` = **回讀時刻**(與檔案 mtime 差 4 s),
+  被當成第一筆樣本時間,資料結尾因此落在 17:11,晚於檔案本身。修法:時間欄與 header 以 UTC 寫出;
+  無 GPS UTC 時以「Created Date − 資料長度」當起點(b1(13) 得約 16:34,仍比實際晚約 5 min,為回讀前的等待時間,
+  無資料可補)。有 `GPS_UTC_*` 的檔案行為不變。
+  **已修 — `02ba580`**:`VboExporter` 的 `time` 欄改用 epoch 數學(UTC,跨日正確),header「File created on」同寫 UTC
+  (與 time 欄自洽);`LogMeta` 新增 `createdDateIsEnd`,僅 `LogaParser`(.loga 的 Created Date=回讀時刻)設 true,
+  匯出時起點=createdDate−資料長度(優先序:GPS_UTC → firstSampleEpochMs → createdDate[−長度])。.rcz/.rcnx/.xrk/.vbo/csv/nmea
+  的 createdDate 即起點,不套用。其他匯出器:NMEA(無 GPS_UTC 時本就用 UTC 合成時間)、CSV、.loga 存檔無此 bug。
+  測試 TZ 固定:`vite.config.ts` 於 VITEST 下設 `TZ=Asia/Taipei`。
+  驗證:createdDate 2026-10-09 16:53:05(+08)+1114.968 s → 首筆 083430.032、header 09/10/2026 08:34:30(新單測);
+  真檔 `b1(13).loga` 匯出 _rc.vbo:首 083430.063、末 085305.000(35679 列);vbo.loga golden 兩檔各僅 41 行變動
+  (header 1 行 + 40 筆 time 欄,其餘不動)已更新;2779/2779 綠、typecheck/lint 0 error。
+  **後續(`eaeefb0`)**:①分析頁 `startTime.ts` 與匯出器共用 `domain/model/sessionStart.ts` 的 `createdDateToStartMs`
+  (`createdDateIsEnd` 時起點=createdDate−資料長度;`sessionDurationMs` 取 Time 通道首末差,無 Time 則 (n−1)×取樣間隔),
+  不再各算各的;②`parseVbo` 起點改為「header 取日期、第一筆有效 `time` 欄(UTC 時刻,以 float64 保留)取時刻」:在 header 日期
+  前後 ±1 個 UTC 日中,挑最接近「header 當 UTC」或「header 當本地」任一解讀的候選。理由:Racelogic 的 header 是 PC 本地時間、
+  本站匯出是 UTC,但 time 欄一律 UTC,因此不必猜 header 時區,跨午夜也正確;無 time 欄時沿用舊行為(header 當本地)。
+  既有 VBO 匯入 golden/測試無期望值變動。新增 round-trip 測試(b1(13) 型匯出→parseVbo 的 createdDate 等於匯出起點、
+  跨本地午夜、第三方本地 header + UTC time)與 startTime 單測。
+  **合入 develop**:B138 merge `1f8f6a3`、B139 merge `2dce0fa`。合併後樹:typecheck 乾淨 · **2788/2788 綠** · lint 0 error · build 通過。
+  真檔 `b1(13).loga` 複驗:lap 4–15(線模式與 ECU 模式相同)48.313 46.530 46.568 46.536 99.323 46.357 46.302 46.990
+  46.621 101.396 46.650 47.317(最佳 46.302);匯出 vbo 首 083430.063 / 末 085305.000 UTC;分析頁起點 16:34:30(+08)。
+  ⚠️ 尚未經裝置驗證(需重新匯入 RaceChrono 確認日期)。
 
 ## Maintenance / deferred
 - [x] **M1** Dependency refresh: no `latest`/`*` ranges existed; all direct deps already at latest in-range; transitive lockfile refreshed; `npm audit` 0 vulnerabilities. TypeScript 6→7 skipped — verified vue-tsc (≤3.3.7) crashes on TS7's removed `./lib/tsc` export; revisit when vue-tsc supports TS7. — `56dc1c5`

@@ -8,6 +8,10 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 import { cloudflare } from "@cloudflare/vite-plugin";
 
+// B139: tests that parse local-time headers (.loga `Created Date`) and export UTC
+// time fields must not depend on the machine's timezone. Set before workers spawn.
+if (process.env.VITEST) process.env.TZ = 'Asia/Taipei'
+
 /**
  * Short commit hash for the footer build stamp. CI/CD provides it via env
  * (Cloudflare Pages `CF_PAGES_COMMIT_SHA`, GitHub Actions `GITHUB_SHA`); local

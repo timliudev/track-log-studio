@@ -49,6 +49,15 @@ export interface LogMeta {
    */
   readonly firstSampleEpochMs?: number
   /**
+   * B139: true when `createdDate` is the logger's READBACK moment (the aRacer
+   * `.loga` `Created Date:` header, ≈ file mtime), i.e. the END of the ride,
+   * not its start. `VboExporter.ts` then anchors the first sample at
+   * `createdDate − (last − first sample time)`. Absent/false for formats whose
+   * createdDate really is the start (.rcz/.rcnx/.xrk/.vbo) — set only by the
+   * `.loga` parser (raceAmp / marker / super2 header variants).
+   */
+  readonly createdDateIsEnd?: boolean
+  /**
    * Session/session-name string recovered from the source file, when the
    * format carries one — currently only the `.vbo` importer's `[session
    * data]` `name` line (B135). Purely informational (no display wiring is

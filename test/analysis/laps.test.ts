@@ -85,7 +85,9 @@ describe('detectLapsByLine', () => {
   it('direction-auto ignores a backwards crossing', () => {
     // Forward crossings (left->right) at 1 and 5; a backward one (right->left)
     // at 3. Majority direction is forward, so the backward crossing is dropped,
-    // leaving 2 forward crossings -> 1 lap from sample 1 to 5.
+    // leaving 2 forward crossings -> 1 lap from sample 1 to 5. Samples 1-2 and
+    // 3-4 hold the same fix, so (B138) the crossings interpolate between the
+    // first rows of the fixes: 5000 ms (rows 0..1) and 40000 ms (rows 3..5).
     const lat = [0, 0, 0, 0, 0, 0, 0]
     const lon = [-1, 1, 1, -1, -1, 1, 1]
     //            0   1  2   3   4  5  6
@@ -97,7 +99,7 @@ describe('detectLapsByLine', () => {
 
     const laps = detectLapsByLine(track, timeMs, line)
     expect(laps).toHaveLength(1)
-    expect(laps[0]).toMatchObject({ startIdx: 1, endIdx: 5, lapTimeMs: 40000 })
+    expect(laps[0]).toMatchObject({ startIdx: 1, endIdx: 5, lapTimeMs: 35000 })
   })
 
   it('debounces crossings closer together than minLapMs', () => {
@@ -293,5 +295,100 @@ describe('inferLapLineFromChannel', () => {
       gate.a,
       gate.b,
     )).toBe(true)
+  })
+})
+
+describe('crossing-time interpolation (B138)', () => {
+  const ROW_MS = 31.25
+  const PERIOD_S = 46.3719
+  const T0_S = 5.0123
+  const line: LapLine = { a: { lat: -1, lon: 0 }, b: { lat: 1, lon: 0 } }
+
+  /** Lap path: out along lat 0 (crossing the line at phase 0.25), back along lat 5. */
+  function posAt(tSec: number): [number, number] {
+    const ph = (((tSec - T0_S) / PERIOD_S + 0.25) % 1 + 1) % 1
+    return ph < 0.5 ? [0, -1 + 4 * ph] : [5, 1 - 4 * (ph - 0.5)]
+  }
+
+  /** ECU-rate rows; GPS fix every `fixEveryS`, HELD across the rows in between. */
+  function build(rows: number, fixEveryS: number): { track: GpsTrack; timeMs: Float64Array } {
+    const lat: number[] = []
+    const lon: number[] = []
+    const timeMs = new Float64Array(rows)
+    let nextFix = 0
+    let cur: [number, number] = [0, 0]
+    for (let i = 0; i < rows; i++) {
+      const tMs = i * ROW_MS
+      timeMs[i] = tMs
+      if (tMs / 1000 >= nextFix) {
+        cur = posAt(tMs / 1000)
+        nextFix += fixEveryS
+      }
+      lat.push(cur[0])
+      lon.push(cur[1])
+    }
+    return { track: makeTrack(lat, lon), timeMs }
+  }
+
+  it('recovers exact lap time from held ~9.7 Hz GPS on a 32 Hz clock (within 1 ms)', () => {
+    const { track, timeMs } = build(Math.ceil((T0_S + 3.2 * PERIOD_S) * 1000 / ROW_MS), 0.1031)
+    const laps = detectLapsByLine(track, timeMs, line)
+    expect(laps).toHaveLength(3)
+    for (const lap of laps) expect(Math.abs(lap.lapTimeMs - PERIOD_S * 1000)).toBeLessThan(1)
+  })
+
+  it('also exact with 1:1 GPS, and idx stays the integer row after the crossing', () => {
+    const { track, timeMs } = build(Math.ceil((T0_S + 2.2 * PERIOD_S) * 1000 / ROW_MS), 0)
+    const laps = detectLapsByLine(track, timeMs, line)
+    expect(laps).toHaveLength(2)
+    for (const lap of laps) expect(Math.abs(lap.lapTimeMs - PERIOD_S * 1000)).toBeLessThan(1)
+    // First crossing at 5.0123 s -> first row at/after is ceil(5012.3/31.25)=161.
+    expect(laps[0].startIdx).toBe(Math.ceil((T0_S * 1000) / ROW_MS))
+    expect(Number.isInteger(laps[0].endIdx)).toBe(true)
+  })
+
+  it('ECU mode with a track refines boundaries to the GPS crossing; without it keeps row times', () => {
+    // Period is a whole number of 4-row GPS fixes so every lap sees identical
+    // fix geometry; the inferred line is then shifted identically at every
+    // boundary and lap times are exact.
+    const period = 371 * 4 * ROW_MS / 1000
+    const rows = Math.ceil((3.3 * period) * 1000 / ROW_MS)
+    const lat: number[] = []
+    const lon: number[] = []
+    const time: number[] = []
+    const lapNo: number[] = []
+    const posA = (t: number): [number, number] => {
+      const ph = ((t / period) % 1 + 1) % 1
+      return ph < 0.5 ? [23, 120 + (-1 + 4 * ph) * 0.0003] : [23.01, 120 + (1 - 4 * (ph - 0.5)) * 0.0003]
+    }
+    let cur: [number, number] = posA(0)
+    for (let i = 0; i < rows; i++) {
+      const t = (i * ROW_MS) / 1000
+      if (i % 4 === 0) cur = posA(t + 0.0111)
+      lat.push(cur[0])
+      lon.push(cur[1])
+      time.push(i * ROW_MS)
+      // counter steps on the first row at/after the crossing at phase 0.25
+      lapNo.push(1 + Math.floor((t - 0.25 * period) / period + 1))
+    }
+    const session = new LogSession([ch('IR_LapNumber', lapNo)], meta)
+    const timeMs = Float64Array.from(time)
+    const track = makeTrack(lat, lon)
+    const plain = detectLapsByChannel(session, timeMs)
+    const refined = detectLapsByChannel(session, timeMs, track)
+    expect(refined.length).toBe(plain.length)
+    expect(refined.length).toBeGreaterThanOrEqual(2)
+    for (let i = 0; i < refined.length; i++) {
+      expect(refined[i].startIdx).toBe(plain[i].startIdx)
+      expect(refined[i].endIdx).toBe(plain[i].endIdx)
+      expect(Math.abs(refined[i].lapTimeMs - period * 1000)).toBeLessThan(1)
+    }
+  })
+
+  it('ECU mode without usable GPS crossings falls back to row times', () => {
+    const session = new LogSession([ch('IR_LapNumber', [1, 1, 2, 2, 3, 3])], meta)
+    const timeMs = new Float64Array([0, 1000, 2000, 3000, 4000, 5000])
+    const track = makeTrack([0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0])
+    expect(detectLapsByChannel(session, timeMs, track)[0].lapTimeMs).toBe(2000)
   })
 })

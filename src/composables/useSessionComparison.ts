@@ -43,7 +43,7 @@ function sessionLaps(
   const track = extractGpsTrack(session)
   const timeMs = Float64Array.from(timeSeconds(session), (v) => v * 1000)
   const laps = source === 'ecu'
-    ? detectLapsByChannel(session, timeMs)
+    ? detectLapsByChannel(session, timeMs, track)
     : line && hasGps(track)
       ? detectLapsByLine(track, timeMs, line)
       : []

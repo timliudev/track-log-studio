@@ -1,4 +1,5 @@
 import type { LogSession } from '@/domain/model/LogSession'
+import { createdDateToStartMs, sessionDurationMs } from '@/domain/model/sessionStart'
 
 /** Where the session's absolute start instant was derived from. */
 export type StartSource = 'gpsUtc' | 'created'
@@ -81,7 +82,13 @@ export function sessionStartAnchor(session: LogSession): StartAnchor | null {
   }
 
   if (created) {
-    return { startUtcMs: created.getTime(), source: 'created' }
+    // B139: a .loga createdDate is the readback (end of ride) — back-date.
+    const startUtcMs = createdDateToStartMs(
+      created,
+      session.meta.createdDateIsEnd === true,
+      sessionDurationMs(session),
+    )
+    return { startUtcMs, source: 'created' }
   }
 
   return null

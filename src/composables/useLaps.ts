@@ -133,7 +133,7 @@ export function useLaps(): {
   const laps = computed<Lap[]>(() => {
     if (lapStore.source === 'ecu') {
       return session.value && timeMs.value
-        ? detectLapsByChannel(session.value, timeMs.value)
+        ? detectLapsByChannel(session.value, timeMs.value, track.value ?? undefined)
         : []
     }
     if (track.value && timeMs.value && lapStore.line) {
